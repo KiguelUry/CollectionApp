@@ -3,6 +3,8 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/login_screen.dart';
 import 'screens/category_selection_screen.dart';
+import 'screens/friends_screen.dart';
+import 'screens/groups_screen.dart';
 import 'screens/splash_screen.dart';
 
 Future<void> main() async {
@@ -42,6 +44,8 @@ class MyApp extends StatelessWidget {
       home: const SplashScreen(),
       routes: {
         '/categories': (context) => const CategorySelectionScreen(),
+        '/groups': (context) => const GroupsScreen(),
+        '/friends': (context) => const FriendsScreen(),
         '/login': (context) => const LoginScreen(),
       },
     );

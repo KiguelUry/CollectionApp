@@ -30,6 +30,16 @@ class MainDrawer extends StatelessWidget {
             title: const Text('Choisir une collection'),
             onTap: () => Navigator.pushReplacementNamed(context, '/categories'),
           ),
+          ListTile(
+            leading: const Icon(Icons.groups),
+            title: const Text('Groupes'),
+            onTap: () => Navigator.pushNamed(context, '/groups'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.people),
+            title: const Text('Amis'),
+            onTap: () => Navigator.pushNamed(context, '/friends'),
+          ),
           const Divider(),
           const Spacer(), // Pousse le bouton déconnexion vers le bas
           ListTile(

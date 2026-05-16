@@ -3,8 +3,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../services/bgg_service.dart';
-import '../widgets/add_game_options_dialog.dart';
+import '../utils/collection_grid_grouper.dart';
 import '../widgets/add_item_manual_dialog.dart';
+import '../widgets/add_item_options_dialog.dart';
 import '../widgets/bgg_network_image.dart';
 import '../widgets/bgg_search_dialog.dart';
 import '../widgets/book_search_dialog.dart';
@@ -48,10 +49,6 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (context) => BggSearchDialog(
         onGameSelected: (bggGame) => _showOptionsDialog(
           title: bggGame['title']!,
-          imageUrl: null,
-          minPlayers: null,
-          maxPlayers: null,
-          playingTime: null,
           bggId: bggGame['id'],
           closesTwoDialogs: true,
         ),
@@ -96,28 +93,21 @@ class _HomeScreenState extends State<HomeScreen> {
     String? imageUrl,
     String? subcategory,
     Map<String, dynamic>? metadata,
-    int? minPlayers,
-    int? maxPlayers,
-    int? playingTime,
     String? bggId,
     bool closesTwoDialogs = false,
   }) {
     showDialog(
       context: context,
-      builder: (context) => AddGameOptionsDialog(
-        gameTitle: title,
-        onConfirm: (isWishlist, selectedUser) async {
+      builder: (context) => AddItemOptionsDialog(
+        itemTitle: title,
+        onConfirm: (options) async {
           await _handleSave(
             title: title,
-            isWishlist: isWishlist,
-            profileId: selectedUser,
+            options: options,
             imageUrl: imageUrl,
-            minPlayers: minPlayers,
-            maxPlayers: maxPlayers,
-            playingTime: playingTime,
-            bggId: bggId,
             subcategory: subcategory,
             metadata: metadata,
+            bggId: bggId,
             closesTwoDialogs: closesTwoDialogs,
           );
         },
@@ -127,21 +117,20 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _handleSave({
     required String title,
-    required bool isWishlist,
-    String? profileId,
+    required AddItemOptions options,
     String? imageUrl,
     String? subcategory,
     Map<String, dynamic>? metadata,
-    int? minPlayers,
-    int? maxPlayers,
-    int? playingTime,
     String? bggId,
     bool closesTwoDialogs = false,
   }) async {
+    final client = Supabase.instance.client;
+    final userId = client.auth.currentUser!.id;
+
     String? resolvedImageUrl = imageUrl;
-    int? resolvedMin = minPlayers;
-    int? resolvedMax = maxPlayers;
-    int? resolvedTime = playingTime;
+    int? resolvedMin;
+    int? resolvedMax;
+    int? resolvedTime;
 
     if (bggId != null) {
       final details = await BggService.getGameFullDetails(bggId);
@@ -151,26 +140,55 @@ class _HomeScreenState extends State<HomeScreen> {
       resolvedTime = details?['playing_time'] as int?;
     }
 
-    final item = CollectionItem(
-      id: '',
-      title: title,
-      category: widget.category,
-      subcategory: subcategory,
-      metadata: metadata,
-      imageUrl: resolvedImageUrl,
-      isWishlist: isWishlist,
-      minPlayers: resolvedMin,
-      maxPlayers: resolvedMax,
-      playingTime: resolvedTime,
-    );
+    // Fusionner les doublons (même titre + catégorie + groupe)
+    var dupQuery = client
+        .from('collection_items')
+        .select('id, quantity')
+        .eq('category', widget.category.dbValue)
+        .eq('title', title.trim());
 
-    await Supabase.instance.client.from('collection_items').insert(
-          item.toInsertJson(isWishlist: isWishlist, locationUserId: profileId),
-        );
+    if (options.groupId != null) {
+      dupQuery = dupQuery.eq('group_id', options.groupId!);
+    } else {
+      dupQuery = dupQuery.filter('group_id', 'is', null);
+    }
+
+    final existing = await dupQuery.maybeSingle();
+    if (existing != null) {
+      final newQty = ((existing['quantity'] as int?) ?? 1) + options.quantity;
+      await client
+          .from('collection_items')
+          .update({'quantity': newQty})
+          .eq('id', existing['id']);
+    } else {
+      final item = CollectionItem(
+        id: '',
+        title: title.trim(),
+        category: widget.category,
+        subcategory: subcategory,
+        metadata: metadata,
+        imageUrl: resolvedImageUrl,
+        isWishlist: options.isWishlist,
+        quantity: options.quantity,
+        locationId: options.locationId,
+        groupId: options.groupId,
+        minPlayers: resolvedMin,
+        maxPlayers: resolvedMax,
+        playingTime: resolvedTime,
+      );
+
+      await client.from('collection_items').insert(
+            item.toInsertJson(
+              isWishlist: options.isWishlist,
+              locationUserId: options.locationUserId,
+              addedBy: userId,
+            ),
+          );
+    }
 
     if (mounted) {
       Navigator.pop(context);
-      if (closesTwoDialogs || bggId != null) Navigator.pop(context);
+      if (closesTwoDialogs) Navigator.pop(context);
     }
   }
 
@@ -229,6 +247,8 @@ class _HomeScreenState extends State<HomeScreen> {
       return const Center(child: Text('Aucun objet ici.'));
     }
 
+    final grouped = CollectionGridGrouper.group(items);
+
     return GridView.builder(
       padding: const EdgeInsets.all(12),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -237,44 +257,83 @@ class _HomeScreenState extends State<HomeScreen> {
         mainAxisSpacing: 12,
         childAspectRatio: 0.85,
       ),
-      itemCount: items.length,
+      itemCount: grouped.length,
       itemBuilder: (context, index) {
-        final item = items[index];
+        final entry = grouped[index];
+        final item = entry.item;
 
         return InkWell(
           onTap: () => Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => ItemDetailScreen(item: item),
+              builder: (context) => ItemDetailScreen(
+                item: item.copyWith(quantity: entry.totalQuantity),
+              ),
             ),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.1),
-                        blurRadius: 6,
-                        offset: const Offset(0, 3),
-                      ),
-                    ],
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: item.imageUrl != null
-                        ? BggNetworkImage(url: item.imageUrl!)
-                        : Container(
-                            color: Colors.grey.shade200,
-                            child: Icon(
-                              widget.category.icon,
-                              color: Colors.grey,
-                            ),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.1),
+                            blurRadius: 6,
+                            offset: const Offset(0, 3),
                           ),
-                  ),
+                        ],
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: item.imageUrl != null
+                            ? BggNetworkImage(url: item.imageUrl!)
+                            : Container(
+                                color: Colors.grey.shade200,
+                                child: Icon(
+                                  widget.category.icon,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                      ),
+                    ),
+                    if (entry.hasDuplicates)
+                      Positioned(
+                        top: 4,
+                        right: 4,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: const BoxDecoration(
+                            color: Colors.deepPurple,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.copy,
+                                color: Colors.white,
+                                size: 12,
+                              ),
+                              const SizedBox(width: 2),
+                              Text(
+                                '${entry.totalQuantity}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
               const SizedBox(height: 6),
