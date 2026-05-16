@@ -2,6 +2,7 @@ import 'collection_category.dart';
 import 'book_subcategory.dart';
 import 'card_subcategory.dart';
 import 'category_metadata.dart';
+import 'item_condition.dart';
 
 class CollectionItem {
   final String id;
@@ -17,6 +18,11 @@ class CollectionItem {
   final int? minPlayers;
   final int? maxPlayers;
   final int? playingTime;
+  final double? rating;
+  final String? review;
+  final double? purchasePrice;
+  final String? condition;
+  final int? gamesPlayed;
   final String? personalRules;
 
   CollectionItem({
@@ -33,6 +39,11 @@ class CollectionItem {
     this.minPlayers,
     this.maxPlayers,
     this.playingTime,
+    this.rating,
+    this.review,
+    this.purchasePrice,
+    this.condition,
+    this.gamesPlayed,
     this.personalRules,
   });
 
@@ -58,8 +69,20 @@ class CollectionItem {
       minPlayers: json['min_players'],
       maxPlayers: json['max_players'],
       playingTime: json['playing_time'],
-      personalRules: json['personal_rules'],
+      rating: _parseDouble(json['rating']),
+      review: json['review'] as String?,
+      purchasePrice: _parseDouble(json['purchase_price']),
+      condition: json['condition'] as String?,
+      gamesPlayed: json['games_played'] as int?,
+      personalRules: json['personal_rules'] as String?,
     );
+  }
+
+  static double? _parseDouble(dynamic value) {
+    if (value == null) return null;
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    return double.tryParse(value.toString());
   }
 
   Map<String, dynamic> toInsertJson({
@@ -77,7 +100,60 @@ class CollectionItem {
       'min_players': minPlayers,
       'max_players': maxPlayers,
       'playing_time': playingTime,
+      'rating': rating,
+      'review': review,
+      'purchase_price': purchasePrice,
+      'condition': condition,
+      'games_played': gamesPlayed,
+      'personal_rules': personalRules,
     };
+  }
+
+  Map<String, dynamic> toUpdateJson() {
+    return {
+      'rating': rating,
+      'review': review?.trim().isEmpty == true ? null : review?.trim(),
+      'purchase_price': purchasePrice,
+      'condition': condition,
+      'games_played': gamesPlayed,
+      'personal_rules':
+          personalRules?.trim().isEmpty == true ? null : personalRules?.trim(),
+    };
+  }
+
+  CollectionItem copyWith({
+    double? rating,
+    String? review,
+    double? purchasePrice,
+    String? condition,
+    int? gamesPlayed,
+    String? personalRules,
+    bool clearRating = false,
+    bool clearPurchasePrice = false,
+    bool clearGamesPlayed = false,
+  }) {
+    return CollectionItem(
+      id: id,
+      title: title,
+      category: category,
+      subcategory: subcategory,
+      metadata: metadata,
+      imageUrl: imageUrl,
+      isWishlist: isWishlist,
+      locationUserId: locationUserId,
+      loanedToId: loanedToId,
+      loanedToName: loanedToName,
+      minPlayers: minPlayers,
+      maxPlayers: maxPlayers,
+      playingTime: playingTime,
+      rating: clearRating ? null : (rating ?? this.rating),
+      review: review ?? this.review,
+      purchasePrice:
+          clearPurchasePrice ? null : (purchasePrice ?? this.purchasePrice),
+      condition: condition ?? this.condition,
+      gamesPlayed: clearGamesPlayed ? null : (gamesPlayed ?? this.gamesPlayed),
+      personalRules: personalRules ?? this.personalRules,
+    );
   }
 
   BookSubcategory? get bookSubcategory {
@@ -90,5 +166,13 @@ class CollectionItem {
     return CardSubcategory.fromDbValue(subcategory);
   }
 
-  String? get listSubtitle => CategoryMetadata.subtitle(this);
+  ItemCondition? get itemCondition => ItemCondition.fromDbValue(condition);
+
+  String? get listSubtitle {
+    final base = CategoryMetadata.subtitle(this);
+    if (rating != null) {
+      return base != null ? '$base · ★ ${rating!.toStringAsFixed(1)}' : '★ ${rating!.toStringAsFixed(1)}';
+    }
+    return base;
+  }
 }
