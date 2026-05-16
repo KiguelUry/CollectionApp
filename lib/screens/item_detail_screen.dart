@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/category_metadata.dart';
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../widgets/bgg_network_image.dart';
@@ -10,6 +11,8 @@ class ItemDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final metadataRows = CategoryMetadata.detailRows(item);
+
     return Scaffold(
       body: CustomScrollView(
         slivers: [
@@ -59,9 +62,9 @@ class ItemDetailScreen extends StatelessWidget {
                           label: Text(item.category.label),
                         ),
                         if (item.bookSubcategory != null)
-                          Chip(
-                            label: Text(item.bookSubcategory!.label),
-                          ),
+                          Chip(label: Text(item.bookSubcategory!.label)),
+                        if (item.cardSubcategory != null)
+                          Chip(label: Text(item.cardSubcategory!.label)),
                       ],
                     ),
                     const SizedBox(height: 16),
@@ -81,6 +84,29 @@ class ItemDetailScreen extends StatelessWidget {
                                 : '?',
                           ),
                         ],
+                      ),
+                      const Divider(height: 40),
+                    ],
+                    if (metadataRows.isNotEmpty) ...[
+                      _buildSectionTitle('Détails'),
+                      ...metadataRows.map(
+                        (row) => ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(
+                            row.key,
+                            style: TextStyle(
+                              color: Colors.grey.shade600,
+                              fontSize: 13,
+                            ),
+                          ),
+                          subtitle: Text(
+                            row.value,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
                       ),
                       const Divider(height: 40),
                     ],

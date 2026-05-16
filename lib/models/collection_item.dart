@@ -1,11 +1,14 @@
 import 'collection_category.dart';
 import 'book_subcategory.dart';
+import 'card_subcategory.dart';
+import 'category_metadata.dart';
 
 class CollectionItem {
   final String id;
   final String title;
   final CollectionCategory category;
   final String? subcategory;
+  final Map<String, dynamic>? metadata;
   final String? imageUrl;
   final bool isWishlist;
   final String? locationUserId;
@@ -21,6 +24,7 @@ class CollectionItem {
     required this.title,
     required this.category,
     this.subcategory,
+    this.metadata,
     this.imageUrl,
     required this.isWishlist,
     this.locationUserId,
@@ -45,6 +49,7 @@ class CollectionItem {
       subcategory: category == CollectionCategory.book
           ? (rawSub ?? (json['category'] == 'manga' ? 'manga' : null))
           : rawSub,
+      metadata: CategoryMetadata.parse(json['metadata']),
       imageUrl: json['image_url'],
       isWishlist: json['is_wishlist'] ?? false,
       locationUserId: json['location_user_id'],
@@ -65,6 +70,7 @@ class CollectionItem {
       'title': title,
       'category': category.dbValue,
       'subcategory': subcategory,
+      'metadata': metadata ?? {},
       'image_url': imageUrl,
       'is_wishlist': isWishlist,
       'location_user_id': isWishlist ? null : locationUserId,
@@ -79,13 +85,10 @@ class CollectionItem {
     return BookSubcategory.fromDbValue(subcategory);
   }
 
-  String? get listSubtitle {
-    if (category == CollectionCategory.boardgame && playingTime != null) {
-      return '$playingTime min';
-    }
-    if (category == CollectionCategory.book && subcategory != null) {
-      return BookSubcategory.fromDbValue(subcategory).label;
-    }
-    return category.label;
+  CardSubcategory? get cardSubcategory {
+    if (category != CollectionCategory.card) return null;
+    return CardSubcategory.fromDbValue(subcategory);
   }
+
+  String? get listSubtitle => CategoryMetadata.subtitle(this);
 }

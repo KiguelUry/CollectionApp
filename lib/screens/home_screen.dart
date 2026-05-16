@@ -87,6 +87,7 @@ class _HomeScreenState extends State<HomeScreen> {
       title: draft['title'] as String,
       imageUrl: draft['image_url'] as String?,
       subcategory: draft['subcategory'] as String?,
+      metadata: draft['metadata'] as Map<String, dynamic>?,
     );
   }
 
@@ -94,6 +95,7 @@ class _HomeScreenState extends State<HomeScreen> {
     required String title,
     String? imageUrl,
     String? subcategory,
+    Map<String, dynamic>? metadata,
     int? minPlayers,
     int? maxPlayers,
     int? playingTime,
@@ -115,6 +117,7 @@ class _HomeScreenState extends State<HomeScreen> {
             playingTime: playingTime,
             bggId: bggId,
             subcategory: subcategory,
+            metadata: metadata,
             closesTwoDialogs: closesTwoDialogs,
           );
         },
@@ -128,6 +131,7 @@ class _HomeScreenState extends State<HomeScreen> {
     String? profileId,
     String? imageUrl,
     String? subcategory,
+    Map<String, dynamic>? metadata,
     int? minPlayers,
     int? maxPlayers,
     int? playingTime,
@@ -152,6 +156,7 @@ class _HomeScreenState extends State<HomeScreen> {
       title: title,
       category: widget.category,
       subcategory: subcategory,
+      metadata: metadata,
       imageUrl: resolvedImageUrl,
       isWishlist: isWishlist,
       minPlayers: resolvedMin,
