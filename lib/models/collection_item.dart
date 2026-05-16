@@ -1,9 +1,11 @@
 import 'collection_category.dart';
+import 'book_subcategory.dart';
 
 class CollectionItem {
   final String id;
   final String title;
   final CollectionCategory category;
+  final String? subcategory;
   final String? imageUrl;
   final bool isWishlist;
   final String? locationUserId;
@@ -18,6 +20,7 @@ class CollectionItem {
     required this.id,
     required this.title,
     required this.category,
+    this.subcategory,
     this.imageUrl,
     required this.isWishlist,
     this.locationUserId,
@@ -30,12 +33,18 @@ class CollectionItem {
   });
 
   factory CollectionItem.fromJson(Map<String, dynamic> json) {
+    final category = CollectionCategory.fromDbValue(
+      json['category'] as String? ?? CollectionCategory.boardgame.dbValue,
+    );
+    final rawSub = json['subcategory'] as String?;
+
     return CollectionItem(
       id: json['id'],
       title: json['title'],
-      category: CollectionCategory.fromDbValue(
-        json['category'] as String? ?? CollectionCategory.boardgame.dbValue,
-      ),
+      category: category,
+      subcategory: category == CollectionCategory.book
+          ? (rawSub ?? (json['category'] == 'manga' ? 'manga' : null))
+          : rawSub,
       imageUrl: json['image_url'],
       isWishlist: json['is_wishlist'] ?? false,
       locationUserId: json['location_user_id'],
@@ -55,6 +64,7 @@ class CollectionItem {
     return {
       'title': title,
       'category': category.dbValue,
+      'subcategory': subcategory,
       'image_url': imageUrl,
       'is_wishlist': isWishlist,
       'location_user_id': isWishlist ? null : locationUserId,
@@ -64,9 +74,17 @@ class CollectionItem {
     };
   }
 
+  BookSubcategory? get bookSubcategory {
+    if (category != CollectionCategory.book) return null;
+    return BookSubcategory.fromDbValue(subcategory);
+  }
+
   String? get listSubtitle {
     if (category == CollectionCategory.boardgame && playingTime != null) {
       return '$playingTime min';
+    }
+    if (category == CollectionCategory.book && subcategory != null) {
+      return BookSubcategory.fromDbValue(subcategory).label;
     }
     return category.label;
   }

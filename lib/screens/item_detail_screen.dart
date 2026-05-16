@@ -51,9 +51,18 @@ class ItemDetailScreen extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Chip(
-                      avatar: Icon(item.category.icon, size: 18),
-                      label: Text(item.category.label),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        Chip(
+                          avatar: Icon(item.category.icon, size: 18),
+                          label: Text(item.category.label),
+                        ),
+                        if (item.bookSubcategory != null)
+                          Chip(
+                            label: Text(item.bookSubcategory!.label),
+                          ),
+                      ],
                     ),
                     const SizedBox(height: 16),
                     if (item.category == CollectionCategory.boardgame) ...[

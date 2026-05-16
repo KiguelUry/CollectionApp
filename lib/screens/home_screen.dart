@@ -7,6 +7,7 @@ import '../widgets/add_game_options_dialog.dart';
 import '../widgets/add_item_manual_dialog.dart';
 import '../widgets/bgg_network_image.dart';
 import '../widgets/bgg_search_dialog.dart';
+import '../widgets/book_search_dialog.dart';
 import '../widgets/main_drawer.dart';
 import 'item_detail_screen.dart';
 
@@ -34,6 +35,8 @@ class _HomeScreenState extends State<HomeScreen> {
   void _onAddPressed() {
     if (widget.category.supportsBggSearch) {
       _showBggSearchDialog();
+    } else if (widget.category.supportsOpenLibrarySearch) {
+      _showBookSearchDialog();
     } else {
       _showManualAddFlow();
     }
@@ -50,6 +53,21 @@ class _HomeScreenState extends State<HomeScreen> {
           maxPlayers: null,
           playingTime: null,
           bggId: bggGame['id'],
+          closesTwoDialogs: true,
+        ),
+      ),
+    );
+  }
+
+  void _showBookSearchDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => BookSearchDialog(
+        onBookSelected: (book, subcategory) => _showOptionsDialog(
+          title: book['title']!,
+          imageUrl: book['image_url']!.isEmpty ? null : book['image_url'],
+          subcategory: subcategory.dbValue,
+          closesTwoDialogs: true,
         ),
       ),
     );
@@ -60,6 +78,7 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       builder: (context) => AddItemManualDialog(
         categoryLabel: widget.category.label,
+        category: widget.category,
       ),
     );
     if (draft == null || !mounted) return;
@@ -67,16 +86,19 @@ class _HomeScreenState extends State<HomeScreen> {
     _showOptionsDialog(
       title: draft['title'] as String,
       imageUrl: draft['image_url'] as String?,
+      subcategory: draft['subcategory'] as String?,
     );
   }
 
   void _showOptionsDialog({
     required String title,
     String? imageUrl,
+    String? subcategory,
     int? minPlayers,
     int? maxPlayers,
     int? playingTime,
     String? bggId,
+    bool closesTwoDialogs = false,
   }) {
     showDialog(
       context: context,
@@ -92,6 +114,8 @@ class _HomeScreenState extends State<HomeScreen> {
             maxPlayers: maxPlayers,
             playingTime: playingTime,
             bggId: bggId,
+            subcategory: subcategory,
+            closesTwoDialogs: closesTwoDialogs,
           );
         },
       ),
@@ -103,10 +127,12 @@ class _HomeScreenState extends State<HomeScreen> {
     required bool isWishlist,
     String? profileId,
     String? imageUrl,
+    String? subcategory,
     int? minPlayers,
     int? maxPlayers,
     int? playingTime,
     String? bggId,
+    bool closesTwoDialogs = false,
   }) async {
     String? resolvedImageUrl = imageUrl;
     int? resolvedMin = minPlayers;
@@ -125,6 +151,7 @@ class _HomeScreenState extends State<HomeScreen> {
       id: '',
       title: title,
       category: widget.category,
+      subcategory: subcategory,
       imageUrl: resolvedImageUrl,
       isWishlist: isWishlist,
       minPlayers: resolvedMin,
@@ -138,7 +165,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (mounted) {
       Navigator.pop(context);
-      if (bggId != null) Navigator.pop(context);
+      if (closesTwoDialogs || bggId != null) Navigator.pop(context);
     }
   }
 

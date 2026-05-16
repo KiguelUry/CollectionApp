@@ -155,6 +155,17 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
               textAlign: TextAlign.center,
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Text(
+                category.description,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+              ),
+            ),
+            const SizedBox(height: 4),
             Text(
               countLabel,
               style: TextStyle(fontSize: 12, color: category.color),
