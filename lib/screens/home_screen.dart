@@ -50,6 +50,7 @@ class _HomeScreenState extends State<HomeScreen> {
         onGameSelected: (bggGame) => _showOptionsDialog(
           title: bggGame['title']!,
           bggId: bggGame['id'],
+          imageUrl: bggGame['image_url'],
           closesTwoDialogs: true,
         ),
       ),
@@ -134,7 +135,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (bggId != null) {
       final details = await BggService.getGameFullDetails(bggId);
-      resolvedImageUrl = details?['image_url'] as String?;
+      resolvedImageUrl =
+          (details?['image_url'] as String?) ?? resolvedImageUrl;
       resolvedMin = details?['min_players'] as int?;
       resolvedMax = details?['max_players'] as int?;
       resolvedTime = details?['playing_time'] as int?;

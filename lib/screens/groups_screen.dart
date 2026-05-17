@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/collection_group.dart';
 import '../services/friend_service.dart';
 import '../services/group_service.dart';
+import '../widgets/friend_picker_dialog.dart';
 import '../widgets/main_drawer.dart';
 import 'group_detail_screen.dart';
 
@@ -70,19 +71,9 @@ class _GroupsScreenState extends State<GroupsScreen> {
       return;
     }
 
-    final picked = await showDialog<String>(
+    final picked = await showFriendPickerDialog(
       context: context,
-      builder: (ctx) => SimpleDialog(
-        title: const Text('Ajouter un membre'),
-        children: friends
-            .map(
-              (f) => SimpleDialogOption(
-                onPressed: () => Navigator.pop(ctx, f['profile_id'] as String),
-                child: Text(f['username'] as String),
-              ),
-            )
-            .toList(),
-      ),
+      friends: friends,
     );
     if (picked == null) return;
     await _groupService.addMember(group.id, picked);

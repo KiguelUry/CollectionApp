@@ -1,29 +1,92 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../services/auth_service.dart';
+import '../models/user_profile.dart';
 import '../screens/login_screen.dart';
+import '../screens/profile_edit_screen.dart';
+import '../services/auth_service.dart';
+import '../services/profile_service.dart';
+import 'profile_avatar.dart';
 
-class MainDrawer extends StatelessWidget {
+class MainDrawer extends StatefulWidget {
   const MainDrawer({super.key});
+
+  @override
+  State<MainDrawer> createState() => _MainDrawerState();
+}
+
+class _MainDrawerState extends State<MainDrawer> {
+  UserProfile? _profile;
+  bool _loadingProfile = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfile();
+  }
+
+  Future<void> _loadProfile() async {
+    try {
+      final p = await ProfileService().fetchCurrentProfile();
+      if (mounted) {
+        setState(() {
+          _profile = p;
+          _loadingProfile = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingProfile = false);
+    }
+  }
+
+  Future<void> _openProfile() async {
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const ProfileEditScreen()),
+    );
+    if (changed == true) _loadProfile();
+  }
 
   @override
   Widget build(BuildContext context) {
     final user = Supabase.instance.client.auth.currentUser;
+    final accent = ProfileAvatar.colorFromHex(_profile?.accentColor);
+    final username = _profile?.username ?? 'Ma collection';
 
     return Drawer(
       child: Column(
         children: [
           UserAccountsDrawerHeader(
-            decoration: BoxDecoration(color: Colors.deepPurple.shade400),
-            accountName: const Text(
-              "Ma Collection Famille",
-              style: TextStyle(fontWeight: FontWeight.bold),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [accent, accent.withValues(alpha: 0.75)],
+              ),
             ),
-            accountEmail: Text(user?.email ?? "Non connecté"),
-            currentAccountPicture: const CircleAvatar(
-              backgroundColor: Colors.white,
-              child: Icon(Icons.person, size: 40, color: Colors.deepPurple),
+            currentAccountPicture: _loadingProfile
+                ? const CircleAvatar(
+                    child: SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : ProfileAvatar(
+                    avatarUrl: _profile?.avatarUrl,
+                    accentColorHex: _profile?.accentColor,
+                    fallbackInitial: username,
+                    radius: 36,
+                  ),
+            accountName: Text(
+              username,
+              style: const TextStyle(fontWeight: FontWeight.bold),
             ),
+            accountEmail: Text(user?.email ?? 'Non connecté'),
+            onDetailsPressed: _openProfile,
+          ),
+          ListTile(
+            leading: const Icon(Icons.person_outline),
+            title: const Text('Mon profil'),
+            subtitle: const Text('Photo, couleur, bio'),
+            onTap: _openProfile,
           ),
           ListTile(
             leading: const Icon(Icons.home),
@@ -41,11 +104,11 @@ class MainDrawer extends StatelessWidget {
             onTap: () => Navigator.pushNamed(context, '/friends'),
           ),
           const Divider(),
-          const Spacer(), // Pousse le bouton déconnexion vers le bas
+          const Spacer(),
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.red),
             title: const Text(
-              "Déconnexion",
+              'Déconnexion',
               style: TextStyle(color: Colors.red),
             ),
             onTap: () async {

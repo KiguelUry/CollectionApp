@@ -9,7 +9,6 @@ import '../models/collection_item.dart';
 import '../models/item_condition.dart';
 import '../models/storage_location.dart';
 import '../services/group_service.dart';
-import '../services/location_service.dart';
 import '../widgets/bgg_network_image.dart';
 import '../widgets/location_picker_field.dart';
 import '../widgets/star_rating_bar.dart';

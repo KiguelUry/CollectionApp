@@ -5,6 +5,7 @@ import 'screens/login_screen.dart';
 import 'screens/category_selection_screen.dart';
 import 'screens/friends_screen.dart';
 import 'screens/groups_screen.dart';
+import 'screens/profile_edit_screen.dart';
 import 'screens/splash_screen.dart';
 
 Future<void> main() async {
@@ -46,6 +47,7 @@ class MyApp extends StatelessWidget {
         '/categories': (context) => const CategorySelectionScreen(),
         '/groups': (context) => const GroupsScreen(),
         '/friends': (context) => const FriendsScreen(),
+        '/profile': (context) => const ProfileEditScreen(),
         '/login': (context) => const LoginScreen(),
       },
     );

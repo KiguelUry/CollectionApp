@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/book_subcategory.dart';
 import '../services/open_library_service.dart';
+import '../utils/debounced_runner.dart';
 
 class BookSearchDialog extends StatefulWidget {
   final void Function(Map<String, String> book, BookSubcategory subcategory)
@@ -14,9 +15,55 @@ class BookSearchDialog extends StatefulWidget {
 
 class _BookSearchDialogState extends State<BookSearchDialog> {
   final _controller = TextEditingController();
+  final _debounce = DebouncedRunner();
   BookSubcategory _subcategory = BookSubcategory.manga;
   List<Map<String, String>> _results = [];
   bool _isLoading = false;
+  int _searchGeneration = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(_onTextChanged);
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(_onTextChanged);
+    _controller.dispose();
+    _debounce.dispose();
+    super.dispose();
+  }
+
+  void _onTextChanged() {
+    final query = _controller.text.trim();
+    if (query.isEmpty) {
+      setState(() {
+        _results = [];
+        _isLoading = false;
+      });
+      return;
+    }
+    _debounce.run(
+      delay: const Duration(milliseconds: 400),
+      action: () => _search(query),
+    );
+  }
+
+  Future<void> _search(String query) async {
+    if (query.length < 2) return;
+
+    final generation = ++_searchGeneration;
+    setState(() => _isLoading = true);
+
+    final res = await OpenLibraryService.searchBooks(query);
+    if (!mounted || generation != _searchGeneration) return;
+
+    setState(() {
+      _results = res;
+      _isLoading = false;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -45,30 +92,42 @@ class _BookSearchDialogState extends State<BookSearchDialog> {
             const SizedBox(height: 8),
             TextField(
               controller: _controller,
+              autofocus: true,
               decoration: InputDecoration(
-                hintText: 'Titre, auteur…',
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.search),
-                  onPressed: () => _search(_controller.text),
-                ),
+                hintText: 'Tape pour chercher…',
+                suffixIcon: _isLoading
+                    ? const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    : const Icon(Icons.search),
               ),
-              onSubmitted: _search,
             ),
-            if (_isLoading) const LinearProgressIndicator(),
             Expanded(
               child: ListView.builder(
                 itemCount: _results.length,
                 itemBuilder: (context, index) {
                   final book = _results[index];
                   final imageUrl = book['image_url'];
+                  final ratingAvg = book['rating_avg'];
+                  final ratingCount = book['rating_count'];
+                  final parts = <String>[
+                    book['author']!,
+                    if (book['year']!.isNotEmpty) book['year']!,
+                    if (ratingAvg != null &&
+                        (int.tryParse(ratingCount ?? '0') ?? 0) > 0)
+                      '★ $ratingAvg ($ratingCount avis)',
+                  ];
                   return ListTile(
                     leading: imageUrl != null && imageUrl.isNotEmpty
                         ? Image.network(imageUrl, width: 40, fit: BoxFit.cover)
                         : const Icon(Icons.menu_book),
                     title: Text(book['title']!),
-                    subtitle: Text(
-                      '${book['author']}${book['year']!.isNotEmpty ? ' · ${book['year']}' : ''}',
-                    ),
+                    subtitle: Text(parts.join(' · ')),
                     onTap: () => widget.onBookSelected(book, _subcategory),
                   );
                 },
@@ -83,15 +142,5 @@ class _BookSearchDialogState extends State<BookSearchDialog> {
         ),
       ),
     );
-  }
-
-  Future<void> _search(String query) async {
-    if (query.length < 2) return;
-    setState(() => _isLoading = true);
-    final res = await OpenLibraryService.searchBooks(query);
-    setState(() {
-      _results = res;
-      _isLoading = false;
-    });
   }
 }

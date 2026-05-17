@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/storage_location.dart';
 import '../services/location_service.dart';
+import '../utils/search_relevance.dart';
 
 class LocationPickerField extends StatefulWidget {
   final String? selectedLocationId;
@@ -20,58 +21,73 @@ class LocationPickerField extends StatefulWidget {
 
 class _LocationPickerFieldState extends State<LocationPickerField> {
   final _service = LocationService();
+  final _searchController = TextEditingController();
   List<StorageLocation> _locations = [];
+  List<StorageLocation> _filtered = [];
   bool _loading = true;
 
   @override
   void initState() {
     super.initState();
+    _searchController.addListener(_filter);
     _load();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
     final list = await _service.fetchLocations(groupId: widget.groupId);
-    if (mounted) {
-      setState(() {
-        _locations = list;
-        _loading = false;
-      });
+    if (!mounted) return;
+
+    StorageLocation? selected;
+    if (widget.selectedLocationId != null) {
+      for (final l in list) {
+        if (l.id == widget.selectedLocationId) {
+          selected = l;
+          break;
+        }
+      }
     }
+
+    setState(() {
+      _locations = list;
+      _loading = false;
+      if (selected != null) {
+        _searchController.text = selected.label;
+      }
+    });
+    _filter();
   }
 
-  Future<void> _addNew() async {
-    final controller = TextEditingController();
-    final label = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Nouvelle localisation'),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(
-            labelText: 'Nom',
-            hintText: 'ex: Chez Papa',
-          ),
-          textCapitalization: TextCapitalization.sentences,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Annuler'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text('Ajouter'),
-          ),
-        ],
-      ),
-    );
-    if (label == null || label.isEmpty) return;
+  void _filter() {
+    final q = _searchController.text.trim().toLowerCase();
+    setState(() {
+      if (q.isEmpty) {
+        _filtered = List.from(_locations);
+      } else {
+        _filtered = _locations
+            .where((l) => titleRelevanceScore(l.label, q) > 0)
+            .toList();
+        sortByScore(
+          _filtered,
+          (l) => titleRelevanceScore(l.label, q),
+        );
+      }
+    });
+  }
 
+  Future<void> _addNew(String label) async {
+    if (label.trim().isEmpty) return;
     final created = await _service.createLocation(
-      label: label,
+      label: label.trim(),
       groupId: widget.groupId,
     );
     await _load();
+    _searchController.text = created.label;
     widget.onChanged(created);
   }
 
@@ -81,37 +97,93 @@ class _LocationPickerFieldState extends State<LocationPickerField> {
       return const LinearProgressIndicator();
     }
 
+    final query = _searchController.text.trim();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        DropdownButtonFormField<String?>(
-          value: widget.selectedLocationId,
+        TextField(
+          controller: _searchController,
           decoration: const InputDecoration(
             labelText: 'Où se trouve l\'objet ?',
+            hintText: 'Tape « pa » → Chez Papa…',
             border: OutlineInputBorder(),
+            prefixIcon: Icon(Icons.place_outlined),
           ),
-          items: [
-            const DropdownMenuItem<String?>(
-              value: null,
-              child: Text('— Non renseigné —'),
-            ),
-            ..._locations.map(
-              (l) => DropdownMenuItem(value: l.id, child: Text(l.label)),
-            ),
-          ],
-          onChanged: (id) {
-            if (id == null) {
-              widget.onChanged(null);
-              return;
-            }
-            widget.onChanged(_locations.firstWhere((l) => l.id == id));
-          },
         ),
+        if (query.isNotEmpty && _filtered.isEmpty)
+          ListTile(
+            leading: const Icon(Icons.add_location_alt),
+            title: Text('Créer « $query »'),
+            onTap: () => _addNew(query),
+          ),
+        if (_filtered.isNotEmpty)
+          Container(
+            constraints: const BoxConstraints(maxHeight: 160),
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey.shade300),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: _filtered.length,
+              separatorBuilder: (_, __) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final loc = _filtered[index];
+                final selected = loc.id == widget.selectedLocationId;
+                return ListTile(
+                  dense: true,
+                  selected: selected,
+                  title: Text(loc.label),
+                  trailing: selected ? const Icon(Icons.check, size: 18) : null,
+                  onTap: () {
+                    _searchController.text = loc.label;
+                    widget.onChanged(loc);
+                  },
+                );
+              },
+            ),
+          ),
         TextButton.icon(
-          onPressed: _addNew,
+          onPressed: () async {
+            final controller = TextEditingController();
+            final label = await showDialog<String>(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                title: const Text('Nouvelle localisation'),
+                content: TextField(
+                  controller: controller,
+                  decoration: const InputDecoration(
+                    labelText: 'Nom',
+                    hintText: 'ex: Chez Papa',
+                  ),
+                  textCapitalization: TextCapitalization.sentences,
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Annuler'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+                    child: const Text('Ajouter'),
+                  ),
+                ],
+              ),
+            );
+            if (label != null && label.isNotEmpty) await _addNew(label);
+          },
           icon: const Icon(Icons.add_location_alt),
           label: const Text('Ajouter une localisation'),
         ),
+        if (widget.selectedLocationId != null)
+          TextButton(
+            onPressed: () {
+              _searchController.clear();
+              widget.onChanged(null);
+            },
+            child: const Text('Effacer la localisation'),
+          ),
       ],
     );
   }
