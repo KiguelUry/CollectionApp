@@ -4,6 +4,8 @@ class UserProfile {
   final String? avatarUrl;
   final String accentColor;
   final String? bio;
+  final bool showcasePublic;
+  final String? showcaseToken;
 
   const UserProfile({
     required this.id,
@@ -11,6 +13,8 @@ class UserProfile {
     this.avatarUrl,
     this.accentColor = '#673AB7',
     this.bio,
+    this.showcasePublic = false,
+    this.showcaseToken,
   });
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
@@ -20,6 +24,8 @@ class UserProfile {
       avatarUrl: json['avatar_url'] as String?,
       accentColor: (json['accent_color'] as String?) ?? '#673AB7',
       bio: json['bio'] as String?,
+      showcasePublic: json['showcase_public'] as bool? ?? false,
+      showcaseToken: json['showcase_token'] as String?,
     );
   }
 

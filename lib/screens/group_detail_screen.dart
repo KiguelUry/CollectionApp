@@ -4,7 +4,20 @@ import '../models/collection_category.dart';
 import '../models/collection_group.dart';
 import '../models/collection_item.dart';
 import '../utils/collection_grid_grouper.dart';
-import '../widgets/bgg_network_image.dart';
+import '../utils/collection_item_filters.dart';
+import '../services/group_service.dart';
+import '../models/collection_list_filters.dart';
+import '../models/collection_view_mode.dart';
+import '../models/item_tag.dart';
+import '../models/storage_location.dart';
+import '../services/location_service.dart';
+import '../services/tag_service.dart';
+import '../widgets/collection_filter_bar.dart';
+import '../widgets/collection_item_list_tile.dart';
+import '../widgets/collection_item_tile.dart';
+import '../widgets/group_badge.dart';
+import '../widgets/profile_avatar.dart';
+import 'group_edit_screen.dart';
 import 'item_detail_screen.dart';
 
 class GroupDetailScreen extends StatefulWidget {
@@ -17,55 +30,163 @@ class GroupDetailScreen extends StatefulWidget {
 }
 
 class _GroupDetailScreenState extends State<GroupDetailScreen> {
+  final _groupService = GroupService();
+  final _tagService = TagService();
+  final _searchController = TextEditingController();
+  late CollectionGroup _group;
   late final Stream<List<Map<String, dynamic>>> _stream;
+  CollectionListFilters _filters = CollectionListFilters();
+  CollectionViewMode _viewMode = CollectionViewMode.grid;
+  List<StorageLocation> _locations = [];
+  List<ItemTag> _tags = [];
 
   @override
   void initState() {
     super.initState();
+    _group = widget.group;
     _stream = Supabase.instance.client
         .from('collection_items')
         .stream(primaryKey: ['id'])
-        .eq('group_id', widget.group.id);
+        .eq('group_id', _group.id);
+    _loadFilterData();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadFilterData() async {
+    try {
+      final locs = await LocationService().fetchLocations(groupId: _group.id);
+      final tags = await _tagService.fetchMyTags();
+      if (mounted) {
+        setState(() {
+          _locations = locs;
+          _tags = tags;
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _openEdit() async {
+    final updated = await Navigator.push<CollectionGroup>(
+      context,
+      MaterialPageRoute(
+        builder: (ctx) => GroupEditScreen(group: _group),
+      ),
+    );
+    if (updated != null && mounted) {
+      setState(() => _group = updated);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final accent = ProfileAvatar.colorFromHex(_group.accentColor);
+    final canEdit = _groupService.canEdit(_group);
+
     return DefaultTabController(
       length: CollectionCategory.values.length,
       child: Scaffold(
         appBar: AppBar(
-          title: Text(widget.group.name),
+          title: Row(
+            children: [
+              GroupBadge.fromGroup(
+                name: _group.name,
+                avatarUrl: _group.avatarUrl,
+                accentColor: _group.accentColor,
+                iconKey: _group.iconKey,
+                radius: 18,
+              ),
+              const SizedBox(width: 12),
+              Expanded(child: Text(_group.name)),
+            ],
+          ),
+          backgroundColor: accent,
+          foregroundColor: Colors.white,
+          iconTheme: const IconThemeData(color: Colors.white),
+          actions: [
+            IconButton(
+              icon: Icon(
+                _viewMode == CollectionViewMode.grid
+                    ? Icons.view_list
+                    : Icons.grid_view,
+              ),
+              onPressed: () => setState(() {
+                _viewMode = _viewMode == CollectionViewMode.grid
+                    ? CollectionViewMode.list
+                    : CollectionViewMode.grid;
+              }),
+            ),
+            if (canEdit)
+              IconButton(
+                icon: const Icon(Icons.palette_outlined),
+                tooltip: 'Personnaliser',
+                onPressed: _openEdit,
+              ),
+          ],
           bottom: TabBar(
             isScrollable: true,
+            indicatorColor: Colors.white,
+            labelColor: Colors.white,
+            unselectedLabelColor: Colors.white70,
             tabs: CollectionCategory.values
                 .map((c) => Tab(text: c.label))
                 .toList(),
           ),
         ),
-        body: StreamBuilder<List<Map<String, dynamic>>>(
-          stream: _stream,
-          builder: (context, snapshot) {
-            if (snapshot.hasError) {
-              return Center(child: Text('Erreur : ${snapshot.error}'));
-            }
-            if (!snapshot.hasData) {
-              return const Center(child: CircularProgressIndicator());
-            }
+        body: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            CollectionFilterBar(
+              filters: _filters,
+              onChanged: (f) => setState(() => _filters = f),
+              searchController: _searchController,
+              locations: _locations,
+              tags: _tags,
+              showScopeFilters: false,
+            ),
+            Expanded(
+              child: StreamBuilder<List<Map<String, dynamic>>>(
+                stream: _stream,
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return Center(child: Text('Erreur : ${snapshot.error}'));
+                  }
+                  if (!snapshot.hasData) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
 
-            final all = snapshot.data!
-                .map((j) => CollectionItem.fromJson(j))
-                .where((i) => !i.isWishlist)
-                .toList();
+                  return FutureBuilder<List<CollectionItem>>(
+                    future: _tagService.enrichItems(
+                      snapshot.data!
+                          .map((j) => CollectionItem.fromJson(j))
+                          .where((i) =>
+                              !i.isWishlist && isActiveCollectionItem(i))
+                          .toList(),
+                    ),
+                    builder: (context, enriched) {
+                      final all = enriched.data ?? [];
 
-            return TabBarView(
-              children: CollectionCategory.values.map((category) {
-                final items =
-                    all.where((i) => i.category == category).toList();
-                final grouped = CollectionGridGrouper.group(items);
-                return _buildGrid(grouped, category);
-              }).toList(),
-            );
-          },
+                      return TabBarView(
+                        children: CollectionCategory.values.map((category) {
+                          final items = _filters.apply(
+                            all.where((i) => i.category == category).toList(),
+                          );
+                          final grouped = CollectionGridGrouper.group(items);
+                          return _viewMode == CollectionViewMode.grid
+                              ? _buildGrid(grouped, category)
+                              : _buildList(grouped, category);
+                        }).toList(),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -76,7 +197,14 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     CollectionCategory category,
   ) {
     if (grouped.isEmpty) {
-      return const Center(child: Text('Aucun objet partagé ici.'));
+      return Center(
+        child: Text(
+          _filters.hasActiveFilters
+              ? 'Aucun objet ne correspond aux filtres.'
+              : 'Aucun objet partagé ici.',
+          style: TextStyle(color: Colors.grey.shade600),
+        ),
+      );
     }
 
     return GridView.builder(
@@ -92,66 +220,57 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
         final entry = grouped[index];
         final item = entry.item;
 
-        return InkWell(
+        return CollectionItemTile(
+          item: item,
+          category: category,
+          totalQuantity: entry.totalQuantity,
+          showDuplicateBadge: entry.hasDuplicates,
+          showGroupBadge: false,
           onTap: () => Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (ctx) => ItemDetailScreen(item: item),
+              builder: (ctx) => ItemDetailScreen(
+                item: item.copyWith(quantity: entry.totalQuantity),
+              ),
             ),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: item.imageUrl != null
-                          ? BggNetworkImage(url: item.imageUrl!)
-                          : Container(
-                              color: Colors.grey.shade200,
-                              child: Icon(category.icon, color: Colors.grey),
-                            ),
-                    ),
-                    if (entry.hasDuplicates)
-                      Positioned(
-                        top: 6,
-                        right: 6,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.deepPurple,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            '×${entry.totalQuantity}',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
+        );
+      },
+    );
+  }
+
+  Widget _buildList(
+    List<GroupedCollectionItem> grouped,
+    CollectionCategory category,
+  ) {
+    if (grouped.isEmpty) {
+      return Center(
+        child: Text(
+          _filters.hasActiveFilters
+              ? 'Aucun objet ne correspond aux filtres.'
+              : 'Aucun objet partagé ici.',
+          style: TextStyle(color: Colors.grey.shade600),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.only(bottom: 16),
+      itemCount: grouped.length,
+      itemBuilder: (context, index) {
+        final entry = grouped[index];
+        final item = entry.item;
+        return CollectionItemListTile(
+          item: item,
+          category: category,
+          totalQuantity: entry.totalQuantity,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (ctx) => ItemDetailScreen(
+                item: item.copyWith(quantity: entry.totalQuantity),
               ),
-              const SizedBox(height: 6),
-              Text(
-                item.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 11,
-                ),
-              ),
-            ],
+            ),
           ),
         );
       },

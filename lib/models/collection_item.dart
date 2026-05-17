@@ -3,6 +3,7 @@ import 'book_subcategory.dart';
 import 'card_subcategory.dart';
 import 'category_metadata.dart';
 import 'item_condition.dart';
+import 'item_tag.dart';
 
 class CollectionItem {
   final String id;
@@ -12,6 +13,8 @@ class CollectionItem {
   final Map<String, dynamic>? metadata;
   final String? imageUrl;
   final bool isWishlist;
+  final bool isForSale;
+  final bool isSold;
   final int quantity;
   final String? locationId;
   final String? locationLabel;
@@ -21,6 +24,7 @@ class CollectionItem {
   final String? locationUserId;
   final String? loanedToId;
   final String? loanedToName;
+  final DateTime? loanedAt;
   final int? minPlayers;
   final int? maxPlayers;
   final int? playingTime;
@@ -30,6 +34,8 @@ class CollectionItem {
   final String? condition;
   final int? gamesPlayed;
   final String? personalRules;
+  final DateTime? createdAt;
+  final List<ItemTag> tags;
 
   CollectionItem({
     required this.id,
@@ -39,6 +45,8 @@ class CollectionItem {
     this.metadata,
     this.imageUrl,
     required this.isWishlist,
+    this.isForSale = false,
+    this.isSold = false,
     this.quantity = 1,
     this.locationId,
     this.locationLabel,
@@ -48,6 +56,7 @@ class CollectionItem {
     this.locationUserId,
     this.loanedToId,
     this.loanedToName,
+    this.loanedAt,
     this.minPlayers,
     this.maxPlayers,
     this.playingTime,
@@ -57,9 +66,21 @@ class CollectionItem {
     this.condition,
     this.gamesPlayed,
     this.personalRules,
+    this.createdAt,
+    this.tags = const [],
   });
 
   bool get isGroupOwned => groupId != null;
+
+  bool get isOnLoan =>
+      loanedToId != null ||
+      (loanedToName != null && loanedToName!.trim().isNotEmpty);
+
+  String get loaneeDisplayName {
+    final name = loanedToName?.trim();
+    if (name != null && name.isNotEmpty) return name;
+    return 'Quelqu\'un';
+  }
 
   factory CollectionItem.fromJson(Map<String, dynamic> json) {
     final category = CollectionCategory.fromDbValue(
@@ -79,6 +100,24 @@ class CollectionItem {
       gName = grp['name'] as String?;
     }
 
+    String? loanedName = json['loaned_to_name'] as String?;
+    final loanedProfile = json['loaned_to'];
+    if (loanedProfile is Map) {
+      loanedName = loanedProfile['username'] as String? ?? loanedName;
+    }
+
+    DateTime? loanedAt;
+    final rawLoanedAt = json['loaned_at'];
+    if (rawLoanedAt is String) {
+      loanedAt = DateTime.tryParse(rawLoanedAt);
+    }
+
+    DateTime? createdAt;
+    final rawCreated = json['created_at'];
+    if (rawCreated is String) {
+      createdAt = DateTime.tryParse(rawCreated);
+    }
+
     return CollectionItem(
       id: json['id'],
       title: json['title'],
@@ -89,6 +128,8 @@ class CollectionItem {
       metadata: CategoryMetadata.parse(json['metadata']),
       imageUrl: json['image_url'],
       isWishlist: json['is_wishlist'] ?? false,
+      isForSale: json['is_for_sale'] as bool? ?? false,
+      isSold: json['is_sold'] as bool? ?? false,
       quantity: (json['quantity'] as int?) ?? 1,
       locationId: json['location_id'] as String?,
       locationLabel: locLabel,
@@ -96,8 +137,9 @@ class CollectionItem {
       groupName: gName,
       addedBy: json['added_by'] as String?,
       locationUserId: json['location_user_id'],
-      loanedToId: json['loaned_to_id'],
-      loanedToName: json['loaned_to_name'],
+      loanedToId: json['loaned_to_id'] as String?,
+      loanedToName: loanedName,
+      loanedAt: loanedAt,
       minPlayers: json['min_players'],
       maxPlayers: json['max_players'],
       playingTime: json['playing_time'],
@@ -107,6 +149,8 @@ class CollectionItem {
       condition: json['condition'] as String?,
       gamesPlayed: json['games_played'] as int?,
       personalRules: json['personal_rules'] as String?,
+      createdAt: createdAt,
+      tags: ItemTag.parseListFromItemJson(json),
     );
   }
 
@@ -129,6 +173,8 @@ class CollectionItem {
       'metadata': metadata ?? {},
       'image_url': imageUrl,
       'is_wishlist': isWishlist,
+      'is_for_sale': isForSale,
+      'is_sold': isSold,
       'quantity': quantity,
       'location_id': locationId,
       'group_id': groupId,
@@ -158,6 +204,11 @@ class CollectionItem {
       'quantity': quantity,
       'location_id': locationId,
       'group_id': groupId,
+      'is_for_sale': isForSale,
+      'is_sold': isSold,
+      'loaned_to_id': loanedToId,
+      'loaned_to_name': loanedToName,
+      'loaned_at': loanedAt?.toUtc().toIso8601String(),
     };
   }
 
@@ -173,11 +224,18 @@ class CollectionItem {
     String? condition,
     int? gamesPlayed,
     String? personalRules,
+    bool? isForSale,
+    bool? isSold,
+    String? loanedToId,
+    String? loanedToName,
+    DateTime? loanedAt,
+    bool clearLoan = false,
     bool clearRating = false,
     bool clearPurchasePrice = false,
     bool clearGamesPlayed = false,
     bool clearGroup = false,
     bool clearLocation = false,
+    List<ItemTag>? tags,
   }) {
     return CollectionItem(
       id: id,
@@ -187,6 +245,8 @@ class CollectionItem {
       metadata: metadata,
       imageUrl: imageUrl,
       isWishlist: isWishlist,
+      isForSale: isForSale ?? this.isForSale,
+      isSold: isSold ?? this.isSold,
       quantity: quantity ?? this.quantity,
       locationId: clearLocation ? null : (locationId ?? this.locationId),
       locationLabel: clearLocation ? null : (locationLabel ?? this.locationLabel),
@@ -194,8 +254,9 @@ class CollectionItem {
       groupName: clearGroup ? null : (groupName ?? this.groupName),
       addedBy: addedBy,
       locationUserId: locationUserId,
-      loanedToId: loanedToId,
-      loanedToName: loanedToName,
+      loanedToId: clearLoan ? null : (loanedToId ?? this.loanedToId),
+      loanedToName: clearLoan ? null : (loanedToName ?? this.loanedToName),
+      loanedAt: clearLoan ? null : (loanedAt ?? this.loanedAt),
       minPlayers: minPlayers,
       maxPlayers: maxPlayers,
       playingTime: playingTime,
@@ -206,7 +267,17 @@ class CollectionItem {
       condition: condition ?? this.condition,
       gamesPlayed: clearGamesPlayed ? null : (gamesPlayed ?? this.gamesPlayed),
       personalRules: personalRules ?? this.personalRules,
+      createdAt: createdAt,
+      tags: tags ?? this.tags,
     );
+  }
+
+  String? get createdAtLabel {
+    final dt = createdAt;
+    if (dt == null) return null;
+    final d = dt.day.toString().padLeft(2, '0');
+    final m = dt.month.toString().padLeft(2, '0');
+    return 'Ajouté le $d/$m/${dt.year}';
   }
 
   BookSubcategory? get bookSubcategory {
@@ -233,6 +304,9 @@ class CollectionItem {
     if (quantity > 1) parts.add('×$quantity');
     if (locationLabel != null) parts.add(locationLabel!);
     if (rating != null) parts.add('★ ${rating!.toStringAsFixed(1)}');
+    if (isOnLoan) parts.add('Prêté → $loaneeDisplayName');
+    if (isSold) parts.add('Vendu');
+    if (isForSale && !isSold) parts.add('À vendre');
     return parts.isEmpty ? null : parts.join(' · ');
   }
 }

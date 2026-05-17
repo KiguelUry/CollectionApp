@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_group.dart';
-import '../models/storage_location.dart';
 import '../services/group_service.dart';
+import 'group_badge.dart';
 import 'location_picker_field.dart';
 
 class AddItemOptions {
@@ -109,7 +109,19 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                               .map(
                                 (g) => DropdownMenuItem(
                                   value: g.id,
-                                  child: Text(g.name),
+                                  child: Row(
+                                    children: [
+                                      GroupBadge.fromGroup(
+                                        name: g.name,
+                                        avatarUrl: g.avatarUrl,
+                                        accentColor: g.accentColor,
+                                        iconKey: g.iconKey,
+                                        radius: 14,
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(child: Text(g.name)),
+                                    ],
+                                  ),
                                 ),
                               )
                               .toList(),

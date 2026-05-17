@@ -3,9 +3,15 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/user_profile.dart';
 import '../screens/login_screen.dart';
 import '../screens/profile_edit_screen.dart';
+import '../screens/inventory_manage_screen.dart';
+import '../screens/loans_screen.dart';
+import '../screens/shake_pick_screen.dart';
+import '../screens/stats_screen.dart';
+import '../screens/wishlist_overview_screen.dart';
 import '../services/auth_service.dart';
 import '../services/profile_service.dart';
 import 'profile_avatar.dart';
+import 'share_collection_sheet.dart';
 
 class MainDrawer extends StatefulWidget {
   const MainDrawer({super.key});
@@ -92,6 +98,81 @@ class _MainDrawerState extends State<MainDrawer> {
             leading: const Icon(Icons.home),
             title: const Text('Choisir une collection'),
             onTap: () => Navigator.pushReplacementNamed(context, '/categories'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.ios_share),
+            title: const Text('Partager ma collection'),
+            subtitle: const Text('Résumé pour amis sans l\'app, CSV'),
+            onTap: () {
+              Navigator.pop(context);
+              showShareCollectionSheet(context);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.bar_chart_outlined),
+            title: const Text('Statistiques'),
+            subtitle: const Text('Graphiques et valorisation'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (ctx) => const StatsScreen()),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.shuffle),
+            title: const Text('Shake to Pick'),
+            subtitle: const Text('Tirage aléatoire dans ta collection'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (ctx) => const ShakePickScreen(),
+                ),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.handshake_outlined),
+            title: const Text('Mes prêts'),
+            subtitle: const Text('Objets prêtés à tes amis'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (ctx) => const LoansScreen()),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.copy_all),
+            title: const Text('Doubles & ventes'),
+            subtitle: const Text('À vendre, vendus, doublons'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (ctx) => const InventoryManageScreen(),
+                ),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.favorite_border),
+            title: const Text('Ma wishlist'),
+            subtitle: const Text('Tous les objets à acquérir'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (ctx) => const WishlistOverviewScreen(),
+                ),
+              );
+            },
           ),
           ListTile(
             leading: const Icon(Icons.groups),

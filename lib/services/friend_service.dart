@@ -1,5 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/collection_item.dart';
+import '../utils/collection_item_filters.dart';
 import '../utils/search_relevance.dart';
 
 class FriendService {
@@ -200,5 +202,78 @@ class FriendService {
         .from('friendships')
         .update({'share_collections': share})
         .eq('id', friendshipId);
+  }
+
+  /// Filtre local des amis déjà ajoutés (par pseudo).
+  List<Map<String, dynamic>> filterFriends(
+    List<Map<String, dynamic>> friends,
+    String query,
+  ) {
+    final q = query.trim();
+    if (q.isEmpty) return friends;
+
+    final scored = <Map<String, dynamic>>[];
+    for (final f in friends) {
+      final username = f['username'] as String? ?? '';
+      final score = titleRelevanceScore(username, q);
+      if (score > 0) {
+        scored.add({...f, '_score': score});
+      }
+    }
+
+    sortByScore(scored, (f) => f['_score'] as int);
+    return scored.map((f) {
+      final copy = Map<String, dynamic>.from(f);
+      copy.remove('_score');
+      return copy;
+    }).toList();
+  }
+
+  /// Vérifie l'amitié et si les collections sont partagées (flag mutuel).
+  Future<Map<String, dynamic>?> friendshipWith(String friendProfileId) async {
+    final userId = _client.auth.currentUser?.id;
+    if (userId == null) return null;
+
+    final row = await _client
+        .from('friendships')
+        .select('id, share_collections, requester_id, addressee_id')
+        .eq('status', 'accepted')
+        .or(
+          'and(requester_id.eq.$userId,addressee_id.eq.$friendProfileId),'
+          'and(requester_id.eq.$friendProfileId,addressee_id.eq.$userId)',
+        )
+        .maybeSingle();
+
+    if (row == null) return null;
+    return Map<String, dynamic>.from(row);
+  }
+
+  Future<bool> canViewFriendCollection(String friendProfileId) async {
+    final friendship = await friendshipWith(friendProfileId);
+    if (friendship == null) return false;
+    return friendship['share_collections'] as bool? ?? false;
+  }
+
+  /// Objets visibles de l'ami (collection active, hors wishlist).
+  Future<List<CollectionItem>> fetchFriendCollectionItems(
+    String friendProfileId,
+  ) async {
+    if (!await canViewFriendCollection(friendProfileId)) {
+      throw Exception('Cet ami ne partage pas sa collection');
+    }
+
+    final rows = await _client
+        .from('collection_items')
+        .select('*, locations(label), groups(name)')
+        .or(
+          'added_by.eq.$friendProfileId,location_user_id.eq.$friendProfileId',
+        )
+        .eq('is_wishlist', false)
+        .order('title');
+
+    return (rows as List)
+        .map((r) => CollectionItem.fromJson(Map<String, dynamic>.from(r)))
+        .where(isActiveCollectionItem)
+        .toList();
   }
 }

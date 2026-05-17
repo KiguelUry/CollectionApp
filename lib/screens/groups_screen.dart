@@ -3,8 +3,11 @@ import '../models/collection_group.dart';
 import '../services/friend_service.dart';
 import '../services/group_service.dart';
 import '../widgets/friend_picker_dialog.dart';
+import '../widgets/group_badge.dart';
 import '../widgets/main_drawer.dart';
+import '../widgets/profile_avatar.dart';
 import 'group_detail_screen.dart';
+import 'group_edit_screen.dart';
 
 class GroupsScreen extends StatefulWidget {
   const GroupsScreen({super.key});
@@ -57,8 +60,20 @@ class _GroupsScreenState extends State<GroupsScreen> {
       ),
     );
     if (name == null || name.isEmpty) return;
-    await _groupService.createGroup(name);
+    final group = await _groupService.createGroup(name);
+    if (!mounted) return;
+    await _openEdit(group);
     await _load();
+  }
+
+  Future<void> _openEdit(CollectionGroup group) async {
+    final updated = await Navigator.push<CollectionGroup>(
+      context,
+      MaterialPageRoute(
+        builder: (ctx) => GroupEditScreen(group: group),
+      ),
+    );
+    if (updated != null && mounted) await _load();
   }
 
   Future<void> _addFriendToGroup(CollectionGroup group) async {
@@ -84,6 +99,16 @@ class _GroupsScreenState extends State<GroupsScreen> {
     }
   }
 
+  Future<void> _openGroup(CollectionGroup group) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (ctx) => GroupDetailScreen(group: group),
+      ),
+    );
+    if (mounted) await _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -107,21 +132,48 @@ class _GroupsScreenState extends State<GroupsScreen> {
                   itemCount: _groups.length,
                   itemBuilder: (context, index) {
                     final group = _groups[index];
+                    final canEdit = _groupService.canEdit(group);
+                    final accent =
+                        ProfileAvatar.colorFromHex(group.accentColor);
+
                     return Card(
                       child: ListTile(
-                        leading: const Icon(Icons.groups, color: Colors.deepPurple),
-                        title: Text(group.name),
-                        subtitle: const Text('Voir la collection partagée'),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.person_add),
-                          onPressed: () => _addFriendToGroup(group),
+                        leading: GroupBadge.fromGroup(
+                          name: group.name,
+                          avatarUrl: group.avatarUrl,
+                          accentColor: group.accentColor,
+                          iconKey: group.iconKey,
+                          radius: 26,
                         ),
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (ctx) => GroupDetailScreen(group: group),
+                        title: Text(group.name),
+                        subtitle: Text(
+                          canEdit
+                              ? 'Collection partagée · Personnalisable'
+                              : 'Collection partagée',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: accent.withValues(alpha: 0.9),
                           ),
-                        ).then((_) => _load()),
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (canEdit)
+                              IconButton(
+                                icon: const Icon(Icons.palette_outlined),
+                                tooltip: 'Personnaliser',
+                                onPressed: () => _openEdit(group),
+                              ),
+                            IconButton(
+                              icon: const Icon(Icons.person_add),
+                              tooltip: 'Ajouter un membre',
+                              onPressed: () => _addFriendToGroup(group),
+                            ),
+                          ],
+                        ),
+                        onTap: () => _openGroup(group),
+                        onLongPress:
+                            canEdit ? () => _openEdit(group) : null,
                       ),
                     );
                   },

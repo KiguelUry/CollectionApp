@@ -1,8 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_category.dart';
+import '../models/collection_summary.dart';
+import '../services/collection_stats_service.dart';
+import '../widgets/collection_summary_card.dart';
 import '../widgets/main_drawer.dart';
 import 'home_screen.dart';
+import 'shake_pick_screen.dart';
+import 'stats_screen.dart';
+import 'wishlist_overview_screen.dart';
+import '../theme/app_theme.dart';
+import '../utils/collection_item_scope.dart';
 
 class CategorySelectionScreen extends StatefulWidget {
   const CategorySelectionScreen({super.key});
@@ -13,13 +21,16 @@ class CategorySelectionScreen extends StatefulWidget {
 }
 
 class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
+  final _statsService = CollectionStatsService();
   Map<CollectionCategory, int> _counts = {};
+  Map<CollectionCategory, int> _wishlistCounts = {};
+  CollectionSummary _summary = const CollectionSummary();
   bool _loadingCounts = true;
 
   @override
   void initState() {
     super.initState();
-    _loadCounts();
+    _load();
   }
 
   Future<String> _getUsername() async {
@@ -34,23 +45,43 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     return data['username'] ?? 'Aventurier';
   }
 
-  Future<void> _loadCounts() async {
-    final rows = await Supabase.instance.client
-        .from('collection_items')
-        .select('category')
-        .eq('is_wishlist', false);
+  Future<void> _load() async {
+    setState(() => _loadingCounts = true);
+
+    final userId = Supabase.instance.client.auth.currentUser!.id;
+    final rows = await CollectionItemScope.personal(
+      Supabase.instance.client
+          .from('collection_items')
+          .select('category, is_wishlist'),
+      userId: userId,
+    );
 
     final counts = {
       for (final c in CollectionCategory.values) c: 0,
     };
-    for (final row in rows) {
+    final wishCounts = {
+      for (final c in CollectionCategory.values) c: 0,
+    };
+    for (final row in rows as List) {
       final cat = CollectionCategory.fromDbValue(row['category'] as String);
-      counts[cat] = (counts[cat] ?? 0) + 1;
+      final isWishlist = row['is_wishlist'] as bool? ?? false;
+      if (isWishlist) {
+        wishCounts[cat] = (wishCounts[cat] ?? 0) + 1;
+      } else {
+        counts[cat] = (counts[cat] ?? 0) + 1;
+      }
     }
+
+    CollectionSummary summary = const CollectionSummary();
+    try {
+      summary = await _statsService.fetchSummary();
+    } catch (_) {}
 
     if (mounted) {
       setState(() {
         _counts = counts;
+        _wishlistCounts = wishCounts;
+        _summary = summary;
         _loadingCounts = false;
       });
     }
@@ -62,7 +93,21 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
       MaterialPageRoute(
         builder: (context) => HomeScreen(category: category),
       ),
-    ).then((_) => _loadCounts());
+    ).then((_) => _load());
+  }
+
+  void _openWishlist() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (ctx) => const WishlistOverviewScreen()),
+    ).then((_) => _load());
+  }
+
+  void _openStats() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (ctx) => const StatsScreen()),
+    ).then((_) => _load());
   }
 
   @override
@@ -78,76 +123,118 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
       );
     }
 
+    final scheme = Theme.of(context).colorScheme;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Ma Collection Famille'),
+        title: const Text('Collection Famille'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.bar_chart_outlined),
+            tooltip: 'Statistiques',
+            onPressed: _openStats,
+          ),
+          IconButton(
+            icon: const Icon(Icons.shuffle),
+            tooltip: 'Shake to Pick',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (ctx) => const ShakePickScreen()),
+            ),
+          ),
+        ],
       ),
       drawer: const MainDrawer(),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            FutureBuilder<String>(
-              future: _getUsername(),
-              builder: (context, snapshot) {
-                final name = snapshot.data ?? '...';
-                return Text(
-                  'Salut $name !',
-                  style: const TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+            decoration: AppTheme.heroGradient(scheme.primary),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                FutureBuilder<String>(
+                  future: _getUsername(),
+                  builder: (context, snapshot) {
+                    final name = snapshot.data ?? '...';
+                    return Text(
+                      'Salut $name',
+                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                    );
+                  },
+                ),
+                Text(
+                  'Quelle collection ouvrir ?',
+                  style: TextStyle(color: Colors.grey.shade700),
+                ),
+                const SizedBox(height: 12),
+                if (!_loadingCounts)
+                  CollectionSummaryCard(
+                    summary: _summary,
+                    onWishlistTap: _openWishlist,
+                    onStatsTap: _openStats,
                   ),
-                );
-              },
+              ],
             ),
-            const Text(
-              'Quelle collection veux-tu consulter ?',
-              style: TextStyle(fontSize: 16, color: Colors.grey),
-            ),
-            const SizedBox(height: 24),
-            Expanded(
-              child: _loadingCounts
-                  ? const Center(child: CircularProgressIndicator())
-                  : GridView.count(
+          ),
+          Expanded(
+            child: _loadingCounts
+                ? const Center(child: CircularProgressIndicator())
+                : GridView.builder(
+                    padding: const EdgeInsets.all(16),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: 2,
-                      crossAxisSpacing: 15,
-                      mainAxisSpacing: 15,
-                      children: CollectionCategory.values
-                          .map((category) => _buildCategoryCard(category))
-                          .toList(),
+                      crossAxisSpacing: 14,
+                      mainAxisSpacing: 14,
+                      childAspectRatio: 0.88,
                     ),
-            ),
-          ],
-        ),
+                    itemCount: CollectionCategory.values.length,
+                    itemBuilder: (context, index) => _buildCategoryCard(
+                      CollectionCategory.values[index],
+                    ),
+                  ),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildCategoryCard(CollectionCategory category) {
     final count = _counts[category] ?? 0;
+    final wishCount = _wishlistCounts[category] ?? 0;
     final countLabel = count == 0
         ? 'Vide'
         : count == 1
             ? '1 objet'
             : '$count objets';
+    final wishLabel = wishCount > 0 ? '♥ $wishCount en wishlist' : null;
 
     return InkWell(
       onTap: () => _openCategory(category),
       borderRadius: BorderRadius.circular(20),
       child: Card(
-        elevation: 4,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: category.color.withValues(alpha: 0.12),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    category.color.withValues(alpha: 0.2),
+                    category.color.withValues(alpha: 0.06),
+                  ],
+                ),
                 shape: BoxShape.circle,
               ),
-              child: Icon(category.icon, size: 40, color: category.color),
+              child: Icon(category.icon, size: 36, color: category.color),
             ),
             const SizedBox(height: 12),
             Text(
@@ -170,6 +257,17 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
               countLabel,
               style: TextStyle(fontSize: 12, color: category.color),
             ),
+            if (wishLabel != null) ...[
+              const SizedBox(height: 2),
+              Text(
+                wishLabel,
+                style: TextStyle(
+                  fontSize: 10,
+                  color: Colors.amber.shade800,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
           ],
         ),
       ),

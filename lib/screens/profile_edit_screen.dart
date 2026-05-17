@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/user_profile.dart';
 import '../services/profile_service.dart';
+import '../services/showcase_service.dart';
 import '../widgets/profile_avatar.dart';
 
 class ProfileEditScreen extends StatefulWidget {
@@ -12,6 +13,7 @@ class ProfileEditScreen extends StatefulWidget {
 
 class _ProfileEditScreenState extends State<ProfileEditScreen> {
   final _service = ProfileService();
+  final _showcase = ShowcaseService();
   final _usernameController = TextEditingController();
   final _bioController = TextEditingController();
 
@@ -248,7 +250,89 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                       );
                     }).toList(),
                   ),
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 24),
+                  Card(
+                    child: Column(
+                      children: [
+                        SwitchListTile(
+                          secondary: const Icon(Icons.public),
+                          title: const Text('Vitrine publique'),
+                          subtitle: Text(
+                            _profile?.showcasePublic == true
+                                ? 'Tes proches peuvent voir ta collection dans le navigateur'
+                                : 'Lien web sans installer l\'app (collection + wishlist)',
+                          ),
+                          value: _profile?.showcasePublic ?? false,
+                          onChanged: _saving
+                              ? null
+                              : (v) async {
+                                  try {
+                                    await _showcase.setPublic(v);
+                                    await _load();
+                                    if (mounted) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            v
+                                                ? 'Vitrine activée — partage le lien depuis le menu Partager'
+                                                : 'Vitrine désactivée',
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  } catch (e) {
+                                    if (mounted) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        SnackBar(content: Text('$e')),
+                                      );
+                                    }
+                                  }
+                                },
+                        ),
+                        if (_profile?.showcasePublic == true &&
+                            _profile?.showcaseToken != null)
+                          ListTile(
+                            dense: true,
+                            leading: const Icon(Icons.link, size: 20),
+                            title: Text(
+                              _showcase.buildUrl(_profile!.showcaseToken!),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            trailing: TextButton(
+                              onPressed: () async {
+                                try {
+                                  await _showcase.regenerateToken();
+                                  await _load();
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context)
+                                        .showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Nouveau lien généré (l\'ancien ne fonctionne plus)',
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                } catch (e) {
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context)
+                                        .showSnackBar(
+                                      SnackBar(content: Text('$e')),
+                                    );
+                                  }
+                                }
+                              },
+                              child: const Text('Renouveler'),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
                   FilledButton.icon(
                     onPressed: _saving ? null : _save,
                     icon: _saving

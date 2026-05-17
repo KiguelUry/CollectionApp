@@ -7,6 +7,7 @@ import 'screens/friends_screen.dart';
 import 'screens/groups_screen.dart';
 import 'screens/profile_edit_screen.dart';
 import 'screens/splash_screen.dart';
+import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -37,10 +38,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Collection Famille',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
-      ),
+      theme: AppTheme.light,
 
       home: const SplashScreen(),
       routes: {

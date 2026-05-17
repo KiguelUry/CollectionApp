@@ -72,4 +72,45 @@ class OpenLibraryService {
       return [];
     }
   }
+
+  /// Recherche par code ISBN/EAN (scan code-barres).
+  static Future<Map<String, String>?> lookupByIsbn(String isbn) async {
+    final cleaned = isbn.replaceAll(RegExp(r'[^0-9Xx]'), '');
+    if (cleaned.length < 10) return null;
+
+    try {
+      final url = Uri.https('openlibrary.org', '/api/books', {
+        'bibkeys': 'ISBN:$cleaned',
+        'format': 'json',
+        'jscmd': 'data',
+      });
+      final response = await http.get(url);
+      if (response.statusCode != 200) return null;
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final book = data['ISBN:$cleaned'] as Map<String, dynamic>?;
+      if (book == null) return null;
+
+      final title = book['title'] as String?;
+      if (title == null || title.isEmpty) return null;
+
+      final authors = book['authors'] as List<dynamic>?;
+      final author = authors?.isNotEmpty == true
+          ? (authors!.first as Map)['name']?.toString() ?? ''
+          : '';
+
+      final covers = book['cover'] as Map<String, dynamic>?;
+      final imageUrl = covers?['medium'] as String? ?? '';
+
+      return {
+        'title': title,
+        'author': author,
+        'isbn': cleaned,
+        'image_url': imageUrl,
+      };
+    } catch (e) {
+      debugPrint('ISBN lookup: $e');
+      return null;
+    }
+  }
 }
