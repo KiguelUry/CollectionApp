@@ -7,6 +7,7 @@ import '../services/bgg_service.dart';
 import '../services/profile_service.dart';
 import '../utils/collection_grid_grouper.dart';
 import '../utils/collection_item_filters.dart';
+import '../utils/holder_filter.dart';
 import '../utils/collection_item_scope.dart';
 import '../models/collection_list_filters.dart';
 import '../models/collection_view_mode.dart';
@@ -20,6 +21,7 @@ import '../widgets/collection_item_list_tile.dart';
 import '../widgets/collection_item_tile.dart';
 import '../widgets/isbn_scan_sheet.dart';
 import 'shake_pick_screen.dart';
+import '../utils/shake_pick_filters.dart';
 import '../widgets/add_item_manual_dialog.dart';
 import '../widgets/add_item_options_dialog.dart';
 import '../widgets/bgg_search_dialog.dart';
@@ -37,10 +39,12 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen>
+    with SingleTickerProviderStateMixin {
   final _tagService = TagService();
   final _collectionSearch = TextEditingController();
   final _wishlistSearch = TextEditingController();
+  late final TabController _tabController;
 
   late final String _userId;
   late final Stream<List<Map<String, dynamic>>> _itemsStream;
@@ -53,6 +57,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _userId = Supabase.instance.client.auth.currentUser!.id;
     final rawStream = Supabase.instance.client
         .from('collection_items')
@@ -64,10 +69,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _tabController.dispose();
     _collectionSearch.dispose();
     _wishlistSearch.dispose();
     super.dispose();
   }
+
+  bool get _addingToWishlist => _tabController.index == 1;
 
   Future<void> _loadFilterData() async {
     try {
@@ -256,6 +264,7 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       builder: (dialogContext) => AddItemOptionsDialog(
         itemTitle: title,
+        defaultWishlist: _addingToWishlist,
         onConfirm: (options) async {
           await _handleSave(
             dialogContext: dialogContext,
@@ -335,15 +344,31 @@ class _HomeScreenState extends State<HomeScreen> {
             .eq('id', existing['id']);
         message = 'Quantité mise à jour ($newQty)';
       } else {
+        final meta = Map<String, dynamic>.from(metadata ?? {});
+        if (options.holderLabel != null &&
+            options.holderLabel!.trim().isNotEmpty) {
+          meta['holder_label'] = options.holderLabel!.trim();
+        }
+        if (bggId != null) meta['bgg_id'] = bggId;
+        if (bggDetails != null) {
+          for (final key in [
+            'year_published',
+            'min_age',
+          ]) {
+            final v = bggDetails[key];
+            if (v != null) meta[key] = v;
+          }
+        }
+
         final item = CollectionItem(
           id: '',
           title: title.trim(),
           category: widget.category,
           subcategory: subcategory,
-          metadata: metadata,
+          metadata: meta.isEmpty ? null : meta,
           imageUrl: resolvedImageUrl,
           isWishlist: options.isWishlist,
-          quantity: options.quantity,
+          quantity: options.isWishlist ? 0 : options.quantity,
           locationId: options.locationId,
           groupId: options.groupId,
           minPlayers: resolvedMin,
@@ -395,9 +420,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
+    return Scaffold(
         appBar: AppAppBar(
           title: widget.category.label,
           actions: [
@@ -422,23 +445,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 tooltip: 'Scanner ISBN',
                 onPressed: _scanIsbnAndAdd,
               ),
-            if (widget.category == CollectionCategory.boardgame)
-              IconButton(
-                icon: const Icon(Icons.casino_outlined),
-                tooltip: 'À quoi on joue ce soir ?',
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (ctx) => const ShakePickScreen(
-                      category: CollectionCategory.boardgame,
-                    ),
-                  ),
-                ),
-              ),
           ],
-          bottom: const TabBar(
+          bottom: TabBar(
+            controller: _tabController,
             indicatorColor: Colors.deepPurple,
-            tabs: [
+            tabs: const [
               Tab(text: 'Collection'),
               Tab(text: 'Wishlist'),
             ],
@@ -477,6 +488,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     allItems.where((item) => item.isWishlist).toList();
 
                 return TabBarView(
+                  controller: _tabController,
                   children: [
                     _buildTab(
                       items: collection,
@@ -486,6 +498,25 @@ class _HomeScreenState extends State<HomeScreen> {
                           setState(() => _collectionFilters = f),
                       emptyHint: 'Ta collection est vide ici.',
                       showScopeFilters: true,
+                      showHolderFilter:
+                          widget.category == CollectionCategory.boardgame,
+                      showLocationFilter:
+                          widget.category != CollectionCategory.boardgame,
+                      showTagFilter:
+                          widget.category != CollectionCategory.boardgame,
+                      showHighlyRatedFilter:
+                          widget.category != CollectionCategory.boardgame,
+                      onShakePick: widget.category ==
+                              CollectionCategory.boardgame
+                          ? () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (ctx) => const ShakePickScreen(
+                                    category: CollectionCategory.boardgame,
+                                  ),
+                                ),
+                              )
+                          : null,
                     ),
                     _buildTab(
                       items: wishlist,
@@ -505,8 +536,19 @@ class _HomeScreenState extends State<HomeScreen> {
             );
           },
         ),
-      ),
     );
+  }
+
+  String _buildCountLabel(List<CollectionItem> items, List<CollectionItem> filtered) {
+    if (filtered.length != items.length) {
+      return '${filtered.length} sur ${items.length}';
+    }
+    final personal = items.where((i) => !i.isGroupOwned).length;
+    final inGroup = items.length - personal;
+    if (inGroup > 0 && personal > 0) {
+      return '$personal objet${personal > 1 ? 's' : ''} · $inGroup en groupe${inGroup > 1 ? 's' : ''}';
+    }
+    return '${items.length} objet${items.length > 1 ? 's' : ''}';
   }
 
   Widget _buildTab({
@@ -518,12 +560,16 @@ class _HomeScreenState extends State<HomeScreen> {
     bool showScopeFilters = true,
     bool showStatusFilters = true,
     bool showLocationFilter = true,
+    bool showHolderFilter = false,
     bool showTagFilter = true,
+    bool showHighlyRatedFilter = true,
+    VoidCallback? onShakePick,
   }) {
     final filtered = filters.apply(items);
-    final countLabel = filtered.length == items.length
-        ? '${items.length} objet${items.length > 1 ? 's' : ''}'
-        : '${filtered.length} sur ${items.length}';
+    final countLabel = _buildCountLabel(items, filtered);
+    final List<HolderFilterOption> holderOptions = showHolderFilter
+        ? buildHolderFilterOptions(items)
+        : const <HolderFilterOption>[];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -534,10 +580,14 @@ class _HomeScreenState extends State<HomeScreen> {
           searchController: searchController,
           locations: _locations,
           tags: _tags,
+          holderOptions: holderOptions,
           showScopeFilters: showScopeFilters,
           showStatusFilters: showStatusFilters,
           showLocationFilter: showLocationFilter,
+          showHolderFilter: showHolderFilter,
           showTagFilter: showTagFilter,
+          showHighlyRatedFilter: showHighlyRatedFilter,
+          onShakePick: onShakePick,
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),

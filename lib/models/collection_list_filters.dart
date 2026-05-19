@@ -1,4 +1,5 @@
 import '../models/collection_item.dart';
+import '../utils/holder_filter.dart';
 
 enum CollectionSort {
   titleAsc,
@@ -13,6 +14,7 @@ enum CollectionScopeFilter {
   all,
   personalOnly,
   groupOnly,
+  onLoanOnly,
 }
 
 enum CollectionStatusFilter {
@@ -30,6 +32,8 @@ class CollectionListFilters {
   CollectionStatusFilter status;
   String? locationId;
   String? tagId;
+  /// Filtre « chez qui » (`user:…`, `custom:…`, `loan:…`).
+  String? holderKey;
 
   CollectionListFilters({
     this.searchQuery = '',
@@ -38,6 +42,7 @@ class CollectionListFilters {
     this.status = CollectionStatusFilter.all,
     this.locationId,
     this.tagId,
+    this.holderKey,
   });
 
   bool get hasActiveFilters =>
@@ -46,6 +51,7 @@ class CollectionListFilters {
       status != CollectionStatusFilter.all ||
       locationId != null ||
       tagId != null ||
+      holderKey != null ||
       sort != CollectionSort.titleAsc;
 
   CollectionListFilters copyWith({
@@ -55,8 +61,10 @@ class CollectionListFilters {
     CollectionStatusFilter? status,
     String? locationId,
     String? tagId,
+    String? holderKey,
     bool clearLocation = false,
     bool clearTag = false,
+    bool clearHolder = false,
   }) {
     return CollectionListFilters(
       searchQuery: searchQuery ?? this.searchQuery,
@@ -65,6 +73,7 @@ class CollectionListFilters {
       status: status ?? this.status,
       locationId: clearLocation ? null : (locationId ?? this.locationId),
       tagId: clearTag ? null : (tagId ?? this.tagId),
+      holderKey: clearHolder ? null : (holderKey ?? this.holderKey),
     );
   }
 
@@ -82,6 +91,11 @@ class CollectionListFilters {
       result = result.where((i) => i.locationId == locationId).toList();
     }
 
+    if (holderKey != null) {
+      result =
+          result.where((i) => itemMatchesHolderKey(i, holderKey)).toList();
+    }
+
     if (tagId != null) {
       result = result.where((i) => i.tags.any((t) => t.id == tagId)).toList();
     }
@@ -93,13 +107,15 @@ class CollectionListFilters {
         result = result.where((i) => !i.isGroupOwned).toList();
       case CollectionScopeFilter.groupOnly:
         result = result.where((i) => i.isGroupOwned).toList();
+      case CollectionScopeFilter.onLoanOnly:
+        result = result.where((i) => i.isOnLoan).toList();
     }
 
     switch (status) {
       case CollectionStatusFilter.all:
         break;
       case CollectionStatusFilter.onLoan:
-        result = result.where((i) => i.isOnLoan).toList();
+        break;
       case CollectionStatusFilter.highlyRated:
         result = result.where((i) => (i.rating ?? 0) >= 4).toList();
       case CollectionStatusFilter.withLocation:

@@ -99,6 +99,10 @@ class CollectionItem {
     if (loc is Map) {
       locLabel = loc['label'] as String?;
     }
+    final holder = json['location_holder'];
+    if (holder is Map && holder['username'] != null) {
+      locLabel = 'Chez ${holder['username']}';
+    }
 
     String? gName;
     final grp = json['groups'];
@@ -215,12 +219,15 @@ class CollectionItem {
           personalRules?.trim().isEmpty == true ? null : personalRules?.trim(),
       'quantity': quantity,
       'location_id': locationId,
+      'location_user_id': locationUserId,
       'group_id': groupId,
+      'metadata': metadata ?? {},
       'is_for_sale': isForSale,
       'is_sold': isSold,
       'loaned_to_id': loanedToId,
       'loaned_to_name': loanedToName,
       'loaned_at': loanedAt?.toUtc().toIso8601String(),
+      'is_wishlist': isWishlist,
     };
   }
 
@@ -236,6 +243,7 @@ class CollectionItem {
     String? condition,
     int? gamesPlayed,
     String? personalRules,
+    bool? isWishlist,
     bool? isForSale,
     bool? isSold,
     String? loanedToId,
@@ -247,6 +255,8 @@ class CollectionItem {
     bool clearGamesPlayed = false,
     bool clearGroup = false,
     bool clearLocation = false,
+    String? locationUserId,
+    Map<String, dynamic>? metadata,
     List<ItemTag>? tags,
     String? seriesId,
     String? volumeId,
@@ -258,9 +268,9 @@ class CollectionItem {
       title: title,
       category: category,
       subcategory: subcategory,
-      metadata: metadata,
+      metadata: metadata ?? this.metadata,
       imageUrl: imageUrl,
-      isWishlist: isWishlist,
+      isWishlist: isWishlist ?? this.isWishlist,
       isForSale: isForSale ?? this.isForSale,
       isSold: isSold ?? this.isSold,
       quantity: quantity ?? this.quantity,
@@ -269,7 +279,8 @@ class CollectionItem {
       groupId: clearGroup ? null : (groupId ?? this.groupId),
       groupName: clearGroup ? null : (groupName ?? this.groupName),
       addedBy: addedBy,
-      locationUserId: locationUserId,
+      locationUserId:
+          clearLocation ? null : (locationUserId ?? this.locationUserId),
       loanedToId: clearLoan ? null : (loanedToId ?? this.loanedToId),
       loanedToName: clearLoan ? null : (loanedToName ?? this.loanedToName),
       loanedAt: clearLoan ? null : (loanedAt ?? this.loanedAt),
@@ -312,8 +323,14 @@ class CollectionItem {
   ItemCondition? get itemCondition => ItemCondition.fromDbValue(condition);
 
   String? get ownershipLabel {
-    if (isGroupOwned) return 'Famille / ${groupName ?? 'groupe'}';
+    if (isGroupOwned) return groupName ?? 'Groupe';
     return 'Personnel';
+  }
+
+  List<String> get sharedGroupNames {
+    final raw = metadata?['group_ids'];
+    if (raw is! List) return [];
+    return raw.map((e) => e.toString()).where((s) => s.isNotEmpty).toList();
   }
 
   String? get listSubtitle {

@@ -26,7 +26,7 @@ class _CollapsibleCollectionOverviewState
 
   String _compactLine(CollectionSummary s) {
     final parts = <String>[
-      '${s.ownedCount} objet${s.ownedCount > 1 ? 's' : ''}',
+      s.ownedCountLabel,
       if (s.wishlistCount > 0) '♥ ${s.wishlistCount} wishlist',
     ];
     if (s.hasAnyValue) {

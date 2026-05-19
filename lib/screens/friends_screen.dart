@@ -17,6 +17,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
   final _filterController = TextEditingController();
   List<Map<String, dynamic>> _friends = [];
   List<Map<String, dynamic>> _filtered = [];
+  List<Map<String, dynamic>> _pendingRequests = [];
   bool _loading = true;
 
   @override
@@ -42,7 +43,12 @@ class _FriendsScreenState extends State<FriendsScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      _friends = await _service.fetchFriends();
+      final results = await Future.wait([
+        _service.fetchFriends(),
+        _service.fetchIncomingFriendRequests(),
+      ]);
+      _friends = results[0];
+      _pendingRequests = results[1];
       _applyFilter();
     } catch (e) {
       if (mounted) {
@@ -60,7 +66,6 @@ class _FriendsScreenState extends State<FriendsScreen> {
   }
 
   void _openFriend(Map<String, dynamic> friend) {
-    final sharing = friend['share_collections'] as bool? ?? false;
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -69,10 +74,45 @@ class _FriendsScreenState extends State<FriendsScreen> {
           username: friend['username'] as String,
           avatarUrl: friend['avatar_url'] as String?,
           accentColor: friend['accent_color'] as String?,
-          shareCollections: sharing,
+          shareCollections: true,
         ),
       ),
     );
+  }
+
+  Future<void> _acceptRequest(Map<String, dynamic> req) async {
+    try {
+      await _service.acceptFriendRequest(req['friendship_id'] as String);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${req['username'] ?? 'Ami'} est maintenant ton ami',
+            ),
+          ),
+        );
+        await _load();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _rejectRequest(Map<String, dynamic> req) async {
+    try {
+      await _service.rejectFriendRequest(req['friendship_id'] as String);
+      await _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e')),
+        );
+      }
+    }
   }
 
   @override
@@ -127,12 +167,53 @@ class _FriendsScreenState extends State<FriendsScreen> {
               ),
             ),
           ),
+          if (_pendingRequests.isNotEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              child: Text(
+                'Demandes reçues (${_pendingRequests.length})',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+            ),
+            ..._pendingRequests.map(
+              (req) => Card(
+                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                child: ListTile(
+                  leading: ProfileAvatar(
+                    avatarUrl: req['avatar_url'] as String?,
+                    accentColorHex: req['accent_color'] as String?,
+                    fallbackInitial: req['username'] as String? ?? '?',
+                    radius: 22,
+                  ),
+                  title: Text(req['username'] as String? ?? 'Utilisateur'),
+                  subtitle: const Text('Souhaite t\'ajouter en ami'),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.close, color: Colors.red),
+                        tooltip: 'Refuser',
+                        onPressed: () => _rejectRequest(req),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.check, color: Colors.green),
+                        tooltip: 'Accepter',
+                        onPressed: () => _acceptRequest(req),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
-                : _friends.isEmpty
+                : _friends.isEmpty && _pendingRequests.isEmpty
                     ? _buildEmpty()
-                    : _filtered.isEmpty
+                    : _friends.isNotEmpty && _filtered.isEmpty
                         ? Center(
                             child: Text(
                               'Aucun ami ne correspond à « ${_filterController.text} »',
@@ -147,9 +228,6 @@ class _FriendsScreenState extends State<FriendsScreen> {
                               itemBuilder: (context, index) {
                                 final f = _filtered[index];
                                 final username = f['username'] as String;
-                                final sharing =
-                                    f['share_collections'] as bool? ?? false;
-
                                 return Card(
                                   margin: const EdgeInsets.symmetric(
                                     horizontal: 12,
@@ -165,23 +243,15 @@ class _FriendsScreenState extends State<FriendsScreen> {
                                     ),
                                     title: Text(username),
                                     subtitle: Text(
-                                      sharing
-                                          ? 'Collections partagées · Appuie pour voir'
-                                          : 'Collection privée',
+                                      'Collection et wishlist',
                                       style: TextStyle(
                                         fontSize: 12,
-                                        color: sharing
-                                            ? Colors.deepPurple.shade400
-                                            : Colors.grey,
+                                        color: Colors.deepPurple.shade400,
                                       ),
                                     ),
                                     trailing: Icon(
-                                      sharing
-                                          ? Icons.chevron_right
-                                          : Icons.lock_outline,
-                                      color: sharing
-                                          ? Colors.deepPurple
-                                          : Colors.grey,
+                                      Icons.chevron_right,
+                                      color: Colors.deepPurple.shade400,
                                     ),
                                     onTap: () => _openFriend(f),
                                     onLongPress: () => _showFriendOptions(f),

@@ -61,8 +61,15 @@ class CollectionSummaryCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: _StatTile(
-                    label: 'Objets possédés',
-                    value: '${summary.ownedCount}',
+                    label: summary.groupOwnedCount > 0
+                        ? 'Perso + groupes'
+                        : 'Objets possédés',
+                    value: summary.groupOwnedCount > 0
+                        ? '${summary.ownedCount}+${summary.groupOwnedCount}'
+                        : '${summary.ownedCount}',
+                    subtitle: summary.groupOwnedCount > 0
+                        ? summary.ownedCountLabel
+                        : null,
                     icon: Icons.inventory_2_outlined,
                     color: scheme.primary,
                   ),
@@ -139,6 +146,7 @@ class CollectionSummaryCard extends StatelessWidget {
 class _StatTile extends StatelessWidget {
   final String label;
   final String value;
+  final String? subtitle;
   final IconData icon;
   final Color color;
   final bool showChevron;
@@ -148,6 +156,7 @@ class _StatTile extends StatelessWidget {
     required this.value,
     required this.icon,
     required this.color,
+    this.subtitle,
     this.showChevron = false,
   });
 
@@ -181,6 +190,15 @@ class _StatTile extends StatelessWidget {
               color: color,
             ),
           ),
+          if (subtitle != null) ...[
+            const SizedBox(height: 2),
+            Text(
+              subtitle!,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+            ),
+          ],
           Text(
             label,
             style: TextStyle(fontSize: 11, color: Colors.grey.shade600),

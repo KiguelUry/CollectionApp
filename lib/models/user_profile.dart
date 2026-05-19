@@ -6,6 +6,8 @@ class UserProfile {
   final String? bio;
   final bool showcasePublic;
   final String? showcaseToken;
+  /// Wishlist visible par les amis (défaut : oui).
+  final bool shareWishlist;
 
   const UserProfile({
     required this.id,
@@ -15,6 +17,7 @@ class UserProfile {
     this.bio,
     this.showcasePublic = false,
     this.showcaseToken,
+    this.shareWishlist = true,
   });
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
@@ -26,6 +29,7 @@ class UserProfile {
       bio: json['bio'] as String?,
       showcasePublic: json['showcase_public'] as bool? ?? false,
       showcaseToken: json['showcase_token'] as String?,
+      shareWishlist: json['share_wishlist'] as bool? ?? true,
     );
   }
 

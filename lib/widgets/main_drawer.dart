@@ -163,6 +163,14 @@ class _MainDrawerState extends State<MainDrawer> {
                       Navigator.pushNamed(context, '/groups');
                     },
                   ),
+                  _item(
+                    icon: Icons.settings_outlined,
+                    label: 'Paramètres',
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.pushNamed(context, '/settings');
+                    },
+                  ),
                 ],
               ),
             ),

@@ -1,3 +1,4 @@
+import '../utils/boardgame_display.dart';
 import 'collection_category.dart';
 import 'book_subcategory.dart';
 import 'card_subcategory.dart';
@@ -116,8 +117,12 @@ class CategoryMetadata {
   static String? subtitle(CollectionItem item) {
     switch (item.category) {
       case CollectionCategory.boardgame:
-        if (item.playingTime != null) return '${item.playingTime} min';
-        return null;
+        final parts = <String>[];
+        final players = formatPlayerCount(item.minPlayers, item.maxPlayers);
+        if (players != null) parts.add(players);
+        final time = formatPlayingTime(item.playingTime);
+        if (time != null) parts.add(time);
+        return parts.isEmpty ? null : parts.join(' · ');
       case CollectionCategory.book:
         final author = item.metadata?['author'] as String?;
         if (author != null && author.isNotEmpty) return author;
@@ -148,6 +153,23 @@ class CategoryMetadata {
     final rows = <MapEntry<String, String>>[];
 
     switch (item.category) {
+      case CollectionCategory.boardgame:
+        final year = m['year_published'] ?? m['year'];
+        if (year != null && year.toString().isNotEmpty) {
+          rows.add(MapEntry('Parution', year.toString()));
+        }
+        final players = formatPlayerCount(item.minPlayers, item.maxPlayers);
+        if (players != null) {
+          rows.add(MapEntry('Joueurs', players));
+        }
+        final time = formatPlayingTime(item.playingTime);
+        if (time != null) {
+          rows.add(MapEntry('Durée', time));
+        }
+        final minAge = m['min_age'];
+        if (minAge != null) {
+          rows.add(MapEntry('Âge', '$minAge+'));
+        }
       case CollectionCategory.book:
         if ((m['author'] as String?)?.isNotEmpty == true) {
           rows.add(MapEntry('Auteur', m['author'].toString()));

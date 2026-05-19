@@ -9,6 +9,7 @@ class AppAppBar extends StatelessWidget implements PreferredSizeWidget {
   final Color? backgroundColor;
   final Color? foregroundColor;
   final bool showCollectionsHome;
+  final bool showBackButton;
 
   const AppAppBar({
     super.key,
@@ -18,6 +19,7 @@ class AppAppBar extends StatelessWidget implements PreferredSizeWidget {
     this.backgroundColor,
     this.foregroundColor,
     this.showCollectionsHome = true,
+    this.showBackButton = true,
   });
 
   @override
@@ -28,13 +30,14 @@ class AppAppBar extends StatelessWidget implements PreferredSizeWidget {
   Widget build(BuildContext context) {
     final onCollections = AppNavigation.isOnCollectionsHome(context);
     final canPop = Navigator.canPop(context);
+    final showLeading = showBackButton && canPop;
 
     return AppBar(
       title: Text(title),
       bottom: bottom,
       backgroundColor: backgroundColor,
       foregroundColor: foregroundColor,
-      automaticallyImplyLeading: canPop,
+      automaticallyImplyLeading: showLeading,
       actions: [
         if (showCollectionsHome && !onCollections)
           IconButton(

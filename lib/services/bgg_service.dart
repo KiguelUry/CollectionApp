@@ -287,12 +287,28 @@ class BggService {
       return int.tryParse(raw);
     }
 
+    final bggId = item.getAttribute('id');
+    final year = parseAttr('yearpublished');
+    final minAge = parseAttr('minage');
+    final playingTime = parseAttr('playingtime') ??
+        parseAttr('maxplaytime') ??
+        parseAttr('minplaytime');
+
     return {
+      if (bggId != null) 'bgg_id': bggId,
       if (image != null && image.isNotEmpty) 'image_url': image,
+      if (year != null) 'year_published': year,
+      if (minAge != null) 'min_age': minAge,
       'min_players': parseAttr('minplayers'),
       'max_players': parseAttr('maxplayers'),
-      'playing_time': parseAttr('playingtime'),
+      'playing_time': playingTime,
     };
+  }
+
+  /// Page fichiers BGG (livrets PDF souvent listés là).
+  static String? rulesFilesUrl(String? bggId) {
+    if (bggId == null || bggId.isEmpty) return null;
+    return 'https://boardgamegeek.com/boardgame/$bggId/files';
   }
 
   static Future<Map<String, dynamic>?> getGameFullDetails(String bggId) async {

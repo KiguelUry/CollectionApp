@@ -3,13 +3,15 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_group.dart';
 import '../services/group_service.dart';
 import 'group_badge.dart';
-import 'location_picker_field.dart';
+import 'item_whereabouts_field.dart';
+import 'personal_whereabouts_field.dart';
 
 class AddItemOptions {
   final bool isWishlist;
   final String? locationUserId;
   final String? groupId;
   final String? locationId;
+  final String? holderLabel;
   final int quantity;
 
   const AddItemOptions({
@@ -17,18 +19,21 @@ class AddItemOptions {
     this.locationUserId,
     this.groupId,
     this.locationId,
+    this.holderLabel,
     this.quantity = 1,
   });
 }
 
 class AddItemOptionsDialog extends StatefulWidget {
   final String itemTitle;
+  final bool defaultWishlist;
   final Future<void> Function(AddItemOptions options) onConfirm;
 
   const AddItemOptionsDialog({
     super.key,
     required this.itemTitle,
     required this.onConfirm,
+    this.defaultWishlist = false,
   });
 
   @override
@@ -37,39 +42,36 @@ class AddItemOptionsDialog extends StatefulWidget {
 
 class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
   final _groupService = GroupService();
-  bool _isWishlist = false;
+  late bool _isWishlist;
   bool _shareWithGroup = false;
-  String? _selectedProfileId;
   String? _selectedGroupId;
   String? _selectedLocationId;
+  String? _atMemberUserId;
+  String? _customHolderName;
+  bool _isLoanOnAdd = false;
+  String? _loanFriendId;
+  String? _loanExternalName;
   int _quantity = 1;
-  List<Map<String, dynamic>> _profiles = [];
   List<CollectionGroup> _groups = [];
   bool _loading = true;
 
   @override
   void initState() {
     super.initState();
+    _isWishlist = widget.defaultWishlist;
+    if (_isWishlist) _quantity = 0;
+    _atMemberUserId = Supabase.instance.client.auth.currentUser?.id;
     _load();
   }
 
   Future<void> _load() async {
-    final userId = Supabase.instance.client.auth.currentUser!.id;
-    var profiles = <Map<String, dynamic>>[];
     var groups = <CollectionGroup>[];
-    try {
-      profiles = List<Map<String, dynamic>>.from(
-        await Supabase.instance.client.from('profiles').select('id, username'),
-      );
-    } catch (_) {}
     try {
       groups = await _groupService.fetchMyGroups();
     } catch (_) {}
     if (mounted) {
       setState(() {
-        _profiles = profiles;
         _groups = groups;
-        _selectedProfileId = userId;
         if (_groups.isNotEmpty) _selectedGroupId = _groups.first.id;
         _loading = false;
       });
@@ -91,12 +93,27 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Wishlist'),
-                      value: _isWishlist,
-                      onChanged: (v) => setState(() => _isWishlist = v),
-                    ),
+                    if (!widget.defaultWishlist)
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Wishlist'),
+                        value: _isWishlist,
+                        onChanged: (v) => setState(() {
+                          _isWishlist = v;
+                          _quantity = v ? 0 : 1;
+                        }),
+                      )
+                    else
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.favorite_border),
+                        title: const Text('Ajout à la wishlist'),
+                        subtitle: Text(
+                          _quantity == 0
+                              ? 'Non possédé pour l\'instant'
+                              : 'Quantité : $_quantity',
+                        ),
+                      ),
                     if (!_isWishlist) ...[
                       const Divider(),
                       SwitchListTile(
@@ -110,7 +127,7 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                       ),
                       if (_shareWithGroup && _groups.isNotEmpty)
                         DropdownButtonFormField<String>(
-                          value: _selectedGroupId,
+                          initialValue: _selectedGroupId,
                           decoration: const InputDecoration(
                             labelText: 'Groupe',
                           ),
@@ -138,36 +155,62 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                           style: TextStyle(color: Colors.grey, fontSize: 12),
                         ),
                       const SizedBox(height: 8),
-                      if (_profiles.isNotEmpty)
-                        DropdownButtonFormField<String>(
-                          value: _selectedProfileId,
-                          decoration: const InputDecoration(
-                            labelText: 'Ajouté par / membre',
-                          ),
-                          items: _profiles
-                              .map(
-                                (p) => DropdownMenuItem(
-                                  value: p['id'].toString(),
-                                  child: Text(p['username'] as String),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: (v) =>
-                              setState(() => _selectedProfileId = v),
+                      if (_shareWithGroup && _selectedGroupId != null)
+                        ItemWhereaboutsField(
+                          key: ValueKey('gm_$_selectedGroupId'),
+                          groupId: _selectedGroupId!,
+                          locationUserId: _atMemberUserId,
+                          holderLabel: null,
+                          customHolderName: _customHolderName,
+                          isOnLoan: _isLoanOnAdd,
+                          loanedToId: _loanFriendId,
+                          loanedToName: _loanExternalName,
+                          onChanged: ({
+                            locationUserId,
+                            holderLabel,
+                            customHolderName,
+                            clearHolder = false,
+                            loanedToId,
+                            loanedToName,
+                            clearLoan = false,
+                          }) => setState(() {
+                            if (clearLoan) {
+                              _isLoanOnAdd = false;
+                              _loanFriendId = null;
+                              _loanExternalName = null;
+                              _atMemberUserId = locationUserId;
+                              _customHolderName = customHolderName;
+                            } else if (loanedToName != null ||
+                                loanedToId != null) {
+                              _isLoanOnAdd = true;
+                              _loanFriendId = loanedToId;
+                              _loanExternalName = loanedToName;
+                              _atMemberUserId = null;
+                              _customHolderName = null;
+                            } else {
+                              _isLoanOnAdd = false;
+                              _atMemberUserId =
+                                  clearHolder ? null : locationUserId;
+                              _customHolderName = customHolderName;
+                            }
+                          }),
+                        )
+                      else
+                        PersonalWhereaboutsField(
+                          key: const ValueKey('pers_add'),
+                          locationUserId: _atMemberUserId,
+                          customHolderName: _customHolderName,
+                          onChanged: ({
+                            locationUserId,
+                            holderLabel,
+                            customHolderName,
+                            clearHolder = false,
+                          }) => setState(() {
+                            _atMemberUserId =
+                                clearHolder ? null : locationUserId;
+                            _customHolderName = customHolderName;
+                          }),
                         ),
-                      const SizedBox(height: 12),
-                      LocationPickerField(
-                        key: ValueKey(
-                          _shareWithGroup
-                              ? 'g_${_selectedGroupId ?? ''}'
-                              : 'personal',
-                        ),
-                        selectedLocationId: _selectedLocationId,
-                        groupId: _shareWithGroup ? _selectedGroupId : null,
-                        onChanged: (loc) => setState(
-                          () => _selectedLocationId = loc?.id,
-                        ),
-                      ),
                       const SizedBox(height: 12),
                       Row(
                         children: [
@@ -205,12 +248,20 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
           onPressed: _loading
               ? null
               : () async {
+                  final userId =
+                      Supabase.instance.client.auth.currentUser!.id;
                   final options = AddItemOptions(
                     isWishlist: _isWishlist,
-                    locationUserId: _selectedProfileId,
+                    locationUserId: _isWishlist || _isLoanOnAdd
+                        ? null
+                        : (_shareWithGroup
+                            ? _atMemberUserId
+                            : (_atMemberUserId ?? userId)),
                     groupId: _shareWithGroup ? _selectedGroupId : null,
-                    locationId: _selectedLocationId,
-                    quantity: _quantity,
+                    locationId:
+                        _shareWithGroup ? _selectedLocationId : null,
+                    holderLabel: _customHolderName,
+                    quantity: _isWishlist ? 0 : _quantity,
                   );
                   try {
                     await widget.onConfirm(options);
@@ -226,7 +277,7 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                     }
                   }
                 },
-          child: const Text('Confirmer'),
+          child: const Text('Ajouter'),
         ),
       ],
     );

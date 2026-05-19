@@ -147,4 +147,14 @@ class ProfileService {
         .update({'avatar_url': null})
         .eq('id', id);
   }
+
+  Future<void> updateShareWishlist(bool share) async {
+    final id = _userId;
+    if (id == null) throw Exception('Non connecté');
+
+    await _client
+        .from('profiles')
+        .update({'share_wishlist': share})
+        .eq('id', id);
+  }
 }

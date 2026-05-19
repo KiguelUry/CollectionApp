@@ -70,7 +70,9 @@ class _AddFriendSheetState extends State<AddFriendSheet> {
       if (!mounted) return;
       Navigator.pop(context, true);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$username ajouté')),
+        SnackBar(
+          content: Text('Demande d\'amitié envoyée à $username'),
+        ),
       );
     } catch (e) {
       if (mounted) {

@@ -6,6 +6,7 @@ import '../widgets/app_app_bar.dart';
 import '../widgets/friend_picker_dialog.dart';
 import '../widgets/group_badge.dart';
 import '../widgets/profile_avatar.dart';
+import '../widgets/group_members_sheet.dart';
 import 'group_detail_screen.dart';
 import 'group_edit_screen.dart';
 
@@ -204,6 +205,12 @@ class _GroupsScreenState extends State<GroupsScreen> {
                               PopupMenuButton<String>(
                                 onSelected: (value) {
                                   switch (value) {
+                                    case 'members':
+                                      showGroupMembersSheet(
+                                        context,
+                                        groupId: group.id,
+                                        groupName: group.name,
+                                      );
                                     case 'edit':
                                       _openEdit(group);
                                     case 'delete':
@@ -211,6 +218,10 @@ class _GroupsScreenState extends State<GroupsScreen> {
                                   }
                                 },
                                 itemBuilder: (ctx) => [
+                                  const PopupMenuItem(
+                                    value: 'members',
+                                    child: Text('Voir les membres'),
+                                  ),
                                   const PopupMenuItem(
                                     value: 'edit',
                                     child: Text('Personnaliser'),
@@ -224,6 +235,15 @@ class _GroupsScreenState extends State<GroupsScreen> {
                                   ),
                                 ],
                               ),
+                            IconButton(
+                              icon: const Icon(Icons.people_outline),
+                              tooltip: 'Membres',
+                              onPressed: () => showGroupMembersSheet(
+                                context,
+                                groupId: group.id,
+                                groupName: group.name,
+                              ),
+                            ),
                             IconButton(
                               icon: const Icon(Icons.person_add),
                               tooltip: 'Ajouter un membre',

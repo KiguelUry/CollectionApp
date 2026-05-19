@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/collection_list_filters.dart';
 import '../models/item_tag.dart';
 import '../models/storage_location.dart';
+import '../utils/holder_filter.dart';
 
 /// Barre recherche + filtres (emplacement, tags) + tri.
 class CollectionFilterBar extends StatelessWidget {
@@ -9,10 +10,14 @@ class CollectionFilterBar extends StatelessWidget {
   final ValueChanged<CollectionListFilters> onChanged;
   final List<StorageLocation> locations;
   final List<ItemTag> tags;
+  final List<HolderFilterOption> holderOptions;
   final bool showScopeFilters;
   final bool showStatusFilters;
   final bool showLocationFilter;
+  final bool showHolderFilter;
   final bool showTagFilter;
+  final bool showHighlyRatedFilter;
+  final VoidCallback? onShakePick;
   final TextEditingController? searchController;
 
   const CollectionFilterBar({
@@ -22,10 +27,14 @@ class CollectionFilterBar extends StatelessWidget {
     this.searchController,
     this.locations = const [],
     this.tags = const [],
+    this.holderOptions = const [],
     this.showScopeFilters = true,
     this.showStatusFilters = true,
     this.showLocationFilter = true,
+    this.showHolderFilter = false,
     this.showTagFilter = true,
+    this.showHighlyRatedFilter = true,
+    this.onShakePick,
   });
 
   @override
@@ -115,6 +124,24 @@ class CollectionFilterBar extends StatelessWidget {
                   ),
               ],
             ),
+            if (showHolderFilter) ...[
+              const SizedBox(height: 8),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(child: _holderFilterChip(context)),
+                  if (onShakePick != null)
+                    IconButton(
+                      tooltip: 'À quoi on joue ce soir ?',
+                      onPressed: onShakePick,
+                      icon: Icon(
+                        Icons.casino_outlined,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
+                ],
+              ),
+            ],
             if (showLocationFilter && locations.isNotEmpty) ...[
               const SizedBox(height: 8),
               _horizontalChips(
@@ -144,7 +171,8 @@ class CollectionFilterBar extends StatelessWidget {
                 ],
               ),
             ],
-            if (showScopeFilters || showStatusFilters) ...[
+            if (showScopeFilters ||
+                (showStatusFilters && showHighlyRatedFilter)) ...[
               const SizedBox(height: 8),
               _horizontalChips(
                 children: [
@@ -178,22 +206,19 @@ class CollectionFilterBar extends StatelessWidget {
                         ),
                       ),
                     ),
-                  ],
-                  if (showStatusFilters) ...[
                     _chip(
-                      label: 'Prêtés',
+                      label: 'Prêté',
                       icon: Icons.handshake_outlined,
                       selected:
-                          filters.status == CollectionStatusFilter.onLoan,
+                          filters.scope == CollectionScopeFilter.onLoanOnly,
                       onTap: () => onChanged(
                         filters.copyWith(
-                          status: filters.status ==
-                                  CollectionStatusFilter.onLoan
-                              ? CollectionStatusFilter.all
-                              : CollectionStatusFilter.onLoan,
+                          scope: CollectionScopeFilter.onLoanOnly,
                         ),
                       ),
                     ),
+                  ],
+                  if (showStatusFilters && showHighlyRatedFilter)
                     _chip(
                       label: '★ 4+',
                       selected: filters.status ==
@@ -207,7 +232,6 @@ class CollectionFilterBar extends StatelessWidget {
                         ),
                       ),
                     ),
-                  ],
                 ],
               ),
             ],
@@ -255,6 +279,56 @@ class CollectionFilterBar extends StatelessWidget {
       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
       padding: const EdgeInsets.symmetric(horizontal: 4),
       backgroundColor: backgroundColor,
+    );
+  }
+
+  Widget _holderFilterChip(BuildContext context) {
+    HolderFilterOption? selected;
+    if (filters.holderKey != null) {
+      for (final o in holderOptions) {
+        if (o.key == filters.holderKey) {
+          selected = o;
+          break;
+        }
+      }
+    }
+    final label = selected == null
+        ? 'Chez qui : tous'
+        : '${selected.label} (${selected.count})';
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: PopupMenuButton<String?>(
+        tooltip: 'Filtrer par chez qui',
+        onSelected: (key) => onChanged(
+          filters.copyWith(holderKey: key, clearHolder: key == null),
+        ),
+        itemBuilder: (context) => [
+          const PopupMenuItem(
+            value: null,
+            child: Text('Tous'),
+          ),
+          ...holderOptions.map(
+            (o) => PopupMenuItem(
+              value: o.key,
+              child: Text('${o.label} (${o.count})'),
+            ),
+          ),
+        ],
+        child: Chip(
+          avatar: Icon(
+            selected == null ? Icons.place_outlined : Icons.person_pin,
+            size: 18,
+          ),
+          label: Text(label, style: const TextStyle(fontSize: 12)),
+          deleteIcon: selected != null
+              ? const Icon(Icons.close, size: 16)
+              : null,
+          onDeleted: selected != null
+              ? () => onChanged(filters.copyWith(clearHolder: true))
+              : null,
+        ),
+      ),
     );
   }
 

@@ -48,8 +48,30 @@ class CollectionStatsService {
       total += unit * qty;
     }
 
+    var groupOwned = 0;
+    final memberRows = await _client
+        .from('group_members')
+        .select('group_id')
+        .eq('profile_id', userId);
+    final groupIds = (memberRows as List)
+        .map((r) => r['group_id'] as String)
+        .toList();
+    if (groupIds.isNotEmpty) {
+      final gRows = await _client
+          .from('collection_items')
+          .select('is_wishlist, is_sold, is_for_sale')
+          .inFilter('group_id', groupIds);
+      for (final row in gRows as List) {
+        final isWishlist = row['is_wishlist'] as bool? ?? false;
+        final isSold = row['is_sold'] as bool? ?? false;
+        final isForSale = row['is_for_sale'] as bool? ?? false;
+        if (!isWishlist && !isSold && !isForSale) groupOwned++;
+      }
+    }
+
     return CollectionSummary(
       ownedCount: owned,
+      groupOwnedCount: groupOwned,
       wishlistCount: wishlist,
       pricedItemCount: priced,
       totalPurchaseValue: total,

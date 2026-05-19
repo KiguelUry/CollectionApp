@@ -86,9 +86,41 @@ class TagService {
       byItem[itemId]!.add(ItemTag.fromJson(Map<String, dynamic>.from(tagJson)));
     }
 
-    return items
+    var result = items
         .map((i) => i.copyWith(tags: byItem[i.id] ?? const []))
         .toList();
+    result = await _enrichHolderLabels(result);
+    return result;
+  }
+
+  /// Résout `location_user_id` → « Chez {username} » pour filtres et listes.
+  Future<List<CollectionItem>> _enrichHolderLabels(
+    List<CollectionItem> items,
+  ) async {
+    final userIds = <String>{
+      for (final i in items)
+        if (i.locationUserId != null && i.locationUserId!.isNotEmpty)
+          i.locationUserId!,
+    };
+    if (userIds.isEmpty) return items;
+
+    final rows = await _client
+        .from('profiles')
+        .select('id, username')
+        .inFilter('id', userIds.toList());
+
+    final names = <String, String>{
+      for (final row in rows as List)
+        row['id'] as String: row['username'] as String? ?? 'Membre',
+    };
+
+    return items.map((i) {
+      final uid = i.locationUserId;
+      if (uid == null) return i;
+      final username = names[uid];
+      if (username == null) return i;
+      return i.copyWith(locationLabel: 'Chez $username');
+    }).toList();
   }
 
   List<ItemTag> _parseTagRows(List rows) {

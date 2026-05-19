@@ -23,6 +23,7 @@ class CategorySelectionScreen extends StatefulWidget {
 class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
   final _statsService = CollectionStatsService();
   Map<CollectionCategory, int> _counts = {};
+  Map<CollectionCategory, int> _groupCounts = {};
   Map<CollectionCategory, int> _wishlistCounts = {};
   CollectionSummary _summary = const CollectionSummary();
   bool _loadingCounts = true;
@@ -59,6 +60,9 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     final counts = {
       for (final c in CollectionCategory.values) c: 0,
     };
+    final groupCounts = {
+      for (final c in CollectionCategory.values) c: 0,
+    };
     final wishCounts = {
       for (final c in CollectionCategory.values) c: 0,
     };
@@ -72,6 +76,23 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
       }
     }
 
+    final groupIds = await CollectionItemScope.myGroupIds(userId);
+    if (groupIds.isNotEmpty) {
+      final gRows = await Supabase.instance.client
+          .from('collection_items')
+          .select('category, is_wishlist, is_sold, is_for_sale')
+          .inFilter('group_id', groupIds);
+      for (final row in gRows as List) {
+        final isWishlist = row['is_wishlist'] as bool? ?? false;
+        final isSold = row['is_sold'] as bool? ?? false;
+        final isForSale = row['is_for_sale'] as bool? ?? false;
+        if (isWishlist || isSold || isForSale) continue;
+        final cat =
+            CollectionCategory.fromDbValue(row['category'] as String);
+        groupCounts[cat] = (groupCounts[cat] ?? 0) + 1;
+      }
+    }
+
     CollectionSummary summary = const CollectionSummary();
     try {
       summary = await _statsService.fetchSummary();
@@ -80,6 +101,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     if (mounted) {
       setState(() {
         _counts = counts;
+        _groupCounts = groupCounts;
         _wishlistCounts = wishCounts;
         _summary = summary;
         _loadingCounts = false;
@@ -204,12 +226,10 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
 
   Widget _buildCategoryCard(CollectionCategory category) {
     final count = _counts[category] ?? 0;
+    final groupCount = _groupCounts[category] ?? 0;
     final wishCount = _wishlistCounts[category] ?? 0;
-    final countLabel = count == 0
-        ? 'Vide'
-        : count == 1
-            ? '1 objet'
-            : '$count objets';
+    final total = count + groupCount;
+    final countLabel = category.countSummary(total);
     final wishLabel = wishCount > 0 ? '♥ $wishCount en wishlist' : null;
 
     return InkWell(

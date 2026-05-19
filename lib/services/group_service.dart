@@ -143,7 +143,9 @@ class GroupService {
   Future<List<Map<String, dynamic>>> fetchMembers(String groupId) async {
     final rows = await _client
         .from('group_members')
-        .select('profile_id, profiles(username)')
+        .select(
+          'profile_id, profiles(username, avatar_url, accent_color)',
+        )
         .eq('group_id', groupId);
     return List<Map<String, dynamic>>.from(rows);
   }

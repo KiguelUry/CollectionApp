@@ -94,4 +94,24 @@ enum CollectionCategory {
       orElse: () => CollectionCategory.boardgame,
     );
   }
+
+  /// Libellé court pour les totaux (ex. « 5 jeux », « 1 livre »).
+  String countSummary(int total) {
+    if (total == 0) return 'Vide';
+    final unit = switch (this) {
+      CollectionCategory.boardgame => ('jeu', 'jeux'),
+      CollectionCategory.book => ('livre', 'livres'),
+      CollectionCategory.card => ('carte', 'cartes'),
+      CollectionCategory.car => ('voiture', 'voitures'),
+      CollectionCategory.stamp => ('timbre', 'timbres'),
+      CollectionCategory.coin => ('pièce', 'pièces'),
+      CollectionCategory.media => ('album', 'albums'),
+      CollectionCategory.lego => ('set', 'sets'),
+      CollectionCategory.watch => ('montre', 'montres'),
+      CollectionCategory.videogame => ('jeu vidéo', 'jeux vidéo'),
+      CollectionCategory.movie => ('film', 'films'),
+    };
+    if (total == 1) return '1 ${unit.$1}';
+    return '$total ${unit.$2}';
+  }
 }

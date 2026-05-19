@@ -120,7 +120,7 @@ class _LocationPickerFieldState extends State<LocationPickerField> {
         TextField(
           controller: _searchController,
           decoration: const InputDecoration(
-            labelText: 'Où se trouve l\'objet ?',
+            labelText: 'Emplacement',
             hintText: 'Tape « pa » → Chez Papa…',
             border: OutlineInputBorder(),
             prefixIcon: Icon(Icons.place_outlined),

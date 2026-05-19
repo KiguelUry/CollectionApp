@@ -36,7 +36,7 @@ class FriendService {
   /// Recherche de profils : pertinence pseudo, amis en commun, pas déjà amis.
   Future<List<Map<String, dynamic>>> searchProfiles(String query) async {
     final trimmed = query.trim();
-    if (trimmed.length < 1) return [];
+    if (trimmed.isEmpty) return [];
 
     final userId = _client.auth.currentUser!.id;
     final friendIds = await _myFriendIds();
@@ -131,21 +131,73 @@ class FriendService {
 
     final existing = await _client
         .from('friendships')
-        .select('id')
+        .select('id, status')
         .or(
           'and(requester_id.eq.$userId,addressee_id.eq.$friendId),and(requester_id.eq.$friendId,addressee_id.eq.$userId)',
         )
         .maybeSingle();
     if (existing != null) {
-      throw Exception('Cet utilisateur est déjà dans tes amis');
+      final st = existing['status'] as String?;
+      if (st == 'accepted') {
+        throw Exception('Cet utilisateur est déjà dans tes amis');
+      }
+      if (st == 'pending') {
+        throw Exception('Une demande d\'amitié est déjà en attente');
+      }
+      throw Exception('Impossible d\'ajouter cet utilisateur');
     }
 
     await _client.from('friendships').insert({
       'requester_id': userId,
       'addressee_id': friendId,
-      'status': 'accepted',
+      'status': 'pending',
       'share_collections': true,
     });
+    invalidateFriendCache();
+  }
+
+  Future<List<Map<String, dynamic>>> fetchIncomingFriendRequests() async {
+    final userId = _client.auth.currentUser!.id;
+    final rows = await _client
+        .from('friendships')
+        .select('id, requester_id, created_at')
+        .eq('addressee_id', userId)
+        .eq('status', 'pending')
+        .order('created_at');
+
+    final list = rows as List;
+    if (list.isEmpty) return [];
+
+    final ids = list.map((r) => r['requester_id'] as String).toList();
+    final profiles = await _client
+        .from('profiles')
+        .select('id, username, avatar_url, accent_color')
+        .inFilter('id', ids);
+    final byId = {
+      for (final p in profiles as List)
+        p['id'] as String: Map<String, dynamic>.from(p),
+    };
+
+    return [
+      for (final row in list)
+        {
+          'friendship_id': row['id'],
+          'profile_id': row['requester_id'],
+          ...?byId[row['requester_id'] as String],
+        },
+    ];
+  }
+
+  Future<void> acceptFriendRequest(String friendshipId) async {
+    await _client
+        .from('friendships')
+        .update({'status': 'accepted'})
+        .eq('id', friendshipId);
+    invalidateFriendCache();
+  }
+
+  Future<void> rejectFriendRequest(String friendshipId) async {
+    await _client.from('friendships').delete().eq('id', friendshipId);
     invalidateFriendCache();
   }
 
@@ -250,16 +302,15 @@ class FriendService {
 
   Future<bool> canViewFriendCollection(String friendProfileId) async {
     final friendship = await friendshipWith(friendProfileId);
-    if (friendship == null) return false;
-    return friendship['share_collections'] as bool? ?? false;
+    return friendship != null;
   }
 
-  /// Objets visibles de l'ami (collection active, hors wishlist).
+  /// Collection active de l'ami (perso + groupes visibles via RLS).
   Future<List<CollectionItem>> fetchFriendCollectionItems(
     String friendProfileId,
   ) async {
     if (!await canViewFriendCollection(friendProfileId)) {
-      throw Exception('Cet ami ne partage pas sa collection');
+      throw Exception('Tu dois être ami avec cette personne');
     }
 
     final rows = await _client
@@ -274,6 +325,39 @@ class FriendService {
     return (rows as List)
         .map((r) => CollectionItem.fromJson(Map<String, dynamic>.from(r)))
         .where(isActiveCollectionItem)
+        .toList();
+  }
+
+  Future<bool> canViewFriendWishlist(String friendProfileId) async {
+    if (!await canViewFriendCollection(friendProfileId)) return false;
+
+    final row = await _client
+        .from('profiles')
+        .select('share_wishlist')
+        .eq('id', friendProfileId)
+        .maybeSingle();
+    return row?['share_wishlist'] as bool? ?? true;
+  }
+
+  /// Wishlist de l'ami (si partage activé sur son profil).
+  Future<List<CollectionItem>> fetchFriendWishlistItems(
+    String friendProfileId,
+  ) async {
+    if (!await canViewFriendWishlist(friendProfileId)) {
+      throw Exception('Cette wishlist n\'est pas partagée');
+    }
+
+    final rows = await _client
+        .from('collection_items')
+        .select('*, locations(label), groups(name)')
+        .or(
+          'added_by.eq.$friendProfileId,location_user_id.eq.$friendProfileId',
+        )
+        .eq('is_wishlist', true)
+        .order('title');
+
+    return (rows as List)
+        .map((r) => CollectionItem.fromJson(Map<String, dynamic>.from(r)))
         .toList();
   }
 }

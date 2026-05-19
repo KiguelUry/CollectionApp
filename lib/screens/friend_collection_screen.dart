@@ -8,7 +8,7 @@ import '../widgets/collection_item_tile.dart';
 import '../widgets/profile_avatar.dart';
 import 'item_detail_screen.dart';
 
-/// Collection d'un ami (lecture seule si partage activé).
+/// Collection et wishlist d'un ami (lecture seule).
 class FriendCollectionScreen extends StatefulWidget {
   final String profileId;
   final String username;
@@ -29,156 +29,201 @@ class FriendCollectionScreen extends StatefulWidget {
   State<FriendCollectionScreen> createState() => _FriendCollectionScreenState();
 }
 
-class _FriendCollectionScreenState extends State<FriendCollectionScreen> {
+class _FriendCollectionScreenState extends State<FriendCollectionScreen>
+    with SingleTickerProviderStateMixin {
   final _friendService = FriendService();
-  List<CollectionItem> _items = [];
+  late final TabController _scopeTabController;
+  List<CollectionItem> _collectionItems = [];
+  List<CollectionItem> _wishlistItems = [];
+  bool? _wishlistShared;
   bool _loading = true;
   String? _error;
+  CollectionCategory _selectedCategory = CollectionCategory.boardgame;
 
   @override
   void initState() {
     super.initState();
+    _scopeTabController = TabController(length: 2, vsync: this);
     _load();
   }
 
-  Future<void> _load() async {
-    if (!widget.shareCollections) {
-      setState(() {
-        _loading = false;
-        _items = [];
-      });
-      return;
-    }
+  @override
+  void dispose() {
+    _scopeTabController.dispose();
+    super.dispose();
+  }
 
+  Future<void> _load() async {
     setState(() {
       _loading = true;
       _error = null;
     });
 
     try {
-      _items = await _friendService.fetchFriendCollectionItems(
+      _collectionItems = await _friendService.fetchFriendCollectionItems(
         widget.profileId,
       );
+      _wishlistShared = await _friendService.canViewFriendWishlist(
+        widget.profileId,
+      );
+      if (_wishlistShared == true) {
+        _wishlistItems = await _friendService.fetchFriendWishlistItems(
+          widget.profileId,
+        );
+      } else {
+        _wishlistItems = [];
+      }
     } catch (e) {
-      _items = [];
+      _collectionItems = [];
+      _wishlistItems = [];
       _error = e.toString();
     }
 
     if (mounted) setState(() => _loading = false);
   }
 
-  int _countFor(CollectionCategory category) =>
-      _items.where((i) => i.category == category).length;
+  List<CollectionItem> _itemsForScope(bool wishlist) =>
+      wishlist ? _wishlistItems : _collectionItems;
+
+  int _countFor(CollectionCategory category, bool wishlist) =>
+      _itemsForScope(wishlist)
+          .where((i) => i.category == category)
+          .length;
 
   @override
   Widget build(BuildContext context) {
     final accent = ProfileAvatar.colorFromHex(widget.accentColor);
 
-    return DefaultTabController(
-      length: CollectionCategory.values.length,
-      child: Scaffold(
-        appBar: AppBar(
-          title: Row(
-            children: [
-              ProfileAvatar(
-                avatarUrl: widget.avatarUrl,
-                accentColorHex: widget.accentColor,
-                fallbackInitial: widget.username,
-                radius: 18,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(widget.username),
-                    Text(
-                      widget.shareCollections
-                          ? 'Collection partagée'
-                          : 'Collection privée',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.normal,
-                      ),
+    return Scaffold(
+      appBar: AppBar(
+        title: Row(
+          children: [
+            ProfileAvatar(
+              avatarUrl: widget.avatarUrl,
+              accentColorHex: widget.accentColor,
+              fallbackInitial: widget.username,
+              radius: 18,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(widget.username),
+                  const Text(
+                    'Collection',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.normal,
                     ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: accent,
+        foregroundColor: Colors.white,
+        iconTheme: const IconThemeData(color: Colors.white),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.grid_view_rounded),
+            tooltip: 'Collections',
+            onPressed: () => AppNavigation.openCollections(context),
+          ),
+        ],
+        bottom: TabBar(
+          controller: _scopeTabController,
+          indicatorColor: Colors.white,
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white70,
+          tabs: const [
+            Tab(text: 'Collection'),
+            Tab(text: 'Wishlist'),
+          ],
+        ),
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+              ? Center(child: Text(_error!))
+              : TabBarView(
+                  controller: _scopeTabController,
+                  children: [
+                    _buildScopePane(wishlist: false),
+                    _buildScopePane(wishlist: true),
                   ],
+                ),
+    );
+  }
+
+  Widget _buildScopePane({required bool wishlist}) {
+    if (wishlist && _wishlistShared == false) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.lock_outline, size: 64, color: Colors.grey.shade400),
+              const SizedBox(height: 16),
+              Text(
+                '${widget.username} ne partage pas sa wishlist',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
             ],
           ),
-          backgroundColor: accent,
-          foregroundColor: Colors.white,
-          iconTheme: const IconThemeData(color: Colors.white),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.grid_view_rounded),
-              tooltip: 'Collections',
-              onPressed: () => AppNavigation.openCollections(context),
-            ),
-          ],
-          bottom: TabBar(
-            isScrollable: true,
-            indicatorColor: Colors.white,
-            labelColor: Colors.white,
-            unselectedLabelColor: Colors.white70,
-            tabs: CollectionCategory.values.map((c) {
-              final n = _countFor(c);
-              return Tab(
-                text: n > 0 ? '${c.label} ($n)' : c.label,
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          height: 44,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            itemCount: CollectionCategory.values.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 6),
+            itemBuilder: (context, index) {
+              final cat = CollectionCategory.values[index];
+              final count = _countFor(cat, wishlist);
+              final selected = cat == _selectedCategory;
+              return FilterChip(
+                label: Text(
+                  count > 0 ? '${cat.label} ($count)' : cat.label,
+                  style: const TextStyle(fontSize: 12),
+                ),
+                selected: selected,
+                onSelected: (_) => setState(() => _selectedCategory = cat),
+                avatar: Icon(cat.icon, size: 16),
               );
-            }).toList(),
+            },
           ),
         ),
-        body: !widget.shareCollections
-            ? _buildPrivate()
-            : _loading
-                ? const Center(child: CircularProgressIndicator())
-                : _error != null
-                    ? Center(child: Text(_error!))
-                    : TabBarView(
-                        children: CollectionCategory.values
-                            .map(_buildCategoryGrid)
-                            .toList(),
-                      ),
-      ),
+        Expanded(child: _buildCategoryGrid(_selectedCategory, wishlist)),
+      ],
     );
   }
 
-  Widget _buildPrivate() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.lock_outline, size: 64, color: Colors.grey.shade400),
-            const SizedBox(height: 16),
-            Text(
-              '${widget.username} ne partage pas sa collection',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Le partage doit être activé dans votre amitié '
-              '(interrupteur « Collections partagées »).',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey.shade600),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCategoryGrid(CollectionCategory category) {
-    final items =
-        _items.where((i) => i.category == category).toList();
+  Widget _buildCategoryGrid(CollectionCategory category, bool wishlist) {
+    final items = _itemsForScope(wishlist)
+        .where((i) => i.category == category)
+        .toList();
     if (items.isEmpty) {
-      return const Center(child: Text('Rien dans cette catégorie.'));
+      return Center(
+        child: Text(
+          wishlist
+              ? 'Rien en wishlist dans cette catégorie.'
+              : 'Rien dans cette catégorie.',
+        ),
+      );
     }
 
     final grouped = CollectionGridGrouper.group(items);

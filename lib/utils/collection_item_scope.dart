@@ -20,4 +20,13 @@ class CollectionItemScope {
         .filter('group_id', 'is', null)
         .or(personalOrFilter(userId));
   }
+
+  /// Identifiants des groupes dont l'utilisateur est membre.
+  static Future<List<String>> myGroupIds(String userId) async {
+    final rows = await Supabase.instance.client
+        .from('group_members')
+        .select('group_id')
+        .eq('profile_id', userId);
+    return (rows as List).map((r) => r['group_id'] as String).toList();
+  }
 }
