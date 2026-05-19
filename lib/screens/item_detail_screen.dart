@@ -10,8 +10,9 @@ import '../models/item_condition.dart';
 import '../models/storage_location.dart';
 import '../services/group_service.dart';
 import '../services/loan_service.dart';
+import '../widgets/app_app_bar.dart';
 import '../widgets/loan_item_dialog.dart';
-import '../widgets/bgg_network_image.dart';
+import '../widgets/collection_cover_image.dart';
 import '../widgets/group_badge.dart';
 import '../widgets/location_picker_field.dart';
 import '../widgets/star_rating_bar.dart';
@@ -260,11 +261,12 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
   Widget build(BuildContext context) {
     final metadataRows = CategoryMetadata.detailRows(_item);
     final isBoardgame = _item.category == CollectionCategory.boardgame;
+    final isBook = _item.category == CollectionCategory.book;
     final ro = widget.readOnly;
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+      appBar: AppAppBar(
+        title: _item.title,
         actions: [
           if (!ro && _saveStatus != null)
             Padding(
@@ -304,7 +306,15 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                 fit: StackFit.expand,
                 children: [
                   _item.imageUrl != null
-                      ? BggNetworkImage(url: _item.imageUrl!)
+                      ? SizedBox.expand(
+                          child: CollectionCoverImage(
+                            url: _item.imageUrl!,
+                            height: 280,
+                            bookCover: isBook,
+                            largeSource: true,
+                            fit: isBook ? BoxFit.contain : BoxFit.cover,
+                          ),
+                        )
                       : Container(color: _item.category.color),
                   const DecoratedBox(
                     decoration: BoxDecoration(
@@ -428,6 +438,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                                   _item = _item.copyWith(
                                     groupId: _groups.first.id,
                                     groupName: _groups.first.name,
+                                    clearLocation: true,
                                   );
                                 }
                               });
@@ -442,18 +453,11 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                             .map(
                               (g) => DropdownMenuItem(
                                 value: g.id,
-                                child: Row(
-                                  children: [
-                                    GroupBadge.fromGroup(
-                                      name: g.name,
-                                      avatarUrl: g.avatarUrl,
-                                      accentColor: g.accentColor,
-                                      iconKey: g.iconKey,
-                                      radius: 14,
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(child: Text(g.name)),
-                                  ],
+                                child: GroupBadge.dropdownLabel(
+                                  name: g.name,
+                                  avatarUrl: g.avatarUrl,
+                                  accentColor: g.accentColor,
+                                  iconKey: g.iconKey,
                                 ),
                               ),
                             )
@@ -466,6 +470,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                                   _item = _item.copyWith(
                                     groupId: g.id,
                                     groupName: g.name,
+                                    clearLocation: true,
                                   );
                                 });
                                 _saveNow();
@@ -475,6 +480,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                     IgnorePointer(
                       ignoring: ro,
                       child: LocationPickerField(
+                        key: ValueKey('loc_${_item.groupId ?? 'personal'}'),
                         selectedLocationId: _item.locationId,
                         groupId: _item.groupId,
                         onChanged: (StorageLocation? loc) {
@@ -507,6 +513,19 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                                 : '?',
                           ),
                         ],
+                      ),
+                    ],
+                    if (isBook && !_item.isWishlist && !_item.isSold) ...[
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Lu'),
+                        value: _item.isRead,
+                        onChanged: ro
+                            ? null
+                            : (v) {
+                                setState(() => _item = _item.copyWith(isRead: v));
+                                _saveNow();
+                              },
                       ),
                     ],
                     if (metadataRows.isNotEmpty) ...[

@@ -33,17 +33,13 @@ class CollectionExportService {
     if (userId == null) throw Exception('Non connecté');
 
     final rows = await CollectionItemScope.personal(
-      _client
-          .from('collection_items')
-          .select(
-            'id, title, category, subcategory, quantity, purchase_price, rating, '
-            'review, condition, is_wishlist, is_for_sale, is_sold, '
-            'locations(label)',
-          )
-          .order('category')
-          .order('title'),
+      _client.from('collection_items').select(
+        'id, title, category, subcategory, quantity, purchase_price, rating, '
+        'review, condition, is_wishlist, is_for_sale, is_sold, '
+        'locations(label)',
+      ),
       userId: userId,
-    );
+    ).order('category').order('title');
 
     final buffer = StringBuffer();
     buffer.writeln(
@@ -79,7 +75,7 @@ class CollectionExportService {
 
     var total = 0.0;
     var priced = 0;
-    for (final row in rows as List) {
+    for (final row in rows) {
       if (row['is_wishlist'] == true ||
           row['is_sold'] == true ||
           row['is_for_sale'] == true) {

@@ -11,6 +11,59 @@ class ProfileService {
 
   String? get _userId => _client.auth.currentUser?.id;
 
+  /// Crée la ligne `profiles` si absente (comptes créés sans inscription app).
+  Future<void> ensureCurrentUserProfile() async {
+    final user = _client.auth.currentUser;
+    if (user == null) return;
+
+    final existing = await _client
+        .from('profiles')
+        .select('id')
+        .eq('id', user.id)
+        .maybeSingle();
+    if (existing != null) return;
+
+    final username = _defaultUsername(user);
+    try {
+      await _client.from('profiles').insert({
+        'id': user.id,
+        'username': username,
+      });
+    } on PostgrestException catch (e) {
+      // Ligne créée entre-temps (trigger SQL ou autre appareil)
+      if (e.code == '23505') return;
+      rethrow;
+    }
+  }
+
+  /// Message lisible si l'insert collection_items échoue sur la FK profil.
+  static bool isMissingProfileFk(PostgrestException e) {
+    return e.code == '23503' &&
+        (e.message.contains('collection_items_added_by_fkey') ||
+            e.message.contains('collection_items_location_user_id_fkey') ||
+            e.message.contains('profiles'));
+  }
+
+  static String missingProfileUserMessage() {
+    return 'Ton compte n\'a pas encore de profil dans l\'app. '
+        'Déconnecte-toi, reconnecte-toi, ou demande à l\'admin '
+        'd\'exécuter le script SQL « profiles backfill » sur Supabase.';
+  }
+
+  static String _defaultUsername(User user) {
+    final meta = user.userMetadata;
+    final fromMeta = meta?['username'];
+    if (fromMeta is String && fromMeta.trim().isNotEmpty) {
+      return fromMeta.trim();
+    }
+    final email = user.email;
+    if (email != null && email.contains('@')) {
+      final local = email.split('@').first.trim();
+      if (local.isNotEmpty) return local;
+    }
+    return 'user_${user.id.substring(0, 8)}';
+  }
+
   Future<UserProfile> fetchCurrentProfile() async {
     final id = _userId;
     if (id == null) throw Exception('Non connecté');

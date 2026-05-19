@@ -5,12 +5,14 @@ class CollectionSummaryCard extends StatelessWidget {
   final CollectionSummary summary;
   final VoidCallback? onWishlistTap;
   final VoidCallback? onStatsTap;
+  final bool showHeader;
 
   const CollectionSummaryCard({
     super.key,
     required this.summary,
     this.onWishlistTap,
     this.onStatsTap,
+    this.showHeader = true,
   });
 
   String _formatMoney(double value) {
@@ -33,26 +35,28 @@ class CollectionSummaryCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Icon(Icons.insights, color: scheme.primary),
-                const SizedBox(width: 8),
-                Text(
-                  'Vue d\'ensemble',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
-                const Spacer(),
-                if (onStatsTap != null)
-                  TextButton.icon(
-                    onPressed: onStatsTap,
-                    icon: const Icon(Icons.bar_chart, size: 18),
-                    label: const Text('Stats'),
+            if (showHeader) ...[
+              Row(
+                children: [
+                  Icon(Icons.insights, color: scheme.primary),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Vue d\'ensemble',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
                   ),
-              ],
-            ),
-            const SizedBox(height: 14),
+                  const Spacer(),
+                  if (onStatsTap != null)
+                    TextButton.icon(
+                      onPressed: onStatsTap,
+                      icon: const Icon(Icons.bar_chart, size: 18),
+                      label: const Text('Stats'),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 14),
+            ],
             Row(
               children: [
                 Expanded(

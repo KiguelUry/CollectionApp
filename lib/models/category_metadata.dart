@@ -119,6 +119,8 @@ class CategoryMetadata {
         if (item.playingTime != null) return '${item.playingTime} min';
         return null;
       case CollectionCategory.book:
+        final author = item.metadata?['author'] as String?;
+        if (author != null && author.isNotEmpty) return author;
         if (item.subcategory != null) {
           return BookSubcategory.fromDbValue(item.subcategory).label;
         }
@@ -146,6 +148,19 @@ class CategoryMetadata {
     final rows = <MapEntry<String, String>>[];
 
     switch (item.category) {
+      case CollectionCategory.book:
+        if ((m['author'] as String?)?.isNotEmpty == true) {
+          rows.add(MapEntry('Auteur', m['author'].toString()));
+        }
+        if ((m['year'] as String?)?.isNotEmpty == true) {
+          rows.add(MapEntry('Année', m['year'].toString()));
+        }
+        if (item.subcategory != null) {
+          rows.add(MapEntry(
+            'Type',
+            BookSubcategory.fromDbValue(item.subcategory).label,
+          ));
+        }
       case CollectionCategory.card:
         if (item.subcategory != null) {
           rows.add(MapEntry('Univers', CardSubcategory.fromDbValue(item.subcategory).label));

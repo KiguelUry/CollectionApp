@@ -30,7 +30,10 @@ class CollectionItemListTile extends StatelessWidget {
             width: 52,
             height: 52,
             child: item.imageUrl != null
-                ? BggNetworkImage(url: item.imageUrl!)
+                ? BggNetworkImage(
+                    url: item.imageUrl!,
+                    bookCover: category == CollectionCategory.book,
+                  )
                 : ColoredBox(
                     color: category.color.withValues(alpha: 0.15),
                     child: Icon(category.icon, color: category.color),

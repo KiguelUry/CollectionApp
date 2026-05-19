@@ -3,7 +3,7 @@ import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../services/collection_stats_service.dart';
 import '../widgets/bgg_network_image.dart';
-import '../widgets/main_drawer.dart';
+import '../widgets/app_app_bar.dart';
 import 'home_screen.dart';
 import 'item_detail_screen.dart';
 
@@ -42,8 +42,8 @@ class _WishlistOverviewScreenState extends State<WishlistOverviewScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Ma wishlist'),
+      appBar: AppAppBar(
+        title: 'Ma wishlist',
         actions: [
           if (_total > 0)
             Center(
@@ -57,7 +57,6 @@ class _WishlistOverviewScreenState extends State<WishlistOverviewScreen> {
             ),
         ],
       ),
-      drawer: const MainDrawer(),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _byCategory.isEmpty

@@ -16,16 +16,12 @@ class CollectionShareService {
     if (userId == null) return [];
 
     final rows = await CollectionItemScope.personal(
-      _client
-          .from('collection_items')
-          .select(
-            'id, title, category, quantity, rating, is_wishlist, is_for_sale, '
-            'is_sold',
-          )
-          .order('category')
-          .order('title'),
+      _client.from('collection_items').select(
+        'id, title, category, quantity, rating, is_wishlist, is_for_sale, '
+        'is_sold',
+      ),
       userId: userId,
-    );
+    ).order('category').order('title');
 
     return (rows as List)
         .map((r) => CollectionItem.fromJson(Map<String, dynamic>.from(r)))

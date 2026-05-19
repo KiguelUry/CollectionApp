@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../config/dev_auth_config.dart';
 import '../services/auth_service.dart';
-import 'category_selection_screen.dart';
+import '../widgets/password_text_field.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -28,10 +28,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _goToApp() async {
     if (!mounted) return;
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (c) => const CategorySelectionScreen()),
-    );
+    Navigator.pushReplacementNamed(context, '/categories');
   }
 
   Future<void> _handleAuth() async {
@@ -109,11 +106,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 keyboardType: TextInputType.emailAddress,
                 autocorrect: false,
               ),
-              TextField(
-                controller: _passwordController,
-                decoration: const InputDecoration(labelText: 'Mot de passe'),
-                obscureText: true,
-              ),
+              PasswordTextField(controller: _passwordController),
               const SizedBox(height: 20),
               ElevatedButton(
                 onPressed: _handleAuth,

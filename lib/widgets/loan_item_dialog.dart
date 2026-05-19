@@ -167,6 +167,7 @@ class _LoanItemDialogState extends State<LoanItemDialog> {
                             (f) => DropdownMenuItem(
                               value: f['profile_id'] as String,
                               child: Row(
+                                mainAxisSize: MainAxisSize.min,
                                 children: [
                                   ProfileAvatar(
                                     avatarUrl: f['avatar_url'] as String?,
@@ -177,9 +178,7 @@ class _LoanItemDialogState extends State<LoanItemDialog> {
                                     radius: 16,
                                   ),
                                   const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Text(f['username'] as String),
-                                  ),
+                                  Text(f['username'] as String),
                                 ],
                               ),
                             ),

@@ -24,6 +24,7 @@ class BggService {
   static const _maxSearchResults = 40;
   static const _maxMetaLookup = 15;
   static const _thingChunkSize = 8;
+  static const _maxPollAttempts = 10;
 
   /// Sur Flutter Web, l'API « thing » BGG est bloquée par CORS (Failed to fetch).
   static bool get _canUseThingApi => !kIsWeb;
@@ -32,15 +33,41 @@ class BggService {
   static DateTime? _hotCacheAt;
 
   static Map<String, String> get _headers {
-    final token = dotenv.env['BGG_APPLICATION_TOKEN'];
-    if (token == null || token.isEmpty) {
-      throw Exception('Variable BGG_APPLICATION_TOKEN manquante dans .env');
-    }
-    return {
-      'User-Agent': 'Mozilla/5.0 (Android 14; SM-S931B) AppleWebKit/537.36',
+    final headers = <String, String>{
+      'User-Agent': 'CollectionFamille/1.0',
       'Accept': 'application/xml',
-      'Authorization': 'Bearer $token',
     };
+    final token = dotenv.env['BGG_APPLICATION_TOKEN']?.trim();
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+    return headers;
+  }
+
+  /// L'API XML BGG répond souvent 202 (« Please try again ») : on réessaie.
+  static Future<http.Response> _getWithRetry(Uri url) async {
+    http.Response? last;
+    for (var attempt = 0; attempt < _maxPollAttempts; attempt++) {
+      last = await http.get(url, headers: _headers);
+      final pending = last.statusCode == 202 ||
+          (last.statusCode == 200 &&
+              last.body.contains('Please try again'));
+      if (!pending) return last;
+      await Future.delayed(
+        Duration(milliseconds: 400 + attempt * 250),
+      );
+    }
+    return last!;
+  }
+
+  static String _primaryTitle(XmlElement node) {
+    for (final name in node.findElements('name')) {
+      if (name.getAttribute('type') == 'primary') {
+        return name.getAttribute('value') ?? 'Sans titre';
+      }
+    }
+    return node.findElements('name').firstOrNull?.getAttribute('value') ??
+        'Sans titre';
   }
 
   static Future<List<Map<String, String>>> searchGames(
@@ -55,9 +82,9 @@ class BggService {
         'query': trimmed,
         'type': 'boardgame',
       });
-      final response = await http.get(url, headers: _headers);
+      final response = await _getWithRetry(url);
 
-      if (response.statusCode != 200) return [];
+      if (response.statusCode != 200 || response.body.isEmpty) return [];
 
       final document = XmlDocument.parse(response.body);
       final items = document.findAllElements('item');
@@ -65,9 +92,6 @@ class BggService {
       final candidates = <Map<String, String>>[];
       for (final node in items) {
         if (candidates.length >= _maxSearchResults) break;
-        final title =
-            node.findElements('name').first.getAttribute('value') ??
-            'Sans titre';
         final id = node.getAttribute('id') ?? '';
         if (id.isEmpty) continue;
         final year =
@@ -76,7 +100,11 @@ class BggService {
                 .firstOrNull
                 ?.getAttribute('value') ??
             '';
-        candidates.add({'id': id, 'title': title, 'year': year});
+        candidates.add({
+          'id': id,
+          'title': _primaryTitle(node),
+          'year': year,
+        });
       }
 
       if (candidates.isEmpty) return [];
@@ -154,8 +182,8 @@ class BggService {
       final url = Uri.https('boardgamegeek.com', '/xmlapi2/hot', {
         'type': 'boardgame',
       });
-      final response = await http.get(url, headers: _headers);
-      if (response.statusCode != 200) return [];
+      final response = await _getWithRetry(url);
+      if (response.statusCode != 200 || response.body.isEmpty) return [];
 
       final document = XmlDocument.parse(response.body);
       final items = <Map<String, String>>[];
@@ -163,9 +191,7 @@ class BggService {
       for (final node in document.findAllElements('item')) {
         final id = node.getAttribute('id') ?? '';
         if (id.isEmpty) continue;
-        final title =
-            node.findElements('name').firstOrNull?.getAttribute('value') ??
-            'Sans titre';
+        final title = _primaryTitle(node);
         final year =
             node
                 .findElements('yearpublished')
@@ -212,8 +238,8 @@ class BggService {
           'id': chunk.join(','),
           'stats': '1',
         });
-        final response = await http.get(url, headers: _headers);
-        if (response.statusCode != 200) continue;
+        final response = await _getWithRetry(url);
+        if (response.statusCode != 200 || response.body.isEmpty) continue;
 
         final document = XmlDocument.parse(response.body);
         for (final item in document.findAllElements('item')) {
@@ -250,9 +276,27 @@ class BggService {
     return result;
   }
 
+  static Map<String, dynamic>? _parseThingItem(XmlElement item) {
+    final image =
+        item.findAllElements('image').firstOrNull?.innerText ??
+        item.findAllElements('thumbnail').firstOrNull?.innerText;
+
+    int? parseAttr(String tag) {
+      final raw =
+          item.findElements(tag).firstOrNull?.getAttribute('value') ?? '';
+      return int.tryParse(raw);
+    }
+
+    return {
+      if (image != null && image.isNotEmpty) 'image_url': image,
+      'min_players': parseAttr('minplayers'),
+      'max_players': parseAttr('maxplayers'),
+      'playing_time': parseAttr('playingtime'),
+    };
+  }
+
   static Future<Map<String, dynamic>?> getGameFullDetails(String bggId) async {
     if (!_canUseThingApi) {
-      // Web : pas d'appel thing ; l'objet sera enregistré sans image BGG auto.
       return null;
     }
 
@@ -260,38 +304,12 @@ class BggService {
       final url = Uri.https('boardgamegeek.com', '/xmlapi2/thing', {
         'id': bggId,
       });
-      final response = await http.get(url, headers: _headers);
+      final response = await _getWithRetry(url);
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200 && response.body.isNotEmpty) {
         final document = XmlDocument.parse(response.body);
-        final item = document.findAllElements('item').first;
-
-        return {
-          'image_url':
-              item.findAllElements('image').firstOrNull?.innerText ??
-              item.findAllElements('thumbnail').firstOrNull?.innerText,
-          'min_players': int.tryParse(
-            item
-                    .findElements('minplayers')
-                    .firstOrNull
-                    ?.getAttribute('value') ??
-                '',
-          ),
-          'max_players': int.tryParse(
-            item
-                    .findElements('maxplayers')
-                    .firstOrNull
-                    ?.getAttribute('value') ??
-                '',
-          ),
-          'playing_time': int.tryParse(
-            item
-                    .findElements('playingtime')
-                    .firstOrNull
-                    ?.getAttribute('value') ??
-                '',
-          ),
-        };
+        final item = document.findAllElements('item').firstOrNull;
+        if (item != null) return _parseThingItem(item);
       }
     } catch (e) {
       if (kDebugMode) debugPrint('Erreur détails BGG: $e');

@@ -1,0 +1,16 @@
+# Copier vers gradle.properties et adapter (non versionné si chemins locaux).
+# Voir aussi scripts/setup-gradle-corporate.ps1
+
+org.gradle.jvmargs=-Xmx8G -XX:MaxMetaspaceSize=4G -XX:ReservedCodeCacheSize=512m -XX:+HeapDumpOnOutOfMemoryError
+android.useAndroidX=true
+
+# JDK Android Studio (même trust store que l'IDE)
+# org.gradle.java.home=C:/Program Files/Android/Android Studio/jbr
+
+# Avast / proxy entreprise (truststore dans android/avast-truststore.jks)
+# systemProp.javax.net.ssl.trustStore=avast-truststore.jks
+# systemProp.javax.net.ssl.trustStorePassword=changeit
+# systemProp.javax.net.ssl.checkRevocation=false
+# systemProp.com.sun.net.ssl.checkRevocation=false
+# systemProp.https.proxyHost=proxy.example.com
+# systemProp.https.proxyPort=8080

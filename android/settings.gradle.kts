@@ -11,6 +11,8 @@ pluginManagement {
     includeBuild("$flutterSdkPath/packages/flutter_tools/gradle")
 
     repositories {
+        // Décommenter si scripts/prefetch-gradle-plugins.ps1 a été exécuté (réseau entreprise)
+        // maven { url = uri("${rootDir}/local-gradle-plugins") }
         google()
         mavenCentral()
         gradlePluginPortal()

@@ -39,6 +39,16 @@ class _LocationPickerFieldState extends State<LocationPickerField> {
     super.dispose();
   }
 
+  @override
+  void didUpdateWidget(LocationPickerField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.groupId != widget.groupId) {
+      _searchController.clear();
+      setState(() => _loading = true);
+      _load();
+    }
+  }
+
   Future<void> _load() async {
     final list = await _service.fetchLocations(groupId: widget.groupId);
     if (!mounted) return;
@@ -58,6 +68,11 @@ class _LocationPickerFieldState extends State<LocationPickerField> {
       _loading = false;
       if (selected != null) {
         _searchController.text = selected.label;
+      } else if (widget.selectedLocationId != null) {
+        _searchController.clear();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) widget.onChanged(null);
+        });
       }
     });
     _filter();
@@ -127,7 +142,7 @@ class _LocationPickerFieldState extends State<LocationPickerField> {
             child: ListView.separated(
               shrinkWrap: true,
               itemCount: _filtered.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
+              separatorBuilder: (_, _) => const Divider(height: 1),
               itemBuilder: (context, index) {
                 final loc = _filtered[index];
                 final selected = loc.id == widget.selectedLocationId;

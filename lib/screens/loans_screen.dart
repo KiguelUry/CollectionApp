@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/collection_item.dart';
 import '../services/loan_service.dart';
 import '../widgets/bgg_network_image.dart';
-import '../widgets/main_drawer.dart';
+import '../widgets/app_app_bar.dart';
 import 'item_detail_screen.dart';
 
 /// Registre des objets actuellement prêtés.
@@ -84,10 +84,7 @@ class _LoansScreenState extends State<LoansScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Mes prêts'),
-      ),
-      drawer: const MainDrawer(),
+      appBar: const AppAppBar(title: 'Mes prêts'),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _loans.isEmpty

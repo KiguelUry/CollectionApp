@@ -147,4 +147,13 @@ class GroupService {
         .eq('group_id', groupId);
     return List<Map<String, dynamic>>.from(rows);
   }
+
+  /// Supprime le groupe (cascade membres ; objets : group_id → null en base).
+  Future<void> deleteGroup(String groupId) async {
+    final group = await fetchGroup(groupId);
+    if (!canEdit(group)) {
+      throw Exception('Seul le créateur peut supprimer ce groupe');
+    }
+    await _client.from('groups').delete().eq('id', groupId);
+  }
 }

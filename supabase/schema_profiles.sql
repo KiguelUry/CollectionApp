@@ -53,6 +53,13 @@ create policy "Users delete own avatar"
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
+-- Création du profil par l'utilisateur connecté (comptes sans ligne profiles)
+drop policy if exists "Users insert own profile row" on public.profiles;
+create policy "Users insert own profile row"
+  on public.profiles for insert
+  to authenticated
+  with check (auth.uid() = id);
+
 -- Mise à jour du profil par l'utilisateur connecté
 drop policy if exists "Users update own profile row" on public.profiles;
 create policy "Users update own profile row"

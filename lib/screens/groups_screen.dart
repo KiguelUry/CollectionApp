@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import '../models/collection_group.dart';
 import '../services/friend_service.dart';
 import '../services/group_service.dart';
+import '../widgets/app_app_bar.dart';
 import '../widgets/friend_picker_dialog.dart';
 import '../widgets/group_badge.dart';
-import '../widgets/main_drawer.dart';
 import '../widgets/profile_avatar.dart';
 import 'group_detail_screen.dart';
 import 'group_edit_screen.dart';
@@ -99,6 +99,49 @@ class _GroupsScreenState extends State<GroupsScreen> {
     }
   }
 
+  Future<void> _confirmDeleteGroup(CollectionGroup group) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Supprimer le groupe ?'),
+        content: Text(
+          '« ${group.name} » sera supprimé. Les objets partagés '
+          'resteront dans les collections mais ne seront plus liés à ce groupe.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    try {
+      await _groupService.deleteGroup(group.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Groupe « ${group.name} » supprimé')),
+        );
+        await _load();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e')),
+        );
+      }
+    }
+  }
+
   Future<void> _openGroup(CollectionGroup group) async {
     await Navigator.push(
       context,
@@ -112,8 +155,7 @@ class _GroupsScreenState extends State<GroupsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Mes groupes')),
-      drawer: const MainDrawer(),
+      appBar: const AppAppBar(title: 'Mes groupes'),
       floatingActionButton: FloatingActionButton(
         onPressed: _createGroup,
         child: const Icon(Icons.group_add),
@@ -148,7 +190,7 @@ class _GroupsScreenState extends State<GroupsScreen> {
                         title: Text(group.name),
                         subtitle: Text(
                           canEdit
-                              ? 'Collection partagée · Personnalisable'
+                              ? 'Collection partagée · Créateur'
                               : 'Collection partagée',
                           style: TextStyle(
                             fontSize: 12,
@@ -159,10 +201,28 @@ class _GroupsScreenState extends State<GroupsScreen> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             if (canEdit)
-                              IconButton(
-                                icon: const Icon(Icons.palette_outlined),
-                                tooltip: 'Personnaliser',
-                                onPressed: () => _openEdit(group),
+                              PopupMenuButton<String>(
+                                onSelected: (value) {
+                                  switch (value) {
+                                    case 'edit':
+                                      _openEdit(group);
+                                    case 'delete':
+                                      _confirmDeleteGroup(group);
+                                  }
+                                },
+                                itemBuilder: (ctx) => [
+                                  const PopupMenuItem(
+                                    value: 'edit',
+                                    child: Text('Personnaliser'),
+                                  ),
+                                  const PopupMenuItem(
+                                    value: 'delete',
+                                    child: Text(
+                                      'Supprimer le groupe',
+                                      style: TextStyle(color: Colors.red),
+                                    ),
+                                  ),
+                                ],
                               ),
                             IconButton(
                               icon: const Icon(Icons.person_add),
@@ -172,8 +232,6 @@ class _GroupsScreenState extends State<GroupsScreen> {
                           ],
                         ),
                         onTap: () => _openGroup(group),
-                        onLongPress:
-                            canEdit ? () => _openEdit(group) : null,
                       ),
                     );
                   },

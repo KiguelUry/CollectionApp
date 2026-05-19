@@ -4,7 +4,7 @@ import '../services/inventory_service.dart';
 import '../utils/collection_grid_grouper.dart';
 import '../widgets/bgg_network_image.dart';
 import '../widgets/collection_item_tile.dart';
-import '../widgets/main_drawer.dart';
+import '../widgets/app_app_bar.dart';
 import 'item_detail_screen.dart';
 
 /// Doublons, objets à vendre/échanger, et historique vendu.
@@ -60,9 +60,9 @@ class _InventoryManageScreenState extends State<InventoryManageScreen> {
     return DefaultTabController(
       length: 3,
       child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Doubles & ventes'),
-          bottom: const TabBar(
+        appBar: const AppAppBar(
+          title: 'Doubles & ventes',
+          bottom: TabBar(
             tabs: [
               Tab(text: 'Doublons'),
               Tab(text: 'À vendre'),
@@ -70,7 +70,6 @@ class _InventoryManageScreenState extends State<InventoryManageScreen> {
             ],
           ),
         ),
-        drawer: const MainDrawer(),
         body: _loading
             ? const Center(child: CircularProgressIndicator())
             : TabBarView(

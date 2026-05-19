@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../services/bgg_service.dart';
 import '../utils/debounced_runner.dart';
+import '../utils/dialog_layout.dart';
 import 'bgg_network_image.dart';
 
 class BggSearchDialog extends StatefulWidget {
@@ -66,7 +67,7 @@ class _BggSearchDialogState extends State<BggSearchDialog> {
   }
 
   Future<void> _search(String query) async {
-    if (query.length < 1) return;
+    if (query.isEmpty) return;
 
     final generation = ++_searchGeneration;
     setState(() {
@@ -98,7 +99,7 @@ class _BggSearchDialogState extends State<BggSearchDialog> {
       title: const Text('Chercher sur BGG'),
       content: SizedBox(
         width: double.maxFinite,
-        height: 500,
+        height: adaptiveDialogContentHeight(context),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [

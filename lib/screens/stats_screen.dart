@@ -3,7 +3,7 @@ import '../models/category_stat.dart';
 import '../models/collection_item.dart';
 import '../models/collection_summary.dart';
 import '../services/collection_stats_service.dart';
-import '../widgets/main_drawer.dart';
+import '../widgets/app_app_bar.dart';
 import '../widgets/share_collection_sheet.dart';
 
 /// Statistiques et export de la collection.
@@ -51,8 +51,7 @@ class _StatsScreenState extends State<StatsScreen> {
     final theme = Theme.of(context);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Statistiques')),
-      drawer: const MainDrawer(),
+      appBar: const AppAppBar(title: 'Statistiques'),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(

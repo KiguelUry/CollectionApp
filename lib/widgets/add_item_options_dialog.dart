@@ -54,14 +54,20 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
   }
 
   Future<void> _load() async {
-    final profiles = await Supabase.instance.client
-        .from('profiles')
-        .select('id, username');
-    final groups = await _groupService.fetchMyGroups();
     final userId = Supabase.instance.client.auth.currentUser!.id;
+    var profiles = <Map<String, dynamic>>[];
+    var groups = <CollectionGroup>[];
+    try {
+      profiles = List<Map<String, dynamic>>.from(
+        await Supabase.instance.client.from('profiles').select('id, username'),
+      );
+    } catch (_) {}
+    try {
+      groups = await _groupService.fetchMyGroups();
+    } catch (_) {}
     if (mounted) {
       setState(() {
-        _profiles = List<Map<String, dynamic>>.from(profiles);
+        _profiles = profiles;
         _groups = groups;
         _selectedProfileId = userId;
         if (_groups.isNotEmpty) _selectedGroupId = _groups.first.id;
@@ -95,9 +101,12 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                       const Divider(),
                       SwitchListTile(
                         contentPadding: EdgeInsets.zero,
-                        title: const Text('Possédé par un groupe (ex: Famille)'),
+                        title: const Text('Partager avec un groupe'),
                         value: _shareWithGroup,
-                        onChanged: (v) => setState(() => _shareWithGroup = v),
+                        onChanged: (v) => setState(() {
+                          _shareWithGroup = v;
+                          _selectedLocationId = null;
+                        }),
                       ),
                       if (_shareWithGroup && _groups.isNotEmpty)
                         DropdownButtonFormField<String>(
@@ -109,24 +118,19 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                               .map(
                                 (g) => DropdownMenuItem(
                                   value: g.id,
-                                  child: Row(
-                                    children: [
-                                      GroupBadge.fromGroup(
-                                        name: g.name,
-                                        avatarUrl: g.avatarUrl,
-                                        accentColor: g.accentColor,
-                                        iconKey: g.iconKey,
-                                        radius: 14,
-                                      ),
-                                      const SizedBox(width: 10),
-                                      Expanded(child: Text(g.name)),
-                                    ],
+                                  child: GroupBadge.dropdownLabel(
+                                    name: g.name,
+                                    avatarUrl: g.avatarUrl,
+                                    accentColor: g.accentColor,
+                                    iconKey: g.iconKey,
                                   ),
                                 ),
                               )
                               .toList(),
-                          onChanged: (v) =>
-                              setState(() => _selectedGroupId = v),
+                          onChanged: (v) => setState(() {
+                            _selectedGroupId = v;
+                            _selectedLocationId = null;
+                          }),
                         )
                       else if (_shareWithGroup && _groups.isEmpty)
                         const Text(
@@ -153,6 +157,11 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                         ),
                       const SizedBox(height: 12),
                       LocationPickerField(
+                        key: ValueKey(
+                          _shareWithGroup
+                              ? 'g_${_selectedGroupId ?? ''}'
+                              : 'personal',
+                        ),
                         selectedLocationId: _selectedLocationId,
                         groupId: _shareWithGroup ? _selectedGroupId : null,
                         onChanged: (loc) => setState(
@@ -203,7 +212,19 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                     locationId: _selectedLocationId,
                     quantity: _quantity,
                   );
-                  await widget.onConfirm(options);
+                  try {
+                    await widget.onConfirm(options);
+                  } catch (_) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Échec de l\'ajout — vérifie ta connexion',
+                          ),
+                        ),
+                      );
+                    }
+                  }
                 },
           child: const Text('Confirmer'),
         ),

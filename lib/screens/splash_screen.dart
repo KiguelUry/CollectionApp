@@ -1,10 +1,9 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/dev_auth_config.dart';
 import '../services/auth_service.dart';
-import 'category_selection_screen.dart';
+import '../services/profile_service.dart';
 import 'login_screen.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -45,14 +44,20 @@ class _SplashScreenState extends State<SplashScreen> {
 
     if (!mounted) return;
 
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (context) => session == null
-            ? const LoginScreen()
-            : const CategorySelectionScreen(),
-      ),
-    );
+    if (session == null) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const LoginScreen()),
+      );
+    } else {
+      try {
+        await ProfileService().ensureCurrentUserProfile();
+      } catch (e) {
+        debugPrint('Profil utilisateur : $e');
+      }
+      if (!mounted) return;
+      Navigator.pushReplacementNamed(context, '/categories');
+    }
   }
 
   @override

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/friend_service.dart';
 import '../widgets/add_friend_sheet.dart';
-import '../widgets/main_drawer.dart';
+import '../widgets/app_app_bar.dart';
 import '../widgets/profile_avatar.dart';
 import 'friend_collection_screen.dart';
 
@@ -78,8 +78,8 @@ class _FriendsScreenState extends State<FriendsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Amis'),
+      appBar: AppAppBar(
+        title: 'Amis',
         actions: [
           IconButton(
             icon: const Icon(Icons.person_add),
@@ -88,7 +88,6 @@ class _FriendsScreenState extends State<FriendsScreen> {
           ),
         ],
       ),
-      drawer: const MainDrawer(),
       floatingActionButton: FloatingActionButton(
         onPressed: _openAddFriend,
         tooltip: 'Ajouter un ami',

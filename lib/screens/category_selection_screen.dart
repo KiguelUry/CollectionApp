@@ -3,10 +3,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_category.dart';
 import '../models/collection_summary.dart';
 import '../services/collection_stats_service.dart';
-import '../widgets/collection_summary_card.dart';
+import '../widgets/collapsible_collection_overview.dart';
 import '../widgets/main_drawer.dart';
+import 'books_collection_screen.dart';
 import 'home_screen.dart';
-import 'shake_pick_screen.dart';
 import 'stats_screen.dart';
 import 'wishlist_overview_screen.dart';
 import '../theme/app_theme.dart';
@@ -91,7 +91,9 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => HomeScreen(category: category),
+        builder: (context) => category == CollectionCategory.book
+            ? const BooksCollectionScreen()
+            : HomeScreen(category: category),
       ),
     ).then((_) => _load());
   }
@@ -127,20 +129,12 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Collection Famille'),
+        title: const Text('Collections'),
         actions: [
           IconButton(
             icon: const Icon(Icons.bar_chart_outlined),
             tooltip: 'Statistiques',
             onPressed: _openStats,
-          ),
-          IconButton(
-            icon: const Icon(Icons.shuffle),
-            tooltip: 'Shake to Pick',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (ctx) => const ShakePickScreen()),
-            ),
           ),
         ],
       ),
@@ -150,7 +144,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
         children: [
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
             decoration: AppTheme.heroGradient(scheme.primary),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -161,7 +155,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
                     final name = snapshot.data ?? '...';
                     return Text(
                       'Salut $name',
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
                             fontWeight: FontWeight.w800,
                           ),
                     );
@@ -169,15 +163,19 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
                 ),
                 Text(
                   'Quelle collection ouvrir ?',
-                  style: TextStyle(color: Colors.grey.shade700),
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.grey.shade700,
+                  ),
                 ),
-                const SizedBox(height: 12),
-                if (!_loadingCounts)
-                  CollectionSummaryCard(
+                if (!_loadingCounts) ...[
+                  const SizedBox(height: 10),
+                  CollapsibleCollectionOverview(
                     summary: _summary,
                     onWishlistTap: _openWishlist,
                     onStatsTap: _openStats,
                   ),
+                ],
               ],
             ),
           ),

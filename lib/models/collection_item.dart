@@ -36,6 +36,9 @@ class CollectionItem {
   final String? personalRules;
   final DateTime? createdAt;
   final List<ItemTag> tags;
+  final String? seriesId;
+  final String? volumeId;
+  final bool isRead;
 
   CollectionItem({
     required this.id,
@@ -68,6 +71,9 @@ class CollectionItem {
     this.personalRules,
     this.createdAt,
     this.tags = const [],
+    this.seriesId,
+    this.volumeId,
+    this.isRead = false,
   });
 
   bool get isGroupOwned => groupId != null;
@@ -151,6 +157,9 @@ class CollectionItem {
       personalRules: json['personal_rules'] as String?,
       createdAt: createdAt,
       tags: ItemTag.parseListFromItemJson(json),
+      seriesId: json['series_id'] as String?,
+      volumeId: json['volume_id'] as String?,
+      isRead: json['is_read'] as bool? ?? false,
     );
   }
 
@@ -189,6 +198,9 @@ class CollectionItem {
       'condition': condition,
       'games_played': gamesPlayed,
       'personal_rules': personalRules,
+      'series_id': seriesId,
+      'volume_id': volumeId,
+      'is_read': isRead,
     };
   }
 
@@ -236,6 +248,10 @@ class CollectionItem {
     bool clearGroup = false,
     bool clearLocation = false,
     List<ItemTag>? tags,
+    String? seriesId,
+    String? volumeId,
+    bool? isRead,
+    bool clearSeries = false,
   }) {
     return CollectionItem(
       id: id,
@@ -269,6 +285,9 @@ class CollectionItem {
       personalRules: personalRules ?? this.personalRules,
       createdAt: createdAt,
       tags: tags ?? this.tags,
+      seriesId: clearSeries ? null : (seriesId ?? this.seriesId),
+      volumeId: clearSeries ? null : (volumeId ?? this.volumeId),
+      isRead: isRead ?? this.isRead,
     );
   }
 

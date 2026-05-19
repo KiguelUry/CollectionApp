@@ -117,107 +117,144 @@ class CollectionFilterBar extends StatelessWidget {
             ),
             if (showLocationFilter && locations.isNotEmpty) ...[
               const SizedBox(height: 8),
-              SizedBox(
-                height: 40,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  children: [
-                    _locationChip(context, label: 'Tous les lieux', id: null),
-                    ...locations.map(
-                      (loc) => _locationChip(context, label: loc.label, id: loc.id),
-                    ),
-                  ],
-                ),
+              _horizontalChips(
+                children: [
+                  _locationChip(context, label: 'Tous les lieux', id: null),
+                  ...locations.map(
+                    (loc) =>
+                        _locationChip(context, label: loc.label, id: loc.id),
+                  ),
+                ],
               ),
             ],
             if (showTagFilter && tags.isNotEmpty) ...[
               const SizedBox(height: 6),
-              SizedBox(
+              _horizontalChips(
                 height: 36,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  children: [
-                    _tagChip(context, label: 'Tous tags', id: null),
-                    ...tags.map(
-                      (t) => _tagChip(context, label: t.label, id: t.id, color: t.color),
+                children: [
+                  _tagChip(context, label: 'Tous tags', id: null),
+                  ...tags.map(
+                    (t) => _tagChip(
+                      context,
+                      label: t.label,
+                      id: t.id,
+                      color: t.color,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ],
             if (showScopeFilters || showStatusFilters) ...[
               const SizedBox(height: 8),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    if (showScopeFilters) ...[
-                      _chip(
-                        label: 'Tout',
-                        selected: filters.scope == CollectionScopeFilter.all,
-                        onTap: () => onChanged(
-                          filters.copyWith(scope: CollectionScopeFilter.all),
+              _horizontalChips(
+                children: [
+                  if (showScopeFilters) ...[
+                    _chip(
+                      label: 'Tout',
+                      selected: filters.scope == CollectionScopeFilter.all,
+                      onTap: () => onChanged(
+                        filters.copyWith(scope: CollectionScopeFilter.all),
+                      ),
+                    ),
+                    _chip(
+                      label: 'Perso',
+                      icon: Icons.person_outline,
+                      selected:
+                          filters.scope == CollectionScopeFilter.personalOnly,
+                      onTap: () => onChanged(
+                        filters.copyWith(
+                          scope: CollectionScopeFilter.personalOnly,
                         ),
                       ),
-                      _chip(
-                        label: 'Perso',
-                        icon: Icons.person_outline,
-                        selected:
-                            filters.scope == CollectionScopeFilter.personalOnly,
-                        onTap: () => onChanged(
-                          filters.copyWith(
-                            scope: CollectionScopeFilter.personalOnly,
-                          ),
+                    ),
+                    _chip(
+                      label: 'Groupe',
+                      icon: Icons.groups,
+                      selected:
+                          filters.scope == CollectionScopeFilter.groupOnly,
+                      onTap: () => onChanged(
+                        filters.copyWith(
+                          scope: CollectionScopeFilter.groupOnly,
                         ),
                       ),
-                      _chip(
-                        label: 'Groupe',
-                        icon: Icons.groups,
-                        selected:
-                            filters.scope == CollectionScopeFilter.groupOnly,
-                        onTap: () => onChanged(
-                          filters.copyWith(
-                            scope: CollectionScopeFilter.groupOnly,
-                          ),
-                        ),
-                      ),
-                    ],
-                    if (showStatusFilters) ...[
-                      _chip(
-                        label: 'Prêtés',
-                        icon: Icons.handshake_outlined,
-                        selected:
-                            filters.status == CollectionStatusFilter.onLoan,
-                        onTap: () => onChanged(
-                          filters.copyWith(
-                            status: filters.status ==
-                                    CollectionStatusFilter.onLoan
-                                ? CollectionStatusFilter.all
-                                : CollectionStatusFilter.onLoan,
-                          ),
-                        ),
-                      ),
-                      _chip(
-                        label: '★ 4+',
-                        selected: filters.status ==
-                            CollectionStatusFilter.highlyRated,
-                        onTap: () => onChanged(
-                          filters.copyWith(
-                            status: filters.status ==
-                                    CollectionStatusFilter.highlyRated
-                                ? CollectionStatusFilter.all
-                                : CollectionStatusFilter.highlyRated,
-                          ),
-                        ),
-                      ),
-                    ],
+                    ),
                   ],
-                ),
+                  if (showStatusFilters) ...[
+                    _chip(
+                      label: 'Prêtés',
+                      icon: Icons.handshake_outlined,
+                      selected:
+                          filters.status == CollectionStatusFilter.onLoan,
+                      onTap: () => onChanged(
+                        filters.copyWith(
+                          status: filters.status ==
+                                  CollectionStatusFilter.onLoan
+                              ? CollectionStatusFilter.all
+                              : CollectionStatusFilter.onLoan,
+                        ),
+                      ),
+                    ),
+                    _chip(
+                      label: '★ 4+',
+                      selected: filters.status ==
+                          CollectionStatusFilter.highlyRated,
+                      onTap: () => onChanged(
+                        filters.copyWith(
+                          status: filters.status ==
+                                  CollectionStatusFilter.highlyRated
+                              ? CollectionStatusFilter.all
+                              : CollectionStatusFilter.highlyRated,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ],
           ],
         ),
       ),
+    );
+  }
+
+  Widget _horizontalChips({
+    required List<Widget> children,
+    double height = 40,
+  }) {
+    return SizedBox(
+      height: height,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: children.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 6),
+        itemBuilder: (context, index) => children[index],
+      ),
+    );
+  }
+
+  Widget _filterChip({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+    IconData? icon,
+    Color? backgroundColor,
+  }) {
+    return FilterChip(
+      label: Text(
+        label,
+        style: const TextStyle(fontSize: 12),
+        overflow: TextOverflow.ellipsis,
+      ),
+      avatar: icon != null
+          ? Icon(icon, size: 16, color: selected ? null : Colors.grey.shade700)
+          : null,
+      selected: selected,
+      onSelected: (_) => onTap(),
+      showCheckmark: false,
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      backgroundColor: backgroundColor,
     );
   }
 
@@ -227,18 +264,14 @@ class CollectionFilterBar extends StatelessWidget {
     required String? id,
   }) {
     final selected = filters.locationId == id;
-    return Padding(
-      padding: const EdgeInsets.only(right: 6),
-      child: FilterChip(
-        label: Text(label, style: const TextStyle(fontSize: 12)),
-        selected: selected,
-        onSelected: (_) => onChanged(
-          filters.copyWith(
-            locationId: id,
-            clearLocation: id == null,
-          ),
+    return _filterChip(
+      label: label,
+      selected: selected,
+      onTap: () => onChanged(
+        filters.copyWith(
+          locationId: id,
+          clearLocation: id == null,
         ),
-        showCheckmark: false,
       ),
     );
   }
@@ -250,17 +283,13 @@ class CollectionFilterBar extends StatelessWidget {
     Color? color,
   }) {
     final selected = filters.tagId == id;
-    return Padding(
-      padding: const EdgeInsets.only(right: 6),
-      child: FilterChip(
-        label: Text(label, style: const TextStyle(fontSize: 12)),
-        selected: selected,
-        onSelected: (_) => onChanged(
-          filters.copyWith(tagId: id, clearTag: id == null),
-        ),
-        backgroundColor: color?.withValues(alpha: 0.15),
-        showCheckmark: false,
+    return _filterChip(
+      label: label,
+      selected: selected,
+      onTap: () => onChanged(
+        filters.copyWith(tagId: id, clearTag: id == null),
       ),
+      backgroundColor: color?.withValues(alpha: 0.15),
     );
   }
 
@@ -270,23 +299,11 @@ class CollectionFilterBar extends StatelessWidget {
     required VoidCallback onTap,
     IconData? icon,
   }) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 6),
-      child: FilterChip(
-        label: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (icon != null) ...[
-              Icon(icon, size: 16),
-              const SizedBox(width: 4),
-            ],
-            Text(label),
-          ],
-        ),
-        selected: selected,
-        onSelected: (_) => onTap(),
-        showCheckmark: false,
-      ),
+    return _filterChip(
+      label: label,
+      selected: selected,
+      onTap: onTap,
+      icon: icon,
     );
   }
 }

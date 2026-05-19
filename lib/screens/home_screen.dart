@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../models/book_subcategory.dart';
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../services/bgg_service.dart';
+import '../services/profile_service.dart';
 import '../utils/collection_grid_grouper.dart';
 import '../utils/collection_item_filters.dart';
 import '../utils/collection_item_scope.dart';
@@ -22,7 +24,8 @@ import '../widgets/add_item_manual_dialog.dart';
 import '../widgets/add_item_options_dialog.dart';
 import '../widgets/bgg_search_dialog.dart';
 import '../widgets/book_search_dialog.dart';
-import '../widgets/main_drawer.dart';
+import '../widgets/book_subcategory_picker.dart';
+import '../widgets/app_app_bar.dart';
 import 'item_detail_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -83,19 +86,59 @@ class _HomeScreenState extends State<HomeScreen> {
     final isbn = await showIsbnScanSheet(context);
     if (isbn == null || !mounted) return;
 
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const PopScope(
+        canPop: false,
+        child: AlertDialog(
+          content: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 20),
+              Flexible(child: Text('Recherche du livre…')),
+            ],
+          ),
+        ),
+      ),
+    );
+
     final book = await OpenLibraryService.lookupByIsbn(isbn);
+
     if (!mounted) return;
+    Navigator.pop(context);
+
     if (book == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Livre introuvable pour cet ISBN')),
+        const SnackBar(
+          content: Text(
+            'Livre introuvable pour cet ISBN (essaie la recherche manuelle)',
+          ),
+        ),
       );
       return;
     }
 
+    final suggested = book['subcategory_hint'] != null
+        ? BookSubcategory.fromDbValue(book['subcategory_hint'])
+        : BookSubcategory.other;
+
+    final subcategory = await showBookSubcategoryPicker(
+      context,
+      suggested: suggested,
+    );
+    if (!mounted || subcategory == null) return;
+
     _showOptionsDialog(
       title: book['title']!,
       imageUrl: book['image_url']?.isNotEmpty == true ? book['image_url'] : null,
-      subcategory: 'book',
+      subcategory: subcategory.dbValue,
+      metadata: {
+        if ((book['author'] ?? '').isNotEmpty) 'author': book['author']!,
+        if ((book['year'] ?? '').isNotEmpty) 'year': book['year']!,
+        if ((book['isbn'] ?? '').isNotEmpty) 'isbn': book['isbn']!,
+      },
     );
   }
 
@@ -120,14 +163,47 @@ class _HomeScreenState extends State<HomeScreen> {
   void _showBggSearchDialog() {
     showDialog(
       context: context,
-      builder: (context) => BggSearchDialog(
-        onGameSelected: (bggGame) => _showOptionsDialog(
-          title: bggGame['title']!,
-          bggId: bggGame['id'],
-          imageUrl: bggGame['image_url'],
-          closesTwoDialogs: true,
+      builder: (dialogContext) => BggSearchDialog(
+        onGameSelected: (bggGame) {
+          Navigator.pop(dialogContext);
+          _prepareBggAdd(bggGame);
+        },
+      ),
+    );
+  }
+
+  Future<void> _prepareBggAdd(Map<String, String> bggGame) async {
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const PopScope(
+        canPop: false,
+        child: AlertDialog(
+          content: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 20),
+              Flexible(child: Text('Chargement des infos BGG…')),
+            ],
+          ),
         ),
       ),
+    );
+
+    final bggId = bggGame['id']!;
+    final details = await BggService.getGameFullDetails(bggId);
+
+    if (!mounted) return;
+    Navigator.pop(context);
+
+    _showOptionsDialog(
+      title: bggGame['title']!,
+      bggId: bggId,
+      imageUrl: (details?['image_url'] as String?) ?? bggGame['image_url'],
+      bggDetails: details,
     );
   }
 
@@ -139,6 +215,10 @@ class _HomeScreenState extends State<HomeScreen> {
           title: book['title']!,
           imageUrl: book['image_url']!.isEmpty ? null : book['image_url'],
           subcategory: subcategory.dbValue,
+          metadata: {
+            if ((book['author'] ?? '').isNotEmpty) 'author': book['author']!,
+            if ((book['year'] ?? '').isNotEmpty) 'year': book['year']!,
+          },
           closesTwoDialogs: true,
         ),
       ),
@@ -169,20 +249,23 @@ class _HomeScreenState extends State<HomeScreen> {
     String? subcategory,
     Map<String, dynamic>? metadata,
     String? bggId,
+    Map<String, dynamic>? bggDetails,
     bool closesTwoDialogs = false,
   }) {
     showDialog(
       context: context,
-      builder: (context) => AddItemOptionsDialog(
+      builder: (dialogContext) => AddItemOptionsDialog(
         itemTitle: title,
         onConfirm: (options) async {
           await _handleSave(
+            dialogContext: dialogContext,
             title: title,
             options: options,
             imageUrl: imageUrl,
             subcategory: subcategory,
             metadata: metadata,
             bggId: bggId,
+            bggDetails: bggDetails,
             closesTwoDialogs: closesTwoDialogs,
           );
         },
@@ -191,12 +274,14 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _handleSave({
+    required BuildContext dialogContext,
     required String title,
     required AddItemOptions options,
     String? imageUrl,
     String? subcategory,
     Map<String, dynamic>? metadata,
     String? bggId,
+    Map<String, dynamic>? bggDetails,
     bool closesTwoDialogs = false,
   }) async {
     final client = Supabase.instance.client;
@@ -207,68 +292,104 @@ class _HomeScreenState extends State<HomeScreen> {
     int? resolvedMax;
     int? resolvedTime;
 
-    if (bggId != null) {
-      final details = await BggService.getGameFullDetails(bggId);
-      resolvedImageUrl =
-          (details?['image_url'] as String?) ?? resolvedImageUrl;
-      resolvedMin = details?['min_players'] as int?;
-      resolvedMax = details?['max_players'] as int?;
-      resolvedTime = details?['playing_time'] as int?;
-    }
+    try {
+      await ProfileService().ensureCurrentUserProfile();
 
-    // Fusionner les doublons (même titre + catégorie + groupe)
-    var dupQuery = client
-        .from('collection_items')
-        .select('id, quantity')
-        .eq('category', widget.category.dbValue)
-        .eq('title', title.trim());
+      if (bggDetails != null) {
+        resolvedImageUrl =
+            (bggDetails['image_url'] as String?) ?? resolvedImageUrl;
+        resolvedMin = bggDetails['min_players'] as int?;
+        resolvedMax = bggDetails['max_players'] as int?;
+        resolvedTime = bggDetails['playing_time'] as int?;
+      } else if (bggId != null) {
+        final details = await BggService.getGameFullDetails(bggId);
+        resolvedImageUrl =
+            (details?['image_url'] as String?) ?? resolvedImageUrl;
+        resolvedMin = details?['min_players'] as int?;
+        resolvedMax = details?['max_players'] as int?;
+        resolvedTime = details?['playing_time'] as int?;
+      }
 
-    if (options.groupId != null) {
-      dupQuery = dupQuery.eq('group_id', options.groupId!);
-    } else {
-      dupQuery = dupQuery
-          .filter('group_id', 'is', null)
-          .or(CollectionItemScope.personalOrFilter(userId));
-    }
-
-    final existing = await dupQuery.maybeSingle();
-    if (existing != null) {
-      final newQty = ((existing['quantity'] as int?) ?? 1) + options.quantity;
-      await client
+      var dupQuery = client
           .from('collection_items')
-          .update({'quantity': newQty})
-          .eq('id', existing['id']);
-    } else {
-      final item = CollectionItem(
-        id: '',
-        title: title.trim(),
-        category: widget.category,
-        subcategory: subcategory,
-        metadata: metadata,
-        imageUrl: resolvedImageUrl,
-        isWishlist: options.isWishlist,
-        quantity: options.quantity,
-        locationId: options.locationId,
-        groupId: options.groupId,
-        minPlayers: resolvedMin,
-        maxPlayers: resolvedMax,
-        playingTime: resolvedTime,
+          .select('id, quantity')
+          .eq('category', widget.category.dbValue)
+          .eq('title', title.trim());
+
+      if (options.groupId != null) {
+        dupQuery = dupQuery.eq('group_id', options.groupId!);
+      } else {
+        dupQuery = dupQuery
+            .filter('group_id', 'is', null)
+            .or(CollectionItemScope.personalOrFilter(userId));
+      }
+
+      final existing = await dupQuery.maybeSingle();
+      var message = '« $title » ajouté';
+      if (existing != null) {
+        final newQty =
+            ((existing['quantity'] as int?) ?? 1) + options.quantity;
+        await client
+            .from('collection_items')
+            .update({'quantity': newQty})
+            .eq('id', existing['id']);
+        message = 'Quantité mise à jour ($newQty)';
+      } else {
+        final item = CollectionItem(
+          id: '',
+          title: title.trim(),
+          category: widget.category,
+          subcategory: subcategory,
+          metadata: metadata,
+          imageUrl: resolvedImageUrl,
+          isWishlist: options.isWishlist,
+          quantity: options.quantity,
+          locationId: options.locationId,
+          groupId: options.groupId,
+          minPlayers: resolvedMin,
+          maxPlayers: resolvedMax,
+          playingTime: resolvedTime,
+        );
+
+        await client.from('collection_items').insert(
+              item.toInsertJson(
+                isWishlist: options.isWishlist,
+                locationUserId: options.isWishlist
+                    ? null
+                    : (options.locationUserId ?? userId),
+                addedBy: userId,
+              ),
+            );
+        if (options.isWishlist) {
+          message = '« $title » ajouté à la wishlist';
+        }
+      }
+
+      if (!mounted) return;
+      Navigator.pop(dialogContext);
+      if (closesTwoDialogs && Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
       );
-
-      await client.from('collection_items').insert(
-            item.toInsertJson(
-              isWishlist: options.isWishlist,
-              locationUserId: options.isWishlist
-                  ? null
-                  : (options.locationUserId ?? userId),
-              addedBy: userId,
-            ),
-          );
-    }
-
-    if (mounted) {
-      Navigator.pop(context);
-      if (closesTwoDialogs) Navigator.pop(context);
+    } on PostgrestException catch (e) {
+      if (mounted) {
+        final msg = ProfileService.isMissingProfileFk(e)
+            ? ProfileService.missingProfileUserMessage()
+            : 'Impossible d\'ajouter : $e';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(msg)),
+        );
+      }
+      rethrow;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Impossible d\'ajouter : $e')),
+        );
+      }
+      rethrow;
     }
   }
 
@@ -277,8 +398,8 @@ class _HomeScreenState extends State<HomeScreen> {
     return DefaultTabController(
       length: 2,
       child: Scaffold(
-        appBar: AppBar(
-          title: Text(widget.category.label),
+        appBar: AppAppBar(
+          title: widget.category.label,
           actions: [
             IconButton(
               icon: Icon(
@@ -301,16 +422,19 @@ class _HomeScreenState extends State<HomeScreen> {
                 tooltip: 'Scanner ISBN',
                 onPressed: _scanIsbnAndAdd,
               ),
-            IconButton(
-              icon: const Icon(Icons.shuffle),
-              tooltip: 'Shake to Pick',
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (ctx) => ShakePickScreen(category: widget.category),
+            if (widget.category == CollectionCategory.boardgame)
+              IconButton(
+                icon: const Icon(Icons.casino_outlined),
+                tooltip: 'À quoi on joue ce soir ?',
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (ctx) => const ShakePickScreen(
+                      category: CollectionCategory.boardgame,
+                    ),
+                  ),
                 ),
               ),
-            ),
           ],
           bottom: const TabBar(
             indicatorColor: Colors.deepPurple,
@@ -320,7 +444,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
-        drawer: const MainDrawer(),
         floatingActionButton: FloatingActionButton(
           onPressed: _onAddPressed,
           child: const Icon(Icons.add),

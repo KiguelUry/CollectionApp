@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../models/collection_group.dart';
 import '../models/group_icon.dart';
 import '../services/group_service.dart';
+import '../navigation/app_navigation.dart';
+import '../widgets/app_app_bar.dart';
 import '../widgets/group_badge.dart';
 import '../widgets/profile_avatar.dart';
 
@@ -131,13 +133,55 @@ class _GroupEditScreenState extends State<GroupEditScreen> {
     }
   }
 
+  Future<void> _confirmDelete() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Supprimer ce groupe ?'),
+        content: Text(
+          '« ${_group.name} » sera définitivement supprimé. '
+          'Les objets liés ne seront plus associés à ce groupe.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    try {
+      await _service.deleteGroup(_group.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Groupe supprimé')),
+      );
+      AppNavigation.openCollections(context);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final accent = ProfileAvatar.colorFromHex(_accentColor);
 
     if (!_canEdit && !_loading) {
       return Scaffold(
-        appBar: AppBar(title: Text(_group.name)),
+        appBar: AppAppBar(title: _group.name),
         body: const Center(
           child: Padding(
             padding: EdgeInsets.all(24),
@@ -151,8 +195,8 @@ class _GroupEditScreenState extends State<GroupEditScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Personnaliser le groupe'),
+      appBar: AppAppBar(
+        title: 'Personnaliser le groupe',
         backgroundColor: accent,
         foregroundColor: Colors.white,
       ),
@@ -278,6 +322,15 @@ class _GroupEditScreenState extends State<GroupEditScreen> {
                           )
                         : const Icon(Icons.save),
                     label: Text(_saving ? 'Enregistrement…' : 'Enregistrer'),
+                  ),
+                  const SizedBox(height: 28),
+                  OutlinedButton.icon(
+                    onPressed: _confirmDelete,
+                    icon: const Icon(Icons.delete_outline, color: Colors.red),
+                    label: const Text(
+                      'Supprimer le groupe',
+                      style: TextStyle(color: Colors.red),
+                    ),
                   ),
                 ],
               ),

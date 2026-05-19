@@ -15,6 +15,7 @@ import '../services/tag_service.dart';
 import '../widgets/collection_filter_bar.dart';
 import '../widgets/collection_item_list_tile.dart';
 import '../widgets/collection_item_tile.dart';
+import '../navigation/app_navigation.dart';
 import '../widgets/group_badge.dart';
 import '../widgets/profile_avatar.dart';
 import 'group_edit_screen.dart';
@@ -108,6 +109,11 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
           foregroundColor: Colors.white,
           iconTheme: const IconThemeData(color: Colors.white),
           actions: [
+            IconButton(
+              icon: const Icon(Icons.grid_view_rounded),
+              tooltip: 'Collections',
+              onPressed: () => AppNavigation.openCollections(context),
+            ),
             IconButton(
               icon: Icon(
                 _viewMode == CollectionViewMode.grid

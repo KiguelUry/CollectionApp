@@ -18,10 +18,9 @@ class LoanService {
       _client
           .from('collection_items')
           .select(_select)
-          .or('loaned_to_id.not.is.null,loaned_to_name.not.is.null')
-          .order('loaned_at', ascending: false),
+          .or('loaned_to_id.not.is.null,loaned_to_name.not.is.null'),
       userId: userId,
-    );
+    ).order('loaned_at', ascending: false);
 
     return (rows as List)
         .map((r) => CollectionItem.fromJson(Map<String, dynamic>.from(r)))

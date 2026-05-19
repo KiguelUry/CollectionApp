@@ -35,6 +35,30 @@ class GroupBadge extends StatelessWidget {
     );
   }
 
+  /// Pour [DropdownMenuItem] : pas d'Expanded (contrainte horizontale non bornée).
+  static Widget dropdownLabel({
+    required String name,
+    String? avatarUrl,
+    String? accentColor,
+    String iconKey = 'groups',
+    double radius = 14,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        GroupBadge.fromGroup(
+          name: name,
+          avatarUrl: avatarUrl,
+          accentColor: accentColor,
+          iconKey: iconKey,
+          radius: radius,
+        ),
+        const SizedBox(width: 8),
+        Text(name, overflow: TextOverflow.ellipsis),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final accent = ProfileAvatar.colorFromHex(accentColorHex);
@@ -47,7 +71,7 @@ class GroupBadge extends StatelessWidget {
           child: Image.network(
             avatarUrl!,
             fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => _iconBadge(accent),
+            errorBuilder: (_, _, _) => _iconBadge(accent),
           ),
         ),
       );

@@ -10,6 +10,7 @@ import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../utils/collection_item_filters.dart';
 import '../utils/collection_item_scope.dart';
+import '../widgets/app_app_bar.dart';
 import '../widgets/bgg_network_image.dart';
 import 'item_detail_screen.dart';
 
@@ -30,7 +31,7 @@ class _ShakePickScreenState extends State<ShakePickScreen>
   CollectionItem? _picked;
   bool _loading = true;
   bool _picking = false;
-  StreamSubscription<AccelerometerEvent>? _accelSub;
+  StreamSubscription<UserAccelerometerEvent>? _accelSub;
   int _lastShakeMs = 0;
 
   late AnimationController _pulseController;
@@ -88,14 +89,15 @@ class _ShakePickScreenState extends State<ShakePickScreen>
   }
 
   void _startShakeListener() {
-    _accelSub = accelerometerEventStream().listen((event) {
-      final g = sqrt(
+    // Accélération sans gravité : bien plus fiable que le capteur brut.
+    _accelSub = userAccelerometerEventStream().listen((event) {
+      final shake = sqrt(
         event.x * event.x + event.y * event.y + event.z * event.z,
       );
-      if (g < 18) return;
+      if (shake < 2.4) return;
 
       final now = DateTime.now().millisecondsSinceEpoch;
-      if (now - _lastShakeMs < 1200) return;
+      if (now - _lastShakeMs < 1400) return;
       _lastShakeMs = now;
       _pickRandom();
     });
@@ -122,12 +124,12 @@ class _ShakePickScreenState extends State<ShakePickScreen>
 
   @override
   Widget build(BuildContext context) {
-    final title = widget.category == null
-        ? 'Shake to Pick'
-        : 'Shake · ${widget.category!.label}';
+    final title = widget.category == CollectionCategory.boardgame
+        ? 'À quoi on joue ce soir ?'
+        : 'Tirage au sort';
 
     return Scaffold(
-      appBar: AppBar(title: Text(title)),
+      appBar: AppAppBar(title: title),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _candidates.isEmpty
@@ -177,7 +179,7 @@ class _ShakePickScreenState extends State<ShakePickScreen>
           const SizedBox(height: 24),
           if (!kIsWeb)
             Text(
-              'Secoue ton téléphone pour tirer au sort',
+              'Secoue le téléphone pour choisir un jeu',
               style: TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.w500,

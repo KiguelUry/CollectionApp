@@ -143,7 +143,12 @@ class CollectionItemTile extends StatelessWidget {
   Widget _buildImage() {
     Widget image;
     if (item.imageUrl != null) {
-      image = BggNetworkImage(url: item.imageUrl!);
+      final isBook = category == CollectionCategory.book;
+      image = BggNetworkImage(
+        url: item.imageUrl!,
+        bookCover: isBook,
+        largeSource: !isBook,
+      );
     } else {
       image = Container(
         color: Colors.grey.shade200,

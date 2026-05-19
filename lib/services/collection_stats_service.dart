@@ -61,13 +61,9 @@ class CollectionStatsService {
     if (userId == null) return {};
 
     final rows = await CollectionItemScope.personal(
-      _client
-          .from('collection_items')
-          .select()
-          .eq('is_wishlist', true)
-          .order('title'),
+      _client.from('collection_items').select().eq('is_wishlist', true),
       userId: userId,
-    );
+    ).order('title');
 
     final map = {
       for (final c in CollectionCategory.values) c: <CollectionItem>[],

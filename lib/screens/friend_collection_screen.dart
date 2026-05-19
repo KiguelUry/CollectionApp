@@ -3,6 +3,7 @@ import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../services/friend_service.dart';
 import '../utils/collection_grid_grouper.dart';
+import '../navigation/app_navigation.dart';
 import '../widgets/collection_item_tile.dart';
 import '../widgets/profile_avatar.dart';
 import 'item_detail_screen.dart';
@@ -108,6 +109,13 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen> {
           backgroundColor: accent,
           foregroundColor: Colors.white,
           iconTheme: const IconThemeData(color: Colors.white),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.grid_view_rounded),
+              tooltip: 'Collections',
+              onPressed: () => AppNavigation.openCollections(context),
+            ),
+          ],
           bottom: TabBar(
             isScrollable: true,
             indicatorColor: Colors.white,
