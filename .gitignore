@@ -2,6 +2,8 @@
 .env
 .env.*
 !.env.example
+# Web Vercel : Supabase uniquement (généré par scripts/sync-web-deploy.ps1)
+!web_deploy/assets/.env
 
 # Miscellaneous
 *.class
