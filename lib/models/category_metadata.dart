@@ -158,18 +158,11 @@ class CategoryMetadata {
         if (year != null && year.toString().isNotEmpty) {
           rows.add(MapEntry('Parution', year.toString()));
         }
-        final players = formatPlayerCount(item.minPlayers, item.maxPlayers);
-        if (players != null) {
-          rows.add(MapEntry('Joueurs', players));
-        }
-        final time = formatPlayingTime(item.playingTime);
-        if (time != null) {
-          rows.add(MapEntry('Durée', time));
-        }
         final minAge = m['min_age'];
         if (minAge != null) {
           rows.add(MapEntry('Âge', '$minAge+'));
         }
+        break;
       case CollectionCategory.book:
         if ((m['author'] as String?)?.isNotEmpty == true) {
           rows.add(MapEntry('Auteur', m['author'].toString()));
@@ -183,6 +176,7 @@ class CategoryMetadata {
             BookSubcategory.fromDbValue(item.subcategory).label,
           ));
         }
+        break;
       case CollectionCategory.card:
         if (item.subcategory != null) {
           rows.add(MapEntry('Univers', CardSubcategory.fromDbValue(item.subcategory).label));
@@ -197,6 +191,7 @@ class CategoryMetadata {
         } else {
           rows.add(const MapEntry('Gradation', 'Non gradée'));
         }
+        break;
       case CollectionCategory.car:
         if (m['mileage_km'] != null) {
           rows.add(MapEntry('Kilométrage', '${m['mileage_km']} km'));
@@ -207,6 +202,7 @@ class CategoryMetadata {
         if ((m['logbook'] as String?)?.isNotEmpty == true) {
           rows.add(MapEntry('Carnet de bord', m['logbook'].toString()));
         }
+        break;
       case CollectionCategory.stamp:
       case CollectionCategory.coin:
         if ((m['country'] as String?)?.isNotEmpty == true) {
@@ -218,6 +214,7 @@ class CategoryMetadata {
         if ((m['rarity_tirage'] as String?)?.isNotEmpty == true) {
           rows.add(MapEntry('Tirage / rareté', m['rarity_tirage'].toString()));
         }
+        break;
       case CollectionCategory.media:
         rows.add(MapEntry('Format', MediaFormat.fromDbValue(m['format']?.toString()).label));
         if ((m['disc_color'] as String?)?.isNotEmpty == true) {
@@ -234,6 +231,7 @@ class CategoryMetadata {
         if ((m['barcode'] as String?)?.isNotEmpty == true) {
           rows.add(MapEntry('Code-barres / QR', m['barcode'].toString()));
         }
+        break;
       case CollectionCategory.lego:
         if ((m['set_number'] as String?)?.isNotEmpty == true) {
           rows.add(MapEntry('N° de set', m['set_number'].toString()));
@@ -243,6 +241,7 @@ class CategoryMetadata {
         }
         rows.add(MapEntry('Monté', m['is_built'] == true ? 'Oui' : 'Non'));
         rows.add(MapEntry('Boîte', m['box_included'] == true ? 'Oui' : 'Non'));
+        break;
       default:
         break;
     }

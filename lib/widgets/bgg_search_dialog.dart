@@ -7,8 +7,13 @@ import 'bgg_network_image.dart';
 
 class BggSearchDialog extends StatefulWidget {
   final Function(Map<String, String>) onGameSelected;
+  final VoidCallback? onManualAdd;
 
-  const BggSearchDialog({super.key, required this.onGameSelected});
+  const BggSearchDialog({
+    super.key,
+    required this.onGameSelected,
+    this.onManualAdd,
+  });
 
   @override
   State<BggSearchDialog> createState() => _BggSearchDialogState();
@@ -149,14 +154,23 @@ class _BggSearchDialogState extends State<BggSearchDialog> {
                 ),
               ),
             Expanded(child: _buildList()),
-            if (kIsWeb)
+            if (kIsWeb && !BggService.webBggAvailable)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(
-                  'Sur le navigateur : pas de classement BGG ni vignettes recherche (CORS). Utilise l\'app mobile pour le détail complet.',
-                  style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                  'Recherche BGG indisponible sur le web : déploie la fonction '
+                  'Supabase « bgg-proxy » (voir supabase/functions/bgg-proxy).',
+                  style: TextStyle(fontSize: 10, color: Colors.orange.shade800),
                 ),
               ),
+            if (widget.onManualAdd != null) ...[
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: widget.onManualAdd,
+                icon: const Icon(Icons.edit_outlined, size: 18),
+                label: const Text('Ajouter sans BGG'),
+              ),
+            ],
             const Divider(),
             const Text(
               'Powered by BoardGameGeek',

@@ -117,7 +117,20 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
         if (id != null) _selectedGroupIds.add(id.toString());
       }
     }
+    // Répare les anciennes lignes avec group_ids sans group_id en base.
+    if (_item.groupId == null && _selectedGroupIds.isNotEmpty) {
+      final first = _selectedGroupIds.first;
+      _item = _item.copyWith(
+        groupId: first,
+        groupName: _groupNameById(first),
+      );
+    }
   }
+
+  bool get _sharesWithGroup => _selectedGroupIds.isNotEmpty;
+
+  String? get _primaryGroupId =>
+      _item.groupId ?? (_selectedGroupIds.isEmpty ? null : _selectedGroupIds.first);
 
   String? _customHolderName() =>
       _item.metadata?['holder_label'] as String?;
@@ -153,7 +166,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
   }
 
   String _groupOwnershipSubtitle() {
-    if (!_item.isGroupOwned) return 'Personnel';
+    if (!_sharesWithGroup) return 'Personnel';
     final names = <String>[];
     for (final g in _groups) {
       if (_selectedGroupIds.contains(g.id)) names.add(g.name);
@@ -202,10 +215,10 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
           .update(_item.toUpdateJson())
           .eq('id', _item.id);
       await _reloadItem();
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Erreur lors de la sauvegarde')),
+          SnackBar(content: Text('Erreur lors de la sauvegarde : $e')),
         );
       }
     }
@@ -496,35 +509,48 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       ),
                     ),
                     if (!isWishlist)
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Partagé avec un groupe'),
-                      value: _item.isGroupOwned,
-                      onChanged: ro
-                          ? null
-                          : (v) {
-                              setState(() {
-                                if (!v) {
-                                  _selectedGroupIds = {};
-                                  _item = _item.copyWith(clearGroup: true);
-                                } else if (_groups.isNotEmpty) {
-                                  _selectedGroupIds = {_groups.first.id};
-                                  _item = _item.copyWith(
-                                    groupId: _groups.first.id,
-                                    groupName: _groups.first.name,
-                                    clearLocation: true,
-                                    metadata: _metadataWithGroups(
-                                      _selectedGroupIds.toList(),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Partagé avec un groupe'),
+                        value: _sharesWithGroup,
+                        onChanged: ro
+                            ? null
+                            : (v) async {
+                                if (v && _groups.isEmpty) {
+                                  await _loadGroups();
+                                }
+                                if (!mounted) return;
+                                if (v && _groups.isEmpty) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Crée d\'abord un groupe dans le menu « Groupes »',
+                                      ),
                                     ),
                                   );
+                                  return;
                                 }
-                              });
-                              _saveNow();
-                            },
-                    ),
-                    if (!isWishlist &&
-                        _item.isGroupOwned &&
-                        _groups.isNotEmpty) ...[
+                                setState(() {
+                                  if (!v) {
+                                    _selectedGroupIds = {};
+                                    _item = _item.copyWith(clearGroup: true);
+                                  } else {
+                                    final g = _groups.first;
+                                    _selectedGroupIds = {g.id};
+                                    _item = _item.copyWith(
+                                      groupId: g.id,
+                                      groupName: g.name,
+                                      clearLocation: true,
+                                      metadata: _metadataWithGroups(
+                                        _selectedGroupIds.toList(),
+                                      ),
+                                    );
+                                  }
+                                });
+                                _saveNow();
+                              },
+                      ),
+                    if (!isWishlist && _sharesWithGroup && _groups.isNotEmpty) ...[
                       const SizedBox(height: 8),
                       Text(
                         'Groupes',
@@ -533,6 +559,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       const SizedBox(height: 8),
                       if (_groups.any((g) => !_selectedGroupIds.contains(g.id)))
                         DropdownButtonFormField<String>(
+                          value: null,
                           decoration: const InputDecoration(
                             labelText: 'Ajouter à un groupe',
                           ),
@@ -611,10 +638,10 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       ignoring: ro,
                       child: isWishlist
                           ? const SizedBox.shrink()
-                          : _item.groupId != null
+                          : _primaryGroupId != null
                           ? ItemWhereaboutsField(
-                              key: ValueKey('where_${_item.groupId}'),
-                              groupId: _item.groupId!,
+                              key: ValueKey('where_$_primaryGroupId'),
+                              groupId: _primaryGroupId!,
                               locationUserId: _item.locationUserId,
                               holderLabel: _item.locationLabel,
                               customHolderName: _customHolderName(),
@@ -931,15 +958,17 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildSectionTitle('Informations'),
-        if (isBoardgame && (players != null || time != null))
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              if (players != null)
-                _infoTile(Icons.people, players),
-              if (time != null) _infoTile(Icons.timer, time),
-            ],
-          ),
+        if (isBoardgame) ...[
+          if (players != null || time != null)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                if (players != null) _infoTile(Icons.people, players),
+                if (time != null) _infoTile(Icons.timer, time),
+              ],
+            ),
+          if (metadataRows.isNotEmpty) const SizedBox(height: 8),
+        ],
         ...metadataRows.map(
           (row) => ListTile(
             contentPadding: EdgeInsets.zero,

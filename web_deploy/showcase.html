@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Collection — Collection Famille</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    :root {
+      --accent: #673AB7;
+      --accent-soft: #E8E0F5;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      margin: 0;
+      background: #f6f4fa;
+      color: #1a1a1a;
+      line-height: 1.5;
+    }
+    .hero {
+      background: linear-gradient(135deg, var(--accent), #512DA8);
+      color: #fff;
+      padding: 2rem 1.25rem 2.5rem;
+    }
+    .wrap { max-width: 640px; margin: 0 auto; padding: 0 1rem 3rem; }
+    .profile {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    .avatar {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      object-fit: cover;
+      background: rgba(255,255,255,0.2);
+      border: 3px solid rgba(255,255,255,0.35);
+    }
+    .avatar-fallback {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.25);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      font-weight: 800;
+    }
+    h1 { margin: 0; font-size: 1.5rem; }
+    .bio { margin: 0.5rem 0 0; opacity: 0.9; font-size: 0.95rem; }
+    .badge {
+      display: inline-block;
+      margin-top: 0.75rem;
+      padding: 0.25rem 0.65rem;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.2);
+      font-size: 0.8rem;
+    }
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 1.25rem;
+      margin-top: 1rem;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    }
+    h2 {
+      font-size: 1rem;
+      margin: 0 0 0.75rem;
+      color: var(--accent);
+    }
+    h3 {
+      font-size: 0.9rem;
+      margin: 1rem 0 0.35rem;
+      color: #444;
+    }
+    h3 .n { color: #888; font-weight: normal; }
+    ul { margin: 0; padding-left: 1.2rem; }
+    li { margin: 0.2rem 0; }
+    .meta { color: #666; font-size: 0.85em; }
+    .state {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: #666;
+    }
+    .state.error { color: #c62828; }
+    footer {
+      text-align: center;
+      font-size: 0.8rem;
+      color: #888;
+      margin-top: 2rem;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="state">Chargement…</div>
+  </div>
+
+  <script>
+    // Même projet que l'app (.env) — clé anon publique, données protégées par la RPC.
+    const SUPABASE_URL = 'https://jfudrneoblsiingjqsio.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_lyB3xo2ORzY6zwrbkn5g3A_7p5ddw7n';
+
+    const CATEGORY_LABELS = {
+      boardgame: 'Jeux de société',
+      book: 'Livres',
+      card: 'Cartes',
+      car: 'Voitures',
+      stamp: 'Timbres',
+      coin: 'Monnaies',
+      media: 'Vinyles / CD',
+      lego: 'Lego & maquettes',
+      watch: 'Montres',
+      videogame: 'Jeux vidéo',
+      movie: 'Films',
+    };
+
+    const params = new URLSearchParams(location.search);
+    const token = params.get('t') || params.get('token');
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    }
+
+    function isActive(item) {
+      return !item.is_wishlist && !item.is_sold && !item.is_for_sale;
+    }
+
+    function renderSection(title, items) {
+      if (!items.length) return '';
+      const byCat = {};
+      for (const item of items) {
+        const cat = item.category || 'boardgame';
+        if (!byCat[cat]) byCat[cat] = [];
+        byCat[cat].push(item);
+      }
+      let html = `<div class="card"><h2>${escapeHtml(title)}</h2>`;
+      for (const [cat, list] of Object.entries(byCat).sort((a, b) =>
+        (CATEGORY_LABELS[a[0]] || a[0]).localeCompare(CATEGORY_LABELS[b[0]] || b[0])
+      )) {
+        const label = CATEGORY_LABELS[cat] || cat;
+        html += `<h3>${escapeHtml(label)} <span class="n">(${list.length})</span></h3><ul>`;
+        for (const item of list) {
+          let line = escapeHtml(item.title);
+          if (item.quantity > 1) line += ` <span class="meta">×${item.quantity}</span>`;
+          if (item.rating != null) line += ` <span class="meta">★ ${Number(item.rating).toFixed(1)}</span>`;
+          html += `<li>${line}</li>`;
+        }
+        html += '</ul>';
+      }
+      html += '</div>';
+      return html;
+    }
+
+    async function main() {
+      const app = document.getElementById('app');
+      if (!token) {
+        app.innerHTML = '<div class="state error">Lien invalide (token manquant).</div>';
+        return;
+      }
+
+      const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      const { data, error } = await client.rpc('get_public_showcase', { p_token: token });
+
+      if (error || !data || data.error) {
+        const msg = data?.error === 'not_found'
+          ? 'Cette vitrine n\'existe pas ou n\'est plus publique.'
+          : 'Impossible de charger la collection.';
+        app.innerHTML = `<div class="state error">${msg}</div>`;
+        return;
+      }
+
+      const accent = data.accent_color || '#673AB7';
+      document.documentElement.style.setProperty('--accent', accent);
+      document.documentElement.style.setProperty('--accent-soft', accent + '22');
+      document.title = `Collection de ${data.username}`;
+
+      const items = Array.isArray(data.items) ? data.items : [];
+      const owned = items.filter(isActive);
+      const wishlist = items.filter((i) => i.is_wishlist);
+
+      const initial = (data.username || '?')[0].toUpperCase();
+      const avatar = data.avatar_url
+        ? `<img class="avatar" src="${escapeHtml(data.avatar_url)}" alt="">`
+        : `<div class="avatar-fallback">${escapeHtml(initial)}</div>`;
+
+      let body = renderSection(
+        `Ce que j'ai (${owned.length} objet${owned.length > 1 ? 's' : ''})`,
+        owned
+      );
+      if (wishlist.length) {
+        body += renderSection(
+          `Wishlist — ce que je cherche (${wishlist.length})`,
+          wishlist
+        );
+      }
+
+      app.innerHTML = `
+        <header class="hero">
+          <div class="wrap">
+            <div class="profile">
+              ${avatar}
+              <div>
+                <h1>Collection de ${escapeHtml(data.username)}</h1>
+                ${data.bio ? `<p class="bio">${escapeHtml(data.bio)}</p>` : ''}
+                <span class="badge">Collection Famille · vitrine publique</span>
+              </div>
+            </div>
+          </div>
+        </header>
+        <main class="wrap">
+          ${body || '<div class="card"><p>Aucun objet pour l\'instant.</p></div>'}
+          <footer>
+            Liste en lecture seule — pour la version interactive, installe l'app Collection Famille.
+          </footer>
+        </main>
+      `;
+    }
+
+    main().catch(() => {
+      document.getElementById('app').innerHTML =
+        '<div class="state error">Erreur réseau.</div>';
+    });
+  </script>
+</body>
+</html>

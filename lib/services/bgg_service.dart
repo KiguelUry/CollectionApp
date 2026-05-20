@@ -26,8 +26,16 @@ class BggService {
   static const _thingChunkSize = 8;
   static const _maxPollAttempts = 10;
 
-  /// Sur Flutter Web, l'API « thing » BGG est bloquée par CORS (Failed to fetch).
-  static bool get _canUseThingApi => !kIsWeb;
+  /// Sur le web, les appels passent par la Edge Function Supabase `bgg-proxy`.
+  static bool get _useWebProxy => kIsWeb;
+
+  static bool get _webProxyReady {
+    final base = dotenv.env['SUPABASE_URL']?.trim() ?? '';
+    final anon = dotenv.env['SUPABASE_ANON_KEY']?.trim() ?? '';
+    return base.isNotEmpty && anon.isNotEmpty;
+  }
+
+  static bool get webBggAvailable => !_useWebProxy || _webProxyReady;
 
   static List<Map<String, String>>? _hotCache;
   static DateTime? _hotCacheAt;
@@ -44,11 +52,39 @@ class BggService {
     return headers;
   }
 
+  static Uri _requestUri(Uri bggUri) {
+    if (!_useWebProxy) return bggUri;
+    final base = dotenv.env['SUPABASE_URL']!.trim().replaceAll(RegExp(r'/+$'), '');
+    return Uri.parse('$base/functions/v1/bgg-proxy').replace(
+      queryParameters: {
+        'path': bggUri.path,
+        ...bggUri.queryParameters,
+      },
+    );
+  }
+
+  static Map<String, String> _requestHeaders() {
+    final headers = Map<String, String>.from(_headers);
+    if (_useWebProxy && _webProxyReady) {
+      final anon = dotenv.env['SUPABASE_ANON_KEY']!.trim();
+      headers['apikey'] = anon;
+      headers['Authorization'] = 'Bearer $anon';
+    }
+    return headers;
+  }
+
   /// L'API XML BGG répond souvent 202 (« Please try again ») : on réessaie.
   static Future<http.Response> _getWithRetry(Uri url) async {
+    if (_useWebProxy && !_webProxyReady) {
+      return http.Response('', 503);
+    }
+
+    final target = _requestUri(url);
+    final headers = _requestHeaders();
+
     http.Response? last;
     for (var attempt = 0; attempt < _maxPollAttempts; attempt++) {
-      last = await http.get(url, headers: _headers);
+      last = await http.get(target, headers: headers);
       final pending = last.statusCode == 202 ||
           (last.statusCode == 200 &&
               last.body.contains('Please try again'));
@@ -223,11 +259,11 @@ class BggService {
     }
   }
 
-  /// Rangs + miniatures (mobile/desktop). Sur le web : ignoré (CORS).
+  /// Rangs + miniatures (via API thing ; sur le web : proxy Supabase).
   static Future<Map<String, _BggThingMeta>> _fetchThingMeta(
     List<String> ids,
   ) async {
-    if (ids.isEmpty || !_canUseThingApi) return {};
+    if (ids.isEmpty || (_useWebProxy && !_webProxyReady)) return {};
 
     final result = <String, _BggThingMeta>{};
 
@@ -312,9 +348,7 @@ class BggService {
   }
 
   static Future<Map<String, dynamic>?> getGameFullDetails(String bggId) async {
-    if (!_canUseThingApi) {
-      return null;
-    }
+    if (_useWebProxy && !_webProxyReady) return null;
 
     try {
       final url = Uri.https('boardgamegeek.com', '/xmlapi2/thing', {

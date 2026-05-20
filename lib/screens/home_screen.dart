@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/book_subcategory.dart';
@@ -160,12 +161,56 @@ class _HomeScreenState extends State<HomeScreen>
 
   void _onAddPressed() {
     if (widget.category.supportsBggSearch) {
-      _showBggSearchDialog();
+      if (kIsWeb) {
+        _showBoardgameAddChooser();
+      } else {
+        _showBggSearchDialog();
+      }
     } else if (widget.category.supportsOpenLibrarySearch) {
       _showBookSearchDialog();
     } else {
       _showManualAddFlow();
     }
+  }
+
+  void _showBoardgameAddChooser() {
+    final proxyOk = BggService.webBggAvailable;
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.search),
+              title: const Text('Chercher sur BGG'),
+              subtitle: Text(
+                proxyOk
+                    ? 'Recherche complète (via Supabase)'
+                    : 'Indisponible : déploie la fonction bgg-proxy (voir README Supabase)',
+              ),
+              enabled: proxyOk,
+              onTap: proxyOk
+                  ? () {
+                      Navigator.pop(ctx);
+                      _showBggSearchDialog();
+                    }
+                  : null,
+            ),
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('Saisir le nom à la main'),
+              subtitle: const Text('Sans recherche BGG'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showManualAddFlow();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showBggSearchDialog() {
@@ -176,6 +221,12 @@ class _HomeScreenState extends State<HomeScreen>
           Navigator.pop(dialogContext);
           _prepareBggAdd(bggGame);
         },
+        onManualAdd: kIsWeb
+            ? () {
+                Navigator.pop(dialogContext);
+                _showManualAddFlow();
+              }
+            : null,
       ),
     );
   }

@@ -127,7 +127,7 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                       ),
                       if (_shareWithGroup && _groups.isNotEmpty)
                         DropdownButtonFormField<String>(
-                          initialValue: _selectedGroupId,
+                          value: _selectedGroupId,
                           decoration: const InputDecoration(
                             labelText: 'Groupe',
                           ),
