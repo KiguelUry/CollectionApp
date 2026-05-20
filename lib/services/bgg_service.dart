@@ -3,6 +3,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 import 'package:xml/xml.dart';
 
+import '../config/app_env.dart';
 import '../utils/search_relevance.dart';
 
 enum BggSearchSort {
@@ -30,12 +31,13 @@ class BggService {
   static bool get _useWebProxy => kIsWeb;
 
   static bool get _webProxyReady {
-    final base = dotenv.env['SUPABASE_URL']?.trim() ?? '';
-    final anon = dotenv.env['SUPABASE_ANON_KEY']?.trim() ?? '';
-    return base.isNotEmpty && anon.isNotEmpty;
+    return AppEnv.supabaseUrl.isNotEmpty && AppEnv.supabaseAnonKey.isNotEmpty;
   }
 
   static bool get webBggAvailable => !_useWebProxy || _webProxyReady;
+
+  /// Dernière erreur recherche (affichée sur le web en release).
+  static String? lastSearchError;
 
   static List<Map<String, String>>? _hotCache;
   static DateTime? _hotCacheAt;
@@ -54,7 +56,7 @@ class BggService {
 
   static Uri _requestUri(Uri bggUri) {
     if (!_useWebProxy) return bggUri;
-    final base = dotenv.env['SUPABASE_URL']!.trim().replaceAll(RegExp(r'/+$'), '');
+    final base = AppEnv.supabaseUrl.replaceAll(RegExp(r'/+$'), '');
     return Uri.parse('$base/functions/v1/bgg-proxy').replace(
       queryParameters: {
         'path': bggUri.path,
@@ -66,7 +68,7 @@ class BggService {
   static Map<String, String> _requestHeaders() {
     final headers = Map<String, String>.from(_headers);
     if (_useWebProxy && _webProxyReady) {
-      final anon = dotenv.env['SUPABASE_ANON_KEY']!.trim();
+      final anon = AppEnv.supabaseAnonKey;
       headers['apikey'] = anon;
       headers['Authorization'] = 'Bearer $anon';
     }
@@ -113,6 +115,7 @@ class BggService {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return [];
 
+    lastSearchError = null;
     try {
       final url = Uri.https('boardgamegeek.com', '/xmlapi2/search', {
         'query': trimmed,
@@ -120,7 +123,12 @@ class BggService {
       });
       final response = await _getWithRetry(url);
 
-      if (response.statusCode != 200 || response.body.isEmpty) return [];
+      if (response.statusCode != 200 || response.body.isEmpty) {
+        lastSearchError = response.statusCode == 0
+            ? 'Réseau bloqué (CORS ou connexion). Vérifie le proxy bgg-proxy sur Supabase.'
+            : 'BGG a répondu ${response.statusCode}';
+        return [];
+      }
 
       final document = XmlDocument.parse(response.body);
       final items = document.findAllElements('item');
@@ -151,7 +159,12 @@ class BggService {
       );
 
       final top = candidates.take(_maxMetaLookup).toList();
-      final meta = await _fetchThingMeta(top.map((g) => g['id']!).toList());
+      Map<String, _BggThingMeta> meta = {};
+      try {
+        meta = await _fetchThingMeta(top.map((g) => g['id']!).toList());
+      } catch (e) {
+        if (kDebugMode) debugPrint('BGG thing (recherche) ignoré : $e');
+      }
 
       final ranked = top.map((g) {
         final m = meta[g['id']];
@@ -167,6 +180,7 @@ class BggService {
 
       return ranked.take(20).toList();
     } catch (e) {
+      lastSearchError = e.toString();
       if (kDebugMode) debugPrint('Erreur recherche BGG: $e');
     }
     return [];

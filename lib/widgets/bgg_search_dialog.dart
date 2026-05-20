@@ -87,6 +87,13 @@ class _BggSearchDialogState extends State<BggSearchDialog> {
       _results = res;
       _isLoading = false;
     });
+
+    final err = BggService.lastSearchError;
+    if (err != null && res.isEmpty && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(err), duration: const Duration(seconds: 5)),
+      );
+    }
   }
 
   void _setSort(BggSearchSort sort) {

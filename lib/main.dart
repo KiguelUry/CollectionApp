@@ -8,26 +8,23 @@ import 'screens/groups_screen.dart';
 import 'screens/profile_edit_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/splash_screen.dart';
+import 'config/app_env.dart';
 import 'services/settings_service.dart';
 import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await dotenv.load(fileName: '.env');
+  try {
+    await dotenv.load(fileName: '.env');
+  } catch (_) {
+    // Web/Vercel : assets/.env parfois absent ; repli AppEnv.
+  }
   await SettingsService.instance.load();
 
-  final supabaseUrl = dotenv.env['SUPABASE_URL'];
-  final supabaseAnonKey = dotenv.env['SUPABASE_ANON_KEY'];
-  if (supabaseUrl == null || supabaseAnonKey == null) {
-    throw Exception(
-      'Variables SUPABASE_URL et SUPABASE_ANON_KEY manquantes dans .env',
-    );
-  }
-
   await Supabase.initialize(
-    url: supabaseUrl,
-    anonKey: supabaseAnonKey,
+    url: AppEnv.supabaseUrl,
+    anonKey: AppEnv.supabaseAnonKey,
   );
 
   runApp(const MyApp());

@@ -15,7 +15,7 @@ if (-not (Test-Path ".env")) {
 
 Write-Host "Collectingo — build Web release (Vercel)" -ForegroundColor Cyan
 & $flutter pub get
-& $flutter build web --release
+& $flutter build web --release --pwa-strategy=none
 
 if (Test-Path "build\web\index.html") {
     & (Join-Path $PSScriptRoot "sync-web-deploy.ps1")
