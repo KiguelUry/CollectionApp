@@ -3,10 +3,6 @@
   "outputDirectory": "web_deploy",
   "framework": null,
   "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/index.html",
-      "missing": [{ "type": "file" }]
-    }
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
