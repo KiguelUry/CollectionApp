@@ -1,4 +1,5 @@
 import '../models/collection_item.dart';
+import '../utils/boardgame_genres.dart';
 import '../utils/holder_filter.dart';
 
 enum CollectionSort {
@@ -8,6 +9,7 @@ enum CollectionSort {
   quantityDesc,
   newestFirst,
   oldestFirst,
+  genreAsc,
 }
 
 enum CollectionScopeFilter {
@@ -34,6 +36,8 @@ class CollectionListFilters {
   String? tagId;
   /// Filtre « chez qui » (`user:…`, `custom:…`, `loan:…`).
   String? holderKey;
+  /// Genre BGG (`boardgamecategory`), jeux de société uniquement.
+  String? boardgameGenre;
 
   CollectionListFilters({
     this.searchQuery = '',
@@ -43,6 +47,7 @@ class CollectionListFilters {
     this.locationId,
     this.tagId,
     this.holderKey,
+    this.boardgameGenre,
   });
 
   bool get hasActiveFilters =>
@@ -52,6 +57,7 @@ class CollectionListFilters {
       locationId != null ||
       tagId != null ||
       holderKey != null ||
+      boardgameGenre != null ||
       sort != CollectionSort.titleAsc;
 
   CollectionListFilters copyWith({
@@ -62,9 +68,11 @@ class CollectionListFilters {
     String? locationId,
     String? tagId,
     String? holderKey,
+    String? boardgameGenre,
     bool clearLocation = false,
     bool clearTag = false,
     bool clearHolder = false,
+    bool clearBoardgameGenre = false,
   }) {
     return CollectionListFilters(
       searchQuery: searchQuery ?? this.searchQuery,
@@ -74,6 +82,9 @@ class CollectionListFilters {
       locationId: clearLocation ? null : (locationId ?? this.locationId),
       tagId: clearTag ? null : (tagId ?? this.tagId),
       holderKey: clearHolder ? null : (holderKey ?? this.holderKey),
+      boardgameGenre: clearBoardgameGenre
+          ? null
+          : (boardgameGenre ?? this.boardgameGenre),
     );
   }
 
@@ -98,6 +109,16 @@ class CollectionListFilters {
 
     if (tagId != null) {
       result = result.where((i) => i.tags.any((t) => t.id == tagId)).toList();
+    }
+
+    if (boardgameGenre != null && boardgameGenre!.isNotEmpty) {
+      final genre = boardgameGenre!;
+      result = result
+          .where(
+            (i) => boardgameGenresFromMetadata(i.metadata)
+                .any((g) => g.toLowerCase() == genre.toLowerCase()),
+          )
+          .toList();
     }
 
     switch (scope) {
@@ -151,6 +172,11 @@ class CollectionListFilters {
         final da = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
         final db = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
         final cmp = da.compareTo(db);
+        return cmp != 0 ? cmp : a.title.compareTo(b.title);
+      case CollectionSort.genreAsc:
+        final ga = primaryBoardgameGenre(a) ?? 'zzz';
+        final gb = primaryBoardgameGenre(b) ?? 'zzz';
+        final cmp = ga.toLowerCase().compareTo(gb.toLowerCase());
         return cmp != 0 ? cmp : a.title.compareTo(b.title);
     }
   }

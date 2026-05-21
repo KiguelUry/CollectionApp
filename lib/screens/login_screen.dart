@@ -17,6 +17,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _authService = AuthService();
   bool _isSignUp = false;
   bool _devLoading = false;
+  bool _resetLoading = false;
 
   @override
   void initState() {
@@ -51,6 +52,41 @@ class _LoginScreenState extends State<LoginScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Erreur : $e')),
       );
+    }
+  }
+
+  Future<void> _forgotPassword() async {
+    final email = _emailController.text.trim();
+    if (email.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Saisis d\'abord l\'e-mail du compte dans le champ ci-dessus'),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _resetLoading = true);
+    try {
+      await _authService.sendPasswordResetEmail(email);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'E-mail envoyé à $email. Ouvre le lien pour choisir un nouveau mot de passe '
+            '(vérifie les spams).',
+          ),
+          duration: const Duration(seconds: 10),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Impossible d\'envoyer l\'e-mail : $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _resetLoading = false);
     }
   }
 
@@ -112,6 +148,17 @@ class _LoginScreenState extends State<LoginScreen> {
                 onPressed: _handleAuth,
                 child: Text(_isSignUp ? "S'inscrire" : 'Se connecter'),
               ),
+              if (!_isSignUp)
+                TextButton(
+                  onPressed: _resetLoading ? null : _forgotPassword,
+                  child: _resetLoading
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Mot de passe oublié ?'),
+                ),
               TextButton(
                 onPressed: () => setState(() => _isSignUp = !_isSignUp),
                 child: Text(

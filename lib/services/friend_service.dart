@@ -33,6 +33,10 @@ class FriendService {
 
   void invalidateFriendCache() => _cachedFriendIds = null;
 
+  Future<List<String>> listFriendProfileIds() async {
+    return (await _myFriendIds()).toList();
+  }
+
   /// Recherche de profils : pertinence pseudo, amis en commun, pas déjà amis.
   Future<List<Map<String, dynamic>>> searchProfiles(String query) async {
     final trimmed = query.trim();
@@ -302,7 +306,16 @@ class FriendService {
 
   Future<bool> canViewFriendCollection(String friendProfileId) async {
     final friendship = await friendshipWith(friendProfileId);
-    return friendship != null;
+    if (friendship == null) return false;
+    if (friendship['share_collections'] != true) return false;
+
+    final profile = await _client
+        .from('profiles')
+        .select('hide_collection_from_friends')
+        .eq('id', friendProfileId)
+        .maybeSingle();
+    if (profile?['hide_collection_from_friends'] == true) return false;
+    return true;
   }
 
   /// Collection active de l'ami (perso + groupes visibles via RLS).
@@ -310,7 +323,9 @@ class FriendService {
     String friendProfileId,
   ) async {
     if (!await canViewFriendCollection(friendProfileId)) {
-      throw Exception('Tu dois être ami avec cette personne');
+      throw Exception(
+        'Collection non partagée (active le partage mutuel ou demande à ton ami)',
+      );
     }
 
     final rows = await _client

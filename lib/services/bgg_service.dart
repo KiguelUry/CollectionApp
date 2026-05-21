@@ -344,6 +344,14 @@ class BggService {
         parseAttr('maxplaytime') ??
         parseAttr('minplaytime');
 
+    final categories = item
+        .findAllElements('link')
+        .where((l) => l.getAttribute('type') == 'boardgamecategory')
+        .map((l) => l.getAttribute('value'))
+        .whereType<String>()
+        .where((v) => v.isNotEmpty)
+        .toList();
+
     return {
       if (bggId != null) 'bgg_id': bggId,
       if (image != null && image.isNotEmpty) 'image_url': image,
@@ -352,6 +360,7 @@ class BggService {
       'min_players': parseAttr('minplayers'),
       'max_players': parseAttr('maxplayers'),
       'playing_time': playingTime,
+      if (categories.isNotEmpty) 'bgg_categories': categories,
     };
   }
 

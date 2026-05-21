@@ -1,5 +1,7 @@
 -- Demandes d'amitié + visibilité collections entre amis
--- Exécuter dans Supabase → SQL Editor
+-- NE PAS ré-exécuter en prod si schema_rls_fix_live.sql a déjà été appliqué
+-- (cette version enlève share_collections sur collection_items_select).
+-- Exécuter dans Supabase → SQL Editor (nouvelle base uniquement)
 
 -- Nouvelles amitiés en attente (les existantes « accepted » restent inchangées)
 alter table public.friendships

@@ -6,6 +6,7 @@ import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../services/bgg_service.dart';
 import '../services/profile_service.dart';
+import '../utils/boardgame_genres.dart';
 import '../utils/collection_grid_grouper.dart';
 import '../utils/collection_item_filters.dart';
 import '../utils/holder_filter.dart';
@@ -18,6 +19,7 @@ import '../services/location_service.dart';
 import '../services/open_library_service.dart';
 import '../services/tag_service.dart';
 import '../widgets/collection_filter_bar.dart';
+import '../widgets/wishlist_suggestions_banner.dart';
 import '../widgets/collection_item_list_tile.dart';
 import '../widgets/collection_item_tile.dart';
 import '../widgets/isbn_scan_sheet.dart';
@@ -405,6 +407,7 @@ class _HomeScreenState extends State<HomeScreen>
           for (final key in [
             'year_published',
             'min_age',
+            'bgg_categories',
           ]) {
             final v = bggDetails[key];
             if (v != null) meta[key] = v;
@@ -580,6 +583,8 @@ class _HomeScreenState extends State<HomeScreen>
                       showStatusFilters: false,
                       showLocationFilter: false,
                       showTagFilter: false,
+                      showWishlistSuggestions:
+                          widget.category == CollectionCategory.boardgame,
                     ),
                   ],
                 );
@@ -614,6 +619,7 @@ class _HomeScreenState extends State<HomeScreen>
     bool showHolderFilter = false,
     bool showTagFilter = true,
     bool showHighlyRatedFilter = true,
+    bool showWishlistSuggestions = false,
     VoidCallback? onShakePick,
   }) {
     final filtered = filters.apply(items);
@@ -625,6 +631,8 @@ class _HomeScreenState extends State<HomeScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (showWishlistSuggestions)
+          WishlistSuggestionsBanner(category: widget.category),
         CollectionFilterBar(
           filters: filters,
           onChanged: onFiltersChanged,
@@ -638,6 +646,11 @@ class _HomeScreenState extends State<HomeScreen>
           showHolderFilter: showHolderFilter,
           showTagFilter: showTagFilter,
           showHighlyRatedFilter: showHighlyRatedFilter,
+          showBoardgameGenreFilter:
+              widget.category == CollectionCategory.boardgame,
+          boardgameGenres: widget.category == CollectionCategory.boardgame
+              ? distinctBoardgameGenres(items)
+              : const [],
           onShakePick: onShakePick,
         ),
         Padding(

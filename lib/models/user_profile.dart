@@ -8,6 +8,10 @@ class UserProfile {
   final String? showcaseToken;
   /// Wishlist visible par les amis (défaut : oui).
   final bool shareWishlist;
+  final bool hideCollectionFromNonFriends;
+  final bool hideCollectionFromFriends;
+  /// Jusqu'à 6 objets « trophées » (ordre conservé).
+  final List<String> favoriteItemIds;
 
   const UserProfile({
     required this.id,
@@ -18,6 +22,9 @@ class UserProfile {
     this.showcasePublic = false,
     this.showcaseToken,
     this.shareWishlist = true,
+    this.hideCollectionFromNonFriends = true,
+    this.hideCollectionFromFriends = false,
+    this.favoriteItemIds = const [],
   });
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
@@ -30,7 +37,17 @@ class UserProfile {
       showcasePublic: json['showcase_public'] as bool? ?? false,
       showcaseToken: json['showcase_token'] as String?,
       shareWishlist: json['share_wishlist'] as bool? ?? true,
+      hideCollectionFromNonFriends:
+          json['hide_collection_from_non_friends'] as bool? ?? true,
+      hideCollectionFromFriends:
+          json['hide_collection_from_friends'] as bool? ?? false,
+      favoriteItemIds: _parseFavoriteIds(json['favorite_item_ids']),
     );
+  }
+
+  static List<String> _parseFavoriteIds(dynamic raw) {
+    if (raw is! List) return [];
+    return raw.map((e) => e.toString()).toList();
   }
 
   String get initial =>

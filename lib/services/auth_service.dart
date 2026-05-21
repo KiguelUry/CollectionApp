@@ -40,4 +40,13 @@ class AuthService {
   Future<void> signOut() async {
     await _supabase.auth.signOut();
   }
+
+  /// Envoie un e-mail de réinitialisation (lien Supabase Auth).
+  Future<void> sendPasswordResetEmail(String email) async {
+    final trimmed = email.trim();
+    if (trimmed.isEmpty) {
+      throw Exception('Indique l\'adresse e-mail du compte');
+    }
+    await _supabase.auth.resetPasswordForEmail(trimmed);
+  }
 }

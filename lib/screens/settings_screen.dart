@@ -80,9 +80,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Padding(
             padding: const EdgeInsets.all(16),
             child: Text(
-              'Le partage de wishlist est synchronisé sur ton profil Supabase. '
-              'Les autres options de confidentialité sont encore locales sur '
-              'cet appareil.',
+              'Ces réglages sont enregistrés sur ton profil Supabase et '
+              'appliqués par la base de données.',
               style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
             ),
           ),

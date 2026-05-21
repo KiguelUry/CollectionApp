@@ -49,14 +49,6 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
   Future<void> _load() async {
     setState(() => _loadingCounts = true);
 
-    final userId = Supabase.instance.client.auth.currentUser!.id;
-    final rows = await CollectionItemScope.personal(
-      Supabase.instance.client
-          .from('collection_items')
-          .select('category, is_wishlist'),
-      userId: userId,
-    );
-
     final counts = {
       for (final c in CollectionCategory.values) c: 0,
     };
@@ -66,37 +58,55 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     final wishCounts = {
       for (final c in CollectionCategory.values) c: 0,
     };
-    for (final row in rows as List) {
-      final cat = CollectionCategory.fromDbValue(row['category'] as String);
-      final isWishlist = row['is_wishlist'] as bool? ?? false;
-      if (isWishlist) {
-        wishCounts[cat] = (wishCounts[cat] ?? 0) + 1;
-      } else {
-        counts[cat] = (counts[cat] ?? 0) + 1;
-      }
-    }
-
-    final groupIds = await CollectionItemScope.myGroupIds(userId);
-    if (groupIds.isNotEmpty) {
-      final gRows = await Supabase.instance.client
-          .from('collection_items')
-          .select('category, is_wishlist, is_sold, is_for_sale')
-          .inFilter('group_id', groupIds);
-      for (final row in gRows as List) {
-        final isWishlist = row['is_wishlist'] as bool? ?? false;
-        final isSold = row['is_sold'] as bool? ?? false;
-        final isForSale = row['is_for_sale'] as bool? ?? false;
-        if (isWishlist || isSold || isForSale) continue;
-        final cat =
-            CollectionCategory.fromDbValue(row['category'] as String);
-        groupCounts[cat] = (groupCounts[cat] ?? 0) + 1;
-      }
-    }
-
     CollectionSummary summary = const CollectionSummary();
+    String? loadError;
+
     try {
-      summary = await _statsService.fetchSummary();
-    } catch (_) {}
+      final userId = Supabase.instance.client.auth.currentUser!.id;
+      final rows = await CollectionItemScope.personal(
+        Supabase.instance.client
+            .from('collection_items')
+            .select('category, is_wishlist'),
+        userId: userId,
+      );
+
+      for (final row in rows as List) {
+        final cat = CollectionCategory.fromDbValue(row['category'] as String);
+        final isWishlist = row['is_wishlist'] as bool? ?? false;
+        if (isWishlist) {
+          wishCounts[cat] = (wishCounts[cat] ?? 0) + 1;
+        } else {
+          counts[cat] = (counts[cat] ?? 0) + 1;
+        }
+      }
+
+      try {
+        final groupIds = await CollectionItemScope.myGroupIds(userId);
+        if (groupIds.isNotEmpty) {
+          final gRows = await Supabase.instance.client
+              .from('collection_items')
+              .select('category, is_wishlist, is_sold, is_for_sale')
+              .inFilter('group_id', groupIds);
+          for (final row in gRows as List) {
+            final isWishlist = row['is_wishlist'] as bool? ?? false;
+            final isSold = row['is_sold'] as bool? ?? false;
+            final isForSale = row['is_for_sale'] as bool? ?? false;
+            if (isWishlist || isSold || isForSale) continue;
+            final cat =
+                CollectionCategory.fromDbValue(row['category'] as String);
+            groupCounts[cat] = (groupCounts[cat] ?? 0) + 1;
+          }
+        }
+      } catch (_) {
+        // group_members RLS : compteurs perso OK, groupes ignorés
+      }
+
+      try {
+        summary = await _statsService.fetchSummary();
+      } catch (_) {}
+    } catch (e) {
+      loadError = e.toString();
+    }
 
     if (mounted) {
       setState(() {
@@ -106,6 +116,20 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
         _summary = summary;
         _loadingCounts = false;
       });
+      if (loadError != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              loadError.contains('infinite recursion')
+                  ? 'Erreur base de données (groupes). '
+                      'Exécute supabase/schema_rls_group_members_fix.sql '
+                      'dans Supabase.'
+                  : 'Chargement partiel : $loadError',
+            ),
+            duration: const Duration(seconds: 8),
+          ),
+        );
+      }
     }
   }
 

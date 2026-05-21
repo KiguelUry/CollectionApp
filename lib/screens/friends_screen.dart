@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/friend_service.dart';
 import '../widgets/add_friend_sheet.dart';
 import '../widgets/app_app_bar.dart';
+import '../widgets/friends_activity_feed.dart';
 import '../widgets/profile_avatar.dart';
 import 'friend_collection_screen.dart';
 
@@ -74,7 +75,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
           username: friend['username'] as String,
           avatarUrl: friend['avatar_url'] as String?,
           accentColor: friend['accent_color'] as String?,
-          shareCollections: true,
+          shareCollections: friend['share_collections'] as bool? ?? false,
         ),
       ),
     );
@@ -115,25 +116,8 @@ class _FriendsScreenState extends State<FriendsScreen> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppAppBar(
-        title: 'Amis',
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.person_add),
-            tooltip: 'Ajouter un ami',
-            onPressed: _openAddFriend,
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _openAddFriend,
-        tooltip: 'Ajouter un ami',
-        child: const Icon(Icons.person_add),
-      ),
-      body: Column(
+  Widget _buildFriendsList() {
+    return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
@@ -262,6 +246,41 @@ class _FriendsScreenState extends State<FriendsScreen> {
                           ),
           ),
         ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        appBar: AppAppBar(
+          title: 'Amis',
+          bottom: const TabBar(
+            tabs: [
+              Tab(text: 'Activité'),
+              Tab(text: 'Mes amis'),
+            ],
+          ),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.person_add),
+              tooltip: 'Ajouter un ami',
+              onPressed: _openAddFriend,
+            ),
+          ],
+        ),
+        floatingActionButton: FloatingActionButton(
+          onPressed: _openAddFriend,
+          tooltip: 'Ajouter un ami',
+          child: const Icon(Icons.person_add),
+        ),
+        body: TabBarView(
+          children: [
+            const FriendsActivityFeed(),
+            _buildFriendsList(),
+          ],
+        ),
       ),
     );
   }

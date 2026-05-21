@@ -3,7 +3,10 @@ import 'dart:typed_data';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/collection_item.dart';
 import '../models/user_profile.dart';
+import '../utils/collection_item_filters.dart';
+import 'activity_service.dart';
 
 class ProfileService {
   final _client = Supabase.instance.client;
@@ -64,18 +67,55 @@ class ProfileService {
     return 'user_${user.id.substring(0, 8)}';
   }
 
+  static const _profileSelectFull =
+      'id, username, bio, avatar_url, accent_color, showcase_public, '
+      'showcase_token, share_wishlist, hide_collection_from_non_friends, '
+      'hide_collection_from_friends, favorite_item_ids';
+
+  static const _profileSelectLegacy =
+      'id, username, bio, avatar_url, accent_color, showcase_public, '
+      'showcase_token, share_wishlist';
+
+  Future<Map<String, dynamic>> _fetchProfileRow(
+    String profileId, {
+    required String columns,
+  }) async {
+    final row =
+        await _client.from('profiles').select(columns).eq('id', profileId).single();
+    return Map<String, dynamic>.from(row);
+  }
+
   Future<UserProfile> fetchCurrentProfile() async {
     final id = _userId;
     if (id == null) throw Exception('Non connecté');
-
-    final row = await _client.from('profiles').select().eq('id', id).single();
-    return UserProfile.fromJson(Map<String, dynamic>.from(row));
+    return UserProfile.fromJson(await _fetchProfileRowSafe(id));
   }
 
   Future<UserProfile> fetchProfile(String profileId) async {
-    final row =
-        await _client.from('profiles').select().eq('id', profileId).single();
-    return UserProfile.fromJson(Map<String, dynamic>.from(row));
+    return UserProfile.fromJson(await _fetchProfileRowSafe(profileId));
+  }
+
+  Future<Map<String, dynamic>> _fetchProfileRowSafe(String profileId) async {
+    try {
+      return await _fetchProfileRow(profileId, columns: _profileSelectFull);
+    } on PostgrestException catch (e) {
+      if (!_isMissingColumnError(e)) rethrow;
+      final row =
+          await _fetchProfileRow(profileId, columns: _profileSelectLegacy);
+      return {
+        ...row,
+        'hide_collection_from_non_friends': true,
+        'hide_collection_from_friends': false,
+        'favorite_item_ids': <String>[],
+      };
+    }
+  }
+
+  static bool _isMissingColumnError(PostgrestException e) {
+    return e.code == '42703' ||
+        e.message.contains('does not exist') ||
+        e.message.contains('favorite_item_ids') ||
+        e.message.contains('hide_collection');
   }
 
   Future<UserProfile> updateProfile(UserProfile profile) async {
@@ -156,5 +196,75 @@ class ProfileService {
         .from('profiles')
         .update({'share_wishlist': share})
         .eq('id', id);
+  }
+
+  Future<List<CollectionItem>> fetchFavoriteItems(List<String> itemIds) async {
+    if (itemIds.isEmpty) return [];
+
+    final rows = await _client
+        .from('collection_items')
+        .select('*, locations(label), groups(name)')
+        .inFilter('id', itemIds);
+
+    final byId = <String, CollectionItem>{};
+    for (final row in rows as List) {
+      final item = CollectionItem.fromJson(Map<String, dynamic>.from(row));
+      if (isActiveCollectionItem(item)) byId[item.id] = item;
+    }
+
+    return [
+      for (final id in itemIds)
+        if (byId.containsKey(id)) byId[id]!,
+    ];
+  }
+
+  Future<List<CollectionItem>> fetchPickableTrophyCandidates() async {
+    final id = _userId;
+    if (id == null) return [];
+
+    final rows = await _client
+        .from('collection_items')
+        .select('*, locations(label), groups(name)')
+        .or('added_by.eq.$id,location_user_id.eq.$id')
+        .eq('is_wishlist', false)
+        .order('title')
+        .limit(120);
+
+    return (rows as List)
+        .map((r) => CollectionItem.fromJson(Map<String, dynamic>.from(r)))
+        .where(isActiveCollectionItem)
+        .toList();
+  }
+
+  Future<UserProfile> updateFavoriteItemIds(List<String> ids) async {
+    final userId = _userId;
+    if (userId == null) throw Exception('Non connecté');
+    if (ids.length > 6) {
+      throw Exception('6 trophées maximum');
+    }
+
+    final row = await _client
+        .from('profiles')
+        .update({'favorite_item_ids': ids})
+        .eq('id', userId)
+        .select()
+        .single();
+
+    await ActivityService().logTrophiesUpdated();
+
+    return UserProfile.fromJson(Map<String, dynamic>.from(row));
+  }
+
+  Future<void> updateCollectionPrivacy({
+    required bool hideFromNonFriends,
+    required bool hideFromFriends,
+  }) async {
+    final id = _userId;
+    if (id == null) throw Exception('Non connecté');
+
+    await _client.from('profiles').update({
+      'hide_collection_from_non_friends': hideFromNonFriends,
+      'hide_collection_from_friends': hideFromFriends,
+    }).eq('id', id);
   }
 }

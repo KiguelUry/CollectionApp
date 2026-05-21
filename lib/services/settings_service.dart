@@ -39,14 +39,21 @@ class SettingsService extends ChangeNotifier {
         _prefs!.getBool(_keyShareWishlist) ?? true;
     _loaded = true;
     notifyListeners();
-    _syncShareWishlistFromProfile();
+    _syncPrivacyFromProfile();
   }
 
-  Future<void> _syncShareWishlistFromProfile() async {
+  Future<void> _syncPrivacyFromProfile() async {
     try {
       final profile = await ProfileService().fetchCurrentProfile();
       shareWishlistWithFriends = profile.shareWishlist;
+      hideCollectionFromNonFriends = profile.hideCollectionFromNonFriends;
+      hideCollectionFromFriends = profile.hideCollectionFromFriends;
       await _prefs?.setBool(_keyShareWishlist, shareWishlistWithFriends);
+      await _prefs?.setBool(
+        _keyHideFromNonFriends,
+        hideCollectionFromNonFriends,
+      );
+      await _prefs?.setBool(_keyHideFromFriends, hideCollectionFromFriends);
       notifyListeners();
     } catch (_) {
       // Colonne absente ou hors ligne : préférence locale conservée
@@ -69,12 +76,25 @@ class SettingsService extends ChangeNotifier {
     hideCollectionFromNonFriends = value;
     await _prefs?.setBool(_keyHideFromNonFriends, value);
     notifyListeners();
+    await _pushCollectionPrivacy();
   }
 
   Future<void> setHideFromFriends(bool value) async {
     hideCollectionFromFriends = value;
     await _prefs?.setBool(_keyHideFromFriends, value);
     notifyListeners();
+    await _pushCollectionPrivacy();
+  }
+
+  Future<void> _pushCollectionPrivacy() async {
+    try {
+      await ProfileService().updateCollectionPrivacy(
+        hideFromNonFriends: hideCollectionFromNonFriends,
+        hideFromFriends: hideCollectionFromFriends,
+      );
+    } catch (_) {
+      // Migration SQL non appliquée
+    }
   }
 
   Future<void> setShareWishlistWithFriends(bool value) async {

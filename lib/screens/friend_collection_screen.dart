@@ -59,6 +59,18 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
       _error = null;
     });
 
+    if (!widget.shareCollections) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error =
+              'Collections non partagées. Active « Collections partagées » '
+              'dans le menu de cet ami.';
+        });
+      }
+      return;
+    }
+
     try {
       _collectionItems = await _friendService.fetchFriendCollectionItems(
         widget.profileId,

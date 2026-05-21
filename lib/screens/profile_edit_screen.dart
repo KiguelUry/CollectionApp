@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import '../models/collection_item.dart';
 import '../models/user_profile.dart';
 import '../services/profile_service.dart';
 import '../services/showcase_service.dart';
+import '../widgets/profile/trophy_picker_sheet.dart';
+import '../widgets/profile/trophy_tree.dart';
 import '../widgets/profile_avatar.dart';
 
 class ProfileEditScreen extends StatefulWidget {
@@ -22,6 +25,9 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   bool _loading = true;
   bool _saving = false;
   bool _uploadingAvatar = false;
+  bool _savingTrophies = false;
+  final List<String?> _trophySlotIds = List.filled(6, null);
+  final List<CollectionItem?> _trophySlots = List.filled(6, null);
 
   @override
   void initState() {
@@ -41,11 +47,20 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     try {
       final p = await _service.fetchCurrentProfile();
       if (!mounted) return;
+      final ids = p.favoriteItemIds;
+      for (var i = 0; i < 6; i++) {
+        _trophySlotIds[i] = i < ids.length ? ids[i] : null;
+      }
+      final trophies = await _service.fetchFavoriteItems(ids);
+      if (!mounted) return;
       setState(() {
         _profile = p;
         _usernameController.text = p.username;
         _bioController.text = p.bio ?? '';
         _accentColor = p.accentColor;
+        for (var i = 0; i < 6; i++) {
+          _trophySlots[i] = i < trophies.length ? trophies[i] : null;
+        }
         _loading = false;
       });
     } catch (e) {
@@ -99,6 +114,93 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       }
     } finally {
       if (mounted) setState(() => _uploadingAvatar = false);
+    }
+  }
+
+  Future<void> _onTrophySlotTap(int index) async {
+    if (_profile == null) return;
+
+    final existing = _trophySlots[index];
+    if (existing != null) {
+      final action = await showModalBottomSheet<String>(
+        context: context,
+        showDragHandle: true,
+        builder: (ctx) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.swap_horiz),
+                title: const Text('Remplacer'),
+                onTap: () => Navigator.pop(ctx, 'replace'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: Colors.red),
+                title: const Text('Retirer de l\'arbre'),
+                onTap: () => Navigator.pop(ctx, 'remove'),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (action == 'remove') {
+        setState(() {
+          _trophySlotIds[index] = null;
+          _trophySlots[index] = null;
+        });
+        await _persistTrophies();
+      } else if (action != 'replace') {
+        return;
+      }
+    }
+
+    final candidates = await _service.fetchPickableTrophyCandidates();
+    if (!mounted) return;
+    final picked = await showTrophyPickerSheet(
+      context,
+      candidates: candidates,
+      alreadyPickedIds: _trophySlotIds.whereType<String>().toSet(),
+    );
+    if (picked == null || !mounted) return;
+
+    setState(() {
+      _trophySlotIds[index] = picked.id;
+      _trophySlots[index] = picked;
+    });
+    await _persistTrophies();
+  }
+
+  Future<void> _persistTrophies() async {
+    setState(() => _savingTrophies = true);
+    try {
+      final ids = [
+        for (var i = 0; i < 6; i++)
+          if (_trophySlotIds[i] != null) _trophySlotIds[i]!,
+      ];
+      final updated = await _service.updateFavoriteItemIds(ids);
+      final items = await _service.fetchFavoriteItems(updated.favoriteItemIds);
+      if (!mounted) return;
+      setState(() {
+        _profile = updated;
+        for (var i = 0; i < 6; i++) {
+          _trophySlotIds[i] =
+              i < updated.favoriteItemIds.length ? updated.favoriteItemIds[i] : null;
+          _trophySlots[i] = i < items.length ? items[i] : null;
+        }
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Trophées mis à jour')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _savingTrophies = false);
     }
   }
 
@@ -249,6 +351,32 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                         ),
                       );
                     }).toList(),
+                  ),
+                  const SizedBox(height: 28),
+                  Text(
+                    'Mon arbre à trophées',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '6 coups de cœur sur les branches — visible par tes amis.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                  ),
+                  const SizedBox(height: 12),
+                  if (_savingTrophies)
+                    const Padding(
+                      padding: EdgeInsets.all(8),
+                      child: LinearProgressIndicator(),
+                    ),
+                  TrophyTree(
+                    slots: _trophySlots,
+                    accentColor: accent,
+                    editable: true,
+                    onSlotTap: _onTrophySlotTap,
                   ),
                   const SizedBox(height: 24),
                   Card(

@@ -17,6 +17,8 @@ class CollectionFilterBar extends StatelessWidget {
   final bool showHolderFilter;
   final bool showTagFilter;
   final bool showHighlyRatedFilter;
+  final bool showBoardgameGenreFilter;
+  final List<String> boardgameGenres;
   final VoidCallback? onShakePick;
   final TextEditingController? searchController;
 
@@ -34,6 +36,8 @@ class CollectionFilterBar extends StatelessWidget {
     this.showHolderFilter = false,
     this.showTagFilter = true,
     this.showHighlyRatedFilter = true,
+    this.showBoardgameGenreFilter = false,
+    this.boardgameGenres = const [],
     this.onShakePick,
   });
 
@@ -82,31 +86,36 @@ class CollectionFilterBar extends StatelessWidget {
                   tooltip: 'Trier',
                   initialValue: filters.sort,
                   onSelected: (s) => onChanged(filters.copyWith(sort: s)),
-                  itemBuilder: (context) => const [
-                    PopupMenuItem(
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(
                       value: CollectionSort.titleAsc,
                       child: Text('Titre A → Z'),
                     ),
-                    PopupMenuItem(
+                    const PopupMenuItem(
                       value: CollectionSort.titleDesc,
                       child: Text('Titre Z → A'),
                     ),
-                    PopupMenuItem(
+                    const PopupMenuItem(
                       value: CollectionSort.newestFirst,
                       child: Text('Plus récents'),
                     ),
-                    PopupMenuItem(
+                    const PopupMenuItem(
                       value: CollectionSort.oldestFirst,
                       child: Text('Plus anciens'),
                     ),
-                    PopupMenuItem(
+                    const PopupMenuItem(
                       value: CollectionSort.ratingDesc,
                       child: Text('Mieux notés'),
                     ),
-                    PopupMenuItem(
+                    const PopupMenuItem(
                       value: CollectionSort.quantityDesc,
                       child: Text('Quantité'),
                     ),
+                    if (showBoardgameGenreFilter)
+                      const PopupMenuItem(
+                        value: CollectionSort.genreAsc,
+                        child: Text('Genre BGG'),
+                      ),
                   ],
                   child: Padding(
                     padding: const EdgeInsets.all(8),
@@ -167,6 +176,18 @@ class CollectionFilterBar extends StatelessWidget {
                       id: t.id,
                       color: t.color,
                     ),
+                  ),
+                ],
+              ),
+            ],
+            if (showBoardgameGenreFilter && boardgameGenres.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              _horizontalChips(
+                height: 36,
+                children: [
+                  _genreChip(context, label: 'Tous genres', genre: null),
+                  ...boardgameGenres.map(
+                    (g) => _genreChip(context, label: g, genre: g),
                   ),
                 ],
               ),
@@ -364,6 +385,24 @@ class CollectionFilterBar extends StatelessWidget {
         filters.copyWith(tagId: id, clearTag: id == null),
       ),
       backgroundColor: color?.withValues(alpha: 0.15),
+    );
+  }
+
+  Widget _genreChip(
+    BuildContext context, {
+    required String label,
+    required String? genre,
+  }) {
+    final selected = filters.boardgameGenre == genre;
+    return _filterChip(
+      label: label,
+      selected: selected,
+      onTap: () => onChanged(
+        filters.copyWith(
+          boardgameGenre: genre,
+          clearBoardgameGenre: genre == null,
+        ),
+      ),
     );
   }
 
