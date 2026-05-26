@@ -1,0 +1,21 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Collection — splash pixel (normal)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart"
+    },
+    {
+      "name": "Collection — dev rapide (sans splash)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "toolArgs": [
+        "--dart-define=DEV_SKIP_SPLASH=true",
+        "--dart-define=DEV_FAST_START=true"
+      ]
+    }
+  ]
+}
