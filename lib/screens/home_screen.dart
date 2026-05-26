@@ -24,7 +24,6 @@ import '../widgets/collection_item_list_tile.dart';
 import '../widgets/collection_item_tile.dart';
 import '../widgets/isbn_scan_sheet.dart';
 import 'shake_pick_screen.dart';
-import '../utils/shake_pick_filters.dart';
 import '../widgets/add_item_manual_dialog.dart';
 import '../widgets/add_item_options_dialog.dart';
 import '../widgets/bgg_search_dialog.dart';

@@ -40,7 +40,7 @@ class ProfileAvatar extends StatelessWidget {
           child: Image.network(
             avatarUrl!,
             fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => _initialCircle(accent, initial),
+            errorBuilder: (_, _, _) => _initialCircle(accent, initial),
             loadingBuilder: (context, child, progress) {
               if (progress == null) return child;
               return _initialCircle(

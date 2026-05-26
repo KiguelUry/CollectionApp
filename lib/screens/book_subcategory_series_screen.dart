@@ -9,7 +9,6 @@ import '../services/book_series_service.dart';
 import '../widgets/app_app_bar.dart';
 import '../widgets/author_avatar.dart';
 import '../widgets/book_series_tile.dart';
-import '../widgets/create_book_series_dialog.dart';
 import 'book_author_detail_screen.dart';
 import 'book_series_detail_screen.dart';
 import 'item_detail_screen.dart';
