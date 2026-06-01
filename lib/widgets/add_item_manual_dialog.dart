@@ -1,16 +1,24 @@
 import 'package:flutter/material.dart';
 import '../models/book_subcategory.dart';
+import '../models/card_subcategory.dart';
+import '../models/category_metadata.dart';
 import '../models/collection_category.dart';
 import 'category_metadata_fields.dart';
 
 class AddItemManualDialog extends StatefulWidget {
   final String categoryLabel;
   final CollectionCategory category;
+  final CardSubcategory? initialCardSubcategory;
+  final MediaFormat? initialMediaFormat;
+  final bool lockSubcategory;
 
   const AddItemManualDialog({
     super.key,
     required this.categoryLabel,
     required this.category,
+    this.initialCardSubcategory,
+    this.initialMediaFormat,
+    this.lockSubcategory = false,
   });
 
   @override
@@ -81,6 +89,12 @@ class _AddItemManualDialogState extends State<AddItemManualDialog> {
                 CategoryMetadataFields(
                   key: _metadataKey,
                   category: widget.category,
+                  initialCardSubcategory: widget.initialCardSubcategory,
+                  initialMediaFormat: widget.initialMediaFormat,
+                  lockCardSubcategory: widget.lockSubcategory &&
+                      widget.category == CollectionCategory.card,
+                  lockMediaFormat: widget.lockSubcategory &&
+                      widget.category == CollectionCategory.media,
                 ),
               ],
             ],

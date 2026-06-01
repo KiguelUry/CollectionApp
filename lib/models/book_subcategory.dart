@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+
 /// Sous-type pour la catégorie Livres (manga, BD, roman, etc.)
 enum BookSubcategory {
   manga,
@@ -12,6 +14,34 @@ enum BookSubcategory {
         BookSubcategory.comic => 'BD / Comics',
         BookSubcategory.novel => 'Roman',
         BookSubcategory.other => 'Autre',
+      };
+
+  String get description => switch (this) {
+        BookSubcategory.manga => 'Séries, tomes, scan ISBN',
+        BookSubcategory.comic => 'Albums & séries BD',
+        BookSubcategory.novel => 'Romans & essais',
+        BookSubcategory.other => 'Tous types de livres',
+      };
+
+  String get searchHint => switch (this) {
+        BookSubcategory.manga => 'One Piece, Naruto, Demon Slayer…',
+        BookSubcategory.comic => 'Astérix, Tintin, Blake…',
+        BookSubcategory.novel => 'Titre ou auteur…',
+        BookSubcategory.other => 'Titre du livre…',
+      };
+
+  IconData get icon => switch (this) {
+        BookSubcategory.manga => Icons.auto_stories_rounded,
+        BookSubcategory.comic => Icons.menu_book_rounded,
+        BookSubcategory.novel => Icons.import_contacts_rounded,
+        BookSubcategory.other => Icons.book_rounded,
+      };
+
+  Color get color => switch (this) {
+        BookSubcategory.manga => Colors.deepOrange,
+        BookSubcategory.comic => Colors.teal,
+        BookSubcategory.novel => Colors.indigo,
+        BookSubcategory.other => Colors.blueGrey,
       };
 
   static BookSubcategory fromDbValue(String? value) {

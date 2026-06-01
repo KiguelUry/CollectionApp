@@ -4,7 +4,13 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/book_subcategory.dart';
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
+import '../models/card_subcategory.dart';
+import '../models/category_metadata.dart';
+import '../models/media_format_ui.dart';
 import '../services/bgg_service.dart';
+import '../services/book_catalog_service.dart';
+import '../services/card_catalog_service.dart';
+import '../services/media_catalog_service.dart';
 import '../services/profile_service.dart';
 import '../utils/boardgame_genres.dart';
 import '../utils/collection_grid_grouper.dart';
@@ -16,7 +22,6 @@ import '../models/collection_view_mode.dart';
 import '../models/item_tag.dart';
 import '../models/storage_location.dart';
 import '../services/location_service.dart';
-import '../services/open_library_service.dart';
 import '../services/tag_service.dart';
 import '../widgets/collection_filter_bar.dart';
 import '../widgets/wishlist_suggestions_banner.dart';
@@ -27,15 +32,27 @@ import 'shake_pick_screen.dart';
 import '../widgets/add_item_manual_dialog.dart';
 import '../widgets/add_item_options_dialog.dart';
 import '../widgets/bgg_search_dialog.dart';
-import '../widgets/book_search_dialog.dart';
+import '../widgets/book_search_dialog.dart' show showBookSearch;
+import '../widgets/card_search_dialog.dart' show showCardSearch;
+import '../widgets/media_search_dialog.dart' show showMediaSearch;
+import '../widgets/ui/add_option_tile.dart';
 import '../widgets/book_subcategory_picker.dart';
 import '../widgets/app_app_bar.dart';
 import 'item_detail_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final CollectionCategory category;
+  final String? screenTitle;
+  final CardSubcategory? fixedCardSubcategory;
+  final MediaFormat? fixedMediaFormat;
 
-  const HomeScreen({super.key, required this.category});
+  const HomeScreen({
+    super.key,
+    required this.category,
+    this.screenTitle,
+    this.fixedCardSubcategory,
+    this.fixedMediaFormat,
+  });
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -114,7 +131,7 @@ class _HomeScreenState extends State<HomeScreen>
       ),
     );
 
-    final book = await OpenLibraryService.lookupByIsbn(isbn);
+    final book = await BookCatalogService.lookupByIsbn(isbn);
 
     if (!mounted) return;
     Navigator.pop(context);
@@ -144,11 +161,7 @@ class _HomeScreenState extends State<HomeScreen>
       title: book['title']!,
       imageUrl: book['image_url']?.isNotEmpty == true ? book['image_url'] : null,
       subcategory: subcategory.dbValue,
-      metadata: {
-        if ((book['author'] ?? '').isNotEmpty) 'author': book['author']!,
-        if ((book['year'] ?? '').isNotEmpty) 'year': book['year']!,
-        if ((book['isbn'] ?? '').isNotEmpty) 'isbn': book['isbn']!,
-      },
+      metadata: BookCatalogService.metadataFromLookup(book),
     );
   }
 
@@ -169,9 +182,150 @@ class _HomeScreenState extends State<HomeScreen>
       }
     } else if (widget.category.supportsOpenLibrarySearch) {
       _showBookSearchDialog();
+    } else if (widget.category == CollectionCategory.card) {
+      _showCardAddChooser();
+    } else if (widget.category == CollectionCategory.media) {
+      _showMediaAddChooser();
     } else {
       _showManualAddFlow();
     }
+  }
+
+  void _showCardAddChooser() {
+    final sub =
+        widget.fixedCardSubcategory ?? CardSubcategory.other;
+    final canSearch = CardCatalogService.supportsSearch(sub);
+
+    if (!canSearch) {
+      _showManualAddFlow(
+        cardSubcategory: sub,
+      );
+      return;
+    }
+
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Ajouter — ${sub.label}',
+                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+              const SizedBox(height: 12),
+              AddOptionTile(
+                icon: Icons.search_rounded,
+                color: sub.color,
+                title: 'Chercher dans le catalogue',
+                subtitle: CardCatalogService.catalogLabel(sub),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showCardSearchDialog(sub);
+                },
+              ),
+              const SizedBox(height: 8),
+              AddOptionTile(
+                icon: Icons.edit_outlined,
+                color: sub.color,
+                title: 'Saisir à la main',
+                subtitle: 'Titre, état, photo…',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showManualAddFlow(cardSubcategory: sub);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showCardSearchDialog(CardSubcategory sub) {
+    showCardSearch(
+      context,
+      subcategory: sub,
+      onManualEntry: () => _showManualAddFlow(cardSubcategory: sub),
+    ).then((card) {
+      if (card == null || !mounted) return;
+      _showOptionsDialog(
+        title: card['title']!,
+        imageUrl: card['image_url']?.isNotEmpty == true ? card['image_url'] : null,
+        subcategory: sub.dbValue,
+        metadata: CardCatalogService.metadataFromResult(card, sub),
+      );
+    });
+  }
+
+  void _showMediaAddChooser() {
+    final format = widget.fixedMediaFormat ?? MediaFormat.vinyl;
+
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Ajouter — ${format.label}',
+                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+              const SizedBox(height: 12),
+              AddOptionTile(
+                icon: Icons.search_rounded,
+                color: format.color,
+                title: 'Rechercher / scanner',
+                subtitle: MediaCatalogService.catalogLabel(format: format),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showMediaSearchDialog(format);
+                },
+              ),
+              const SizedBox(height: 8),
+              AddOptionTile(
+                icon: Icons.edit_outlined,
+                color: format.color,
+                title: 'Saisir à la main',
+                subtitle: 'Titre, artiste, photo…',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showManualAddFlow(mediaFormat: format);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showMediaSearchDialog(MediaFormat format) {
+    showMediaSearch(
+      context,
+      format: format,
+      onManualEntry: () => _showManualAddFlow(mediaFormat: format),
+    ).then((album) {
+      if (album == null || !mounted) return;
+      final meta = MediaCatalogService.metadataFromLookup(album, format);
+      _showOptionsDialog(
+        title: album['title']!,
+        imageUrl: album['image_url']?.isNotEmpty == true ? album['image_url'] : null,
+        metadata: meta,
+      );
+    });
   }
 
   void _showBoardgameAddChooser() {
@@ -268,29 +422,47 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void _showBookSearchDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => BookSearchDialog(
-        onBookSelected: (book, subcategory) => _showOptionsDialog(
-          title: book['title']!,
-          imageUrl: book['image_url']!.isEmpty ? null : book['image_url'],
-          subcategory: subcategory.dbValue,
-          metadata: {
-            if ((book['author'] ?? '').isNotEmpty) 'author': book['author']!,
-            if ((book['year'] ?? '').isNotEmpty) 'year': book['year']!,
-          },
-          closesTwoDialogs: true,
-        ),
+    showBookSearch(
+      context,
+      onManualEntry: _showManualAddFlow,
+      onBookSelected: (book, subcategory) => _showOptionsDialog(
+        title: book['title']!,
+        imageUrl: book['image_url']!.isEmpty ? null : book['image_url'],
+        subcategory: subcategory.dbValue,
+        metadata: BookCatalogService.metadataFromLookup(book),
+        closesTwoDialogs: true,
       ),
     );
   }
 
-  Future<void> _showManualAddFlow() async {
+  List<CollectionItem> _filterHubScope(List<CollectionItem> items) {
+    final cardSub = widget.fixedCardSubcategory;
+    if (cardSub != null) {
+      return items.where((i) => i.subcategory == cardSub.dbValue).toList();
+    }
+    final mediaFmt = widget.fixedMediaFormat;
+    if (mediaFmt != null) {
+      return items
+          .where((i) => i.metadata?['format']?.toString() == mediaFmt.dbValue)
+          .toList();
+    }
+    return items;
+  }
+
+  Future<void> _showManualAddFlow({
+    CardSubcategory? cardSubcategory,
+    MediaFormat? mediaFormat,
+  }) async {
     final draft = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (context) => AddItemManualDialog(
-        categoryLabel: widget.category.label,
+        categoryLabel: widget.screenTitle ?? widget.category.label,
         category: widget.category,
+        initialCardSubcategory:
+            cardSubcategory ?? widget.fixedCardSubcategory,
+        initialMediaFormat: mediaFormat ?? widget.fixedMediaFormat,
+        lockSubcategory:
+            widget.fixedCardSubcategory != null || widget.fixedMediaFormat != null,
       ),
     );
     if (draft == null || !mounted) return;
@@ -475,7 +647,7 @@ class _HomeScreenState extends State<HomeScreen>
   Widget build(BuildContext context) {
     return Scaffold(
         appBar: AppAppBar(
-          title: widget.category.label,
+          title: widget.screenTitle ?? widget.category.label,
           actions: [
             IconButton(
               icon: Icon(
@@ -533,12 +705,12 @@ class _HomeScreenState extends State<HomeScreen>
                     snapshot.data!
                         .map((json) => CollectionItem.fromJson(json))
                         .toList();
-                final collection = allItems
+                final scoped = _filterHubScope(allItems);
+                final collection = scoped
                     .where((item) =>
                         !item.isWishlist && isActiveCollectionItem(item))
                     .toList();
-                final wishlist =
-                    allItems.where((item) => item.isWishlist).toList();
+                final wishlist = scoped.where((item) => item.isWishlist).toList();
 
                 return TabBarView(
                   controller: _tabController,

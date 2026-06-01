@@ -6,8 +6,19 @@ import '../models/collection_category.dart';
 /// Formulaire des champs spécifiques par catégorie (stockés dans `metadata`).
 class CategoryMetadataFields extends StatefulWidget {
   final CollectionCategory category;
+  final CardSubcategory? initialCardSubcategory;
+  final MediaFormat? initialMediaFormat;
+  final bool lockCardSubcategory;
+  final bool lockMediaFormat;
 
-  const CategoryMetadataFields({super.key, required this.category});
+  const CategoryMetadataFields({
+    super.key,
+    required this.category,
+    this.initialCardSubcategory,
+    this.initialMediaFormat,
+    this.lockCardSubcategory = false,
+    this.lockMediaFormat = false,
+  });
 
   @override
   State<CategoryMetadataFields> createState() => CategoryMetadataFieldsState();
@@ -15,7 +26,8 @@ class CategoryMetadataFields extends StatefulWidget {
 
 class CategoryMetadataFieldsState extends State<CategoryMetadataFields> {
   // Cartes
-  CardSubcategory _cardType = CardSubcategory.pokemon;
+  late CardSubcategory _cardType =
+      widget.initialCardSubcategory ?? CardSubcategory.pokemon;
   CardCondition _condition = CardCondition.nearMint;
   bool _isGraded = false;
   GradingCompany _gradingCompany = GradingCompany.psa;
@@ -32,7 +44,8 @@ class CategoryMetadataFieldsState extends State<CategoryMetadataFields> {
   final _rarityController = TextEditingController();
 
   // Média
-  MediaFormat _mediaFormat = MediaFormat.vinyl;
+  late MediaFormat _mediaFormat =
+      widget.initialMediaFormat ?? MediaFormat.vinyl;
   final _discColorController = TextEditingController();
   bool _limitedEdition = false;
   PressingType _pressing = PressingType.original;
@@ -135,14 +148,20 @@ class CategoryMetadataFieldsState extends State<CategoryMetadataFields> {
   }
 
   List<Widget> _cardFields() => [
-        DropdownButtonFormField<CardSubcategory>(
-          initialValue: _cardType,
-          decoration: const InputDecoration(labelText: 'Univers / série'),
-          items: CardSubcategory.values
-              .map((s) => DropdownMenuItem(value: s, child: Text(s.label)))
-              .toList(),
-          onChanged: (v) => setState(() => _cardType = v ?? _cardType),
-        ),
+        if (widget.lockCardSubcategory)
+          InputDecorator(
+            decoration: const InputDecoration(labelText: 'Univers'),
+            child: Text(_cardType.label),
+          )
+        else
+          DropdownButtonFormField<CardSubcategory>(
+            initialValue: _cardType,
+            decoration: const InputDecoration(labelText: 'Univers / série'),
+            items: CardSubcategory.values
+                .map((s) => DropdownMenuItem(value: s, child: Text(s.label)))
+                .toList(),
+            onChanged: (v) => setState(() => _cardType = v ?? _cardType),
+          ),
         const SizedBox(height: 12),
         DropdownButtonFormField<CardCondition>(
           initialValue: _condition,
@@ -223,14 +242,20 @@ class CategoryMetadataFieldsState extends State<CategoryMetadataFields> {
       ];
 
   List<Widget> _mediaFields() => [
-        DropdownButtonFormField<MediaFormat>(
-          initialValue: _mediaFormat,
-          decoration: const InputDecoration(labelText: 'Format'),
-          items: MediaFormat.values
-              .map((f) => DropdownMenuItem(value: f, child: Text(f.label)))
-              .toList(),
-          onChanged: (v) => setState(() => _mediaFormat = v ?? _mediaFormat),
-        ),
+        if (widget.lockMediaFormat)
+          InputDecorator(
+            decoration: const InputDecoration(labelText: 'Format'),
+            child: Text(_mediaFormat.label),
+          )
+        else
+          DropdownButtonFormField<MediaFormat>(
+            initialValue: _mediaFormat,
+            decoration: const InputDecoration(labelText: 'Format'),
+            items: MediaFormat.values
+                .map((f) => DropdownMenuItem(value: f, child: Text(f.label)))
+                .toList(),
+            onChanged: (v) => setState(() => _mediaFormat = v ?? _mediaFormat),
+          ),
         const SizedBox(height: 12),
         TextField(
           controller: _discColorController,

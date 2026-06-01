@@ -95,6 +95,18 @@ enum CollectionCategory {
     );
   }
 
+  /// Masquées du menu principal (données existantes conservées en base).
+  static const Set<CollectionCategory> hiddenFromMenu = {
+    CollectionCategory.car,
+    CollectionCategory.stamp,
+    CollectionCategory.coin,
+  };
+
+  static List<CollectionCategory> get menuValues =>
+      CollectionCategory.values
+          .where((c) => !hiddenFromMenu.contains(c))
+          .toList();
+
   /// Libellé court pour les totaux (ex. « 5 jeux », « 1 livre »).
   String countSummary(int total) {
     if (total == 0) return 'Vide';

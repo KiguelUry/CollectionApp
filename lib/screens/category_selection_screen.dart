@@ -6,10 +6,13 @@ import '../services/collection_stats_service.dart';
 import '../widgets/collapsible_collection_overview.dart';
 import '../widgets/main_drawer.dart';
 import 'books_collection_screen.dart';
+import 'cards_collection_screen.dart';
 import 'home_screen.dart';
+import 'media_collection_screen.dart';
 import 'stats_screen.dart';
 import 'wishlist_overview_screen.dart';
 import '../theme/app_theme.dart';
+import '../utils/app_haptics.dart';
 import '../utils/collection_item_scope.dart';
 
 class CategorySelectionScreen extends StatefulWidget {
@@ -50,13 +53,13 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     setState(() => _loadingCounts = true);
 
     final counts = {
-      for (final c in CollectionCategory.values) c: 0,
+      for (final c in CollectionCategory.menuValues) c: 0,
     };
     final groupCounts = {
-      for (final c in CollectionCategory.values) c: 0,
+      for (final c in CollectionCategory.menuValues) c: 0,
     };
     final wishCounts = {
-      for (final c in CollectionCategory.values) c: 0,
+      for (final c in CollectionCategory.menuValues) c: 0,
     };
     CollectionSummary summary = const CollectionSummary();
     String? loadError;
@@ -134,12 +137,16 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
   }
 
   void _openCategory(CollectionCategory category) {
+    AppHaptics.selection();
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => category == CollectionCategory.book
-            ? const BooksCollectionScreen()
-            : HomeScreen(category: category),
+        builder: (context) => switch (category) {
+          CollectionCategory.book => const BooksCollectionScreen(),
+          CollectionCategory.card => const CardsCollectionScreen(),
+          CollectionCategory.media => const MediaCollectionScreen(),
+          _ => HomeScreen(category: category),
+        },
       ),
     ).then((_) => _load());
   }
@@ -237,9 +244,12 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
                       mainAxisSpacing: 14,
                       childAspectRatio: 0.88,
                     ),
-                    itemCount: CollectionCategory.values.length,
-                    itemBuilder: (context, index) => _buildCategoryCard(
-                      CollectionCategory.values[index],
+                    itemCount: CollectionCategory.menuValues.length,
+                    itemBuilder: (context, index) => _AnimatedCategoryCard(
+                      index: index,
+                      child: _buildCategoryCard(
+                        CollectionCategory.menuValues[index],
+                      ),
                     ),
                   ),
           ),
@@ -313,6 +323,36 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _AnimatedCategoryCard extends StatelessWidget {
+  final int index;
+  final Widget child;
+
+  const _AnimatedCategoryCard({
+    required this.index,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final delay = Duration(milliseconds: 35 * index.clamp(0, 12));
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: Duration(milliseconds: 380 + delay.inMilliseconds),
+      curve: Curves.easeOutCubic,
+      builder: (context, value, _) {
+        return Opacity(
+          opacity: value,
+          child: Transform.translate(
+            offset: Offset(0, 14 * (1 - value)),
+            child: child,
+          ),
+        );
+      },
     );
   }
 }

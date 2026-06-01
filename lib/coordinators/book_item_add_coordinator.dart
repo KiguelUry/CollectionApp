@@ -7,12 +7,13 @@ import '../models/collection_item.dart';
 import '../screens/book_series_detail_screen.dart';
 import '../services/book_series_service.dart';
 import '../services/profile_service.dart';
+import '../services/book_catalog_service.dart';
 import '../services/open_library_service.dart';
 import '../utils/book_title_parser.dart';
 import '../utils/collection_item_scope.dart';
 import '../widgets/add_item_manual_dialog.dart';
 import '../widgets/add_item_options_dialog.dart';
-import '../widgets/book_search_dialog.dart';
+import '../widgets/book_search_dialog.dart' show showBookSearch;
 import '../widgets/book_subcategory_picker.dart';
 import '../widgets/add_volume_to_series_sheet.dart';
 import '../widgets/isbn_scan_sheet.dart';
@@ -27,22 +28,17 @@ class BookItemAddCoordinator {
   final _seriesService = BookSeriesService();
 
   Future<void> openSearch({BookSubcategory? subcategory}) async {
-    showDialog(
-      context: context,
-      builder: (dialogContext) => BookSearchDialog(
-        onBookSelected: (book, sub) {
-          Navigator.pop(dialogContext);
-          _prepareAdd(
-            title: book['title']!,
-            imageUrl: book['image_url']!.isEmpty ? null : book['image_url'],
-            subcategory: subcategory ?? sub,
-            metadata: {
-              if ((book['author'] ?? '').isNotEmpty) 'author': book['author']!,
-              if ((book['year'] ?? '').isNotEmpty) 'year': book['year']!,
-            },
-          );
-        },
-      ),
+    await showBookSearch(
+      context,
+      initialSub: subcategory ?? BookSubcategory.manga,
+      onBookSelected: (book, sub) {
+        _prepareAdd(
+          title: book['title']!,
+          imageUrl: book['image_url']!.isEmpty ? null : book['image_url'],
+          subcategory: subcategory ?? sub,
+          metadata: BookCatalogService.metadataFromLookup(book),
+        );
+      },
     );
   }
 
@@ -68,7 +64,7 @@ class BookItemAddCoordinator {
       ),
     );
 
-    final book = await OpenLibraryService.lookupByIsbn(isbn);
+    final book = await BookCatalogService.lookupByIsbn(isbn);
     if (!context.mounted) return;
     Navigator.pop(context);
 
@@ -90,11 +86,7 @@ class BookItemAddCoordinator {
       title: book['title']!,
       imageUrl: book['image_url']?.isNotEmpty == true ? book['image_url'] : null,
       subcategory: sub,
-      metadata: {
-        if ((book['author'] ?? '').isNotEmpty) 'author': book['author']!,
-        if ((book['year'] ?? '').isNotEmpty) 'year': book['year']!,
-        if ((book['isbn'] ?? '').isNotEmpty) 'isbn': book['isbn']!,
-      },
+      metadata: BookCatalogService.metadataFromLookup(book),
     );
   }
 
@@ -180,27 +172,22 @@ class BookItemAddCoordinator {
     int? expectedVolumeCount,
   }) async {
     if (!context.mounted) return;
-    await showDialog(
-      context: context,
-      builder: (dialogContext) => BookSearchDialog(
-        onBookSelected: (book, _) async {
-          Navigator.pop(dialogContext);
-          if (!context.mounted) return;
-          await _finishVolumeAddFromBook(
-            seriesId: seriesId,
-            seriesName: seriesName,
-            subcategory: subcategory,
-            slotVolumeNumber: volumeNumber,
-            expectedVolumeCount: expectedVolumeCount,
-            title: book['title']!,
-            imageUrl: book['image_url']!.isEmpty ? null : book['image_url'],
-            metadata: {
-              if ((book['author'] ?? '').isNotEmpty) 'author': book['author']!,
-              if ((book['year'] ?? '').isNotEmpty) 'year': book['year']!,
-            },
-          );
-        },
-      ),
+    await showBookSearch(
+      context,
+      initialSub: subcategory,
+      onBookSelected: (book, _) async {
+        if (!context.mounted) return;
+        await _finishVolumeAddFromBook(
+          seriesId: seriesId,
+          seriesName: seriesName,
+          subcategory: subcategory,
+          slotVolumeNumber: volumeNumber,
+          expectedVolumeCount: expectedVolumeCount,
+          title: book['title']!,
+          imageUrl: book['image_url']!.isEmpty ? null : book['image_url'],
+          metadata: BookCatalogService.metadataFromLookup(book),
+        );
+      },
     );
   }
 
@@ -232,7 +219,7 @@ class BookItemAddCoordinator {
       ),
     );
 
-    final book = await OpenLibraryService.lookupByIsbn(isbn);
+    final book = await BookCatalogService.lookupByIsbn(isbn);
     if (!context.mounted) return;
     Navigator.pop(context);
 
@@ -251,11 +238,7 @@ class BookItemAddCoordinator {
       expectedVolumeCount: expectedVolumeCount,
       title: book['title']!,
       imageUrl: book['image_url']?.isNotEmpty == true ? book['image_url'] : null,
-      metadata: {
-        if ((book['author'] ?? '').isNotEmpty) 'author': book['author']!,
-        if ((book['year'] ?? '').isNotEmpty) 'year': book['year']!,
-        if ((book['isbn'] ?? '').isNotEmpty) 'isbn': book['isbn']!,
-      },
+      metadata: BookCatalogService.metadataFromLookup(book),
     );
   }
 
@@ -305,13 +288,11 @@ class BookItemAddCoordinator {
       volNum = slotVolumeNumber;
     }
 
-    if (volNum == null) {
-      volNum = await showVolumeNumberDialog(
+    volNum ??= await showVolumeNumberDialog(
         context,
         seriesName: seriesName,
         maxHint: expectedVolumeCount,
       );
-    }
 
     if (!context.mounted || volNum == null) return;
 
@@ -373,13 +354,33 @@ class BookItemAddCoordinator {
     );
   }
 
+  ParsedBookTitle _resolveParsed(String title, Map<String, dynamic>? metadata) {
+    var parsed = BookTitleParser.parse(title);
+    if (!parsed.hasSeries && metadata != null) {
+      final seriesName = metadata['series_title']?.toString().trim();
+      final volRaw = metadata['series_volume']?.toString();
+      final vol = double.tryParse(volRaw?.replaceAll(',', '.') ?? '');
+      if (seriesName != null &&
+          seriesName.isNotEmpty &&
+          vol != null &&
+          vol > 0) {
+        parsed = ParsedBookTitle(
+          rawTitle: title,
+          seriesName: seriesName,
+          volumeNumber: vol,
+        );
+      }
+    }
+    return parsed;
+  }
+
   Future<void> _prepareAdd({
     required String title,
     String? imageUrl,
     required BookSubcategory subcategory,
     Map<String, dynamic>? metadata,
   }) async {
-    final parsed = BookTitleParser.parse(title);
+    final parsed = _resolveParsed(title, metadata);
     String? seriesId;
     String? volumeId;
     var finalTitle = title;

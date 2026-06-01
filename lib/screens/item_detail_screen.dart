@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../models/book_subcategory.dart';
 import '../models/category_metadata.dart';
 import '../models/collection_category.dart';
 import '../models/collection_group.dart';
@@ -16,6 +17,7 @@ import '../widgets/group_badge.dart';
 import '../widgets/item_whereabouts_field.dart';
 import '../widgets/personal_whereabouts_field.dart';
 import '../widgets/star_rating_bar.dart';
+import '../widgets/assign_book_series_sheet.dart';
 import '../widgets/item_tags_editor.dart';
 import '../utils/boardgame_display.dart';
 import '../services/bgg_service.dart';
@@ -348,6 +350,20 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
         title: _item.title,
         showBackButton: true,
         actions: [
+          if (!ro && isBook && _item.volumeId == null)
+            IconButton(
+              icon: const Icon(Icons.link),
+              tooltip: 'Rattacher à une série',
+              onPressed: () async {
+                final sub = BookSubcategory.fromDbValue(_item.subcategory);
+                final ok = await showAssignBookToSeriesSheet(
+                  context,
+                  item: _item,
+                  subcategory: sub,
+                );
+                if (ok == true) _reloadItem();
+              },
+            ),
           if (!ro)
             IconButton(
               icon: const Icon(Icons.delete_outline),
@@ -559,7 +575,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       const SizedBox(height: 8),
                       if (_groups.any((g) => !_selectedGroupIds.contains(g.id)))
                         DropdownButtonFormField<String>(
-                          value: null,
+                          initialValue: null,
                           decoration: const InputDecoration(
                             labelText: 'Ajouter à un groupe',
                           ),

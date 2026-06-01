@@ -2,20 +2,38 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
-import '../services/open_library_service.dart';
+import '../services/book_catalog_service.dart';
 
-/// Scan ISBN / EAN ou saisie manuelle (mobile). Retourne l'ISBN nettoyé.
-Future<String?> showIsbnScanSheet(BuildContext context) {
+/// Scan ISBN / EAN ou saisie manuelle (mobile). Retourne le code nettoyé.
+Future<String?> showIsbnScanSheet(
+  BuildContext context, {
+  String title = 'Scanner un code-barres',
+  String? hint,
+  /// Si false, valide sans interroger le catalogue livres (ex. vinyle).
+  bool validateBookLookup = true,
+}) {
   return showModalBottomSheet<String>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
-    builder: (ctx) => const _IsbnScanSheet(),
+    builder: (ctx) => _IsbnScanSheet(
+      title: title,
+      hint: hint,
+      validateBookLookup: validateBookLookup,
+    ),
   );
 }
 
 class _IsbnScanSheet extends StatefulWidget {
-  const _IsbnScanSheet();
+  final String title;
+  final String? hint;
+  final bool validateBookLookup;
+
+  const _IsbnScanSheet({
+    required this.title,
+    this.hint,
+    required this.validateBookLookup,
+  });
 
   @override
   State<_IsbnScanSheet> createState() => _IsbnScanSheetState();
@@ -59,16 +77,17 @@ class _IsbnScanSheetState extends State<_IsbnScanSheet> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'Scanner un code-barres',
+              widget.title,
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
             ),
             const SizedBox(height: 8),
             Text(
-              _canScan
-                  ? 'Cadre le code ISBN/EAN du livre (ou saisis-le ci-dessous).'
-                  : 'Sur PC, saisis l\'ISBN manuellement.',
+              widget.hint ??
+                  (_canScan
+                      ? 'Cadre le code ISBN/EAN (ou saisis-le ci-dessous).'
+                      : 'Sur PC, saisis le code manuellement.'),
               style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
             ),
             if (_canScan) ...[
@@ -107,13 +126,19 @@ class _IsbnScanSheetState extends State<_IsbnScanSheet> {
               onPressed: () async {
                 final isbn = _manualController.text.trim();
                 if (isbn.isEmpty) return;
-                final book = await OpenLibraryService.lookupByIsbn(isbn);
-                if (!context.mounted) return;
-                if (book == null) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('ISBN introuvable')),
-                  );
-                  return;
+                if (widget.validateBookLookup) {
+                  final book = await BookCatalogService.lookupByIsbn(isbn);
+                  if (!context.mounted) return;
+                  if (book == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Code introuvable (Open Library + Google Books)',
+                        ),
+                      ),
+                    );
+                    return;
+                  }
                 }
                 _submit(isbn);
               },

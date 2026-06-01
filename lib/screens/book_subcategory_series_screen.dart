@@ -8,6 +8,7 @@ import '../models/collection_item.dart';
 import '../services/book_series_service.dart';
 import '../widgets/app_app_bar.dart';
 import '../widgets/author_avatar.dart';
+import '../widgets/assign_book_series_sheet.dart';
 import '../widgets/book_series_tile.dart';
 import 'book_author_detail_screen.dart';
 import 'book_series_detail_screen.dart';
@@ -289,6 +290,18 @@ class _BookSubcategorySeriesScreenState
                           return ListTile(
                             title: Text(item.title),
                             subtitle: Text(item.listSubtitle ?? ''),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.link),
+                              tooltip: 'Rattacher à une série',
+                              onPressed: () async {
+                                final ok = await showAssignBookToSeriesSheet(
+                                  context,
+                                  item: item,
+                                  subcategory: widget.subcategory,
+                                );
+                                if (ok == true) _load();
+                              },
+                            ),
                             onTap: () => Navigator.push(
                               context,
                               MaterialPageRoute(

@@ -8,7 +8,21 @@ Application Flutter **Collectingo** (collections, amis, groupes).
 2. Remplir au minimum `SUPABASE_URL` et `SUPABASE_ANON_KEY` (dashboard Supabase → Settings → API).
 3. **Ne jamais committer `.env`** — le transmettre au collaborateur par un canal sécurisé (mot de passe, 1Password, message privé), ou lui donner accès au même projet Supabase pour qu’il crée son propre `.env`.
 
-Variables optionnelles : `BGG_APPLICATION_TOKEN`, `DEV_TEST_EMAIL` / `DEV_TEST_PASSWORD` (connexion rapide en debug).
+Variables optionnelles :
+
+| Variable | Usage |
+|----------|--------|
+| `BGG_APPLICATION_TOKEN` | Jeux de société (BGG) |
+| `GOOGLE_BOOKS_API_KEY` | Livres / mangas — ISBN et recherche (ex. One Piece) |
+| `DISCOGS_TOKEN` | Vinyles / CD — Discogs (recherche + code-barres) ; sans token → MusicBrainz seul |
+| `DEV_TEST_EMAIL` / `DEV_TEST_PASSWORD` | Connexion rapide en debug |
+
+## Catalogues externes
+
+- **Livres** : Open Library + Google Books (ISBN), hub par type (manga, BD, roman) avec séries.
+- **Cartes** : Pokémon via [TCGdex](https://tcgdex.dev) (FR, gratuit) ; Magic / Yu-Gi-Oh! / One Piece / Lorcana — navigateur par blocs ou recherche.
+- **Vinyles / CD** : hub par format → **Discogs** (token) + scan EAN ; repli **MusicBrainz** (gratuit, sans clé).
+- **Jeux de société** : BGG (proxy Supabase sur le web).
 
 ## Lancer l’app (Cursor / VS Code)
 
