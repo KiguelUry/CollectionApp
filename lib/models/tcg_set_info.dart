@@ -3,12 +3,14 @@ class TcgSeriesBlock {
   final String id;
   final String name;
   final String? nameFr;
+  final String? imageUrl;
   final List<TcgSetInfo> sets;
 
   const TcgSeriesBlock({
     required this.id,
     required this.name,
     this.nameFr,
+    this.imageUrl,
     required this.sets,
   });
 

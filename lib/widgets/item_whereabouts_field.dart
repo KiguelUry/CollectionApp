@@ -302,7 +302,7 @@ class _ItemWhereaboutsFieldState extends State<ItemWhereaboutsField> {
               )
             else
               DropdownButtonFormField<String>(
-                value: _otherFriendId,
+                initialValue: _otherFriendId,
                 decoration: const InputDecoration(labelText: 'Ami'),
                 items: _friends
                     .map(
@@ -343,7 +343,7 @@ class _ItemWhereaboutsFieldState extends State<ItemWhereaboutsField> {
             )
           else
             DropdownButtonFormField<String>(
-              value: _loanFriendId,
+              initialValue: _loanFriendId,
               decoration: const InputDecoration(labelText: 'Ami'),
               items: _friends
                   .map(

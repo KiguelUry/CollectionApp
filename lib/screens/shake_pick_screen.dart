@@ -277,7 +277,7 @@ class _ShakePickScreenState extends State<ShakePickScreen>
             ),
             const SizedBox(height: 8),
             DropdownButtonFormField<int?>(
-              value: _filters.playerCount,
+              initialValue: _filters.playerCount,
               decoration: const InputDecoration(
                 labelText: 'Nombre de joueurs',
                 border: OutlineInputBorder(),
@@ -304,7 +304,7 @@ class _ShakePickScreenState extends State<ShakePickScreen>
             ),
             const SizedBox(height: 10),
             DropdownButtonFormField<ShakePickDuration>(
-              value: _filters.duration,
+              initialValue: _filters.duration,
               decoration: const InputDecoration(
                 labelText: 'Durée de partie',
                 border: OutlineInputBorder(),

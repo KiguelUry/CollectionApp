@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/card_subcategory.dart';
 import '../models/category_metadata.dart';
+import '../models/lego_build_kind.dart';
 import '../models/collection_category.dart';
 
 /// Formulaire des champs spécifiques par catégorie (stockés dans `metadata`).
@@ -8,16 +9,20 @@ class CategoryMetadataFields extends StatefulWidget {
   final CollectionCategory category;
   final CardSubcategory? initialCardSubcategory;
   final MediaFormat? initialMediaFormat;
+  final LegoBuildKind? initialLegoKind;
   final bool lockCardSubcategory;
   final bool lockMediaFormat;
+  final bool lockLegoKind;
 
   const CategoryMetadataFields({
     super.key,
     required this.category,
     this.initialCardSubcategory,
     this.initialMediaFormat,
+    this.initialLegoKind,
     this.lockCardSubcategory = false,
     this.lockMediaFormat = false,
+    this.lockLegoKind = false,
   });
 
   @override
@@ -52,10 +57,27 @@ class CategoryMetadataFieldsState extends State<CategoryMetadataFields> {
   final _barcodeController = TextEditingController();
 
   // Lego
+  late LegoBuildKind _legoKind =
+      widget.initialLegoKind ?? LegoBuildKind.lego;
   final _setNumberController = TextEditingController();
   final _pieceCountController = TextEditingController();
   bool _isBuilt = false;
   bool _boxIncluded = true;
+
+  // Montres
+  final _watchBrandController = TextEditingController();
+  final _watchModelController = TextEditingController();
+  final _watchRefController = TextEditingController();
+  final _watchYearController = TextEditingController();
+
+  // Jeux vidéo
+  final _gamePlatformController = TextEditingController();
+  final _gameYearController = TextEditingController();
+
+  // Films
+  final _movieYearController = TextEditingController();
+  final _movieDirectorController = TextEditingController();
+  String _movieKind = 'movie';
 
   @override
   void dispose() {
@@ -70,6 +92,14 @@ class CategoryMetadataFieldsState extends State<CategoryMetadataFields> {
     _barcodeController.dispose();
     _setNumberController.dispose();
     _pieceCountController.dispose();
+    _watchBrandController.dispose();
+    _watchModelController.dispose();
+    _watchRefController.dispose();
+    _watchYearController.dispose();
+    _gamePlatformController.dispose();
+    _gameYearController.dispose();
+    _movieYearController.dispose();
+    _movieDirectorController.dispose();
     super.dispose();
   }
 
@@ -120,12 +150,39 @@ class CategoryMetadataFieldsState extends State<CategoryMetadataFields> {
         };
       case CollectionCategory.lego:
         return {
+          'lego_kind': _legoKind.dbValue,
           if (_setNumberController.text.trim().isNotEmpty)
             'set_number': _setNumberController.text.trim(),
           if (_pieceCountController.text.trim().isNotEmpty)
             'piece_count': int.tryParse(_pieceCountController.text.trim()),
           'is_built': _isBuilt,
           'box_included': _boxIncluded,
+        };
+      case CollectionCategory.watch:
+        return {
+          if (_watchBrandController.text.trim().isNotEmpty)
+            'brand': _watchBrandController.text.trim(),
+          if (_watchModelController.text.trim().isNotEmpty)
+            'model': _watchModelController.text.trim(),
+          if (_watchRefController.text.trim().isNotEmpty)
+            'reference': _watchRefController.text.trim(),
+          if (_watchYearController.text.trim().isNotEmpty)
+            'year': _watchYearController.text.trim(),
+        };
+      case CollectionCategory.videogame:
+        return {
+          if (_gamePlatformController.text.trim().isNotEmpty)
+            'platform': _gamePlatformController.text.trim(),
+          if (_gameYearController.text.trim().isNotEmpty)
+            'year': _gameYearController.text.trim(),
+        };
+      case CollectionCategory.movie:
+        return {
+          'media_kind': _movieKind,
+          if (_movieYearController.text.trim().isNotEmpty)
+            'year': _movieYearController.text.trim(),
+          if (_movieDirectorController.text.trim().isNotEmpty)
+            'director': _movieDirectorController.text.trim(),
         };
       default:
         return {};
@@ -142,6 +199,9 @@ class CategoryMetadataFieldsState extends State<CategoryMetadataFields> {
         CollectionCategory.stamp || CollectionCategory.coin => _numismaticFields(),
         CollectionCategory.media => _mediaFields(),
         CollectionCategory.lego => _legoFields(),
+        CollectionCategory.watch => _watchFields(),
+        CollectionCategory.videogame => _gameFields(),
+        CollectionCategory.movie => _movieFields(),
         _ => const [],
       },
     );
@@ -301,6 +361,21 @@ class CategoryMetadataFieldsState extends State<CategoryMetadataFields> {
       ];
 
   List<Widget> _legoFields() => [
+        if (widget.lockLegoKind)
+          InputDecorator(
+            decoration: const InputDecoration(labelText: 'Type'),
+            child: Text(_legoKind.label),
+          )
+        else
+          DropdownButtonFormField<LegoBuildKind>(
+            initialValue: _legoKind,
+            decoration: const InputDecoration(labelText: 'Type'),
+            items: LegoBuildKind.values
+                .map((k) => DropdownMenuItem(value: k, child: Text(k.label)))
+                .toList(),
+            onChanged: (v) => setState(() => _legoKind = v ?? _legoKind),
+          ),
+        const SizedBox(height: 12),
         TextField(
           controller: _setNumberController,
           decoration: const InputDecoration(labelText: 'N° de set'),
@@ -323,6 +398,68 @@ class CategoryMetadataFieldsState extends State<CategoryMetadataFields> {
           title: const Text('Boîte d\'origine'),
           value: _boxIncluded,
           onChanged: (v) => setState(() => _boxIncluded = v),
+        ),
+      ];
+
+  List<Widget> _watchFields() => [
+        TextField(
+          controller: _watchBrandController,
+          decoration: const InputDecoration(labelText: 'Marque'),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _watchModelController,
+          decoration: const InputDecoration(labelText: 'Modèle'),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _watchRefController,
+          decoration: const InputDecoration(labelText: 'Référence'),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _watchYearController,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(labelText: 'Année'),
+        ),
+      ];
+
+  List<Widget> _gameFields() => [
+        TextField(
+          controller: _gamePlatformController,
+          decoration: const InputDecoration(
+            labelText: 'Plateforme',
+            hintText: 'PS5, Switch, PC…',
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _gameYearController,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(labelText: 'Année de sortie'),
+        ),
+      ];
+
+  List<Widget> _movieFields() => [
+        DropdownButtonFormField<String>(
+          initialValue: _movieKind,
+          decoration: const InputDecoration(labelText: 'Type'),
+          items: const [
+            DropdownMenuItem(value: 'movie', child: Text('Film')),
+            DropdownMenuItem(value: 'series', child: Text('Série')),
+          ],
+          onChanged: (v) => setState(() => _movieKind = v ?? 'movie'),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _movieYearController,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(labelText: 'Année'),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _movieDirectorController,
+          decoration: const InputDecoration(labelText: 'Réalisateur / créateur'),
         ),
       ];
 }

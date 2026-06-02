@@ -1,5 +1,6 @@
 import '../models/collection_item.dart';
 import '../utils/boardgame_genres.dart';
+import '../utils/card_item_metadata.dart';
 import '../utils/holder_filter.dart';
 
 enum CollectionSort {
@@ -19,6 +20,11 @@ enum CollectionScopeFilter {
   onLoanOnly,
 }
 
+enum CollectionOwnershipView {
+  personal,
+  groups,
+}
+
 enum CollectionStatusFilter {
   all,
   onLoan,
@@ -36,8 +42,12 @@ class CollectionListFilters {
   String? tagId;
   /// Filtre « chez qui » (`user:…`, `custom:…`, `loan:…`).
   String? holderKey;
-  /// Genre BGG (`boardgamecategory`), jeux de société uniquement.
-  String? boardgameGenre;
+  /// Genres BGG (`boardgamecategory`), jeux de société uniquement.
+  Set<String> boardgameGenres;
+  CollectionOwnershipView ownershipView;
+  Set<String> groupIds;
+  Set<String> cardRarities;
+  Set<String> pokemonTypes;
 
   CollectionListFilters({
     this.searchQuery = '',
@@ -47,8 +57,15 @@ class CollectionListFilters {
     this.locationId,
     this.tagId,
     this.holderKey,
-    this.boardgameGenre,
-  });
+    Set<String>? boardgameGenres,
+    this.ownershipView = CollectionOwnershipView.personal,
+    Set<String>? groupIds,
+    Set<String>? cardRarities,
+    Set<String>? pokemonTypes,
+  })  : groupIds = groupIds ?? <String>{},
+        boardgameGenres = boardgameGenres ?? <String>{},
+        cardRarities = cardRarities ?? <String>{},
+        pokemonTypes = pokemonTypes ?? <String>{};
 
   bool get hasActiveFilters =>
       searchQuery.trim().isNotEmpty ||
@@ -57,7 +74,10 @@ class CollectionListFilters {
       locationId != null ||
       tagId != null ||
       holderKey != null ||
-      boardgameGenre != null ||
+      groupIds.isNotEmpty ||
+      boardgameGenres.isNotEmpty ||
+      cardRarities.isNotEmpty ||
+      pokemonTypes.isNotEmpty ||
       sort != CollectionSort.titleAsc;
 
   CollectionListFilters copyWith({
@@ -68,11 +88,17 @@ class CollectionListFilters {
     String? locationId,
     String? tagId,
     String? holderKey,
-    String? boardgameGenre,
+    Set<String>? boardgameGenres,
+    CollectionOwnershipView? ownershipView,
+    Set<String>? groupIds,
+    Set<String>? cardRarities,
+    Set<String>? pokemonTypes,
     bool clearLocation = false,
     bool clearTag = false,
     bool clearHolder = false,
     bool clearBoardgameGenre = false,
+    bool clearGroups = false,
+    bool clearCardFilters = false,
   }) {
     return CollectionListFilters(
       searchQuery: searchQuery ?? this.searchQuery,
@@ -82,9 +108,17 @@ class CollectionListFilters {
       locationId: clearLocation ? null : (locationId ?? this.locationId),
       tagId: clearTag ? null : (tagId ?? this.tagId),
       holderKey: clearHolder ? null : (holderKey ?? this.holderKey),
-      boardgameGenre: clearBoardgameGenre
-          ? null
-          : (boardgameGenre ?? this.boardgameGenre),
+      ownershipView: ownershipView ?? this.ownershipView,
+      groupIds: clearGroups ? <String>{} : (groupIds ?? this.groupIds),
+      boardgameGenres: clearBoardgameGenre
+          ? <String>{}
+          : (boardgameGenres ?? this.boardgameGenres),
+      cardRarities: clearCardFilters
+          ? <String>{}
+          : (cardRarities ?? this.cardRarities),
+      pokemonTypes: clearCardFilters
+          ? <String>{}
+          : (pokemonTypes ?? this.pokemonTypes),
     );
   }
 
@@ -111,23 +145,49 @@ class CollectionListFilters {
       result = result.where((i) => i.tags.any((t) => t.id == tagId)).toList();
     }
 
-    if (boardgameGenre != null && boardgameGenre!.isNotEmpty) {
-      final genre = boardgameGenre!;
+    if (boardgameGenres.isNotEmpty) {
       result = result
           .where(
-            (i) => boardgameGenresFromMetadata(i.metadata)
-                .any((g) => g.toLowerCase() == genre.toLowerCase()),
+            (i) => boardgameGenresFromMetadata(i.metadata).any(
+              (g) => boardgameGenres.any(
+                (selected) => selected.toLowerCase() == g.toLowerCase(),
+              ),
+            ),
           )
           .toList();
     }
 
+    if (cardRarities.isNotEmpty) {
+      result = result.where((i) {
+        final r = cardRarityFromMetadata(i.metadata);
+        return r != null &&
+            cardRarities.any((s) => s.toLowerCase() == r.toLowerCase());
+      }).toList();
+    }
+
+    if (pokemonTypes.isNotEmpty) {
+      result = result.where((i) {
+        final types = pokemonTypesFromMetadata(i.metadata);
+        return types.any(
+          (t) => pokemonTypes.any((s) => s.toLowerCase() == t.toLowerCase()),
+        );
+      }).toList();
+    }
+
+    if (ownershipView == CollectionOwnershipView.personal) {
+      result = result.where((i) => !i.isGroupOwned).toList();
+    } else {
+      result = result.where((i) => i.isGroupOwned).toList();
+      if (groupIds.isNotEmpty) {
+        result = result.where((i) => groupIds.contains(i.groupId)).toList();
+      }
+    }
+
     switch (scope) {
       case CollectionScopeFilter.all:
-        break;
       case CollectionScopeFilter.personalOnly:
-        result = result.where((i) => !i.isGroupOwned).toList();
       case CollectionScopeFilter.groupOnly:
-        result = result.where((i) => i.isGroupOwned).toList();
+        break;
       case CollectionScopeFilter.onLoanOnly:
         result = result.where((i) => i.isOnLoan).toList();
     }

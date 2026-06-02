@@ -11,6 +11,8 @@ class CategoryTypeHub extends StatelessWidget {
   final VoidCallback? onClassicList;
   final Color? accentColor;
   final Widget? header;
+  /// Si false, le titre est déjà dans [CategoryHubHeader] — hero plus compact.
+  final bool showTitleInHero;
 
   const CategoryTypeHub({
     super.key,
@@ -20,6 +22,7 @@ class CategoryTypeHub extends StatelessWidget {
     this.onClassicList,
     this.accentColor,
     this.header,
+    this.showTitleInHero = true,
   });
 
   @override
@@ -37,28 +40,36 @@ class CategoryTypeHub extends StatelessWidget {
             width: double.infinity,
             decoration: AppTheme.heroGradient(accent),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+              padding: EdgeInsets.fromLTRB(
+                20,
+                showTitleInHero ? 8 : 4,
+                20,
+                16,
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    title,
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.3,
-                        ),
-                  ),
-                  const SizedBox(height: 6),
+                  if (showTitleInHero) ...[
+                    Text(
+                      title,
+                      style:
+                          Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.3,
+                              ),
+                    ),
+                    const SizedBox(height: 6),
+                  ],
                   Text(
                     subtitle,
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: showTitleInHero ? 14 : 13,
                       height: 1.35,
                       color: scheme.onSurfaceVariant,
                     ),
                   ),
                   if (header != null) ...[
-                    const SizedBox(height: 16),
+                    SizedBox(height: showTitleInHero ? 16 : 12),
                     header!,
                   ],
                 ],

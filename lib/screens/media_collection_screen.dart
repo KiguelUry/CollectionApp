@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/category_metadata.dart';
 import '../models/collection_category.dart';
 import '../models/media_format_ui.dart';
-import '../widgets/app_app_bar.dart';
+import '../widgets/category_hub_header.dart';
 import '../widgets/category_type_hub.dart';
 import '../widgets/media_quick_search_sheet.dart';
 import '../widgets/ui/hub_search_bar.dart';
@@ -18,10 +18,18 @@ class MediaCollectionScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const AppAppBar(title: 'Vinyles / CD'),
-      body: CategoryTypeHub(
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          CategoryHubHeader(
+            title: 'Vinyles & musique',
+            accentColor: _accent,
+          ),
+          Expanded(
+            child: CategoryTypeHub(
         accentColor: _accent,
         title: 'Vinyles & musique',
+        showTitleInHero: false,
         subtitle:
             'Discogs pour les vinyles (avec token) · MusicBrainz en secours.',
         header: HubSearchBar(
@@ -63,6 +71,9 @@ class MediaCollectionScreen extends StatelessWidget {
             ),
           );
         },
+            ),
+          ),
+        ],
       ),
     );
   }

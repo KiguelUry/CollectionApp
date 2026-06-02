@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_group.dart';
 import '../services/group_service.dart';
+import 'bgg_network_image.dart';
 import 'group_badge.dart';
 import 'item_whereabouts_field.dart';
 import 'personal_whereabouts_field.dart';
@@ -26,6 +27,7 @@ class AddItemOptions {
 
 class AddItemOptionsDialog extends StatefulWidget {
   final String itemTitle;
+  final String? itemImageUrl;
   final bool defaultWishlist;
   final Future<void> Function(AddItemOptions options) onConfirm;
 
@@ -33,6 +35,7 @@ class AddItemOptionsDialog extends StatefulWidget {
     super.key,
     required this.itemTitle,
     required this.onConfirm,
+    this.itemImageUrl,
     this.defaultWishlist = false,
   });
 
@@ -81,7 +84,7 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text('Ajouter ${widget.itemTitle}'),
+      title: const Text('Ajouter à la collection'),
       content: SizedBox(
         width: double.maxFinite,
         child: _loading
@@ -93,6 +96,27 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (widget.itemImageUrl != null &&
+                        widget.itemImageUrl!.trim().isNotEmpty) ...[
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: SizedBox(
+                          width: 96,
+                          height: 96,
+                          child: BggNetworkImage(url: widget.itemImageUrl!),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    Text(
+                      widget.itemTitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    const SizedBox(height: 8),
                     if (!widget.defaultWishlist)
                       SwitchListTile(
                         contentPadding: EdgeInsets.zero,
@@ -127,7 +151,7 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                       ),
                       if (_shareWithGroup && _groups.isNotEmpty)
                         DropdownButtonFormField<String>(
-                          value: _selectedGroupId,
+                          initialValue: _selectedGroupId,
                           decoration: const InputDecoration(
                             labelText: 'Groupe',
                           ),
@@ -212,7 +236,8 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                           }),
                         ),
                       const SizedBox(height: 12),
-                      Row(
+                      Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           const Text('Quantité : '),
                           IconButton(
@@ -239,12 +264,14 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                 ),
               ),
       ),
+      actionsOverflowButtonSpacing: 0,
+      actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('Annuler'),
         ),
-        ElevatedButton(
+        FilledButton(
           onPressed: _loading
               ? null
               : () async {

@@ -5,7 +5,6 @@ import '../models/collection_group.dart';
 import '../models/collection_item.dart';
 import '../utils/collection_grid_grouper.dart';
 import '../utils/collection_item_filters.dart';
-import '../utils/holder_filter.dart';
 import '../services/group_service.dart';
 import '../models/collection_list_filters.dart';
 import '../models/collection_view_mode.dart';
@@ -225,11 +224,6 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
     final categoryItems =
         items.where((i) => i.category == _selectedCategory).toList();
     final filtered = filters.apply(categoryItems);
-    final holderOptions = !isWishlist &&
-            _selectedCategory == CollectionCategory.boardgame
-        ? buildHolderFilterOptions(categoryItems)
-        : const <HolderFilterOption>[];
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -239,14 +233,9 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
           searchController: searchController,
           locations: _locations,
           tags: _tags,
-          holderOptions: holderOptions,
           showScopeFilters: false,
-          showStatusFilters: !isWishlist,
-          showHighlyRatedFilter:
-              !isWishlist && _selectedCategory != CollectionCategory.boardgame,
           showLocationFilter: !isWishlist &&
               _selectedCategory != CollectionCategory.boardgame,
-          showHolderFilter: holderOptions.isNotEmpty,
           showTagFilter:
               !isWishlist && _selectedCategory != CollectionCategory.boardgame,
         ),

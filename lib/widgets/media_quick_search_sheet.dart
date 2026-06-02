@@ -40,7 +40,8 @@ class _MediaQuickSearchSheet extends StatefulWidget {
 
 class _MediaQuickSearchSheetState extends State<_MediaQuickSearchSheet> {
   late MediaFormat _format = widget.initialFormat;
-  final _controller = TextEditingController();
+  final _artistController = TextEditingController();
+  final _titleController = TextEditingController();
   final _debounce = DebouncedRunner();
   List<Map<String, String>> _results = [];
   bool _loading = false;
@@ -49,20 +50,22 @@ class _MediaQuickSearchSheetState extends State<_MediaQuickSearchSheet> {
   @override
   void initState() {
     super.initState();
-    _controller.addListener(_onTextChanged);
+    _artistController.addListener(_scheduleSearch);
+    _titleController.addListener(_scheduleSearch);
   }
 
   @override
   void dispose() {
-    _controller.removeListener(_onTextChanged);
-    _controller.dispose();
+    _artistController.dispose();
+    _titleController.dispose();
     _debounce.dispose();
     super.dispose();
   }
 
-  void _onTextChanged() {
-    final q = _controller.text.trim();
-    if (q.length < 2) {
+  void _scheduleSearch() {
+    final artist = _artistController.text.trim();
+    final title = _titleController.text.trim();
+    if (artist.length < 2 && title.length < 2) {
       setState(() {
         _results = [];
         _searched = false;
@@ -72,18 +75,19 @@ class _MediaQuickSearchSheetState extends State<_MediaQuickSearchSheet> {
     }
     _debounce.run(
       delay: const Duration(milliseconds: 450),
-      action: () => _search(q),
+      action: _search,
     );
   }
 
-  Future<void> _search(String query) async {
+  Future<void> _search() async {
     setState(() {
       _loading = true;
       _searched = true;
     });
     try {
-      final res = await MediaCatalogService.searchReleases(
-        query,
+      final res = await MediaCatalogService.searchReleasesAdvanced(
+        artist: _artistController.text,
+        title: _titleController.text,
         format: _format,
       );
       if (!mounted) return;
@@ -177,10 +181,26 @@ class _MediaQuickSearchSheetState extends State<_MediaQuickSearchSheet> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: TextField(
-              controller: _controller,
+              controller: _artistController,
+              textInputAction: TextInputAction.next,
+              decoration: const InputDecoration(
+                hintText: 'Artiste',
+                prefixIcon: Icon(Icons.person_outline),
+                isDense: true,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: TextField(
+              controller: _titleController,
+              textInputAction: TextInputAction.search,
+              onSubmitted: (_) => _search(),
               decoration: InputDecoration(
-                hintText: 'Artiste ou titre d\'album…',
-                prefixIcon: const Icon(Icons.search_rounded),
+                hintText: 'Titre d\'album',
+                prefixIcon: const Icon(Icons.album_outlined),
+                isDense: true,
                 suffixIcon: _loading
                     ? const Padding(
                         padding: EdgeInsets.all(12),
@@ -190,7 +210,10 @@ class _MediaQuickSearchSheetState extends State<_MediaQuickSearchSheet> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         ),
                       )
-                    : null,
+                    : IconButton(
+                        icon: const Icon(Icons.search_rounded),
+                        onPressed: _search,
+                      ),
               ),
             ),
           ),
@@ -229,8 +252,8 @@ class _MediaQuickSearchSheetState extends State<_MediaQuickSearchSheet> {
     if (!_searched) {
       return EmptyState(
         icon: Icons.album_outlined,
-        title: 'Recherche ou scan',
-        message: 'Les vinyles et CD passent souvent par le code-barres.',
+        title: 'Artiste et/ou titre',
+        message: 'Renseigne au moins 2 caractères dans un des champs, ou scanne.',
         iconColor: _format.color,
       );
     }

@@ -154,5 +154,5 @@ class BookSeriesStats {
       totalSlots > 0 ? '$readCount/$totalSlots' : '$readCount';
 
   String? get ratingLabel =>
-      displayRating != null ? displayRating!.toStringAsFixed(1) : null;
+      displayRating?.toStringAsFixed(1);
 }

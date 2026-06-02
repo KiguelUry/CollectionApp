@@ -4,7 +4,8 @@ import '../../models/card_subcategory.dart';
 import '../../models/tcg_set_info.dart';
 import '../../services/user_card_collection_service.dart';
 import '../../widgets/app_app_bar.dart';
-import '../../widgets/bgg_network_image.dart';
+import '../../screens/tcg/tcg_rarity_gallery_screen.dart';
+import '../../widgets/tcg/tcg_set_logo.dart';
 import 'tcg_set_cards_screen.dart';
 
 /// Séries d'un bloc (logos + codes type BLK, SVI…).
@@ -24,6 +25,7 @@ class TcgSetsBlockScreen extends StatefulWidget {
 
 class _TcgSetsBlockScreenState extends State<TcgSetsBlockScreen> {
   Set<String> _ownedSetIds = {};
+  String _query = '';
 
   @override
   void initState() {
@@ -45,9 +47,22 @@ class _TcgSetsBlockScreenState extends State<TcgSetsBlockScreen> {
   int get _ownedCount =>
       widget.block.sets.where(_hasSet).length;
 
+  List<TcgSetInfo> get _visibleSets {
+    final q = _query.trim().toLowerCase();
+    if (q.isEmpty) return widget.block.sets;
+    return widget.block.sets
+        .where(
+          (s) =>
+              s.displayName.toLowerCase().contains(q) ||
+              (s.code?.toLowerCase().contains(q) ?? false),
+        )
+        .toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final visibleSets = _visibleSets;
 
     return Scaffold(
       appBar: AppAppBar(title: widget.block.displayName),
@@ -59,11 +74,23 @@ class _TcgSetsBlockScreenState extends State<TcgSetsBlockScreen> {
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextField(
+                    decoration: const InputDecoration(
+                      hintText: 'Rechercher une série…',
+                      isDense: true,
+                      prefixIcon: Icon(Icons.search, size: 20),
+                    ),
+                    onChanged: (v) => setState(() => _query = v),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
                 children: [
                   Expanded(
                     child: Text(
-                      '${widget.block.sets.length} séries',
+                      '${visibleSets.length} / ${widget.block.sets.length} séries',
                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
                             fontWeight: FontWeight.w700,
                           ),
@@ -90,11 +117,24 @@ class _TcgSetsBlockScreenState extends State<TcgSetsBlockScreen> {
                     ),
                 ],
               ),
+                ],
+              ),
             ),
           ),
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(14, 0, 14, 20),
-            sliver: SliverGrid(
+            sliver: visibleSets.isEmpty
+                ? SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        'Aucune série ne correspond à la recherche.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: scheme.onSurfaceVariant),
+                      ),
+                    ),
+                  )
+                : SliverGrid(
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 2,
                 childAspectRatio: 0.85,
@@ -103,7 +143,7 @@ class _TcgSetsBlockScreenState extends State<TcgSetsBlockScreen> {
               ),
               delegate: SliverChildBuilderDelegate(
                 (context, i) {
-                  final set = widget.block.sets[i];
+                  final set = visibleSets[i];
                   final owned = _hasSet(set);
                   return TweenAnimationBuilder<double>(
                     tween: Tween(begin: 0, end: 1),
@@ -134,18 +174,15 @@ class _TcgSetsBlockScreenState extends State<TcgSetsBlockScreen> {
                               child: Column(
                                 children: [
                                   Expanded(
-                                    child: set.imageUrl != null &&
-                                            set.imageUrl!.isNotEmpty
-                                        ? BggNetworkImage(url: set.imageUrl!)
-                                        : ColoredBox(
-                                            color: widget.subcategory.color
-                                                .withValues(alpha: 0.08),
-                                            child: Icon(
-                                              Icons.style,
-                                              size: 48,
-                                              color: widget.subcategory.color,
-                                            ),
-                                          ),
+                                    child: TcgSetLogo.forSet(
+                                      subcategory: widget.subcategory,
+                                      set: set,
+                                      fallbackColor: widget.subcategory.color,
+                                      fallbackLabel: set.code?.toUpperCase() ??
+                                          (set.id.length > 3
+                                              ? set.id.substring(0, 3)
+                                              : set.id),
+                                    ),
                                   ),
                                   const SizedBox(height: 8),
                                   Text(
@@ -199,7 +236,7 @@ class _TcgSetsBlockScreenState extends State<TcgSetsBlockScreen> {
                     ),
                   );
                 },
-                childCount: widget.block.sets.length,
+                childCount: visibleSets.length,
               ),
             ),
           ),

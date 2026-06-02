@@ -127,27 +127,28 @@ class _PersonalWhereaboutsFieldState extends State<PersonalWhereaboutsField> {
           style: Theme.of(context).textTheme.titleSmall,
         ),
         const SizedBox(height: 8),
-        ChoiceChip(
-          label: Text('Chez $_myUsername'),
-          selected: _isAtMe,
-          onSelected: widget.readOnly ? null : (_) => _selectMe(),
-        ),
-        const SizedBox(height: 8),
         DropdownButtonFormField<String?>(
-          value: dropdownValue,
+          isExpanded: true,
+          initialValue: dropdownValue,
           decoration: const InputDecoration(
-            labelText: 'Ou chez…',
+            labelText: 'Chez qui ?',
             prefixIcon: Icon(Icons.person_outline),
           ),
           items: [
-            const DropdownMenuItem(
+            DropdownMenuItem(
               value: '__me__',
-              child: Text('Chez moi'),
+              child: Text(
+                'Chez moi ($_myUsername)',
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
             ..._friends.map(
               (f) => DropdownMenuItem(
                 value: f['profile_id'] as String,
-                child: Text('Chez ${f['username']}'),
+                child: Text(
+                  'Chez ${f['username']}',
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ),
             const DropdownMenuItem(

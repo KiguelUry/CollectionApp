@@ -5,11 +5,18 @@ import '../models/collection_summary.dart';
 import '../services/collection_stats_service.dart';
 import '../widgets/collapsible_collection_overview.dart';
 import '../widgets/main_drawer.dart';
+import '../models/user_collection_type.dart';
+import '../services/user_collection_type_service.dart';
+import '../widgets/create_custom_collection_dialog.dart';
 import 'books_collection_screen.dart';
 import 'cards_collection_screen.dart';
 import 'home_screen.dart';
+import 'lego_collection_screen.dart';
 import 'media_collection_screen.dart';
+import 'movie_collection_screen.dart';
 import 'stats_screen.dart';
+import 'videogame_collection_screen.dart';
+import 'watch_collection_screen.dart';
 import 'wishlist_overview_screen.dart';
 import '../theme/app_theme.dart';
 import '../utils/app_haptics.dart';
@@ -28,6 +35,8 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
   Map<CollectionCategory, int> _counts = {};
   Map<CollectionCategory, int> _groupCounts = {};
   Map<CollectionCategory, int> _wishlistCounts = {};
+  Map<String, int> _customCounts = {};
+  List<UserCollectionType> _customTypes = [];
   CollectionSummary _summary = const CollectionSummary();
   bool _loadingCounts = true;
 
@@ -61,6 +70,8 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     final wishCounts = {
       for (final c in CollectionCategory.menuValues) c: 0,
     };
+    final customCounts = <String, int>{};
+    var customTypes = <UserCollectionType>[];
     CollectionSummary summary = const CollectionSummary();
     String? loadError;
 
@@ -69,13 +80,24 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
       final rows = await CollectionItemScope.personal(
         Supabase.instance.client
             .from('collection_items')
-            .select('category, is_wishlist'),
+            .select('category, subcategory, is_wishlist'),
         userId: userId,
       );
 
       for (final row in rows as List) {
         final cat = CollectionCategory.fromDbValue(row['category'] as String);
         final isWishlist = row['is_wishlist'] as bool? ?? false;
+        if (cat == CollectionCategory.custom) {
+          final sub = row['subcategory'] as String?;
+          if (sub != null) {
+            if (isWishlist) {
+              // wishlist custom — ignore for tile badge for now
+            } else {
+              customCounts[sub] = (customCounts[sub] ?? 0) + 1;
+            }
+          }
+          continue;
+        }
         if (isWishlist) {
           wishCounts[cat] = (wishCounts[cat] ?? 0) + 1;
         } else {
@@ -107,6 +129,10 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
       try {
         summary = await _statsService.fetchSummary();
       } catch (_) {}
+
+      try {
+        customTypes = await UserCollectionTypeService().fetchMine();
+      } catch (_) {}
     } catch (e) {
       loadError = e.toString();
     }
@@ -116,6 +142,8 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
         _counts = counts;
         _groupCounts = groupCounts;
         _wishlistCounts = wishCounts;
+        _customCounts = customCounts;
+        _customTypes = customTypes;
         _summary = summary;
         _loadingCounts = false;
       });
@@ -145,10 +173,63 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
           CollectionCategory.book => const BooksCollectionScreen(),
           CollectionCategory.card => const CardsCollectionScreen(),
           CollectionCategory.media => const MediaCollectionScreen(),
+          CollectionCategory.lego => const LegoCollectionScreen(),
+          CollectionCategory.watch => const WatchCollectionScreen(),
+          CollectionCategory.videogame => const VideogameCollectionScreen(),
+          CollectionCategory.movie => const MovieCollectionScreen(),
           _ => HomeScreen(category: category),
         },
       ),
     ).then((_) => _load());
+  }
+
+  void _openCustomType(UserCollectionType type) {
+    AppHaptics.selection();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => HomeScreen(
+          category: CollectionCategory.custom,
+          screenTitle: type.name,
+          customTypeId: type.id,
+          customTypeName: type.name,
+          accentOverride: type.color,
+        ),
+      ),
+    ).then((_) => _load());
+  }
+
+  Future<void> _createCustomType() async {
+    final created = await showCreateCustomCollectionDialog(context);
+    if (created == null || !mounted) return;
+    _openCustomType(created);
+    _load();
+  }
+
+  int get _gridItemCount =>
+      CollectionCategory.menuValues.length +
+      _customTypes.length +
+      1;
+
+  Widget _buildGridItem(int index) {
+    final builtInCount = CollectionCategory.menuValues.length;
+    if (index < builtInCount) {
+      return _AnimatedCategoryCard(
+        index: index,
+        child: _buildCategoryCard(CollectionCategory.menuValues[index]),
+      );
+    }
+    if (index < builtInCount + _customTypes.length) {
+      final type = _customTypes[index - builtInCount];
+      return _AnimatedCategoryCard(
+        index: index,
+        child: _buildCustomTypeCard(type),
+      );
+    }
+    return _AnimatedCategoryCard(
+      index: index,
+      child: _buildAddCustomCard(),
+    );
   }
 
   void _openWishlist() {
@@ -244,13 +325,8 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
                       mainAxisSpacing: 14,
                       childAspectRatio: 0.88,
                     ),
-                    itemCount: CollectionCategory.menuValues.length,
-                    itemBuilder: (context, index) => _AnimatedCategoryCard(
-                      index: index,
-                      child: _buildCategoryCard(
-                        CollectionCategory.menuValues[index],
-                      ),
-                    ),
+                    itemCount: _gridItemCount,
+                    itemBuilder: (context, index) => _buildGridItem(index),
                   ),
           ),
         ],
@@ -320,6 +396,82 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
                 ),
               ),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCustomTypeCard(UserCollectionType type) {
+    final count = _customCounts[type.id] ?? 0;
+    final countLabel =
+        count == 0 ? 'Vide' : (count == 1 ? '1 objet' : '$count objets');
+
+    return InkWell(
+      onTap: () => _openCustomType(type),
+      borderRadius: BorderRadius.circular(20),
+      child: Card(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    type.color.withValues(alpha: 0.2),
+                    type.color.withValues(alpha: 0.06),
+                  ],
+                ),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(type.icon, size: 36, color: type.color),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              type.name,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              countLabel,
+              style: TextStyle(fontSize: 12, color: type.color),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAddCustomCard() {
+    return InkWell(
+      onTap: _createCustomType,
+      borderRadius: BorderRadius.circular(20),
+      child: Card(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.add_circle_outline, size: 40, color: Colors.grey.shade600),
+            const SizedBox(height: 12),
+            Text(
+              'Nouvelle collection',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.grey.shade800,
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Text(
+                'Type perso si absent de la liste',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+              ),
+            ),
           ],
         ),
       ),

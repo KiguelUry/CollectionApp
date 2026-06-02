@@ -4,7 +4,11 @@ import '../../models/card_subcategory.dart';
 import '../../models/tcg_set_info.dart';
 import '../../services/user_card_collection_service.dart';
 import '../../utils/app_haptics.dart';
+import '../../models/collection_category.dart';
+import '../home_screen.dart';
 import '../../widgets/app_app_bar.dart';
+import '../../screens/tcg/tcg_rarity_gallery_screen.dart';
+import '../../widgets/tcg/tcg_set_logo.dart';
 import '../../widgets/ui/empty_state.dart';
 import '../../widgets/ui/loading_placeholder.dart';
 import 'tcg_sets_block_screen.dart';
@@ -29,6 +33,7 @@ class _TcgSeriesBlocksScreenState extends State<TcgSeriesBlocksScreen> {
   Set<String> _ownedSetIds = {};
   bool _loading = true;
   String? _error;
+  String _query = '';
 
   @override
   void initState() {
@@ -60,6 +65,15 @@ class _TcgSeriesBlocksScreenState extends State<TcgSeriesBlocksScreen> {
     }
   }
 
+  List<TcgSeriesBlock> get _visibleBlocks {
+    final list = _blocks ?? [];
+    final q = _query.trim().toLowerCase();
+    if (q.isEmpty) return list;
+    return list
+        .where((b) => b.displayName.toLowerCase().contains(q))
+        .toList();
+  }
+
   int _ownedInBlock(TcgSeriesBlock block) {
     return block.sets.where((s) {
       return _ownedSetIds.contains(s.id) ||
@@ -70,7 +84,44 @@ class _TcgSeriesBlocksScreenState extends State<TcgSeriesBlocksScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppAppBar(title: widget.subcategory.label),
+      appBar: AppAppBar(
+        title: widget.subcategory.label,
+        actions: [
+          TextButton.icon(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (ctx) => HomeScreen(
+                    category: CollectionCategory.card,
+                    screenTitle: widget.subcategory.label,
+                    fixedCardSubcategory: widget.subcategory,
+                  ),
+                ),
+              );
+            },
+            icon: const Icon(Icons.collections_bookmark_outlined),
+            label: const Text('Ma collection'),
+          ),
+          if (_blocks != null && _blocks!.isNotEmpty)
+            TextButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (ctx) => TcgRarityGalleryScreen(
+                      subcategory: widget.subcategory,
+                      title: '${widget.subcategory.label} · raretés',
+                      sets: _blocks!.expand((b) => b.sets).toList(),
+                    ),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.star_outline),
+              label: const Text('Par rareté'),
+            ),
+        ],
+      ),
       body: _loading
           ? const LoadingPlaceholder()
           : _error != null
@@ -82,166 +133,87 @@ class _TcgSeriesBlocksScreenState extends State<TcgSeriesBlocksScreen> {
                   onAction: _load,
                   iconColor: widget.subcategory.color,
                 )
-              : _blocks!.isEmpty
+              : _visibleBlocks.isEmpty
                   ? EmptyState(
                       icon: Icons.layers_outlined,
-                      title: 'Aucun bloc',
-                      message: 'Le catalogue n\'a rien renvoyé pour cet univers.',
+                      title: (_blocks == null || _blocks!.isEmpty)
+                          ? 'Aucun bloc'
+                          : 'Aucun résultat',
+                      message: (_blocks == null || _blocks!.isEmpty)
+                          ? 'Le catalogue n\'a rien renvoyé pour cet univers.'
+                          : 'Essaie un autre nom de bloc.',
                       actionLabel: 'Actualiser',
                       onAction: _load,
                       iconColor: widget.subcategory.color,
                     )
                   : RefreshIndicator(
-                  onRefresh: _load,
-                  child: CustomScrollView(
-                    slivers: [
-                      SliverToBoxAdapter(
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                          child: Text(
-                            'Choisis un bloc',
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleMedium
-                                ?.copyWith(fontWeight: FontWeight.bold),
+                      onRefresh: _load,
+                      child: CustomScrollView(
+                        slivers: [
+                          SliverToBoxAdapter(
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                              child: TextField(
+                                decoration: const InputDecoration(
+                                  hintText: 'Rechercher un bloc…',
+                                  isDense: true,
+                                  prefixIcon: Icon(Icons.search, size: 20),
+                                ),
+                                onChanged: (v) => setState(() => _query = v),
+                              ),
+                            ),
                           ),
-                        ),
-                      ),
-                      SliverToBoxAdapter(
-                        child: SizedBox(
-                          height: 132,
-                          child: ListView.separated(
-                            scrollDirection: Axis.horizontal,
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            itemCount: _blocks!.length,
-                            separatorBuilder: (_, _) => const SizedBox(width: 10),
-                            itemBuilder: (context, i) {
-                              final block = _blocks![i];
-                              final owned = _ownedInBlock(block);
-                              return _BlockChip(
-                                label: block.displayName,
-                                subtitle:
-                                    '${block.sets.length} séries${owned > 0 ? ' · $owned chez toi' : ''}',
-                                color: widget.subcategory.color,
-                                onTap: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (ctx) => TcgSetsBlockScreen(
-                                        subcategory: widget.subcategory,
-                                        block: block,
-                                      ),
-                                    ),
-                                  ).then((_) => _load());
+                          SliverPadding(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                            sliver: SliverGrid(
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 2,
+                                childAspectRatio: 0.92,
+                                crossAxisSpacing: 10,
+                                mainAxisSpacing: 10,
+                              ),
+                              delegate: SliverChildBuilderDelegate(
+                                (context, i) {
+                                  final block = _visibleBlocks[i];
+                                  return _BlockCard(
+                                    subcategory: widget.subcategory,
+                                    block: block,
+                                    color: widget.subcategory.color,
+                                    ownedCount: _ownedInBlock(block),
+                                    onTap: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (ctx) => TcgSetsBlockScreen(
+                                            subcategory: widget.subcategory,
+                                            block: block,
+                                          ),
+                                        ),
+                                      ).then((_) => _load());
+                                    },
+                                  );
                                 },
-                              );
-                            },
+                                childCount: _visibleBlocks.length,
+                              ),
+                            ),
                           ),
-                        ),
+                        ],
                       ),
-                      SliverPadding(
-                        padding: const EdgeInsets.all(16),
-                        sliver: SliverGrid(
-                          gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
-                            childAspectRatio: 1.4,
-                            crossAxisSpacing: 10,
-                            mainAxisSpacing: 10,
-                          ),
-                          delegate: SliverChildBuilderDelegate(
-                            (context, i) {
-                              final block = _blocks![i];
-                              return _BlockCard(
-                                block: block,
-                                color: widget.subcategory.color,
-                                ownedCount: _ownedInBlock(block),
-                                onTap: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (ctx) => TcgSetsBlockScreen(
-                                        subcategory: widget.subcategory,
-                                        block: block,
-                                      ),
-                                    ),
-                                  ).then((_) => _load());
-                                },
-                              );
-                            },
-                            childCount: _blocks!.length,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-    );
-  }
-}
-
-class _BlockChip extends StatelessWidget {
-  final String label;
-  final String subtitle;
-  final Color color;
-  final VoidCallback onTap;
-
-  const _BlockChip({
-    required this.label,
-    required this.subtitle,
-    required this.color,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: color.withValues(alpha: 0.12),
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        onTap: () {
-          AppHaptics.selection();
-          onTap();
-        },
-        borderRadius: BorderRadius.circular(16),
-        child: SizedBox(
-          width: 200,
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  label,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 15,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
+                    ),
     );
   }
 }
 
 class _BlockCard extends StatelessWidget {
+  final CardSubcategory subcategory;
   final TcgSeriesBlock block;
   final Color color;
   final int ownedCount;
   final VoidCallback onTap;
 
   const _BlockCard({
+    required this.subcategory,
     required this.block,
     required this.color,
     required this.ownedCount,
@@ -253,24 +225,40 @@ class _BlockCard extends StatelessWidget {
     return Card(
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: onTap,
+        onTap: () {
+          AppHaptics.selection();
+          onTap();
+        },
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(10),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.layers, color: color),
-              const Spacer(),
+              Expanded(
+                child: TcgSetLogo.forBlock(
+                  subcategory: subcategory,
+                  block: block,
+                  fallbackColor: color,
+                  fallbackLabel: block.displayName.length > 3
+                      ? block.displayName.substring(0, 2).toUpperCase()
+                      : block.displayName,
+                ),
+              ),
+              const SizedBox(height: 8),
               Text(
                 block.displayName,
+                textAlign: TextAlign.center,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                ),
               ),
               Text(
                 '${block.sets.length} séries'
-                '${ownedCount > 0 ? ' · ♥ $ownedCount' : ''}',
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                '${ownedCount > 0 ? ' · $ownedCount possédées' : ''}',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
               ),
             ],
           ),

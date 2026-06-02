@@ -2,7 +2,15 @@ import 'package:flutter/material.dart';
 import '../models/collection_list_filters.dart';
 import '../models/item_tag.dart';
 import '../models/storage_location.dart';
-import '../utils/holder_filter.dart';
+class GroupFilterOption {
+  final String id;
+  final String label;
+
+  const GroupFilterOption({
+    required this.id,
+    required this.label,
+  });
+}
 
 /// Barre recherche + filtres (emplacement, tags) + tri.
 class CollectionFilterBar extends StatelessWidget {
@@ -10,16 +18,15 @@ class CollectionFilterBar extends StatelessWidget {
   final ValueChanged<CollectionListFilters> onChanged;
   final List<StorageLocation> locations;
   final List<ItemTag> tags;
-  final List<HolderFilterOption> holderOptions;
   final bool showScopeFilters;
-  final bool showStatusFilters;
   final bool showLocationFilter;
-  final bool showHolderFilter;
   final bool showTagFilter;
-  final bool showHighlyRatedFilter;
   final bool showBoardgameGenreFilter;
   final List<String> boardgameGenres;
-  final VoidCallback? onShakePick;
+  final bool showCardFilter;
+  final List<String> cardRarities;
+  final List<String> pokemonTypes;
+  final List<GroupFilterOption> groupOptions;
   final TextEditingController? searchController;
 
   const CollectionFilterBar({
@@ -29,16 +36,15 @@ class CollectionFilterBar extends StatelessWidget {
     this.searchController,
     this.locations = const [],
     this.tags = const [],
-    this.holderOptions = const [],
     this.showScopeFilters = true,
-    this.showStatusFilters = true,
     this.showLocationFilter = true,
-    this.showHolderFilter = false,
     this.showTagFilter = true,
-    this.showHighlyRatedFilter = true,
     this.showBoardgameGenreFilter = false,
     this.boardgameGenres = const [],
-    this.onShakePick,
+    this.showCardFilter = false,
+    this.cardRarities = const [],
+    this.pokemonTypes = const [],
+    this.groupOptions = const [],
   });
 
   @override
@@ -111,11 +117,6 @@ class CollectionFilterBar extends StatelessWidget {
                       value: CollectionSort.quantityDesc,
                       child: Text('Quantité'),
                     ),
-                    if (showBoardgameGenreFilter)
-                      const PopupMenuItem(
-                        value: CollectionSort.genreAsc,
-                        child: Text('Genre BGG'),
-                      ),
                   ],
                   child: Padding(
                     padding: const EdgeInsets.all(8),
@@ -125,6 +126,36 @@ class CollectionFilterBar extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (showBoardgameGenreFilter && boardgameGenres.isNotEmpty)
+                  IconButton(
+                    tooltip: 'Filtrer par genres',
+                    onPressed: () => _openBoardgameGenreFilters(context),
+                    icon: Badge(
+                      isLabelVisible: filters.boardgameGenres.isNotEmpty,
+                      label: Text('${filters.boardgameGenres.length}'),
+                      child: Icon(
+                        Icons.category_outlined,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
+                  ),
+                if (showCardFilter &&
+                    (cardRarities.isNotEmpty || pokemonTypes.isNotEmpty))
+                  IconButton(
+                    tooltip: 'Filtres cartes',
+                    onPressed: () => _openCardFilters(context),
+                    icon: Badge(
+                      isLabelVisible: filters.cardRarities.isNotEmpty ||
+                          filters.pokemonTypes.isNotEmpty,
+                      label: Text(
+                        '${filters.cardRarities.length + filters.pokemonTypes.length}',
+                      ),
+                      child: Icon(
+                        Icons.style_outlined,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
+                  ),
                 if (filters.hasActiveFilters)
                   IconButton(
                     tooltip: 'Réinitialiser',
@@ -133,24 +164,6 @@ class CollectionFilterBar extends StatelessWidget {
                   ),
               ],
             ),
-            if (showHolderFilter) ...[
-              const SizedBox(height: 8),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Expanded(child: _holderFilterChip(context)),
-                  if (onShakePick != null)
-                    IconButton(
-                      tooltip: 'À quoi on joue ce soir ?',
-                      onPressed: onShakePick,
-                      icon: Icon(
-                        Icons.casino_outlined,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                    ),
-                ],
-              ),
-            ],
             if (showLocationFilter && locations.isNotEmpty) ...[
               const SizedBox(height: 8),
               _horizontalChips(
@@ -180,81 +193,16 @@ class CollectionFilterBar extends StatelessWidget {
                 ],
               ),
             ],
-            if (showBoardgameGenreFilter && boardgameGenres.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              _horizontalChips(
-                height: 36,
-                children: [
-                  _genreChip(context, label: 'Tous genres', genre: null),
-                  ...boardgameGenres.map(
-                    (g) => _genreChip(context, label: g, genre: g),
-                  ),
-                ],
-              ),
-            ],
-            if (showScopeFilters ||
-                (showStatusFilters && showHighlyRatedFilter)) ...[
-              const SizedBox(height: 8),
-              _horizontalChips(
-                children: [
-                  if (showScopeFilters) ...[
-                    _chip(
-                      label: 'Tout',
-                      selected: filters.scope == CollectionScopeFilter.all,
-                      onTap: () => onChanged(
-                        filters.copyWith(scope: CollectionScopeFilter.all),
-                      ),
-                    ),
-                    _chip(
-                      label: 'Perso',
-                      icon: Icons.person_outline,
-                      selected:
-                          filters.scope == CollectionScopeFilter.personalOnly,
-                      onTap: () => onChanged(
-                        filters.copyWith(
-                          scope: CollectionScopeFilter.personalOnly,
-                        ),
-                      ),
-                    ),
-                    _chip(
-                      label: 'Groupe',
-                      icon: Icons.groups,
-                      selected:
-                          filters.scope == CollectionScopeFilter.groupOnly,
-                      onTap: () => onChanged(
-                        filters.copyWith(
-                          scope: CollectionScopeFilter.groupOnly,
-                        ),
-                      ),
-                    ),
-                    _chip(
-                      label: 'Prêté',
-                      icon: Icons.handshake_outlined,
-                      selected:
-                          filters.scope == CollectionScopeFilter.onLoanOnly,
-                      onTap: () => onChanged(
-                        filters.copyWith(
-                          scope: CollectionScopeFilter.onLoanOnly,
-                        ),
-                      ),
-                    ),
-                  ],
-                  if (showStatusFilters && showHighlyRatedFilter)
-                    _chip(
-                      label: '★ 4+',
-                      selected: filters.status ==
-                          CollectionStatusFilter.highlyRated,
-                      onTap: () => onChanged(
-                        filters.copyWith(
-                          status: filters.status ==
-                                  CollectionStatusFilter.highlyRated
-                              ? CollectionStatusFilter.all
-                              : CollectionStatusFilter.highlyRated,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
+            if (showScopeFilters) ...[
+              const SizedBox(height: 10),
+              _ownershipToggle(context),
+              if (filters.ownershipView == CollectionOwnershipView.groups) ...[
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: _groupPickerChip(context),
+                ),
+              ],
             ],
           ],
         ),
@@ -303,56 +251,6 @@ class CollectionFilterBar extends StatelessWidget {
     );
   }
 
-  Widget _holderFilterChip(BuildContext context) {
-    HolderFilterOption? selected;
-    if (filters.holderKey != null) {
-      for (final o in holderOptions) {
-        if (o.key == filters.holderKey) {
-          selected = o;
-          break;
-        }
-      }
-    }
-    final label = selected == null
-        ? 'Chez qui : tous'
-        : '${selected.label} (${selected.count})';
-
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: PopupMenuButton<String?>(
-        tooltip: 'Filtrer par chez qui',
-        onSelected: (key) => onChanged(
-          filters.copyWith(holderKey: key, clearHolder: key == null),
-        ),
-        itemBuilder: (context) => [
-          const PopupMenuItem(
-            value: null,
-            child: Text('Tous'),
-          ),
-          ...holderOptions.map(
-            (o) => PopupMenuItem(
-              value: o.key,
-              child: Text('${o.label} (${o.count})'),
-            ),
-          ),
-        ],
-        child: Chip(
-          avatar: Icon(
-            selected == null ? Icons.place_outlined : Icons.person_pin,
-            size: 18,
-          ),
-          label: Text(label, style: const TextStyle(fontSize: 12)),
-          deleteIcon: selected != null
-              ? const Icon(Icons.close, size: 16)
-              : null,
-          onDeleted: selected != null
-              ? () => onChanged(filters.copyWith(clearHolder: true))
-              : null,
-        ),
-      ),
-    );
-  }
-
   Widget _locationChip(
     BuildContext context, {
     required String label,
@@ -388,35 +286,239 @@ class CollectionFilterBar extends StatelessWidget {
     );
   }
 
-  Widget _genreChip(
-    BuildContext context, {
-    required String label,
-    required String? genre,
-  }) {
-    final selected = filters.boardgameGenre == genre;
-    return _filterChip(
-      label: label,
-      selected: selected,
-      onTap: () => onChanged(
+  Future<void> _openCardFilters(BuildContext context) async {
+    final rarities = Set<String>.from(filters.cardRarities);
+    final types = Set<String>.from(filters.pokemonTypes);
+    final result = await showDialog<({Set<String> rarities, Set<String> types})>(
+      context: context,
+      builder: (ctx) {
+        var tmpR = Set<String>.from(rarities);
+        var tmpT = Set<String>.from(types);
+        return StatefulBuilder(
+          builder: (context, setStateDialog) => AlertDialog(
+            title: const Text('Filtres cartes'),
+            content: SizedBox(
+              width: 420,
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (cardRarities.isNotEmpty) ...[
+                      Text(
+                        'Rareté',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          for (final r in cardRarities)
+                            FilterChip(
+                              label: Text(r),
+                              selected: tmpR.contains(r),
+                              onSelected: (on) => setStateDialog(() {
+                                if (on) {
+                                  tmpR.add(r);
+                                } else {
+                                  tmpR.remove(r);
+                                }
+                              }),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    if (pokemonTypes.isNotEmpty) ...[
+                      Text(
+                        'Type Pokémon',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          for (final t in pokemonTypes)
+                            FilterChip(
+                              label: Text(t),
+                              selected: tmpT.contains(t),
+                              onSelected: (on) => setStateDialog(() {
+                                if (on) {
+                                  tmpT.add(t);
+                                } else {
+                                  tmpT.remove(t);
+                                }
+                              }),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(
+                  ctx,
+                  (rarities: <String>{}, types: <String>{}),
+                ),
+                child: const Text('Effacer'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Annuler'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(
+                  ctx,
+                  (rarities: tmpR, types: tmpT),
+                ),
+                child: const Text('Appliquer'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (result == null) return;
+    onChanged(
+      filters.copyWith(
+        cardRarities: result.rarities,
+        pokemonTypes: result.types,
+        clearCardFilters:
+            result.rarities.isEmpty && result.types.isEmpty,
+      ),
+    );
+  }
+
+  Future<void> _openBoardgameGenreFilters(BuildContext context) async {
+    if (!showBoardgameGenreFilter || boardgameGenres.isEmpty) return;
+    final current = Set<String>.from(filters.boardgameGenres);
+    final selected = await showDialog<Set<String>>(
+      context: context,
+      builder: (ctx) {
+        final tmp = Set<String>.from(current);
+        return StatefulBuilder(
+          builder: (context, setStateDialog) => AlertDialog(
+            title: const Text('Genres BGG'),
+            content: SizedBox(
+              width: 420,
+              child: SingleChildScrollView(
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (final genre in boardgameGenres)
+                      FilterChip(
+                        label: Text(genre),
+                        selected: tmp.contains(genre),
+                        onSelected: (on) => setStateDialog(() {
+                          if (on) {
+                            tmp.add(genre);
+                          } else {
+                            tmp.remove(genre);
+                          }
+                        }),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, <String>{}),
+                child: const Text('Effacer'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Annuler'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, tmp),
+                child: const Text('Appliquer'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (selected == null) return;
+    onChanged(
+      filters.copyWith(
+        boardgameGenres: selected,
+        clearBoardgameGenre: selected.isEmpty,
+      ),
+    );
+  }
+
+  Widget _ownershipToggle(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: SegmentedButton<CollectionOwnershipView>(
+      showSelectedIcon: false,
+      segments: const [
+        ButtonSegment(
+          value: CollectionOwnershipView.personal,
+          icon: Icon(Icons.person_outline),
+          label: Text('Personnel'),
+        ),
+        ButtonSegment(
+          value: CollectionOwnershipView.groups,
+          icon: Icon(Icons.groups_outlined),
+          label: Text('Groupes'),
+        ),
+      ],
+      selected: {filters.ownershipView},
+      onSelectionChanged: (selection) => onChanged(
         filters.copyWith(
-          boardgameGenre: genre,
-          clearBoardgameGenre: genre == null,
+          ownershipView: selection.first,
+          clearGroups: selection.first != CollectionOwnershipView.groups,
+        ),
+      ),
+    ),
+    );
+  }
+
+  Widget _groupPickerChip(BuildContext context) {
+    final selectedCount = filters.groupIds.length;
+    return PopupMenuButton<String>(
+      tooltip: 'Choisir un ou plusieurs groupes',
+      onSelected: (id) {
+        final next = Set<String>.from(filters.groupIds);
+        if (id == '__all__') {
+          next.clear();
+        } else if (next.contains(id)) {
+          next.remove(id);
+        } else {
+          next.add(id);
+        }
+        onChanged(filters.copyWith(groupIds: next, clearGroups: next.isEmpty));
+      },
+      itemBuilder: (context) => [
+        const PopupMenuItem(
+          value: '__all__',
+          child: Text('Tous les groupes'),
+        ),
+        ...groupOptions.map(
+          (g) => CheckedPopupMenuItem(
+            value: g.id,
+            checked: filters.groupIds.contains(g.id),
+            child: Text(g.label),
+          ),
+        ),
+      ],
+      child: Chip(
+        avatar: const Icon(Icons.filter_list, size: 18),
+        label: Text(
+          selectedCount == 0
+              ? 'Groupes : tous'
+              : 'Groupes : $selectedCount sélectionné(s)',
+          style: const TextStyle(fontSize: 12),
         ),
       ),
     );
   }
 
-  Widget _chip({
-    required String label,
-    required bool selected,
-    required VoidCallback onTap,
-    IconData? icon,
-  }) {
-    return _filterChip(
-      label: label,
-      selected: selected,
-      onTap: onTap,
-      icon: icon,
-    );
-  }
 }

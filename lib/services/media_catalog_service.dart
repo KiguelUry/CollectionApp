@@ -19,7 +19,29 @@ class MediaCatalogService {
     MediaFormat format = MediaFormat.vinyl,
     int limit = 20,
   }) async {
-    final q = query.trim();
+    return searchReleasesAdvanced(
+      format: format,
+      limit: limit,
+      query: query,
+    );
+  }
+
+  /// Recherche par titre, artiste, ou les deux combinés.
+  static Future<List<Map<String, String>>> searchReleasesAdvanced({
+    MediaFormat format = MediaFormat.vinyl,
+    int limit = 20,
+    String? query,
+    String? artist,
+    String? title,
+  }) async {
+    final parts = <String>[
+      if (artist != null && artist.trim().isNotEmpty) artist.trim(),
+      if (title != null && title.trim().isNotEmpty) title.trim(),
+    ];
+    if (parts.isEmpty && query != null && query.trim().isNotEmpty) {
+      parts.add(query.trim());
+    }
+    final q = parts.join(' ');
     if (q.length < 2) return [];
 
     if (discogsEnabled) {

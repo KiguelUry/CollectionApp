@@ -140,9 +140,41 @@ class CategoryMetadata {
         if (km != null) return '$km km';
         return null;
       case CollectionCategory.media:
+        final artist = item.metadata?['artist'] as String?;
         final fmt = item.metadata?['format'];
-        if (fmt != null) return MediaFormat.fromDbValue(fmt.toString()).label;
+        final fmtLabel =
+            fmt != null ? MediaFormat.fromDbValue(fmt.toString()).label : null;
+        if (artist != null && artist.trim().isNotEmpty) {
+          if (fmtLabel != null) return '$artist · $fmtLabel';
+          return artist;
+        }
+        return fmtLabel;
+      case CollectionCategory.lego:
+        final kind = item.metadata?['lego_kind']?.toString();
+        if (kind == 'maquette') return 'Maquette';
+        final setNum = item.metadata?['set_number']?.toString();
+        if (setNum != null && setNum.isNotEmpty) return 'Set $setNum';
         return null;
+      case CollectionCategory.watch:
+        final brand = item.metadata?['brand']?.toString();
+        final model = item.metadata?['model']?.toString();
+        if (brand != null && brand.isNotEmpty) {
+          if (model != null && model.isNotEmpty) return '$brand · $model';
+          return brand;
+        }
+        return model;
+      case CollectionCategory.videogame:
+        return item.metadata?['platform']?.toString();
+      case CollectionCategory.movie:
+        final year = item.metadata?['year']?.toString();
+        final kind = item.metadata?['media_kind']?.toString();
+        if (year != null && year.isNotEmpty) {
+          if (kind == 'series') return 'Série · $year';
+          return year;
+        }
+        return kind == 'series' ? 'Série' : null;
+      case CollectionCategory.custom:
+        return item.metadata?['custom_type_name']?.toString();
       default:
         return null;
     }
@@ -241,6 +273,40 @@ class CategoryMetadata {
         }
         rows.add(MapEntry('Monté', m['is_built'] == true ? 'Oui' : 'Non'));
         rows.add(MapEntry('Boîte', m['box_included'] == true ? 'Oui' : 'Non'));
+        break;
+      case CollectionCategory.watch:
+        if ((m['brand'] as String?)?.isNotEmpty == true) {
+          rows.add(MapEntry('Marque', m['brand'].toString()));
+        }
+        if ((m['model'] as String?)?.isNotEmpty == true) {
+          rows.add(MapEntry('Modèle', m['model'].toString()));
+        }
+        if ((m['reference'] as String?)?.isNotEmpty == true) {
+          rows.add(MapEntry('Référence', m['reference'].toString()));
+        }
+        if ((m['year'] as String?)?.isNotEmpty == true) {
+          rows.add(MapEntry('Année', m['year'].toString()));
+        }
+        break;
+      case CollectionCategory.videogame:
+        if ((m['platform'] as String?)?.isNotEmpty == true) {
+          rows.add(MapEntry('Plateforme', m['platform'].toString()));
+        }
+        if ((m['year'] as String?)?.isNotEmpty == true) {
+          rows.add(MapEntry('Année', m['year'].toString()));
+        }
+        break;
+      case CollectionCategory.movie:
+        rows.add(MapEntry(
+          'Type',
+          m['media_kind'] == 'series' ? 'Série' : 'Film',
+        ));
+        if ((m['year'] as String?)?.isNotEmpty == true) {
+          rows.add(MapEntry('Année', m['year'].toString()));
+        }
+        if ((m['director'] as String?)?.isNotEmpty == true) {
+          rows.add(MapEntry('Réalisateur', m['director'].toString()));
+        }
         break;
       default:
         break;

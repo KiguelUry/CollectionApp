@@ -70,7 +70,7 @@ class _GroupMemberLocationFieldState extends State<GroupMemberLocationField> {
         ),
         const SizedBox(height: 8),
         DropdownButtonFormField<String?>(
-          value: widget.selectedUserId,
+          initialValue: widget.selectedUserId,
           decoration: const InputDecoration(
             labelText: 'Membre du groupe',
             prefixIcon: Icon(Icons.person_pin_circle_outlined),

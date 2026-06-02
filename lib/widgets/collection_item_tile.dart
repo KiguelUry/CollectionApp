@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
+import '../utils/boardgame_display.dart';
 import 'bgg_network_image.dart';
 
 /// Tuile grille pour un objet de collection (grisée si vendu).
@@ -24,31 +25,37 @@ class CollectionItemTile extends StatelessWidget {
 
   bool get _isGrayed => item.isSold;
 
+  bool get _isCard => category == CollectionCategory.card;
+
   @override
   Widget build(BuildContext context) {
+    if (_isCard) {
+      return _buildCardTile();
+    }
+
     final child = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(
           child: Stack(
             fit: StackFit.expand,
             children: [
               Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.08),
-                      blurRadius: 6,
-                      offset: const Offset(0, 3),
-                    ),
-                  ],
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.08),
+                        blurRadius: 6,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: _buildImage(),
+                  ),
                 ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: _buildImage(),
-                ),
-              ),
               if (showDuplicateBadge && totalQuantity > 1)
                 Positioned(
                   top: 4,
@@ -104,33 +111,40 @@ class CollectionItemTile extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 6),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                item.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 11,
-                  color: _isGrayed ? Colors.grey : null,
-                ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              item.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 11,
+                color: _isGrayed ? Colors.grey : null,
               ),
-              if (item.listSubtitle != null)
+            ),
+              if (_subtitleLine != null)
                 Text(
-                  item.listSubtitle!,
+                  _subtitleLine!,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: Colors.grey.shade600,
+                    fontSize: 10,
+                  ),
+                ),
+              if (_whereLine != null)
+                Text(
+                  _whereLine!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.grey.shade700,
                     fontSize: 9,
                   ),
                 ),
-            ],
-          ),
+          ],
         ),
       ],
     );
@@ -140,18 +154,109 @@ class CollectionItemTile extends StatelessWidget {
     return InkWell(onTap: onTap, child: child);
   }
 
+  Widget _buildCardTile() {
+    final child = DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: Colors.grey.shade300, width: 0.8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 5, 4, 0),
+                  child: Align(
+                    alignment: Alignment.center,
+                    child: AspectRatio(
+                      aspectRatio: 63 / 88,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: _buildImage(),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                if (showDuplicateBadge && totalQuantity > 1)
+                  Positioned(
+                    top: 4,
+                    right: 4,
+                    child: _badge('×$totalQuantity', Colors.deepPurple),
+                  ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 3),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade300,
+              borderRadius: const BorderRadius.vertical(
+                bottom: Radius.circular(5),
+              ),
+            ),
+            child: Text(
+              item.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 8,
+                height: 1.05,
+                fontWeight: FontWeight.w600,
+                color: _isGrayed ? Colors.grey : Colors.black87,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (onTap == null) return child;
+    return InkWell(onTap: onTap, borderRadius: BorderRadius.circular(6), child: child);
+  }
+
+  String? get _subtitleLine {
+    if (category == CollectionCategory.boardgame) {
+      final parts = <String>[];
+      final players = formatPlayerCount(item.minPlayers, item.maxPlayers);
+      if (players != null) parts.add(players);
+      final time = formatPlayingTime(item.playingTime);
+      if (time != null) parts.add(time);
+      return parts.isEmpty ? null : parts.join(' · ');
+    }
+    return item.listSubtitle;
+  }
+
+  String? get _whereLine {
+    if (item.locationLabel == null || item.locationLabel!.trim().isEmpty) {
+      return null;
+    }
+    return item.locationLabel;
+  }
+
   Widget _buildImage() {
     Widget image;
     if (item.imageUrl != null) {
       final isBook = category == CollectionCategory.book;
+      final isCard = category == CollectionCategory.card;
       image = BggNetworkImage(
         url: item.imageUrl!,
+        fit: isCard ? BoxFit.contain : BoxFit.cover,
         bookCover: isBook,
-        largeSource: !isBook,
+        largeSource: !isBook && !isCard,
       );
     } else {
-      image = Container(
-        color: Colors.grey.shade200,
+      image = ColoredBox(
+        color: _isCard ? Colors.transparent : Colors.grey.shade200,
         child: Icon(category.icon, color: Colors.grey),
       );
     }

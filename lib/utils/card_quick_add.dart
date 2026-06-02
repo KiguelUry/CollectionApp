@@ -22,9 +22,27 @@ Future<void> quickAddCardFromCatalog(
     context: context,
     builder: (dialogContext) => AddItemOptionsDialog(
       itemTitle: title,
+      itemImageUrl: imageUrl,
       onConfirm: (options) async {
         final client = Supabase.instance.client;
         final userId = client.auth.currentUser!.id;
+
+        try {
+          await ProfileService().ensureCurrentUserProfile();
+        } on PostgrestException catch (e) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  ProfileService.isMissingProfileFk(e)
+                      ? ProfileService.missingProfileUserMessage()
+                      : '$e',
+                ),
+              ),
+            );
+          }
+          return;
+        }
 
         final item = CollectionItem(
           id: '',
@@ -43,8 +61,9 @@ Future<void> quickAddCardFromCatalog(
           await client.from('collection_items').insert(
                 item.toInsertJson(
                   isWishlist: options.isWishlist,
-                  locationUserId:
-                      options.isWishlist ? null : (options.locationUserId ?? userId),
+                  locationUserId: options.isWishlist
+                      ? null
+                      : (options.locationUserId ?? userId),
                   addedBy: userId,
                 ),
               );
@@ -56,9 +75,7 @@ Future<void> quickAddCardFromCatalog(
           }
         } on PostgrestException catch (e) {
           if (context.mounted) {
-            final msg = ProfileService.isMissingProfileFk(e)
-                ? ProfileService.missingProfileUserMessage()
-                : '$e';
+            final msg = _insertErrorMessage(e);
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text(msg)),
             );
@@ -81,4 +98,17 @@ Future<void> quickAddTcgCatalogCard(
     imageUrl: card.imageUrl,
     metadata: CardCatalogService.metadataFromTcgCard(card, subcategory),
   );
+}
+
+String _insertErrorMessage(PostgrestException e) {
+  if (ProfileService.isMissingProfileFk(e)) {
+    return ProfileService.missingProfileUserMessage();
+  }
+  final m = e.message.toLowerCase();
+  if (m.contains('subcategory_check')) {
+    return 'Univers carte non reconnu en base. '
+        'Exécute supabase/schema_collection_item_subcategory.sql '
+        'dans Supabase (SQL Editor).';
+  }
+  return e.message;
 }

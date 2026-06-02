@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/tcg_set_info.dart';
+import '../utils/tcg_set_image_url.dart';
 
 /// Lorcast — Disney Lorcana (gratuit, sans clé).
 /// https://lorcast.com
@@ -21,8 +22,8 @@ class LorcastService {
       }
     }
 
-    main.sort((a, b) => (b.releaseDate ?? '').compareTo(a.releaseDate ?? ''));
-    extra.sort((a, b) => (b.releaseDate ?? '').compareTo(a.releaseDate ?? ''));
+    sortSetsByReleaseNewest(main);
+    sortSetsByReleaseNewest(extra);
 
     return [
       TcgSeriesBlock(
@@ -60,6 +61,9 @@ class LorcastService {
           name: s['name']?.toString() ?? code,
           code: code,
           seriesName: _isMainChapter(code) ? 'Chapitres' : 'Promos & spéciaux',
+          imageUrl: code.isNotEmpty
+              ? 'https://lorcast.com/images/sets/${code.toLowerCase()}.webp'
+              : null,
           releaseDate: s['released_at']?.toString(),
         );
       }).toList();

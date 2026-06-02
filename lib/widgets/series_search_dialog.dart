@@ -131,7 +131,7 @@ class _SeriesSearchDialogState extends State<_SeriesSearchDialog> {
                     )
                   : ListView.separated(
                       itemCount: _results.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      separatorBuilder: (_, _) => const Divider(height: 1),
                       itemBuilder: (ctx, i) {
                         final hit = _results[i];
                         return ListTile(

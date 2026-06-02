@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/lego_build_kind.dart';
 import '../models/book_subcategory.dart';
 import '../models/card_subcategory.dart';
 import '../models/category_metadata.dart';
@@ -10,6 +11,7 @@ class AddItemManualDialog extends StatefulWidget {
   final CollectionCategory category;
   final CardSubcategory? initialCardSubcategory;
   final MediaFormat? initialMediaFormat;
+  final LegoBuildKind? initialLegoKind;
   final bool lockSubcategory;
 
   const AddItemManualDialog({
@@ -18,6 +20,7 @@ class AddItemManualDialog extends StatefulWidget {
     required this.category,
     this.initialCardSubcategory,
     this.initialMediaFormat,
+    this.initialLegoKind,
     this.lockSubcategory = false,
   });
 
@@ -91,10 +94,13 @@ class _AddItemManualDialogState extends State<AddItemManualDialog> {
                   category: widget.category,
                   initialCardSubcategory: widget.initialCardSubcategory,
                   initialMediaFormat: widget.initialMediaFormat,
+                  initialLegoKind: widget.initialLegoKind,
                   lockCardSubcategory: widget.lockSubcategory &&
                       widget.category == CollectionCategory.card,
                   lockMediaFormat: widget.lockSubcategory &&
                       widget.category == CollectionCategory.media,
+                  lockLegoKind: widget.lockSubcategory &&
+                      widget.category == CollectionCategory.lego,
                 ),
               ],
             ],

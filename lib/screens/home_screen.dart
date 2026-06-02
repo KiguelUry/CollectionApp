@@ -15,7 +15,7 @@ import '../services/profile_service.dart';
 import '../utils/boardgame_genres.dart';
 import '../utils/collection_grid_grouper.dart';
 import '../utils/collection_item_filters.dart';
-import '../utils/holder_filter.dart';
+import '../utils/card_item_metadata.dart';
 import '../utils/collection_item_scope.dart';
 import '../models/collection_list_filters.dart';
 import '../models/collection_view_mode.dart';
@@ -23,6 +23,8 @@ import '../models/item_tag.dart';
 import '../models/storage_location.dart';
 import '../services/location_service.dart';
 import '../services/tag_service.dart';
+import '../widgets/category_collection_header.dart';
+import '../widgets/category_collection_shell.dart';
 import '../widgets/collection_filter_bar.dart';
 import '../widgets/wishlist_suggestions_banner.dart';
 import '../widgets/collection_item_list_tile.dart';
@@ -36,9 +38,15 @@ import '../widgets/book_search_dialog.dart' show showBookSearch;
 import '../widgets/card_search_dialog.dart' show showCardSearch;
 import '../widgets/media_search_dialog.dart' show showMediaSearch;
 import '../widgets/ui/add_option_tile.dart';
+import '../models/lego_build_kind.dart';
+import '../services/rebrickable_service.dart';
+import '../services/rawg_service.dart';
+import '../services/tmdb_service.dart';
+import '../utils/catalog_hit_metadata.dart';
 import '../widgets/book_subcategory_picker.dart';
-import '../widgets/app_app_bar.dart';
+import '../widgets/catalog_search_sheet.dart';
 import 'item_detail_screen.dart';
+import 'media_artist_albums_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final CollectionCategory category;
@@ -46,12 +54,23 @@ class HomeScreen extends StatefulWidget {
   final CardSubcategory? fixedCardSubcategory;
   final MediaFormat? fixedMediaFormat;
 
+  final Color? accentOverride;
+  final String? customTypeId;
+  final String? customTypeName;
+  final LegoBuildKind? fixedLegoKind;
+  final Map<String, String>? pendingCatalogHit;
+
   const HomeScreen({
     super.key,
     required this.category,
     this.screenTitle,
     this.fixedCardSubcategory,
     this.fixedMediaFormat,
+    this.accentOverride,
+    this.customTypeId,
+    this.customTypeName,
+    this.fixedLegoKind,
+    this.pendingCatalogHit,
   });
 
   @override
@@ -70,6 +89,7 @@ class _HomeScreenState extends State<HomeScreen>
   CollectionListFilters _collectionFilters = CollectionListFilters();
   CollectionListFilters _wishlistFilters = CollectionListFilters();
   CollectionViewMode _viewMode = CollectionViewMode.grid;
+  bool _mediaGroupByArtist = false;
   List<StorageLocation> _locations = [];
   List<ItemTag> _tags = [];
 
@@ -82,8 +102,50 @@ class _HomeScreenState extends State<HomeScreen>
         .from('collection_items')
         .stream(primaryKey: ['id'])
         .eq('category', widget.category.dbValue);
-    _itemsStream = rawStream.map(_onlyMyRows);
+    _itemsStream = rawStream.map(_filterAndScopeRows);
     _loadFilterData();
+    if (widget.pendingCatalogHit != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _openFromCatalogHit(widget.pendingCatalogHit!);
+      });
+    }
+  }
+
+  List<Map<String, dynamic>> _filterAndScopeRows(
+    List<Map<String, dynamic>> rows,
+  ) {
+    var filtered = _onlyMyRows(rows);
+
+    if (widget.customTypeId != null) {
+      filtered = filtered
+          .where((r) => r['subcategory'] == widget.customTypeId)
+          .toList();
+    }
+
+    if (widget.fixedLegoKind != null) {
+      filtered = filtered.where((r) {
+        final meta = CategoryMetadata.parse(r['metadata']);
+        final kind = meta?['lego_kind']?.toString() ?? 'lego';
+        return kind == widget.fixedLegoKind!.dbValue;
+      }).toList();
+    }
+
+    return filtered;
+  }
+
+  Color get _accentColor =>
+      widget.accentOverride ?? widget.category.color;
+
+  void _openFromCatalogHit(Map<String, String> hit) {
+    var meta = metadataFromCatalogHit(hit, widget.category);
+    if (widget.fixedLegoKind != null) {
+      meta = {...meta, 'lego_kind': widget.fixedLegoKind!.dbValue};
+    }
+    _showOptionsDialog(
+      title: hit['title'] ?? 'Objet',
+      imageUrl: hit['image_url']?.isNotEmpty == true ? hit['image_url'] : null,
+      metadata: meta,
+    );
   }
 
   @override
@@ -186,6 +248,12 @@ class _HomeScreenState extends State<HomeScreen>
       _showCardAddChooser();
     } else if (widget.category == CollectionCategory.media) {
       _showMediaAddChooser();
+    } else if (widget.category == CollectionCategory.movie) {
+      _showMovieAddChooser();
+    } else if (widget.category == CollectionCategory.videogame) {
+      _showVideogameAddChooser();
+    } else if (widget.category == CollectionCategory.lego) {
+      _showLegoAddChooser();
     } else {
       _showManualAddFlow();
     }
@@ -328,6 +396,121 @@ class _HomeScreenState extends State<HomeScreen>
     });
   }
 
+  void _showCatalogAddChooser({
+    required String label,
+    required Color color,
+    required VoidCallback onSearch,
+  }) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Ajouter — $label',
+                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+              const SizedBox(height: 12),
+              AddOptionTile(
+                icon: Icons.search_rounded,
+                color: color,
+                title: 'Chercher dans le catalogue',
+                subtitle: 'Recherche en ligne si clé API',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  onSearch();
+                },
+              ),
+              const SizedBox(height: 8),
+              AddOptionTile(
+                icon: Icons.edit_outlined,
+                color: color,
+                title: 'Saisir à la main',
+                subtitle: 'Titre, détails, photo…',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showManualAddFlow();
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showMovieAddChooser() {
+    _showCatalogAddChooser(
+      label: widget.screenTitle ?? 'Films',
+      color: _accentColor,
+      onSearch: () {
+        showCatalogSearchSheet(
+          context,
+          title: 'Rechercher un film ou une série',
+          hint: 'Titre',
+          apiHint: TmdbService.isConfigured
+              ? null
+              : 'Ajoute TMDB_API_KEY dans .env',
+          search: TmdbService.search,
+          onManualEntry: _showManualAddFlow,
+        ).then((hit) {
+          if (hit != null && mounted) _openFromCatalogHit(hit);
+        });
+      },
+    );
+  }
+
+  void _showVideogameAddChooser() {
+    _showCatalogAddChooser(
+      label: widget.screenTitle ?? 'Jeux vidéo',
+      color: _accentColor,
+      onSearch: () {
+        showCatalogSearchSheet(
+          context,
+          title: 'Rechercher un jeu',
+          hint: 'Nom du jeu',
+          apiHint: RawgService.isConfigured
+              ? null
+              : 'Ajoute RAWG_API_KEY dans .env',
+          search: RawgService.search,
+          onManualEntry: _showManualAddFlow,
+        ).then((hit) {
+          if (hit != null && mounted) _openFromCatalogHit(hit);
+        });
+      },
+    );
+  }
+
+  void _showLegoAddChooser() {
+    _showCatalogAddChooser(
+      label: widget.screenTitle ?? 'Lego',
+      color: _accentColor,
+      onSearch: () {
+        showCatalogSearchSheet(
+          context,
+          title: 'Rechercher un set Lego',
+          hint: 'Nom ou n° de set',
+          apiHint: RebrickableService.isConfigured
+              ? null
+              : 'Ajoute REBRICKABLE_API_KEY dans .env',
+          search: RebrickableService.search,
+          onManualEntry: () => _showManualAddFlow(
+            legoKind: widget.fixedLegoKind,
+          ),
+        ).then((hit) {
+          if (hit != null && mounted) _openFromCatalogHit(hit);
+        });
+      },
+    );
+  }
+
   void _showBoardgameAddChooser() {
     final proxyOk = BggService.webBggAvailable;
     showModalBottomSheet<void>(
@@ -446,12 +629,20 @@ class _HomeScreenState extends State<HomeScreen>
           .where((i) => i.metadata?['format']?.toString() == mediaFmt.dbValue)
           .toList();
     }
+    final legoKind = widget.fixedLegoKind;
+    if (legoKind != null) {
+      return items.where((i) {
+        final k = i.metadata?['lego_kind']?.toString() ?? 'lego';
+        return k == legoKind.dbValue;
+      }).toList();
+    }
     return items;
   }
 
   Future<void> _showManualAddFlow({
     CardSubcategory? cardSubcategory,
     MediaFormat? mediaFormat,
+    LegoBuildKind? legoKind,
   }) async {
     final draft = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -461,8 +652,10 @@ class _HomeScreenState extends State<HomeScreen>
         initialCardSubcategory:
             cardSubcategory ?? widget.fixedCardSubcategory,
         initialMediaFormat: mediaFormat ?? widget.fixedMediaFormat,
-        lockSubcategory:
-            widget.fixedCardSubcategory != null || widget.fixedMediaFormat != null,
+        initialLegoKind: legoKind ?? widget.fixedLegoKind,
+        lockSubcategory: widget.fixedCardSubcategory != null ||
+            widget.fixedMediaFormat != null ||
+            widget.fixedLegoKind != null,
       ),
     );
     if (draft == null || !mounted) return;
@@ -488,6 +681,7 @@ class _HomeScreenState extends State<HomeScreen>
       context: context,
       builder: (dialogContext) => AddItemOptionsDialog(
         itemTitle: title,
+        itemImageUrl: imageUrl,
         defaultWishlist: _addingToWishlist,
         onConfirm: (options) async {
           await _handleSave(
@@ -549,6 +743,11 @@ class _HomeScreenState extends State<HomeScreen>
           .eq('category', widget.category.dbValue)
           .eq('title', title.trim());
 
+      final resolvedSub = widget.customTypeId ?? subcategory;
+      if (resolvedSub != null) {
+        dupQuery = dupQuery.eq('subcategory', resolvedSub);
+      }
+
       if (options.groupId != null) {
         dupQuery = dupQuery.eq('group_id', options.groupId!);
       } else {
@@ -584,12 +783,18 @@ class _HomeScreenState extends State<HomeScreen>
             if (v != null) meta[key] = v;
           }
         }
+        if (widget.fixedLegoKind != null && !meta.containsKey('lego_kind')) {
+          meta['lego_kind'] = widget.fixedLegoKind!.dbValue;
+        }
+        if (widget.customTypeName != null) {
+          meta['custom_type_name'] = widget.customTypeName;
+        }
 
         final item = CollectionItem(
           id: '',
           title: title.trim(),
           category: widget.category,
-          subcategory: subcategory,
+          subcategory: resolvedSub,
           metadata: meta.isEmpty ? null : meta,
           imageUrl: resolvedImageUrl,
           isWishlist: options.isWishlist,
@@ -643,48 +848,60 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
+  Color get _onAccent {
+    final c = _accentColor;
+    return c.computeLuminance() > 0.55 ? Colors.black87 : Colors.white;
+  }
+
+  List<Widget> get _headerActions => [
+        IconButton(
+          icon: Icon(
+            _viewMode == CollectionViewMode.grid
+                ? Icons.view_list_rounded
+                : Icons.grid_view_rounded,
+            color: _onAccent,
+          ),
+          tooltip: _viewMode == CollectionViewMode.grid
+              ? 'Vue liste'
+              : 'Vue grille',
+          onPressed: () => setState(() {
+            _viewMode = _viewMode == CollectionViewMode.grid
+                ? CollectionViewMode.list
+                : CollectionViewMode.grid;
+          }),
+        ),
+        if (widget.category.supportsOpenLibrarySearch)
+          IconButton(
+            icon: Icon(Icons.qr_code_scanner_rounded, color: _onAccent),
+            tooltip: 'Scanner ISBN',
+            onPressed: _scanIsbnAndAdd,
+          ),
+      ];
+
   @override
   Widget build(BuildContext context) {
+    final title = widget.screenTitle ?? widget.category.label;
+
     return Scaffold(
-        appBar: AppAppBar(
-          title: widget.screenTitle ?? widget.category.label,
-          actions: [
-            IconButton(
-              icon: Icon(
-                _viewMode == CollectionViewMode.grid
-                    ? Icons.view_list
-                    : Icons.grid_view,
-              ),
-              tooltip: _viewMode == CollectionViewMode.grid
-                  ? 'Vue liste'
-                  : 'Vue grille',
-              onPressed: () => setState(() {
-                _viewMode = _viewMode == CollectionViewMode.grid
-                    ? CollectionViewMode.list
-                    : CollectionViewMode.grid;
-              }),
-            ),
-            if (widget.category.supportsOpenLibrarySearch)
-              IconButton(
-                icon: const Icon(Icons.qr_code_scanner),
-                tooltip: 'Scanner ISBN',
-                onPressed: _scanIsbnAndAdd,
-              ),
-          ],
-          bottom: TabBar(
-            controller: _tabController,
-            indicatorColor: Colors.deepPurple,
-            tabs: const [
-              Tab(text: 'Collection'),
-              Tab(text: 'Wishlist'),
-            ],
-          ),
-        ),
-        floatingActionButton: FloatingActionButton(
+        floatingActionButton: FloatingActionButton.extended(
           onPressed: _onAddPressed,
-          child: const Icon(Icons.add),
+          backgroundColor: _accentColor,
+          foregroundColor: _onAccent,
+          icon: const Icon(Icons.add_rounded),
+          label: const Text('Ajouter'),
         ),
-        body: StreamBuilder<List<Map<String, dynamic>>>(
+        body: Column(
+          children: [
+            CategoryCollectionHeader(
+              category: widget.category,
+              title: title,
+              tabController: _tabController,
+              accentOverride: widget.accentOverride,
+              quickActions: _quickActions(),
+              extraActions: _headerActions,
+            ),
+            Expanded(
+              child: StreamBuilder<List<Map<String, dynamic>>>(
           stream: _itemsStream,
           builder: (context, snapshot) {
             if (snapshot.hasError) {
@@ -723,25 +940,10 @@ class _HomeScreenState extends State<HomeScreen>
                           setState(() => _collectionFilters = f),
                       emptyHint: 'Ta collection est vide ici.',
                       showScopeFilters: true,
-                      showHolderFilter:
-                          widget.category == CollectionCategory.boardgame,
                       showLocationFilter:
                           widget.category != CollectionCategory.boardgame,
                       showTagFilter:
                           widget.category != CollectionCategory.boardgame,
-                      showHighlyRatedFilter:
-                          widget.category != CollectionCategory.boardgame,
-                      onShakePick: widget.category ==
-                              CollectionCategory.boardgame
-                          ? () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (ctx) => const ShakePickScreen(
-                                    category: CollectionCategory.boardgame,
-                                  ),
-                                ),
-                              )
-                          : null,
                     ),
                     _buildTab(
                       items: wishlist,
@@ -750,10 +952,11 @@ class _HomeScreenState extends State<HomeScreen>
                       onFiltersChanged: (f) =>
                           setState(() => _wishlistFilters = f),
                       emptyHint: 'Rien en wishlist pour cette catégorie.',
-                      showScopeFilters: false,
-                      showStatusFilters: false,
-                      showLocationFilter: false,
-                      showTagFilter: false,
+                      showScopeFilters: true,
+                      showLocationFilter:
+                          widget.category != CollectionCategory.boardgame,
+                      showTagFilter:
+                          widget.category != CollectionCategory.boardgame,
                       showWishlistSuggestions:
                           widget.category == CollectionCategory.boardgame,
                     ),
@@ -763,7 +966,88 @@ class _HomeScreenState extends State<HomeScreen>
             );
           },
         ),
+            ),
+          ],
+        ),
     );
+  }
+
+  List<CategoryQuickAction> _quickActions() {
+    return switch (widget.category) {
+      CollectionCategory.boardgame => [
+          CategoryQuickAction(
+            label: 'Chercher BGG',
+            icon: Icons.search_rounded,
+            onTap: () {
+              if (kIsWeb && !BggService.webBggAvailable) {
+                _showBoardgameAddChooser();
+              } else {
+                _showBggSearchDialog();
+              }
+            },
+          ),
+          CategoryQuickAction(
+            label: 'Tirage au sort',
+            icon: Icons.casino_outlined,
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (ctx) => const ShakePickScreen(
+                  category: CollectionCategory.boardgame,
+                ),
+              ),
+            ),
+          ),
+        ],
+      CollectionCategory.book => [
+          CategoryQuickAction(
+            label: 'Rechercher',
+            icon: Icons.menu_book_rounded,
+            onTap: _showBookSearchDialog,
+          ),
+          CategoryQuickAction(
+            label: 'Scan ISBN',
+            icon: Icons.qr_code_scanner_rounded,
+            onTap: _scanIsbnAndAdd,
+          ),
+        ],
+      CollectionCategory.card => [
+          CategoryQuickAction(
+            label: 'Chercher une carte',
+            icon: Icons.search_rounded,
+            onTap: _showCardAddChooser,
+          ),
+        ],
+      CollectionCategory.media => [
+          CategoryQuickAction(
+            label: 'Chercher / scanner',
+            icon: Icons.album_rounded,
+            onTap: _showMediaAddChooser,
+          ),
+        ],
+      CollectionCategory.movie => [
+          CategoryQuickAction(
+            label: 'Chercher',
+            icon: Icons.search_rounded,
+            onTap: _showMovieAddChooser,
+          ),
+        ],
+      CollectionCategory.videogame => [
+          CategoryQuickAction(
+            label: 'Chercher',
+            icon: Icons.search_rounded,
+            onTap: _showVideogameAddChooser,
+          ),
+        ],
+      CollectionCategory.lego => [
+          CategoryQuickAction(
+            label: 'Chercher un set',
+            icon: Icons.search_rounded,
+            onTap: _showLegoAddChooser,
+          ),
+        ],
+      _ => const <CategoryQuickAction>[],
+    };
   }
 
   String _buildCountLabel(List<CollectionItem> items, List<CollectionItem> filtered) {
@@ -785,44 +1069,69 @@ class _HomeScreenState extends State<HomeScreen>
     required ValueChanged<CollectionListFilters> onFiltersChanged,
     required String emptyHint,
     bool showScopeFilters = true,
-    bool showStatusFilters = true,
     bool showLocationFilter = true,
-    bool showHolderFilter = false,
     bool showTagFilter = true,
-    bool showHighlyRatedFilter = true,
     bool showWishlistSuggestions = false,
-    VoidCallback? onShakePick,
   }) {
     final filtered = filters.apply(items);
     final countLabel = _buildCountLabel(items, filtered);
-    final List<HolderFilterOption> holderOptions = showHolderFilter
-        ? buildHolderFilterOptions(items)
-        : const <HolderFilterOption>[];
+    final groupOptions = items
+        .where((i) => i.groupId != null)
+        .map((i) => MapEntry(i.groupId!, i.groupName ?? 'Groupe'))
+        .fold<Map<String, String>>(
+          <String, String>{},
+          (acc, entry) => acc..putIfAbsent(entry.key, () => entry.value),
+        )
+        .entries
+        .map((e) => GroupFilterOption(id: e.key, label: e.value))
+        .toList()
+      ..sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
+
+    final cardRarityOptions = widget.category == CollectionCategory.card
+        ? (distinctCardRarities(items).toList()
+          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())))
+        : const <String>[];
+    final pokemonTypeOptions = widget.category == CollectionCategory.card
+        ? (distinctPokemonTypes(items).toList()
+          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())))
+        : const <String>[];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (showWishlistSuggestions)
           WishlistSuggestionsBanner(category: widget.category),
+        if (widget.category == CollectionCategory.media)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: FilterChip(
+                label: const Text('Par artiste'),
+                selected: _mediaGroupByArtist,
+                onSelected: (v) => setState(() => _mediaGroupByArtist = v),
+                avatar: const Icon(Icons.person_outline, size: 18),
+              ),
+            ),
+          ),
         CollectionFilterBar(
           filters: filters,
           onChanged: onFiltersChanged,
           searchController: searchController,
           locations: _locations,
           tags: _tags,
-          holderOptions: holderOptions,
           showScopeFilters: showScopeFilters,
-          showStatusFilters: showStatusFilters,
           showLocationFilter: showLocationFilter,
-          showHolderFilter: showHolderFilter,
           showTagFilter: showTagFilter,
-          showHighlyRatedFilter: showHighlyRatedFilter,
           showBoardgameGenreFilter:
               widget.category == CollectionCategory.boardgame,
           boardgameGenres: widget.category == CollectionCategory.boardgame
               ? distinctBoardgameGenres(items)
               : const [],
-          onShakePick: onShakePick,
+          showCardFilter: widget.category == CollectionCategory.card,
+          cardRarities: cardRarityOptions,
+          pokemonTypes: pokemonTypeOptions,
+          groupOptions: groupOptions,
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
@@ -836,27 +1145,79 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
         Expanded(
-          child: _viewMode == CollectionViewMode.grid
-              ? _buildItemGrid(
-                  filtered,
-                  emptyHint: emptyHint,
-                  filters: filters,
-                  onClearFilters: () {
-                    searchController.clear();
-                    onFiltersChanged(CollectionListFilters());
-                  },
-                )
-              : _buildItemList(
-                  filtered,
-                  emptyHint: emptyHint,
-                  filters: filters,
-                  onClearFilters: () {
-                    searchController.clear();
-                    onFiltersChanged(CollectionListFilters());
-                  },
-                ),
+          child: widget.category == CollectionCategory.media &&
+                  _mediaGroupByArtist
+              ? _buildMediaArtistList(filtered, emptyHint: emptyHint)
+              : _viewMode == CollectionViewMode.grid
+                  ? _buildItemGrid(
+                      filtered,
+                      emptyHint: emptyHint,
+                      filters: filters,
+                      onClearFilters: () {
+                        searchController.clear();
+                        onFiltersChanged(CollectionListFilters());
+                      },
+                    )
+                  : _buildItemList(
+                      filtered,
+                      emptyHint: emptyHint,
+                      filters: filters,
+                      onClearFilters: () {
+                        searchController.clear();
+                        onFiltersChanged(CollectionListFilters());
+                      },
+                    ),
         ),
       ],
+    );
+  }
+
+  Widget _buildMediaArtistList(
+    List<CollectionItem> items, {
+    required String emptyHint,
+  }) {
+    if (items.isEmpty) {
+      return Center(child: Text(emptyHint));
+    }
+
+    final byArtist = <String, List<CollectionItem>>{};
+    for (final item in items) {
+      final raw = item.metadata?['artist']?.toString().trim();
+      final key =
+          raw != null && raw.isNotEmpty ? raw : 'Artiste inconnu';
+      byArtist.putIfAbsent(key, () => []).add(item);
+    }
+    final artists = byArtist.keys.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      itemCount: artists.length,
+      separatorBuilder: (_, _) => const Divider(height: 1),
+      itemBuilder: (context, index) {
+        final name = artists[index];
+        final albums = byArtist[name]!;
+        return ListTile(
+          leading: CircleAvatar(
+            backgroundColor: widget.category.color.withValues(alpha: 0.2),
+            child: Icon(Icons.person, color: widget.category.color),
+          ),
+          title: Text(name, style: const TextStyle(fontWeight: FontWeight.w700)),
+          subtitle: Text(
+            '${albums.length} album${albums.length > 1 ? 's' : ''}',
+          ),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (ctx) => MediaArtistAlbumsScreen(
+                artist: name,
+                items: albums,
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -896,13 +1257,19 @@ class _HomeScreenState extends State<HomeScreen>
 
     final grouped = CollectionGridGrouper.group(items);
 
+    final aspectRatio = switch (widget.category) {
+      CollectionCategory.boardgame => 0.72,
+      CollectionCategory.card => 0.5,
+      _ => 0.85,
+    };
+
     return GridView.builder(
       padding: const EdgeInsets.all(12),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 3,
         crossAxisSpacing: 12,
         mainAxisSpacing: 12,
-        childAspectRatio: 0.85,
+        childAspectRatio: aspectRatio,
       ),
       itemCount: grouped.length,
       itemBuilder: (context, index) {

@@ -11,7 +11,8 @@ enum CollectionCategory {
   lego,
   watch,
   videogame,
-  movie;
+  movie,
+  custom;
 
   String get dbValue => name;
 
@@ -27,6 +28,7 @@ enum CollectionCategory {
         CollectionCategory.watch => 'Montres',
         CollectionCategory.videogame => 'Jeux vidéo',
         CollectionCategory.movie => 'Films',
+        CollectionCategory.custom => 'Collection perso',
       };
 
   String get description => switch (this) {
@@ -41,6 +43,7 @@ enum CollectionCategory {
         CollectionCategory.watch => 'Montres & bracelets',
         CollectionCategory.videogame => 'Jeux console & PC',
         CollectionCategory.movie => 'Films & séries',
+        CollectionCategory.custom => 'Type personnalisé',
       };
 
   IconData get icon => switch (this) {
@@ -55,6 +58,7 @@ enum CollectionCategory {
         CollectionCategory.watch => Icons.watch,
         CollectionCategory.videogame => Icons.sports_esports,
         CollectionCategory.movie => Icons.movie,
+        CollectionCategory.custom => Icons.folder_special_outlined,
       };
 
   Color get color => switch (this) {
@@ -69,6 +73,7 @@ enum CollectionCategory {
         CollectionCategory.watch => Colors.blueGrey,
         CollectionCategory.videogame => Colors.green,
         CollectionCategory.movie => Colors.pink,
+        CollectionCategory.custom => Colors.blueGrey,
       };
 
   bool get supportsBggSearch => this == CollectionCategory.boardgame;
@@ -81,7 +86,10 @@ enum CollectionCategory {
         CollectionCategory.stamp ||
         CollectionCategory.coin ||
         CollectionCategory.media ||
-        CollectionCategory.lego =>
+        CollectionCategory.lego ||
+        CollectionCategory.watch ||
+        CollectionCategory.videogame ||
+        CollectionCategory.movie =>
           true,
         _ => false,
       };
@@ -100,6 +108,7 @@ enum CollectionCategory {
     CollectionCategory.car,
     CollectionCategory.stamp,
     CollectionCategory.coin,
+    CollectionCategory.custom,
   };
 
   static List<CollectionCategory> get menuValues =>
@@ -121,8 +130,9 @@ enum CollectionCategory {
       CollectionCategory.lego => ('set', 'sets'),
       CollectionCategory.watch => ('montre', 'montres'),
       CollectionCategory.videogame => ('jeu vidéo', 'jeux vidéo'),
-      CollectionCategory.movie => ('film', 'films'),
-    };
+        CollectionCategory.movie => ('film', 'films'),
+        CollectionCategory.custom => ('objet', 'objets'),
+      };
     if (total == 1) return '1 ${unit.$1}';
     return '$total ${unit.$2}';
   }

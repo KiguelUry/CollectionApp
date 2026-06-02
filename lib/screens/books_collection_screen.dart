@@ -3,8 +3,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/book_subcategory.dart';
 import '../models/collection_category.dart';
-import '../widgets/app_app_bar.dart';
 import '../coordinators/book_item_add_coordinator.dart';
+import '../widgets/category_hub_header.dart';
 import '../widgets/category_type_hub.dart';
 import '../widgets/ui/hub_search_bar.dart';
 import 'book_subcategory_series_screen.dart';
@@ -54,20 +54,26 @@ class _BooksCollectionScreenState extends State<BooksCollectionScreen> {
     return DefaultTabController(
       length: 2,
       child: Scaffold(
-        appBar: const AppAppBar(
-          title: 'Livres',
-          bottom: TabBar(
-            tabs: [
-              Tab(text: 'Explorer'),
-              Tab(text: 'Wishlist'),
-            ],
-          ),
-        ),
-        body: TabBarView(
+        body: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            CategoryHubHeader(
+              title: 'Livres',
+              accentColor: _accent,
+              tabBar: const TabBar(
+                tabs: [
+                  Tab(text: 'Explorer'),
+                  Tab(text: 'Wishlist'),
+                ],
+              ),
+            ),
+            Expanded(
+              child: TabBarView(
           children: [
             CategoryTypeHub(
               accentColor: _accent,
-              title: 'Ta bibliothèque',
+              title: 'Livres',
+              showTitleInHero: false,
               subtitle:
                   'Manga, BD, romans — organise par séries et tomes.',
               header: HubSearchBar(
@@ -107,6 +113,9 @@ class _BooksCollectionScreenState extends State<BooksCollectionScreen> {
               },
             ),
             const BookWishlistTab(),
+          ],
+              ),
+            ),
           ],
         ),
       ),

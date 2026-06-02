@@ -6,6 +6,8 @@ import 'package:http/http.dart' as http;
 import '../models/tcg_set_info.dart';
 import '../utils/pokemon_series_labels_fr.dart';
 import '../utils/pokemon_set_labels_fr.dart';
+import '../utils/tcg_set_image_url.dart';
+import '../utils/tcgdex_assets.dart';
 
 /// Pokémon — [TCGdex](https://tcgdex.dev) (gratuit, multilingue FR, sans clé).
 /// Remplace pokemontcg.io / Scrydex.
@@ -22,42 +24,44 @@ class PokemonTcgService {
       if (seriesRes.statusCode != 200) return [];
 
       final seriesList = jsonDecode(seriesRes.body) as List<dynamic>;
-      final blocks = <TcgSeriesBlock>[];
 
-      for (final raw in seriesList) {
+      final blockFutures = seriesList.map((raw) async {
         final s = raw as Map<String, dynamic>;
         final serieId = s['id']?.toString() ?? '';
-        if (serieId.isEmpty) continue;
+        if (serieId.isEmpty) return null;
 
-        final setsRes = await http.get(
-          _uri('/sets', {'serie.id': serieId}),
-        );
-        if (setsRes.statusCode != 200) continue;
+        final setsRes = await http.get(_uri('/sets', {'serie.id': serieId}));
+        if (setsRes.statusCode != 200) return null;
 
         final setsJson = jsonDecode(setsRes.body) as List<dynamic>;
+        final serieName = s['name']?.toString() ?? serieId;
         final sets = setsJson
-            .map((e) => _mapSetBrief(e as Map<String, dynamic>, serieId))
+            .map((e) => _mapSetBrief(e as Map<String, dynamic>, serieName))
             .where((set) => set.id.isNotEmpty)
             .toList();
-        if (sets.isEmpty) continue;
+        if (sets.isEmpty) return null;
 
-        sets.sort((a, b) => b.id.compareTo(a.id));
+        sortSetsByReleaseNewest(sets);
 
-        final serieName = s['name']?.toString() ?? serieId;
-        blocks.add(
-          TcgSeriesBlock(
-            id: serieId,
-            name: serieName,
-            nameFr: PokemonSeriesLabelsFr.label(serieName),
-            sets: sets,
-          ),
+        final blockLogo = normalizeTcgSetLogoUrl(
+              tcgdexAssetUrl(s['logo'], kind: 'series', id: serieId),
+            ) ??
+            normalizeTcgSetLogoUrl(sets.firstOrNull?.imageUrl);
+
+        return TcgSeriesBlock(
+          id: serieId,
+          name: serieName,
+          nameFr: PokemonSeriesLabelsFr.label(serieName),
+          imageUrl: blockLogo,
+          sets: sets,
         );
-      }
+      });
 
-      blocks.sort(
-        (a, b) => PokemonSeriesLabelsFr.sortIndex(a.name)
-            .compareTo(PokemonSeriesLabelsFr.sortIndex(b.name)),
-      );
+      final blocks = (await Future.wait(blockFutures))
+          .whereType<TcgSeriesBlock>()
+          .toList();
+
+      sortBlocksByReleaseNewest(blocks);
       return blocks;
     } catch (e) {
       if (kDebugMode) debugPrint('TCGdex blocks: $e');
@@ -78,12 +82,17 @@ class PokemonTcgService {
       nameFr: PokemonSetLabelsFr.setLabel(code, name),
       code: code,
       seriesName: serieName,
-      imageUrl: s['logo']?.toString(),
-      symbolUrl: s['symbol']?.toString(),
+      imageUrl: normalizeTcgSetLogoUrl(
+        tcgdexAssetUrl(s['logo'], kind: 'set', id: id),
+      ),
+      symbolUrl: tcgdexAssetUrl(s['symbol'], kind: 'set', id: id),
       releaseDate: s['releaseDate']?.toString(),
       totalCards: cardCount?['official'] as int? ?? cardCount?['total'] as int?,
     );
   }
+
+  /// TCGdex ne renvoie pas la rareté dans la liste — détail par carte.
+  static const _detailBatchSize = 24;
 
   static Future<List<TcgCatalogCard>> fetchCardsInSet(String setId) async {
     if (setId.isEmpty) return [];
@@ -94,13 +103,35 @@ class PokemonTcgService {
       if (response.statusCode != 200) return [];
 
       final list = jsonDecode(response.body) as List<dynamic>;
-      return list
-          .map((raw) => _mapCatalogBrief(raw as Map<String, dynamic>, setId))
-          .whereType<TcgCatalogCard>()
+      final ids = list
+          .map((raw) => (raw as Map<String, dynamic>)['id']?.toString() ?? '')
+          .where((id) => id.isNotEmpty)
           .toList();
+
+      if (ids.isEmpty) return [];
+
+      final cards = <TcgCatalogCard>[];
+      for (var i = 0; i < ids.length; i += _detailBatchSize) {
+        final chunk = ids.skip(i).take(_detailBatchSize);
+        final batch = await Future.wait(chunk.map(_fetchCardById));
+        cards.addAll(batch.whereType<TcgCatalogCard>());
+      }
+      return cards;
     } catch (e) {
       if (kDebugMode) debugPrint('TCGdex cards in set $setId: $e');
       return [];
+    }
+  }
+
+  static Future<TcgCatalogCard?> _fetchCardById(String id) async {
+    try {
+      final response = await http.get(_uri('/cards/$id'));
+      if (response.statusCode != 200) return null;
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return _mapCatalogFull(data);
+    } catch (e) {
+      if (kDebugMode) debugPrint('TCGdex card $id: $e');
+      return null;
     }
   }
 
@@ -113,20 +144,22 @@ class PokemonTcgService {
       if (response.statusCode != 200) return [];
 
       final list = jsonDecode(response.body) as List<dynamic>;
-      return list
+      final ids = list
           .take(30)
-          .map((raw) {
-            final brief = raw as Map<String, dynamic>;
-            final id = brief['id']?.toString() ?? '';
-            final card = _mapCatalogBrief(brief, _setIdFromCardId(id));
-            if (card == null) return null;
-            return {
+          .map((raw) => (raw as Map<String, dynamic>)['id']?.toString() ?? '')
+          .where((id) => id.isNotEmpty)
+          .toList();
+
+      final cards = await Future.wait(ids.map(_fetchCardById));
+      return cards
+          .whereType<TcgCatalogCard>()
+          .map(
+            (card) => {
               'title': card.name,
               'image_url': card.imageUrl ?? '',
               ...card.raw,
-            };
-          })
-          .whereType<Map<String, String>>()
+            },
+          )
           .toList();
     } catch (e) {
       if (kDebugMode) debugPrint('TCGdex search: $e');
@@ -140,10 +173,22 @@ class PokemonTcgService {
     return cardId.substring(0, dash);
   }
 
-  static String? _imageUrl(dynamic base) {
-    final url = base?.toString();
+  static String? _imageUrl(dynamic image) {
+    if (image is Map) {
+      final high = image['high']?.toString();
+      if (high != null && high.isNotEmpty) return high;
+      final low = image['low']?.toString();
+      if (low != null && low.isNotEmpty) return low;
+    }
+    final url = image?.toString();
     if (url == null || url.isEmpty) return null;
-    if (url.contains('/high.') || url.contains('/low.')) return url;
+    if (url.contains('/high.') ||
+        url.contains('/low.') ||
+        url.endsWith('.webp') ||
+        url.endsWith('.png') ||
+        url.endsWith('.jpg')) {
+      return url;
+    }
     return '$url/high.webp';
   }
 
@@ -160,7 +205,15 @@ class PokemonTcgService {
       name: name,
       imageUrl: _imageUrl(card['image']),
       number: card['localId']?.toString(),
-      raw: _rawMeta(id, setId: setId, setName: '', number: card['localId']?.toString()),
+      rarity: card['rarity']?.toString(),
+      raw: _rawMeta(
+        id,
+        setId: setId,
+        setName: '',
+        number: card['localId']?.toString(),
+        rarity: card['rarity']?.toString(),
+        types: _typesList(card['types']),
+      ),
     );
   }
 
@@ -187,8 +240,14 @@ class PokemonTcgService {
         setCode: abbr?['official']?.toString(),
         number: card['localId']?.toString(),
         rarity: card['rarity']?.toString(),
+        types: _typesList(card['types']),
       ),
     );
+  }
+
+  static List<String> _typesList(dynamic raw) {
+    if (raw is! List) return const [];
+    return raw.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
   }
 
   static Map<String, String> _rawMeta(
@@ -198,6 +257,7 @@ class PokemonTcgService {
     String? setCode,
     String? number,
     String? rarity,
+    List<String> types = const [],
   }) {
     return {
       'tcgdex_id': id,
@@ -207,6 +267,7 @@ class PokemonTcgService {
       if (setName.isNotEmpty) 'set_name': setName,
       if (number != null && number.isNotEmpty) 'card_number': number,
       if (rarity != null && rarity.isNotEmpty) 'rarity': rarity,
+      if (types.isNotEmpty) 'types': types.join(','),
       'source': 'tcgdex',
     };
   }

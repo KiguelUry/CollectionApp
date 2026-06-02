@@ -45,7 +45,7 @@ class CollectionCoverImage extends StatelessWidget {
       webHtmlElementStrategy: kIsWeb
           ? WebHtmlElementStrategy.prefer
           : WebHtmlElementStrategy.never,
-      errorBuilder: (_, __, ___) => _fallback(),
+      errorBuilder: (_, _, _) => _fallback(),
       loadingBuilder: (context, child, progress) {
         if (progress == null) return child;
         return _fallback(

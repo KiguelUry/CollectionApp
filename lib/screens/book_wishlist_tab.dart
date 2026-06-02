@@ -52,7 +52,7 @@ class _BookWishlistTabState extends State<BookWishlistTab> {
         return ListView.separated(
           padding: const EdgeInsets.all(12),
           itemCount: items.length,
-          separatorBuilder: (_, __) => const Divider(height: 1),
+          separatorBuilder: (_, _) => const Divider(height: 1),
           itemBuilder: (context, i) {
             final item = items[i];
             return ListTile(

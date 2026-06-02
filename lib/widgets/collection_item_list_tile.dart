@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
+import '../utils/boardgame_display.dart';
 import 'bgg_network_image.dart';
 
 /// Ligne liste (vue dense type Libib).
@@ -49,16 +50,16 @@ class CollectionItemListTile extends StatelessWidget {
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (item.listSubtitle != null)
+            if (_subtitleLine != null)
               Text(
-                item.listSubtitle!,
+                _subtitleLine ?? '',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
               ),
-            if (item.createdAtLabel != null)
+            if (_whereLine != null)
               Text(
-                item.createdAtLabel!,
+                _whereLine!,
                 style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
               ),
             if (item.tags.isNotEmpty)
@@ -98,8 +99,27 @@ class CollectionItemListTile extends StatelessWidget {
               ),
           ],
         ),
-        isThreeLine: item.tags.isNotEmpty || item.createdAtLabel != null,
+        isThreeLine: item.tags.isNotEmpty || _whereLine != null,
       ),
     );
+  }
+
+  String? get _subtitleLine {
+    if (category == CollectionCategory.boardgame) {
+      final parts = <String>[];
+      final players = formatPlayerCount(item.minPlayers, item.maxPlayers);
+      if (players != null) parts.add(players);
+      final time = formatPlayingTime(item.playingTime);
+      if (time != null) parts.add(time);
+      return parts.isEmpty ? null : parts.join(' · ');
+    }
+    return item.listSubtitle;
+  }
+
+  String? get _whereLine {
+    if (item.locationLabel == null || item.locationLabel!.trim().isEmpty) {
+      return null;
+    }
+    return item.locationLabel;
   }
 }

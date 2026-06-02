@@ -110,7 +110,7 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
       child: ListView.separated(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
         itemCount: _events.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 4),
+        separatorBuilder: (_, _) => const SizedBox(height: 4),
         itemBuilder: (context, index) {
           final e = _events[index];
           return Card(

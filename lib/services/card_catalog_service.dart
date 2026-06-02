@@ -54,6 +54,12 @@ class CardCatalogService {
       if ((card['card_number'] ?? '').isNotEmpty)
         'card_number': card['card_number']!,
       if ((card['rarity'] ?? '').isNotEmpty) 'rarity': card['rarity']!,
+      if ((card['types'] ?? '').isNotEmpty)
+        'types': card['types']!
+            .split(',')
+            .map((e) => e.trim())
+            .where((e) => e.isNotEmpty)
+            .toList(),
       if ((card['scryfall_id'] ?? '').isNotEmpty)
         'scryfall_id': card['scryfall_id']!,
       if ((card['tcgdex_id'] ?? '').isNotEmpty) 'tcgdex_id': card['tcgdex_id']!,

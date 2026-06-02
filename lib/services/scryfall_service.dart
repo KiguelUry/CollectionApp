@@ -4,42 +4,18 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/tcg_set_info.dart';
+import '../utils/http_user_agent.dart';
+import '../utils/tcg_set_image_url.dart';
 
 /// Scryfall — Magic: The Gathering (gratuit, sans clé).
 class ScryfallService {
   static Future<List<TcgSeriesBlock>> fetchBlocks() async {
     try {
-      final url = Uri.https('api.scryfall.com', '/sets');
-      final response = await http.get(
-        url,
-        headers: {'Accept': 'application/json'},
-      );
-      if (response.statusCode != 200) return [];
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      final list = data['data'] as List<dynamic>? ?? [];
-      final sets = <TcgSetInfo>[];
-
-      for (final raw in list) {
-        final s = raw as Map<String, dynamic>;
-        final setType = s['set_type'] as String? ?? '';
-        if (setType == 'memorabilia' || setType == 'funny') continue;
-
-        sets.add(
-          TcgSetInfo(
-            id: s['id']?.toString() ?? '',
-            name: s['name']?.toString() ?? '',
-            code: s['code']?.toString(),
-            seriesName: s['block']?.toString() ?? s['block_code']?.toString() ?? 'Autre',
-            imageUrl: s['icon_svg_uri']?.toString(),
-            releaseDate: s['released_at']?.toString(),
-            totalCards: s['card_count'] as int?,
-          ),
-        );
-      }
+      final allSets = await _fetchAllSets();
+      if (allSets.isEmpty) return [];
 
       final byBlock = <String, List<TcgSetInfo>>{};
-      for (final s in sets) {
+      for (final s in allSets) {
         byBlock.putIfAbsent(s.seriesName, () => []).add(s);
       }
 
@@ -49,6 +25,7 @@ class ScryfallService {
         return TcgSeriesBlock(
           id: e.key,
           name: e.key,
+          imageUrl: sorted.firstOrNull?.imageUrl,
           sets: sorted,
         );
       }).toList()
@@ -60,6 +37,61 @@ class ScryfallService {
     }
   }
 
+  static Future<List<TcgSetInfo>> _fetchAllSets() async {
+    final sets = <TcgSetInfo>[];
+    Uri? next = Uri.https('api.scryfall.com', '/sets');
+
+    while (next != null) {
+      final response = await http.get(next, headers: tcgHttpHeaders);
+      if (response.statusCode != 200) break;
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final list = data['data'] as List<dynamic>? ?? [];
+
+      for (final raw in list) {
+        final s = raw as Map<String, dynamic>;
+        final setType = s['set_type'] as String? ?? '';
+        if (setType == 'memorabilia' || setType == 'funny' || setType == 'token') {
+          continue;
+        }
+
+        sets.add(
+          TcgSetInfo(
+            id: s['id']?.toString() ?? '',
+            name: s['name']?.toString() ?? '',
+            code: s['code']?.toString(),
+            seriesName: _blockLabel(s),
+            imageUrl: s['icon_svg_uri']?.toString() ??
+                scryfallSetSvgUrl(s['code']?.toString()),
+            releaseDate: s['released_at']?.toString(),
+            totalCards: s['card_count'] as int?,
+          ),
+        );
+      }
+
+      final hasMore = data['has_more'] == true;
+      final nextUrl = data['next_page'] as String?;
+      next = hasMore && nextUrl != null ? Uri.parse(nextUrl) : null;
+    }
+
+    return sets;
+  }
+
+  static String _blockLabel(Map<String, dynamic> s) {
+    final block = s['block'] as String?;
+    if (block != null && block.trim().isNotEmpty) return block.trim();
+    final blockCode = s['block_code'] as String?;
+    if (blockCode != null && blockCode.trim().isNotEmpty) {
+      return blockCode.trim();
+    }
+    final released = s['released_at'] as String?;
+    if (released != null && released.length >= 4) {
+      return released.substring(0, 4);
+    }
+    final setType = s['set_type'] as String? ?? 'extension';
+    return setType[0].toUpperCase() + setType.substring(1);
+  }
+
   static Future<List<TcgCatalogCard>> fetchCardsInSet(String setCode) async {
     if (setCode.isEmpty) return [];
     try {
@@ -68,10 +100,7 @@ class ScryfallService {
         'unique': 'cards',
         'order': 'set',
       });
-      final response = await http.get(
-        url,
-        headers: {'Accept': 'application/json'},
-      );
+      final response = await http.get(url, headers: tcgHttpHeaders);
       if (response.statusCode != 200) return [];
 
       final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -96,7 +125,9 @@ class ScryfallService {
       if (kDebugMode) debugPrint('Scryfall set cards: $e');
       return [];
     }
-  }  static Future<List<Map<String, String>>> search(String query) async {
+  }
+
+  static Future<List<Map<String, String>>> search(String query) async {
     final q = query.trim();
     if (q.length < 2) return [];
 
@@ -106,10 +137,7 @@ class ScryfallService {
         'unique': 'cards',
         'order': 'released',
       });
-      final response = await http.get(
-        url,
-        headers: {'Accept': 'application/json'},
-      );
+      final response = await http.get(url, headers: tcgHttpHeaders);
       if (response.statusCode != 200) return [];
 
       final data = jsonDecode(response.body) as Map<String, dynamic>;

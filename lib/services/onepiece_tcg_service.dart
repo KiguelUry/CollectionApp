@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/tcg_set_info.dart';
+import '../utils/tcg_set_image_url.dart';
 
 /// API communautaire One Piece TCG (gratuit).
 /// https://www.optcgapi.com
@@ -16,17 +17,24 @@ class OnepieceTcgService {
       byBlock.putIfAbsent(_blockForSetId(s.code ?? s.id), () => []).add(s);
     }
 
-    final blocks = byBlock.entries
-        .map(
-          (e) => TcgSeriesBlock(
-            id: e.key,
-            name: e.key,
-            sets: e.value..sort((a, b) => b.id.compareTo(a.id)),
-          ),
-        )
-        .toList();
+    final blocks = byBlock.entries.map((e) {
+      final sorted = List<TcgSetInfo>.from(e.value)
+        ..sort((a, b) => compareOnepieceSetId(a.id, b.id));
+      return TcgSeriesBlock(
+        id: e.key,
+        name: e.key,
+        imageUrl: sorted.firstOrNull?.imageUrl,
+        sets: sorted,
+      );
+    }).toList();
 
-    blocks.sort((a, b) => _blockSort(a.id).compareTo(_blockSort(b.id)));
+    blocks.sort((a, b) {
+      final latestA = a.sets.isNotEmpty ? a.sets.first.id : '';
+      final latestB = b.sets.isNotEmpty ? b.sets.first.id : '';
+      return compareOnepieceSetId(latestB, latestA);
+    });
+
+    await _enrichBlockLogos(blocks);
     return blocks;
   }
 
@@ -51,6 +59,7 @@ class OnepieceTcgService {
           name: name,
           code: setId,
           seriesName: _blockForSetId(setId),
+          imageUrl: onepieceSetLogoUrl(setId),
         );
       }).toList();
     } catch (e) {
@@ -115,6 +124,33 @@ class OnepieceTcgService {
     }
   }
 
+  /// Vignette bloc : première carte du set le plus récent (pas de logo officiel fiable).
+  static Future<void> _enrichBlockLogos(List<TcgSeriesBlock> blocks) async {
+    const batchSize = 4;
+    for (var i = 0; i < blocks.length; i++) {
+      final block = blocks[i];
+      if (block.imageUrl != null && block.imageUrl!.isNotEmpty) continue;
+      final set = block.sets.isNotEmpty ? block.sets.first : null;
+      if (set == null) continue;
+
+      final cards = await fetchCardsInSet(set.id);
+      final thumb = cards.isNotEmpty ? cards.first.imageUrl : null;
+      if (thumb == null || thumb.isEmpty) continue;
+
+      blocks[i] = TcgSeriesBlock(
+        id: block.id,
+        name: block.name,
+        nameFr: block.nameFr,
+        imageUrl: thumb,
+        sets: block.sets,
+      );
+
+      if (i > 0 && i % batchSize == 0) {
+        await Future<void>.delayed(Duration.zero);
+      }
+    }
+  }
+
   static String _blockForSetId(String setId) {
     final id = setId.toUpperCase();
     if (id.startsWith('OP')) return 'Boosters (OP)';
@@ -122,18 +158,6 @@ class OnepieceTcgService {
     if (id.startsWith('PRB')) return 'Premium Boosters';
     if (id.startsWith('ST')) return 'Starter Decks';
     return 'Autres';
-  }
-
-  static int _blockSort(String block) {
-    const order = [
-      'Boosters (OP)',
-      'Extra Boosters',
-      'Premium Boosters',
-      'Starter Decks',
-      'Autres',
-    ];
-    final i = order.indexOf(block);
-    return i >= 0 ? i : order.length;
   }
 
   static TcgCatalogCard? _mapCatalogCard(Map<String, dynamic> card) {

@@ -4,29 +4,54 @@ import 'package:flutter/material.dart';
 class LoadingPlaceholder extends StatelessWidget {
   final int count;
   final bool grid;
+  final String? message;
 
   const LoadingPlaceholder({
     super.key,
     this.count = 6,
     this.grid = true,
+    this.message,
   });
 
   @override
   Widget build(BuildContext context) {
-    if (grid) {
-      return GridView.builder(
-        padding: const EdgeInsets.all(16),
-        physics: const NeverScrollableScrollPhysics(),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          crossAxisSpacing: 14,
-          mainAxisSpacing: 14,
-          childAspectRatio: 0.92,
+    final body = grid
+        ? _buildGrid()
+        : _buildList();
+
+    if (message == null || message!.trim().isEmpty) return body;
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: Text(
+            message!,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+          ),
         ),
-        itemCount: count,
-        itemBuilder: (_, _) => const _ShimmerBox(height: 120),
-      );
-    }
+        Expanded(child: body),
+      ],
+    );
+  }
+
+  Widget _buildGrid() {
+    return GridView.builder(
+      padding: const EdgeInsets.all(16),
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 14,
+        mainAxisSpacing: 14,
+        childAspectRatio: 0.92,
+      ),
+      itemCount: count,
+      itemBuilder: (_, _) => const _ShimmerBox(height: 120),
+    );
+  }
+
+  Widget _buildList() {
     return ListView.separated(
       padding: const EdgeInsets.all(16),
       physics: const NeverScrollableScrollPhysics(),

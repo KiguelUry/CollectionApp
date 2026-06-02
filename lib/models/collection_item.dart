@@ -136,7 +136,7 @@ class CollectionItem {
           ? (rawSub ?? (json['category'] == 'manga' ? 'manga' : null))
           : rawSub,
       metadata: CategoryMetadata.parse(json['metadata']),
-      imageUrl: json['image_url'],
+      imageUrl: _resolveImageUrl(json),
       isWishlist: json['is_wishlist'] ?? false,
       isForSale: json['is_for_sale'] as bool? ?? false,
       isSold: json['is_sold'] as bool? ?? false,
@@ -165,6 +165,19 @@ class CollectionItem {
       volumeId: json['volume_id'] as String?,
       isRead: json['is_read'] as bool? ?? false,
     );
+  }
+
+  static String? _resolveImageUrl(Map<String, dynamic> json) {
+    final direct = json['image_url'] as String?;
+    if (direct != null && direct.trim().isNotEmpty) return direct.trim();
+    final meta = json['metadata'];
+    if (meta is Map) {
+      final fromMeta = meta['image_url'] as String?;
+      if (fromMeta != null && fromMeta.trim().isNotEmpty) {
+        return fromMeta.trim();
+      }
+    }
+    return null;
   }
 
   static double? _parseDouble(dynamic value) {
