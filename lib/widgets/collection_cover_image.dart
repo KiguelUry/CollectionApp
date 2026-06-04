@@ -1,9 +1,9 @@
-import 'package:flutter/foundation.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../utils/cover_image_url.dart';
 
-/// Couverture nette (cache mémoire, ratio livre, URLs OL en grande taille).
+/// Couverture nette (cache disque + mémoire, ratio livre, URLs adaptées).
 class CollectionCoverImage extends StatelessWidget {
   final String url;
   final double? width;
@@ -33,37 +33,31 @@ class CollectionCoverImage extends StatelessWidget {
     final cacheW = _cachePixelSize(w, dpr);
     final cacheH = _cachePixelSize(h, dpr);
 
-    Widget image = Image.network(
-      displayUrl,
+    Widget image = CachedNetworkImage(
+      imageUrl: displayUrl,
       width: w,
       height: h,
       fit: bookCover ? BoxFit.contain : fit,
       filterQuality: FilterQuality.medium,
-      cacheWidth: cacheW,
-      cacheHeight: cacheH,
-      alignment: Alignment.center,
-      webHtmlElementStrategy: kIsWeb
-          ? WebHtmlElementStrategy.prefer
-          : WebHtmlElementStrategy.never,
-      errorBuilder: (_, _, _) => _fallback(),
-      loadingBuilder: (context, child, progress) {
-        if (progress == null) return child;
-        return _fallback(
-          child: Center(
-            child: SizedBox(
-              width: 22,
-              height: 22,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                value: progress.expectedTotalBytes != null
-                    ? progress.cumulativeBytesLoaded /
-                        progress.expectedTotalBytes!
-                    : null,
-              ),
+      memCacheWidth: cacheW,
+      memCacheHeight: cacheH,
+      maxWidthDiskCache: cacheW,
+      maxHeightDiskCache: cacheH,
+      fadeInDuration: const Duration(milliseconds: 120),
+      fadeOutDuration: const Duration(milliseconds: 80),
+      placeholder: (_, _) => _fallback(
+        child: Center(
+          child: SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: Colors.grey.shade500,
             ),
           ),
-        );
-      },
+        ),
+      ),
+      errorWidget: (_, _, _) => _fallback(),
     );
 
     if (bookCover && w != null && h != null) {

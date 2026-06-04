@@ -62,7 +62,6 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
   void initState() {
     super.initState();
     _isWishlist = widget.defaultWishlist;
-    if (_isWishlist) _quantity = 0;
     _atMemberUserId = Supabase.instance.client.auth.currentUser?.id;
     _load();
   }
@@ -122,10 +121,7 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                         contentPadding: EdgeInsets.zero,
                         title: const Text('Wishlist'),
                         value: _isWishlist,
-                        onChanged: (v) => setState(() {
-                          _isWishlist = v;
-                          _quantity = v ? 0 : 1;
-                        }),
+                        onChanged: (v) => setState(() => _isWishlist = v),
                       )
                     else
                       ListTile(
@@ -288,7 +284,7 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                     locationId:
                         _shareWithGroup ? _selectedLocationId : null,
                     holderLabel: _customHolderName,
-                    quantity: _isWishlist ? 0 : _quantity,
+                    quantity: _quantity,
                   );
                   try {
                     await widget.onConfirm(options);

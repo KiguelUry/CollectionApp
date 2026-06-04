@@ -43,9 +43,10 @@ class _GroupsScreenState extends State<GroupsScreen> {
         title: const Text('Nouveau groupe'),
         content: TextField(
           controller: controller,
+          autofocus: true,
           decoration: const InputDecoration(
-            labelText: 'Nom',
-            hintText: 'ex: Famille',
+            labelText: 'Nom du groupe',
+            hintText: 'Famille, colocs, club…',
           ),
         ),
         actions: [
@@ -53,7 +54,7 @@ class _GroupsScreenState extends State<GroupsScreen> {
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Annuler'),
           ),
-          ElevatedButton(
+          FilledButton(
             onPressed: () => Navigator.pop(ctx, controller.text.trim()),
             child: const Text('Créer'),
           ),
@@ -157,105 +158,179 @@ class _GroupsScreenState extends State<GroupsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: const AppAppBar(title: 'Mes groupes'),
-      floatingActionButton: FloatingActionButton(
+      floatingActionButton: FloatingActionButton.extended(
         onPressed: _createGroup,
-        child: const Icon(Icons.group_add),
+        icon: const Icon(Icons.group_add_rounded),
+        label: const Text('Groupe'),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _groups.isEmpty
-              ? const Center(
-                  child: Text(
-                    'Crée un groupe « Famille » pour partager des objets.',
-                    textAlign: TextAlign.center,
+              ? _buildEmpty()
+              : RefreshIndicator(
+                  onRefresh: _load,
+                  child: ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 88),
+                    itemCount: _groups.length,
+                    itemBuilder: (context, index) {
+                      return _buildGroupCard(_groups[index]);
+                    },
                   ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.all(12),
-                  itemCount: _groups.length,
-                  itemBuilder: (context, index) {
-                    final group = _groups[index];
-                    final canEdit = _groupService.canEdit(group);
-                    final accent =
-                        ProfileAvatar.colorFromHex(group.accentColor);
+                ),
+    );
+  }
 
-                    return Card(
-                      child: ListTile(
-                        leading: GroupBadge.fromGroup(
-                          name: group.name,
-                          avatarUrl: group.avatarUrl,
-                          accentColor: group.accentColor,
-                          iconKey: group.iconKey,
-                          radius: 26,
-                        ),
-                        title: Text(group.name),
-                        subtitle: Text(
-                          canEdit
-                              ? 'Collection partagée · Créateur'
-                              : 'Collection partagée',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: accent.withValues(alpha: 0.9),
+  Widget _buildEmpty() {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: [
+        const SizedBox(height: 56),
+        Icon(Icons.groups_rounded, size: 72, color: Colors.grey.shade400),
+        const SizedBox(height: 16),
+        const Text(
+          'Collection à plusieurs',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Text(
+            'Crée un groupe « Famille » ou « Club jeux » pour partager '
+            'des objets et voir qui possède quoi.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey.shade600, height: 1.35),
+          ),
+        ),
+        const SizedBox(height: 24),
+        Center(
+          child: FilledButton.icon(
+            onPressed: _createGroup,
+            icon: const Icon(Icons.group_add),
+            label: const Text('Créer un groupe'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGroupCard(CollectionGroup group) {
+    final canEdit = _groupService.canEdit(group);
+    final accent = ProfileAvatar.colorFromHex(group.accentColor);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Material(
+        borderRadius: BorderRadius.circular(18),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => _openGroup(group),
+          child: Ink(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  accent.withValues(alpha: 0.18),
+                  Theme.of(context).colorScheme.surface,
+                ],
+              ),
+              border: Border.all(color: accent.withValues(alpha: 0.25)),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                children: [
+                  GroupBadge.fromGroup(
+                    name: group.name,
+                    avatarUrl: group.avatarUrl,
+                    accentColor: group.accentColor,
+                    iconKey: group.iconKey,
+                    radius: 28,
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          group.name,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 17,
                           ),
                         ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (canEdit)
-                              PopupMenuButton<String>(
-                                onSelected: (value) {
-                                  switch (value) {
-                                    case 'members':
-                                      showGroupMembersSheet(
-                                        context,
-                                        groupId: group.id,
-                                        groupName: group.name,
-                                      );
-                                    case 'edit':
-                                      _openEdit(group);
-                                    case 'delete':
-                                      _confirmDeleteGroup(group);
-                                  }
-                                },
-                                itemBuilder: (ctx) => [
-                                  const PopupMenuItem(
-                                    value: 'members',
-                                    child: Text('Voir les membres'),
-                                  ),
-                                  const PopupMenuItem(
-                                    value: 'edit',
-                                    child: Text('Personnaliser'),
-                                  ),
-                                  const PopupMenuItem(
-                                    value: 'delete',
-                                    child: Text(
-                                      'Supprimer le groupe',
-                                      style: TextStyle(color: Colors.red),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            IconButton(
-                              icon: const Icon(Icons.people_outline),
-                              tooltip: 'Membres',
-                              onPressed: () => showGroupMembersSheet(
-                                context,
-                                groupId: group.id,
-                                groupName: group.name,
-                              ),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.person_add),
-                              tooltip: 'Ajouter un membre',
-                              onPressed: () => _addFriendToGroup(group),
-                            ),
-                          ],
+                        const SizedBox(height: 4),
+                        Text(
+                          canEdit
+                              ? 'Tu es créateur · collection partagée'
+                              : 'Membre · collection partagée',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: accent.withValues(alpha: 0.95),
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
-                        onTap: () => _openGroup(group),
+                      ],
+                    ),
+                  ),
+                  if (canEdit)
+                    PopupMenuButton<String>(
+                      icon: Icon(Icons.more_vert, color: accent),
+                      onSelected: (value) {
+                        switch (value) {
+                          case 'members':
+                            showGroupMembersSheet(
+                              context,
+                              groupId: group.id,
+                              groupName: group.name,
+                            );
+                          case 'edit':
+                            _openEdit(group);
+                          case 'delete':
+                            _confirmDeleteGroup(group);
+                        }
+                      },
+                      itemBuilder: (ctx) => const [
+                        PopupMenuItem(
+                          value: 'members',
+                          child: Text('Membres'),
+                        ),
+                        PopupMenuItem(
+                          value: 'edit',
+                          child: Text('Personnaliser'),
+                        ),
+                        PopupMenuItem(
+                          value: 'delete',
+                          child: Text(
+                            'Supprimer',
+                            style: TextStyle(color: Colors.red),
+                          ),
+                        ),
+                      ],
+                    )
+                  else
+                    IconButton(
+                      icon: Icon(Icons.people_outline, color: accent),
+                      tooltip: 'Membres',
+                      onPressed: () => showGroupMembersSheet(
+                        context,
+                        groupId: group.id,
+                        groupName: group.name,
                       ),
-                    );
-                  },
-                ),
+                    ),
+                  IconButton(
+                    icon: Icon(Icons.person_add_alt_1, color: accent),
+                    tooltip: 'Inviter',
+                    onPressed: () => _addFriendToGroup(group),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -52,7 +52,7 @@ Future<void> quickAddCardFromCatalog(
           metadata: meta,
           imageUrl: imageUrl,
           isWishlist: options.isWishlist,
-          quantity: options.isWishlist ? 0 : options.quantity,
+          quantity: options.quantity,
           locationId: options.locationId,
           groupId: options.groupId,
         );

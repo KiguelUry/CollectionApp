@@ -21,16 +21,19 @@ import '../widgets/assign_book_series_sheet.dart';
 import '../widgets/item_tags_editor.dart';
 import '../utils/boardgame_display.dart';
 import '../services/bgg_service.dart';
+import '../utils/copy_friend_item.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class ItemDetailScreen extends StatefulWidget {
   final CollectionItem item;
   final bool readOnly;
+  final String? friendUsername;
 
   const ItemDetailScreen({
     super.key,
     required this.item,
     this.readOnly = false,
+    this.friendUsername,
   });
 
   @override
@@ -350,6 +353,16 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
         title: _item.title,
         showBackButton: true,
         actions: [
+          if (ro && widget.friendUsername != null)
+            IconButton(
+              icon: const Icon(Icons.add_circle_outline),
+              tooltip: 'Ajouter chez moi',
+              onPressed: () => showCopyFriendItemSheet(
+                context,
+                source: _item,
+                friendUsername: widget.friendUsername!,
+              ),
+            ),
           if (!ro && isBook && _item.volumeId == null)
             IconButton(
               icon: const Icon(Icons.link),

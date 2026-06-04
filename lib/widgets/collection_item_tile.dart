@@ -12,6 +12,7 @@ class CollectionItemTile extends StatelessWidget {
   final bool showDuplicateBadge;
   final bool showGroupBadge;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
 
   const CollectionItemTile({
     super.key,
@@ -21,6 +22,7 @@ class CollectionItemTile extends StatelessWidget {
     this.showDuplicateBadge = false,
     this.showGroupBadge = true,
     this.onTap,
+    this.onLongPress,
   });
 
   bool get _isGrayed => item.isSold;
@@ -149,9 +151,13 @@ class CollectionItemTile extends StatelessWidget {
       ],
     );
 
-    if (onTap == null) return child;
+    if (onTap == null && onLongPress == null) return child;
 
-    return InkWell(onTap: onTap, child: child);
+    return InkWell(
+      onTap: onTap,
+      onLongPress: onLongPress,
+      child: child,
+    );
   }
 
   Widget _buildCardTile() {
@@ -220,8 +226,13 @@ class CollectionItemTile extends StatelessWidget {
       ),
     );
 
-    if (onTap == null) return child;
-    return InkWell(onTap: onTap, borderRadius: BorderRadius.circular(6), child: child);
+    if (onTap == null && onLongPress == null) return child;
+    return InkWell(
+      onTap: onTap,
+      onLongPress: onLongPress,
+      borderRadius: BorderRadius.circular(6),
+      child: child,
+    );
   }
 
   String? get _subtitleLine {

@@ -118,134 +118,207 @@ class _FriendsScreenState extends State<FriendsScreen> {
 
   Widget _buildFriendsList() {
     return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: TextField(
-              controller: _filterController,
-              decoration: InputDecoration(
-                hintText: 'Rechercher dans mes amis…',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: _filterController.text.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: () => _filterController.clear(),
-                      )
-                    : null,
-                border: const OutlineInputBorder(),
-              ),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: TextField(
+            controller: _filterController,
+            decoration: InputDecoration(
+              hintText: 'Chercher un ami…',
+              border: InputBorder.none,
+              icon: Icon(Icons.search, color: Colors.deepPurple.shade300),
+              suffixIcon: _filterController.text.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear, size: 20),
+                      onPressed: () => _filterController.clear(),
+                    )
+                  : null,
             ),
           ),
+        ),
+        if (_pendingRequests.isNotEmpty) ...[
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: Text(
-              _loading
-                  ? 'Chargement…'
-                  : '${_filtered.length} ami${_filtered.length > 1 ? 's' : ''}'
-                  '${_filterController.text.trim().isNotEmpty && _filtered.length != _friends.length ? ' sur ${_friends.length}' : ''}',
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.grey.shade600,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-          if (_pendingRequests.isNotEmpty) ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-              child: Text(
-                'Demandes reçues (${_pendingRequests.length})',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-            ),
-            ..._pendingRequests.map(
-              (req) => Card(
-                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                child: ListTile(
-                  leading: ProfileAvatar(
-                    avatarUrl: req['avatar_url'] as String?,
-                    accentColorHex: req['accent_color'] as String?,
-                    fallbackInitial: req['username'] as String? ?? '?',
-                    radius: 22,
-                  ),
-                  title: Text(req['username'] as String? ?? 'Utilisateur'),
-                  subtitle: const Text('Souhaite t\'ajouter en ami'),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.close, color: Colors.red),
-                        tooltip: 'Refuser',
-                        onPressed: () => _rejectRequest(req),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.check, color: Colors.green),
-                        tooltip: 'Accepter',
-                        onPressed: () => _acceptRequest(req),
-                      ),
-                    ],
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
+            child: Row(
+              children: [
+                Icon(Icons.mail_outline, size: 18, color: Colors.orange.shade700),
+                const SizedBox(width: 6),
+                Text(
+                  '${_pendingRequests.length} demande${_pendingRequests.length > 1 ? 's' : ''}',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: Colors.orange.shade900,
                   ),
                 ),
+              ],
+            ),
+          ),
+          ..._pendingRequests.map(_buildRequestCard),
+        ],
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+          child: Text(
+            _loading
+                ? 'Chargement…'
+                : '${_filtered.length} ami${_filtered.length > 1 ? 's' : ''}',
+            style: TextStyle(
+              fontSize: 13,
+              color: Colors.grey.shade600,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        Expanded(
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _friends.isEmpty && _pendingRequests.isEmpty
+                  ? _buildEmpty()
+                  : _friends.isNotEmpty && _filtered.isEmpty
+                      ? Center(
+                          child: Text(
+                            'Aucun ami pour « ${_filterController.text} »',
+                            style: TextStyle(color: Colors.grey.shade600),
+                          ),
+                        )
+                      : RefreshIndicator(
+                          onRefresh: _load,
+                          child: ListView.builder(
+                            padding: const EdgeInsets.fromLTRB(12, 4, 12, 88),
+                            itemCount: _filtered.length,
+                            itemBuilder: (context, index) {
+                              return _buildFriendCard(_filtered[index]);
+                            },
+                          ),
+                        ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRequestCard(Map<String, dynamic> req) {
+    final accent = ProfileAvatar.colorFromHex(req['accent_color'] as String?);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: Material(
+        borderRadius: BorderRadius.circular(16),
+        color: Colors.orange.shade50,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: ListTile(
+            leading: ProfileAvatar(
+              avatarUrl: req['avatar_url'] as String?,
+              accentColorHex: req['accent_color'] as String?,
+              fallbackInitial: req['username'] as String? ?? '?',
+              radius: 24,
+            ),
+            title: Text(
+              req['username'] as String? ?? 'Utilisateur',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            subtitle: const Text('Veut rejoindre tes amis'),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: Icon(Icons.close, color: Colors.red.shade400),
+                  onPressed: () => _rejectRequest(req),
+                ),
+                FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: accent,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                  ),
+                  onPressed: () => _acceptRequest(req),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFriendCard(Map<String, dynamic> f) {
+    final username = f['username'] as String;
+    final accent = ProfileAvatar.colorFromHex(f['accent_color'] as String?);
+    final sharing = f['share_collections'] as bool? ?? false;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        borderRadius: BorderRadius.circular(18),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => _openFriend(f),
+          onLongPress: () => _showFriendOptions(f),
+          child: Ink(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: [
+                  accent.withValues(alpha: 0.14),
+                  Theme.of(context).colorScheme.surface,
+                ],
+              ),
+              border: Border.all(color: accent.withValues(alpha: 0.22)),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(
+                children: [
+                  ProfileAvatar(
+                    avatarUrl: f['avatar_url'] as String?,
+                    accentColorHex: f['accent_color'] as String?,
+                    fallbackInitial: username,
+                    radius: 26,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          username,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          sharing
+                              ? 'Collection partagée · appui long = options'
+                              : 'Collections privées',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: sharing
+                                ? accent.withValues(alpha: 0.95)
+                                : Colors.grey.shade600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    Icons.arrow_forward_ios_rounded,
+                    size: 16,
+                    color: accent.withValues(alpha: 0.7),
+                  ),
+                ],
               ),
             ),
-          ],
-          Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : _friends.isEmpty && _pendingRequests.isEmpty
-                    ? _buildEmpty()
-                    : _friends.isNotEmpty && _filtered.isEmpty
-                        ? Center(
-                            child: Text(
-                              'Aucun ami ne correspond à « ${_filterController.text} »',
-                              style: TextStyle(color: Colors.grey.shade600),
-                            ),
-                          )
-                        : RefreshIndicator(
-                            onRefresh: _load,
-                            child: ListView.builder(
-                              padding: const EdgeInsets.only(bottom: 88),
-                              itemCount: _filtered.length,
-                              itemBuilder: (context, index) {
-                                final f = _filtered[index];
-                                final username = f['username'] as String;
-                                return Card(
-                                  margin: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 4,
-                                  ),
-                                  child: ListTile(
-                                    leading: ProfileAvatar(
-                                      avatarUrl: f['avatar_url'] as String?,
-                                      accentColorHex:
-                                          f['accent_color'] as String?,
-                                      fallbackInitial: username,
-                                      radius: 24,
-                                    ),
-                                    title: Text(username),
-                                    subtitle: Text(
-                                      'Collection et wishlist',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.deepPurple.shade400,
-                                      ),
-                                    ),
-                                    trailing: Icon(
-                                      Icons.chevron_right,
-                                      color: Colors.deepPurple.shade400,
-                                    ),
-                                    onTap: () => _openFriend(f),
-                                    onLongPress: () => _showFriendOptions(f),
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
           ),
-        ],
+        ),
+      ),
     );
   }
 
@@ -256,24 +329,26 @@ class _FriendsScreenState extends State<FriendsScreen> {
       child: Scaffold(
         appBar: AppAppBar(
           title: 'Amis',
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: 'Activité'),
-              Tab(text: 'Mes amis'),
+          bottom: TabBar(
+            indicatorColor: Colors.deepPurple.shade300,
+            labelColor: Colors.deepPurple.shade800,
+            tabs: const [
+              Tab(icon: Icon(Icons.bolt_rounded, size: 20), text: 'Activité'),
+              Tab(icon: Icon(Icons.people_rounded, size: 20), text: 'Mes amis'),
             ],
           ),
           actions: [
             IconButton(
-              icon: const Icon(Icons.person_add),
+              icon: const Icon(Icons.person_add_alt_1_rounded),
               tooltip: 'Ajouter un ami',
               onPressed: _openAddFriend,
             ),
           ],
         ),
-        floatingActionButton: FloatingActionButton(
+        floatingActionButton: FloatingActionButton.extended(
           onPressed: _openAddFriend,
-          tooltip: 'Ajouter un ami',
-          child: const Icon(Icons.person_add),
+          icon: const Icon(Icons.person_add),
+          label: const Text('Ami'),
         ),
         body: TabBarView(
           children: [
@@ -286,33 +361,36 @@ class _FriendsScreenState extends State<FriendsScreen> {
   }
 
   Widget _buildEmpty() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.people_outline, size: 64, color: Colors.grey.shade400),
-            const SizedBox(height: 16),
-            const Text(
-              'Aucun ami pour l\'instant',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Utilise le bouton + pour chercher quelqu\'un par pseudo.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey.shade600),
-            ),
-            const SizedBox(height: 20),
-            FilledButton.icon(
-              onPressed: _openAddFriend,
-              icon: const Icon(Icons.person_add),
-              label: const Text('Ajouter un ami'),
-            ),
-          ],
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: [
+        const SizedBox(height: 48),
+        Icon(Icons.people_outline_rounded, size: 72, color: Colors.grey.shade400),
+        const SizedBox(height: 16),
+        const Text(
+          'Construis ton cercle',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
         ),
-      ),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 36),
+          child: Text(
+            'Ajoute des amis par pseudo pour voir leurs collections et '
+            'copier des objets chez toi en un geste.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey.shade600, height: 1.35),
+          ),
+        ),
+        const SizedBox(height: 24),
+        Center(
+          child: FilledButton.icon(
+            onPressed: _openAddFriend,
+            icon: const Icon(Icons.person_add),
+            label: const Text('Ajouter un ami'),
+          ),
+        ),
+      ],
     );
   }
 
@@ -338,7 +416,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
             SwitchListTile(
               title: const Text('Collections partagées'),
               subtitle: const Text(
-                'Quand c\'est activé, vous pouvez voir vos collections respectives',
+                'Permet de voir collection et wishlist mutuelles',
               ),
               value: sharing,
               onChanged: (val) async {

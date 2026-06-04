@@ -4,6 +4,7 @@ import '../models/collection_item.dart';
 import '../services/friend_service.dart';
 import '../utils/collection_grid_grouper.dart';
 import '../navigation/app_navigation.dart';
+import '../utils/copy_friend_item.dart';
 import '../widgets/collection_item_tile.dart';
 import '../widgets/profile_avatar.dart';
 import 'item_detail_screen.dart';
@@ -139,6 +140,20 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
           IconButton(
+            icon: const Icon(Icons.add_circle_outline),
+            tooltip: 'Appui long sur un objet pour l\'ajouter chez toi',
+            onPressed: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'Appui long sur une vignette → ajouter à ta collection ou wishlist',
+                  ),
+                  duration: Duration(seconds: 3),
+                ),
+              );
+            },
+          ),
+          IconButton(
             icon: const Icon(Icons.grid_view_rounded),
             tooltip: 'Collections',
             onPressed: () => AppNavigation.openCollections(context),
@@ -264,8 +279,14 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
               builder: (ctx) => ItemDetailScreen(
                 item: item.copyWith(quantity: entry.totalQuantity),
                 readOnly: true,
+                friendUsername: widget.username,
               ),
             ),
+          ),
+          onLongPress: () => showCopyFriendItemSheet(
+            context,
+            source: item,
+            friendUsername: widget.username,
           ),
         );
       },

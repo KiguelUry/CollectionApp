@@ -21,7 +21,8 @@ String openLibraryAuthorPhotoUrl(String authorOlid, {CoverSize size = CoverSize.
 
 /// Choisit une URL plus nette pour l'affichage (listes vs fiche détail).
 String coverUrlForDisplay(String url, {required bool large}) {
-  if (url.contains('assets.tcgdex.net') && url.endsWith('/low.webp')) {
+  // Grilles / listes : garder low.webp (chargement plus rapide).
+  if (url.contains('assets.tcgdex.net') && large && url.endsWith('/low.webp')) {
     return url.replaceFirst('/low.webp', '/high.webp');
   }
   if (!url.contains('covers.openlibrary.org')) return url;

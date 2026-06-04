@@ -530,7 +530,7 @@ class BookItemAddCoordinator {
           metadata: metadata,
           imageUrl: imageUrl,
           isWishlist: options.isWishlist,
-          quantity: options.quantity,
+          quantity: options.isWishlist ? 1 : options.quantity,
           locationId: options.locationId,
           groupId: options.groupId,
           seriesId: seriesId,

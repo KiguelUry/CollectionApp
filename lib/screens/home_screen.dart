@@ -798,7 +798,7 @@ class _HomeScreenState extends State<HomeScreen>
           metadata: meta.isEmpty ? null : meta,
           imageUrl: resolvedImageUrl,
           isWishlist: options.isWishlist,
-          quantity: options.isWishlist ? 0 : options.quantity,
+          quantity: options.quantity,
           locationId: options.locationId,
           groupId: options.groupId,
           minPlayers: resolvedMin,

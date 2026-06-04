@@ -81,7 +81,8 @@ class _WishlistOverviewScreenState extends State<WishlistOverviewScreen> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Ajoute un objet en cochant « Wishlist » lors de l\'ajout, ou depuis l\'onglet Wishlist d\'une catégorie.',
+                          'Onglet Wishlist dans chaque collection, ou bouton ♥ à l\'ajout. '
+                          'Tu peux aussi copier un objet depuis la collection d\'un ami.',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: Colors.grey),
                         ),
@@ -94,28 +95,38 @@ class _WishlistOverviewScreenState extends State<WishlistOverviewScreen> {
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
                     children: [
-                      Card(
-                        color: Colors.amber.shade50,
-                        child: Padding(
-                          padding: const EdgeInsets.all(14),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.lightbulb_outline,
-                                color: Colors.amber.shade800,
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  'Centralise ici tout ce que tu veux acquérir. Les alertes bon plan arriveront plus tard.',
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: Colors.amber.shade900,
-                                  ),
-                                ),
-                              ),
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Colors.amber.shade100,
+                              Colors.orange.shade50,
                             ],
                           ),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.favorite_rounded,
+                              color: Colors.amber.shade900,
+                              size: 32,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                '$_total objet${_total > 1 ? 's' : ''} à chiner — '
+                                'depuis une catégorie, un ami, ou une recherche catalogue.',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.amber.shade900,
+                                  height: 1.3,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                       const SizedBox(height: 8),
