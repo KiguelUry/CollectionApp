@@ -10,6 +10,8 @@ class CollectionCoverImage extends StatelessWidget {
   final double? height;
   final BoxFit fit;
   final bool bookCover;
+  /// Affiche l'image entière (jeux de société, boîtes…) sans rognage.
+  final bool boxedCover;
   final bool largeSource;
   final Widget? placeholder;
 
@@ -20,6 +22,7 @@ class CollectionCoverImage extends StatelessWidget {
     this.height,
     this.fit = BoxFit.cover,
     this.bookCover = false,
+    this.boxedCover = false,
     this.largeSource = false,
     this.placeholder,
   });
@@ -33,11 +36,12 @@ class CollectionCoverImage extends StatelessWidget {
     final cacheW = _cachePixelSize(w, dpr);
     final cacheH = _cachePixelSize(h, dpr);
 
+    final padded = bookCover || boxedCover;
     Widget image = CachedNetworkImage(
       imageUrl: displayUrl,
       width: w,
       height: h,
-      fit: bookCover ? BoxFit.contain : fit,
+      fit: padded ? BoxFit.contain : fit,
       filterQuality: FilterQuality.medium,
       memCacheWidth: cacheW,
       memCacheHeight: cacheH,
@@ -60,7 +64,7 @@ class CollectionCoverImage extends StatelessWidget {
       errorWidget: (_, _, _) => _fallback(),
     );
 
-    if (bookCover && w != null && h != null) {
+    if (padded) {
       image = ColoredBox(
         color: Colors.grey.shade100,
         child: image,
@@ -68,7 +72,7 @@ class CollectionCoverImage extends StatelessWidget {
     }
 
     return ClipRRect(
-      borderRadius: BorderRadius.circular(bookCover ? 6 : 8),
+      borderRadius: BorderRadius.circular(padded ? 6 : 8),
       child: image,
     );
   }

@@ -92,11 +92,17 @@ class ScryfallService {
     return setType[0].toUpperCase() + setType.substring(1);
   }
 
-  static Future<List<TcgCatalogCard>> fetchCardsInSet(String setCode) async {
+  static Future<List<TcgCatalogCard>> fetchCardsInSet(
+    String setCode, {
+    String? rarity,
+  }) async {
     if (setCode.isEmpty) return [];
     try {
+      final q = rarity != null && rarity.isNotEmpty
+          ? 'set:$setCode rarity:${_scryfallRarityQuery(rarity)}'
+          : 'set:$setCode';
       final url = Uri.https('api.scryfall.com', '/cards/search', {
-        'q': 'set:$setCode',
+        'q': q,
         'unique': 'cards',
         'order': 'set',
       });
@@ -151,6 +157,14 @@ class ScryfallService {
       if (kDebugMode) debugPrint('Scryfall: $e');
       return [];
     }
+  }
+
+  static String _scryfallRarityQuery(String label) {
+    final r = label.toLowerCase();
+    if (r.contains('mythic')) return 'mythic';
+    if (r.contains('rare') && !r.contains('un')) return 'rare';
+    if (r.contains('uncommon') || r.contains('peu')) return 'uncommon';
+    return 'common';
   }
 
   static Map<String, String>? _mapCard(Map<String, dynamic> card) {

@@ -4,7 +4,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 
-/// Films & séries — [TMDB](https://www.themoviedb.org/settings/api)
+import '../utils/catalog_http.dart';
+
+/// Films — [TMDB](https://www.themoviedb.org/settings/api)
 /// Clé : `TMDB_API_KEY` dans `.env`
 class TmdbService {
   static String? get _apiKey {
@@ -14,56 +16,43 @@ class TmdbService {
 
   static bool get isConfigured => _apiKey != null;
 
-  static Future<List<Map<String, String>>> search(String query) async {
+  /// Films cinéma uniquement (pas les séries TV).
+  static Future<List<Map<String, String>>> searchMovies(String query) async {
     final q = query.trim();
     final key = _apiKey;
     if (key == null || q.length < 2) return [];
 
     try {
-      final movieUri = Uri.https('api.themoviedb.org', '/3/search/movie', {
+      final uri = Uri.https('api.themoviedb.org', '/3/search/movie', {
         'api_key': key,
         'query': q,
         'language': 'fr-FR',
         'page': '1',
       });
-      final tvUri = Uri.https('api.themoviedb.org', '/3/search/tv', {
-        'api_key': key,
-        'query': q,
-        'language': 'fr-FR',
-        'page': '1',
-      });
-
-      final responses = await Future.wait([
-        http.get(movieUri),
-        http.get(tvUri),
-      ]);
-
-      final out = <Map<String, String>>[];
-
-      if (responses[0].statusCode == 200) {
-        final data = jsonDecode(responses[0].body) as Map<String, dynamic>;
-        final list = data['results'] as List<dynamic>? ?? [];
-        for (final raw in list.take(12)) {
-          final m = _mapMovie(raw as Map<String, dynamic>);
-          if (m != null) out.add(m);
+      final response = await http.get(uri, headers: catalogHttpHeaders);
+      if (response.statusCode != 200) {
+        if (kDebugMode) {
+          debugPrint('TMDB movies ${response.statusCode}: ${response.body}');
         }
+        return [];
       }
 
-      if (responses[1].statusCode == 200) {
-        final data = jsonDecode(responses[1].body) as Map<String, dynamic>;
-        final list = data['results'] as List<dynamic>? ?? [];
-        for (final raw in list.take(8)) {
-          final m = _mapTv(raw as Map<String, dynamic>);
-          if (m != null) out.add(m);
-        }
-      }
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final list = data['results'] as List<dynamic>? ?? [];
 
-      return out;
+      return list
+          .map((raw) => _mapMovie(raw as Map<String, dynamic>))
+          .whereType<Map<String, String>>()
+          .toList();
     } catch (e) {
       if (kDebugMode) debugPrint('TMDB search: $e');
       return [];
     }
   }
+
+  /// Compat — films seulement (les écrans utilisent [MovieCatalogService]).
+  static Future<List<Map<String, String>>> search(String query) =>
+      searchMovies(query);
 
   static Map<String, String>? _mapMovie(Map<String, dynamic> m) {
     final title = m['title']?.toString();
@@ -75,21 +64,7 @@ class TmdbService {
       'image_url': poster != null ? 'https://image.tmdb.org/t/p/w342$poster' : '',
       'year': year ?? '',
       'media_kind': 'movie',
-      'tmdb_id': m['id']?.toString() ?? '',
-      'source': 'tmdb',
-    };
-  }
-
-  static Map<String, String>? _mapTv(Map<String, dynamic> m) {
-    final title = m['name']?.toString();
-    if (title == null || title.isEmpty) return null;
-    final year = (m['first_air_date'] as String?)?.substring(0, 4);
-    final poster = m['poster_path']?.toString();
-    return {
-      'title': title,
-      'image_url': poster != null ? 'https://image.tmdb.org/t/p/w342$poster' : '',
-      'year': year ?? '',
-      'media_kind': 'series',
+      'physical_format': 'physical',
       'tmdb_id': m['id']?.toString() ?? '',
       'source': 'tmdb',
     };

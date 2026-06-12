@@ -11,7 +11,6 @@ import '../../services/user_card_collection_service.dart';
 import '../../utils/card_quick_add.dart';
 import '../../utils/tcg_bulk_add.dart';
 import '../../utils/tcg_rarity_order.dart';
-import 'tcg_rarity_gallery_screen.dart';
 import '../../widgets/app_app_bar.dart';
 import '../../widgets/tcg/tcg_catalog_card_tile.dart';
 import '../../widgets/ui/empty_state.dart';
@@ -36,6 +35,7 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
   List<TcgCatalogCard> _cards = [];
   Set<String> _ownedIds = {};
   bool _loading = true;
+  bool _enrichingRarities = false;
   bool _ownedOnly = false;
   String _query = '';
   final Set<String> _rarityFilters = {};
@@ -43,6 +43,31 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
   bool _bulkMode = false;
   final Set<String> _selectedIds = {};
   final ScrollController _scrollController = ScrollController();
+
+  static const _pokemonTypes = [
+    'Colorless',
+    'Darkness',
+    'Dragon',
+    'Fairy',
+    'Fighting',
+    'Fire',
+    'Grass',
+    'Lightning',
+    'Metal',
+    'Psychic',
+    'Water',
+    'Incolore',
+    'Ténèbres',
+    'Dragon',
+    'Fée',
+    'Combat',
+    'Feu',
+    'Plante',
+    'Électrique',
+    'Métal',
+    'Psy',
+    'Eau',
+  ];
 
   @override
   void initState() {
@@ -95,9 +120,23 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
         _ownedIds = owned;
         _loading = false;
       });
+      _maybeEnrichPokemonRarities();
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _maybeEnrichPokemonRarities() async {
+    if (widget.subcategory != CardSubcategory.pokemon) return;
+    if (!_cards.any((c) => c.rarity == null || c.rarity!.isEmpty)) return;
+    setState(() => _enrichingRarities = true);
+    final copy = List<TcgCatalogCard>.from(_cards);
+    await PokemonTcgService.enrichRarities(copy);
+    if (!mounted) return;
+    setState(() {
+      _cards = copy;
+      _enrichingRarities = false;
+    });
   }
 
   Future<List<TcgCatalogCard>> _fetchCards() async {
@@ -137,6 +176,7 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
         }
       }
     }
+    if (out.isEmpty) return _pokemonTypes.toSet();
     return out;
   }
 
@@ -190,40 +230,10 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
     final filtered = _filtered;
     final ownedInSet =
         _cards.where((c) => _ownedIds.contains(c.id)).length;
+    final total = widget.set.totalCards ?? _cards.length;
 
     return Scaffold(
-      appBar: AppAppBar(
-        title: widget.set.displayName,
-        actions: [
-          IconButton(
-            tooltip: 'Vue par rareté',
-            icon: const Icon(Icons.star_outline),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (ctx) => TcgRarityGalleryScreen(
-                  subcategory: widget.subcategory,
-                  title: widget.set.displayName,
-                  sets: const [],
-                  singleSet: widget.set,
-                ),
-              ),
-            ),
-          ),
-          IconButton(
-            tooltip: _bulkMode ? 'Annuler sélection' : 'Ajout rapide',
-            icon: Icon(_bulkMode ? Icons.close : Icons.playlist_add_check),
-            onPressed: () => setState(() {
-              _bulkMode = !_bulkMode;
-              _selectedIds.clear();
-            }),
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _load,
-          ),
-        ],
-      ),
+      appBar: AppAppBar(title: widget.set.displayName),
       body: Column(
         children: [
           Padding(
@@ -239,81 +249,84 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
                   ),
                   onChanged: (v) => setState(() => _query = v),
                 ),
-                const SizedBox(height: 6),
-                if (_sortedRarityOptions.isNotEmpty)
-                  SizedBox(
-                    height: 34,
-                    child: ListView(
-                      scrollDirection: Axis.horizontal,
-                      children: [
-                        for (final r in _sortedRarityOptions)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 6),
-                            child: FilterChip(
-                              label: Text(r, style: const TextStyle(fontSize: 11)),
-                              selected: _rarityFilters.contains(r),
-                              onSelected: (on) => setState(() {
-                                if (on) {
-                                  _rarityFilters.add(r);
-                                } else {
-                                  _rarityFilters.remove(r);
-                                }
-                              }),
-                            ),
-                          ),
-                      ],
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    FilterChip(
+                      label: Text('Possédées $ownedInSet/$total'),
+                      selected: _ownedOnly,
+                      onSelected: (v) => setState(() => _ownedOnly = v),
                     ),
-                  ),
-                const SizedBox(height: 4),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      FilterChip(
-                        label: Text('Possédées $ownedInSet/${_cards.length}'),
-                        selected: _ownedOnly,
-                        onSelected: (v) => setState(() => _ownedOnly = v),
+                    const Spacer(),
+                    if (_enrichingRarities)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: widget.subcategory.color,
+                          ),
+                        ),
                       ),
-                      if (_rarityOptions.isNotEmpty)
-                        TextButton.icon(
-                          onPressed: () => _openFilterDialog(
-                            title: 'Rareté',
-                            options: _sortedRarityOptions,
-                            selected: _rarityFilters,
-                            onApply: (s) => setState(() {
-                              _rarityFilters
-                                ..clear()
-                                ..addAll(s);
-                            }),
-                          ),
-                          icon: const Icon(Icons.star_outline, size: 18),
-                          label: Text(
-                            _rarityFilters.isEmpty
-                                ? 'Toutes raretés'
-                                : 'Rareté (${_rarityFilters.length})',
-                          ),
+                    IconButton(
+                      tooltip: _rarityFilters.isEmpty
+                          ? 'Filtrer par rareté'
+                          : 'Rareté (${_rarityFilters.length})',
+                      icon: Icon(
+                        Icons.star_outline,
+                        color: _rarityFilters.isNotEmpty
+                            ? widget.subcategory.color
+                            : null,
+                      ),
+                      onPressed: _sortedRarityOptions.isEmpty
+                          ? null
+                          : () => _openFilterDialog(
+                                title: 'Rareté',
+                                options: _sortedRarityOptions,
+                                selected: _rarityFilters,
+                                onApply: (s) => setState(() {
+                                  _rarityFilters
+                                    ..clear()
+                                    ..addAll(s);
+                                }),
+                              ),
+                    ),
+                    IconButton(
+                      tooltip:
+                          _bulkMode ? 'Annuler sélection' : 'Sélection multiple',
+                      icon: Icon(
+                        _bulkMode ? Icons.close : Icons.playlist_add_check,
+                      ),
+                      onPressed: () => setState(() {
+                        _bulkMode = !_bulkMode;
+                        _selectedIds.clear();
+                      }),
+                    ),
+                    if (widget.subcategory == CardSubcategory.pokemon)
+                      IconButton(
+                        tooltip: _typeFilters.isEmpty
+                            ? 'Type Pokémon'
+                            : 'Type (${_typeFilters.length})',
+                        icon: Icon(
+                          Icons.bolt_outlined,
+                          color: _typeFilters.isNotEmpty
+                              ? widget.subcategory.color
+                              : null,
                         ),
-                      if (_typeOptions.isNotEmpty)
-                        TextButton.icon(
-                          onPressed: () => _openFilterDialog(
-                            title: 'Type',
-                            options: _typeOptions.toList()..sort(),
-                            selected: _typeFilters,
-                            onApply: (s) => setState(() {
-                              _typeFilters
-                                ..clear()
-                                ..addAll(s);
-                            }),
-                          ),
-                          icon: const Icon(Icons.bolt_outlined, size: 18),
-                          label: Text(
-                            _typeFilters.isEmpty
-                                ? 'Type'
-                                : 'Type (${_typeFilters.length})',
-                          ),
+                        onPressed: () => _openFilterDialog(
+                          title: 'Type Pokémon',
+                          options: _typeOptions.toList()..sort(),
+                          selected: _typeFilters,
+                          onApply: (s) => setState(() {
+                            _typeFilters
+                              ..clear()
+                              ..addAll(s);
+                          }),
                         ),
-                    ],
-                  ),
+                      ),
+                  ],
                 ),
               ],
             ),
@@ -324,7 +337,7 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
                     grid: false,
                     count: 8,
                     message: widget.subcategory == CardSubcategory.pokemon
-                        ? 'Chargement des cartes et raretés…'
+                        ? 'Chargement des cartes…'
                         : null,
                   )
                 : filtered.isEmpty
@@ -375,7 +388,8 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
                                 ).then((_) => _refreshOwned());
                               }
                             },
-                            onQuickAdd: _bulkMode ? null : () => _quickAddCard(card),
+                            onQuickAdd:
+                                _bulkMode ? null : () => _quickAddCard(card),
                           );
                         },
                       ),

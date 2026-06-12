@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/card_subcategory.dart';
 import '../models/collection_list_filters.dart';
 import '../models/item_tag.dart';
 import '../models/storage_location.dart';
@@ -24,8 +25,11 @@ class CollectionFilterBar extends StatelessWidget {
   final bool showBoardgameGenreFilter;
   final List<String> boardgameGenres;
   final bool showCardFilter;
+  final bool showCardSubcategoryFilter;
+  final bool showCardUniverseDetailFilters;
   final List<String> cardRarities;
   final List<String> pokemonTypes;
+  final List<CardSubcategory> cardSubcategoryOptions;
   final List<GroupFilterOption> groupOptions;
   final TextEditingController? searchController;
 
@@ -42,8 +46,11 @@ class CollectionFilterBar extends StatelessWidget {
     this.showBoardgameGenreFilter = false,
     this.boardgameGenres = const [],
     this.showCardFilter = false,
+    this.showCardSubcategoryFilter = false,
+    this.showCardUniverseDetailFilters = false,
     this.cardRarities = const [],
     this.pokemonTypes = const [],
+    this.cardSubcategoryOptions = const [],
     this.groupOptions = const [],
   });
 
@@ -140,15 +147,18 @@ class CollectionFilterBar extends StatelessWidget {
                     ),
                   ),
                 if (showCardFilter &&
-                    (cardRarities.isNotEmpty || pokemonTypes.isNotEmpty))
+                    (cardRarities.isNotEmpty ||
+                        pokemonTypes.isNotEmpty ||
+                        cardSubcategoryOptions.isNotEmpty))
                   IconButton(
                     tooltip: 'Filtres cartes',
                     onPressed: () => _openCardFilters(context),
                     icon: Badge(
                       isLabelVisible: filters.cardRarities.isNotEmpty ||
-                          filters.pokemonTypes.isNotEmpty,
+                          filters.pokemonTypes.isNotEmpty ||
+                          filters.cardSubcategories.isNotEmpty,
                       label: Text(
-                        '${filters.cardRarities.length + filters.pokemonTypes.length}',
+                        '${filters.cardRarities.length + filters.pokemonTypes.length + filters.cardSubcategories.length}',
                       ),
                       child: Icon(
                         Icons.style_outlined,
@@ -192,6 +202,48 @@ class CollectionFilterBar extends StatelessWidget {
                   ),
                 ],
               ),
+            ],
+            if (showCardSubcategoryFilter &&
+                cardSubcategoryOptions.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              _horizontalChips(
+                height: 36,
+                children: [
+                  _cardSubcategoryChip(context, label: 'Tous les univers', id: null),
+                  ...cardSubcategoryOptions.map(
+                    (sub) => _cardSubcategoryChip(
+                      context,
+                      label: sub.label,
+                      id: sub.dbValue,
+                      color: sub.color,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            if (showCardUniverseDetailFilters) ...[
+              if (cardRarities.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                _horizontalChips(
+                  height: 36,
+                  children: [
+                    _cardRarityChip(context, label: 'Toutes raretés', id: null),
+                    for (final r in cardRarities)
+                      _cardRarityChip(context, label: r, id: r),
+                  ],
+                ),
+              ],
+              if (pokemonTypes.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                _horizontalChips(
+                  height: 36,
+                  children: [
+                    _pokemonTypeChip(context, label: 'Tous types', id: null),
+                    for (final t in pokemonTypes)
+                      _pokemonTypeChip(context, label: t, id: t),
+                  ],
+                ),
+              ],
             ],
             if (showScopeFilters) ...[
               const SizedBox(height: 10),
@@ -286,14 +338,106 @@ class CollectionFilterBar extends StatelessWidget {
     );
   }
 
+  Widget _cardSubcategoryChip(
+    BuildContext context, {
+    required String label,
+    required String? id,
+    Color? color,
+  }) {
+    final selected = id == null
+        ? filters.cardSubcategories.isEmpty
+        : filters.cardSubcategories.contains(id);
+    return _filterChip(
+      label: label,
+      selected: selected,
+      onTap: () {
+        if (id == null) {
+          onChanged(
+            filters.copyWith(
+              cardSubcategories: {},
+              clearCardFilters: true,
+            ),
+          );
+          return;
+        }
+        final already = filters.cardSubcategories.length == 1 &&
+            filters.cardSubcategories.contains(id);
+        onChanged(
+          filters.copyWith(
+            cardSubcategories: already ? {} : {id},
+            clearCardFilters: !already,
+          ),
+        );
+      },
+      backgroundColor: color?.withValues(alpha: 0.15),
+    );
+  }
+
+  Widget _cardRarityChip(
+    BuildContext context, {
+    required String label,
+    required String? id,
+  }) {
+    final selected = id == null
+        ? filters.cardRarities.isEmpty
+        : filters.cardRarities.contains(id);
+    return _filterChip(
+      label: label,
+      selected: selected,
+      onTap: () {
+        if (id == null) {
+          onChanged(filters.copyWith(cardRarities: {}));
+          return;
+        }
+        final next = Set<String>.from(filters.cardRarities);
+        if (next.contains(id)) {
+          next.remove(id);
+        } else {
+          next.add(id);
+        }
+        onChanged(filters.copyWith(cardRarities: next));
+      },
+    );
+  }
+
+  Widget _pokemonTypeChip(
+    BuildContext context, {
+    required String label,
+    required String? id,
+  }) {
+    final selected = id == null
+        ? filters.pokemonTypes.isEmpty
+        : filters.pokemonTypes.contains(id);
+    return _filterChip(
+      label: label,
+      selected: selected,
+      onTap: () {
+        if (id == null) {
+          onChanged(filters.copyWith(pokemonTypes: {}));
+          return;
+        }
+        final next = Set<String>.from(filters.pokemonTypes);
+        if (next.contains(id)) {
+          next.remove(id);
+        } else {
+          next.add(id);
+        }
+        onChanged(filters.copyWith(pokemonTypes: next));
+      },
+    );
+  }
+
   Future<void> _openCardFilters(BuildContext context) async {
     final rarities = Set<String>.from(filters.cardRarities);
     final types = Set<String>.from(filters.pokemonTypes);
-    final result = await showDialog<({Set<String> rarities, Set<String> types})>(
+    final subs = Set<String>.from(filters.cardSubcategories);
+    final result = await showDialog<
+        ({Set<String> rarities, Set<String> types, Set<String> subs})>(
       context: context,
       builder: (ctx) {
         var tmpR = Set<String>.from(rarities);
         var tmpT = Set<String>.from(types);
+        var tmpS = Set<String>.from(subs);
         return StatefulBuilder(
           builder: (context, setStateDialog) => AlertDialog(
             title: const Text('Filtres cartes'),
@@ -354,6 +498,33 @@ class CollectionFilterBar extends StatelessWidget {
                         ],
                       ),
                     ],
+                    if (cardSubcategoryOptions.isNotEmpty) ...[
+                      if (cardRarities.isNotEmpty || pokemonTypes.isNotEmpty)
+                        const SizedBox(height: 12),
+                      Text(
+                        'Univers',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          for (final sub in cardSubcategoryOptions)
+                            FilterChip(
+                              label: Text(sub.label),
+                              selected: tmpS.contains(sub.dbValue),
+                              onSelected: (on) => setStateDialog(() {
+                                if (on) {
+                                  tmpS.add(sub.dbValue);
+                                } else {
+                                  tmpS.remove(sub.dbValue);
+                                }
+                              }),
+                            ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -362,7 +533,7 @@ class CollectionFilterBar extends StatelessWidget {
               TextButton(
                 onPressed: () => Navigator.pop(
                   ctx,
-                  (rarities: <String>{}, types: <String>{}),
+                  (rarities: <String>{}, types: <String>{}, subs: <String>{}),
                 ),
                 child: const Text('Effacer'),
               ),
@@ -373,7 +544,7 @@ class CollectionFilterBar extends StatelessWidget {
               FilledButton(
                 onPressed: () => Navigator.pop(
                   ctx,
-                  (rarities: tmpR, types: tmpT),
+                  (rarities: tmpR, types: tmpT, subs: tmpS),
                 ),
                 child: const Text('Appliquer'),
               ),
@@ -387,8 +558,10 @@ class CollectionFilterBar extends StatelessWidget {
       filters.copyWith(
         cardRarities: result.rarities,
         pokemonTypes: result.types,
-        clearCardFilters:
-            result.rarities.isEmpty && result.types.isEmpty,
+        cardSubcategories: result.subs,
+        clearCardFilters: result.rarities.isEmpty &&
+            result.types.isEmpty &&
+            result.subs.isEmpty,
       ),
     );
   }
@@ -483,6 +656,15 @@ class CollectionFilterBar extends StatelessWidget {
 
   Widget _groupPickerChip(BuildContext context) {
     final selectedCount = filters.groupIds.length;
+    final chipLabel = switch (selectedCount) {
+      0 => 'Groupes : tous',
+      1 => groupOptions
+              .where((g) => filters.groupIds.contains(g.id))
+              .map((g) => g.label)
+              .firstOrNull ??
+          '1 groupe',
+      _ => 'Groupes : $selectedCount sélectionné(s)',
+    };
     return PopupMenuButton<String>(
       tooltip: 'Choisir un ou plusieurs groupes',
       onSelected: (id) {
@@ -512,9 +694,7 @@ class CollectionFilterBar extends StatelessWidget {
       child: Chip(
         avatar: const Icon(Icons.filter_list, size: 18),
         label: Text(
-          selectedCount == 0
-              ? 'Groupes : tous'
-              : 'Groupes : $selectedCount sélectionné(s)',
+          chipLabel,
           style: const TextStyle(fontSize: 12),
         ),
       ),

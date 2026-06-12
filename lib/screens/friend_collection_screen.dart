@@ -5,6 +5,7 @@ import '../services/friend_service.dart';
 import '../utils/collection_grid_grouper.dart';
 import '../navigation/app_navigation.dart';
 import '../utils/copy_friend_item.dart';
+import '../utils/friend_item_overlap.dart';
 import '../widgets/collection_item_tile.dart';
 import '../widgets/profile_avatar.dart';
 import 'item_detail_screen.dart';
@@ -40,6 +41,8 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
   bool _loading = true;
   String? _error;
   CollectionCategory _selectedCategory = CollectionCategory.boardgame;
+  FriendOverlapIndex? _overlap;
+  bool _categorySynced = false;
 
   @override
   void initState() {
@@ -86,13 +89,77 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
       } else {
         _wishlistItems = [];
       }
+      _overlap = await buildFriendOverlapIndex([
+        ..._collectionItems,
+        ..._wishlistItems,
+      ]);
+      _categorySynced = false;
     } catch (e) {
       _collectionItems = [];
       _wishlistItems = [];
+      _overlap = null;
       _error = e.toString();
     }
 
-    if (mounted) setState(() => _loading = false);
+    if (mounted) {
+      setState(() => _loading = false);
+      _pickInitialCategory([..._collectionItems, ..._wishlistItems]);
+    }
+  }
+
+  void _pickInitialCategory(List<CollectionItem> items) {
+    if (_categorySynced || items.isEmpty) return;
+    if (items.any((i) => i.category == _selectedCategory)) {
+      _categorySynced = true;
+      return;
+    }
+    for (final cat in CollectionCategory.values) {
+      if (items.any((i) => i.category == cat)) {
+        _categorySynced = true;
+        setState(() => _selectedCategory = cat);
+        return;
+      }
+    }
+  }
+
+  Widget? _overlapBanner() {
+    final o = _overlap;
+    if (o == null || (o.inCollectionCount == 0 && o.inWishlistCount == 0)) {
+      return null;
+    }
+    final parts = <String>[];
+    if (o.inCollectionCount > 0) {
+      parts.add(
+        '${o.inCollectionCount} en commun',
+      );
+    }
+    if (o.inWishlistCount > 0) {
+      parts.add('${o.inWishlistCount} dans ta wishlist');
+    }
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.teal.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.teal.shade100),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.compare_arrows, color: Colors.teal.shade700),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              parts.join(' · '),
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                color: Colors.teal.shade900,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   List<CollectionItem> _itemsForScope(bool wishlist) =>
@@ -208,9 +275,12 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
       );
     }
 
+    final overlapBanner = !wishlist ? _overlapBanner() : null;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (overlapBanner != null) overlapBanner,
         SizedBox(
           height: 44,
           child: ListView.separated(
@@ -268,11 +338,14 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
         final entry = grouped[index];
         final item = entry.item;
 
+        final overlap = _overlap?.kindFor(item);
+
         return CollectionItemTile(
           item: item,
           category: category,
           totalQuantity: entry.totalQuantity,
           showDuplicateBadge: entry.hasDuplicates,
+          overlapKind: overlap,
           onTap: () => Navigator.push(
             context,
             MaterialPageRoute(
@@ -280,6 +353,7 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
                 item: item.copyWith(quantity: entry.totalQuantity),
                 readOnly: true,
                 friendUsername: widget.username,
+                friendOverlap: overlap,
               ),
             ),
           ),

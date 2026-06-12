@@ -14,6 +14,7 @@ Future<Map<String, String>?> showCatalogSearchSheet(
   required CatalogSearchFn search,
   String? apiHint,
   VoidCallback? onManualEntry,
+  Color? accent,
 }) {
   return showModalBottomSheet<Map<String, String>>(
     context: context,
@@ -26,6 +27,7 @@ Future<Map<String, String>?> showCatalogSearchSheet(
       search: search,
       apiHint: apiHint,
       onManualEntry: onManualEntry,
+      accent: accent,
     ),
   );
 }
@@ -36,6 +38,7 @@ class _CatalogSearchSheet extends StatefulWidget {
   final CatalogSearchFn search;
   final String? apiHint;
   final VoidCallback? onManualEntry;
+  final Color? accent;
 
   const _CatalogSearchSheet({
     required this.title,
@@ -43,6 +46,7 @@ class _CatalogSearchSheet extends StatefulWidget {
     required this.search,
     this.apiHint,
     this.onManualEntry,
+    this.accent,
   });
 
   @override
@@ -103,6 +107,8 @@ class _CatalogSearchSheetState extends State<_CatalogSearchSheet> {
   @override
   Widget build(BuildContext context) {
     final maxH = MediaQuery.sizeOf(context).height * 0.88;
+    final accent = widget.accent ?? Theme.of(context).colorScheme.primary;
+    final scheme = Theme.of(context).colorScheme;
 
     return Padding(
       padding: EdgeInsets.only(
@@ -113,31 +119,60 @@ class _CatalogSearchSheetState extends State<_CatalogSearchSheet> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Text(
-                widget.title,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
+            Container(
+              margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    accent.withValues(alpha: 0.18),
+                    accent.withValues(alpha: 0.06),
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: accent.withValues(alpha: 0.25)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.search_rounded, color: accent, size: 22),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          widget.title,
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w800,
+                              ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (widget.apiHint != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      widget.apiHint!,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: scheme.onSurfaceVariant,
+                      ),
                     ),
+                  ],
+                ],
               ),
             ),
-            if (widget.apiHint != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Text(
-                  widget.apiHint!,
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                ),
-              ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: TextField(
                 controller: _controller,
                 autofocus: true,
                 decoration: InputDecoration(
                   hintText: widget.hint,
-                  prefixIcon: const Icon(Icons.search),
+                  prefixIcon: Icon(Icons.search, color: accent),
+                  focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: accent, width: 2),
+                  ),
                 ),
               ),
             ),
@@ -183,8 +218,10 @@ class _CatalogSearchSheetState extends State<_CatalogSearchSheet> {
                                 final sub = [
                                   r['year'],
                                   r['platform'],
-                                  r['set_number'],
-                                  r['media_kind'] == 'series' ? 'Série' : null,
+                                  if (r['set_number']?.isNotEmpty == true)
+                                    'Set ${r['set_number']}',
+                                  if (r['media_kind'] == 'movie')
+                                    'Film',
                                 ].whereType<String>().where((s) => s.isNotEmpty).join(' · ');
 
                                 return ListTile(

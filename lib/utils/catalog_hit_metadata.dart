@@ -24,10 +24,18 @@ Map<String, dynamic> metadataFromCatalogHit(
         'source': hit['source'] ?? 'rawg',
       },
     CollectionCategory.movie => {
-        'media_kind': hit['media_kind'] ?? 'movie',
+        'media_kind': 'movie',
+        'physical_format': hit['physical_format'] ?? 'physical',
         if (hit['year']?.isNotEmpty == true) 'year': hit['year'],
         if (hit['tmdb_id']?.isNotEmpty == true) 'tmdb_id': hit['tmdb_id'],
+        if (hit['itunes_id']?.isNotEmpty == true) 'itunes_id': hit['itunes_id'],
         'source': hit['source'] ?? 'tmdb',
+      },
+    CollectionCategory.watch => {
+        if (hit['brand']?.isNotEmpty == true) 'brand': hit['brand'],
+        if (hit['model']?.isNotEmpty == true) 'model': hit['model'],
+        if (hit['reference']?.isNotEmpty == true) 'reference': hit['reference'],
+        'source': hit['source'] ?? 'manual_watch',
       },
     _ => <String, dynamic>{},
   };

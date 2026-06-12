@@ -64,10 +64,10 @@ class _TcgRarityGalleryScreenState extends State<TcgRarityGalleryScreen> {
     final targets =
         widget.singleSet != null ? [widget.singleSet!] : widget.sets;
 
-    for (final set in targets) {
-      final cards = await _fetchSet(set);
+    final batches = await Future.wait(targets.map(_fetchSet));
+    if (!mounted) return;
+    for (final cards in batches) {
       _all.addAll(cards);
-      if (!mounted) return;
     }
 
     setState(() => _loading = false);

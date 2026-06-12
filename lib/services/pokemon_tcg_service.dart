@@ -91,9 +91,6 @@ class PokemonTcgService {
     );
   }
 
-  /// TCGdex ne renvoie pas la rareté dans la liste — détail par carte.
-  static const _detailBatchSize = 24;
-
   static Future<List<TcgCatalogCard>> fetchCardsInSet(String setId) async {
     if (setId.isEmpty) return [];
     try {
@@ -103,23 +100,49 @@ class PokemonTcgService {
       if (response.statusCode != 200) return [];
 
       final list = jsonDecode(response.body) as List<dynamic>;
-      final ids = list
-          .map((raw) => (raw as Map<String, dynamic>)['id']?.toString() ?? '')
-          .where((id) => id.isNotEmpty)
+      final cards = list
+          .map((raw) => _mapCatalogBrief(raw as Map<String, dynamic>, setId))
+          .whereType<TcgCatalogCard>()
           .toList();
 
-      if (ids.isEmpty) return [];
-
-      final cards = <TcgCatalogCard>[];
-      for (var i = 0; i < ids.length; i += _detailBatchSize) {
-        final chunk = ids.skip(i).take(_detailBatchSize);
-        final batch = await Future.wait(chunk.map(_fetchCardById));
-        cards.addAll(batch.whereType<TcgCatalogCard>());
-      }
       return cards;
     } catch (e) {
       if (kDebugMode) debugPrint('TCGdex cards in set $setId: $e');
       return [];
+    }
+  }
+
+  static const _rarityBatch = 30;
+
+  /// Complète les raretés manquantes (liste TCGdex sans détail).
+  static Future<void> enrichRarities(List<TcgCatalogCard> cards) async {
+    final missing = cards.where((c) => c.rarity == null || c.rarity!.isEmpty);
+    for (final chunk in _chunks(missing.toList(), _rarityBatch)) {
+      final details = await Future.wait(
+        chunk.map((card) => _fetchCardById(card.id)),
+      );
+      for (var i = 0; i < chunk.length; i++) {
+        final d = details[i];
+        if (d?.rarity == null || d!.rarity!.isEmpty) continue;
+        final idx = cards.indexWhere((c) => c.id == chunk[i].id);
+        if (idx < 0) continue;
+        final old = cards[idx];
+        cards[idx] = TcgCatalogCard(
+          id: old.id,
+          name: old.name,
+          imageUrl: old.imageUrl ?? d.imageUrl,
+          setName: old.setName,
+          number: old.number,
+          rarity: d.rarity,
+          raw: {...old.raw, if (d.rarity != null) 'rarity': d.rarity!},
+        );
+      }
+    }
+  }
+
+  static Iterable<List<T>> _chunks<T>(List<T> list, int size) sync* {
+    for (var i = 0; i < list.length; i += size) {
+      yield list.skip(i).take(size).toList();
     }
   }
 

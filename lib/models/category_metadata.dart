@@ -167,12 +167,8 @@ class CategoryMetadata {
         return item.metadata?['platform']?.toString();
       case CollectionCategory.movie:
         final year = item.metadata?['year']?.toString();
-        final kind = item.metadata?['media_kind']?.toString();
-        if (year != null && year.isNotEmpty) {
-          if (kind == 'series') return 'Série · $year';
-          return year;
-        }
-        return kind == 'series' ? 'Série' : null;
+        if (year != null && year.isNotEmpty) return year;
+        return 'Blu-ray / DVD';
       case CollectionCategory.custom:
         return item.metadata?['custom_type_name']?.toString();
       default:
@@ -297,10 +293,7 @@ class CategoryMetadata {
         }
         break;
       case CollectionCategory.movie:
-        rows.add(MapEntry(
-          'Type',
-          m['media_kind'] == 'series' ? 'Série' : 'Film',
-        ));
+        rows.add(const MapEntry('Support', 'Physique (Blu-ray, DVD…)'));
         if ((m['year'] as String?)?.isNotEmpty == true) {
           rows.add(MapEntry('Année', m['year'].toString()));
         }

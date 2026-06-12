@@ -29,7 +29,7 @@ enum CardSubcategory {
         CardSubcategory.yugioh => 'Par ère & extension (YGOProDeck)',
         CardSubcategory.onepiece => 'Par type de booster (OPTCG)',
         CardSubcategory.lorcana => 'Par chapitre (Lorcast)',
-        CardSubcategory.topps => 'Cartes sport / trading',
+        CardSubcategory.topps => 'Saisie manuelle — pas de catalogue',
         CardSubcategory.panini => 'Albums & stickers',
         CardSubcategory.other => 'Saisie manuelle',
       };

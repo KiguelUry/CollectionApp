@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/book_subcategory.dart';
 import '../models/collection_category.dart';
+import '../models/collection_group.dart';
 import '../models/collection_item.dart';
 import '../models/card_subcategory.dart';
 import '../models/category_metadata.dart';
@@ -16,11 +17,12 @@ import '../utils/boardgame_genres.dart';
 import '../utils/collection_grid_grouper.dart';
 import '../utils/collection_item_filters.dart';
 import '../utils/card_item_metadata.dart';
-import '../utils/collection_item_scope.dart';
+import '../utils/wishlist_promote.dart';
 import '../models/collection_list_filters.dart';
 import '../models/collection_view_mode.dart';
 import '../models/item_tag.dart';
 import '../models/storage_location.dart';
+import '../services/group_service.dart';
 import '../services/location_service.dart';
 import '../services/tag_service.dart';
 import '../widgets/category_collection_header.dart';
@@ -39,9 +41,10 @@ import '../widgets/card_search_dialog.dart' show showCardSearch;
 import '../widgets/media_search_dialog.dart' show showMediaSearch;
 import '../widgets/ui/add_option_tile.dart';
 import '../models/lego_build_kind.dart';
-import '../services/rebrickable_service.dart';
-import '../services/rawg_service.dart';
-import '../services/tmdb_service.dart';
+import '../services/lego_catalog_service.dart';
+import '../services/movie_catalog_service.dart';
+import '../services/videogame_catalog_service.dart';
+import '../widgets/watch_quick_search_sheet.dart';
 import '../utils/catalog_hit_metadata.dart';
 import '../widgets/book_subcategory_picker.dart';
 import '../widgets/catalog_search_sheet.dart';
@@ -92,6 +95,7 @@ class _HomeScreenState extends State<HomeScreen>
   bool _mediaGroupByArtist = false;
   List<StorageLocation> _locations = [];
   List<ItemTag> _tags = [];
+  Map<String, String> _groupNamesById = {};
 
   @override
   void initState() {
@@ -158,14 +162,30 @@ class _HomeScreenState extends State<HomeScreen>
 
   bool get _addingToWishlist => _tabController.index == 1;
 
+  List<CollectionItem> _parseItems(List<Map<String, dynamic>> rows) {
+    return rows.map((json) {
+      final item = CollectionItem.fromJson(json);
+      final gid = item.groupId;
+      if (gid == null) return item;
+      final name = _groupNamesById[gid] ?? item.groupName;
+      if (name == null || name == item.groupName) return item;
+      return item.copyWith(groupName: name);
+    }).toList();
+  }
+
   Future<void> _loadFilterData() async {
     try {
-      final locs = await LocationService().fetchLocations();
-      final tags = await _tagService.fetchMyTags();
+      final results = await Future.wait([
+        LocationService().fetchLocations(),
+        _tagService.fetchMyTags(),
+        GroupService().fetchMyGroups(),
+      ]);
       if (mounted) {
+        final groups = results[2] as List<CollectionGroup>;
         setState(() {
-          _locations = locs;
-          _tags = tags;
+          _locations = results[0] as List<StorageLocation>;
+          _tags = results[1] as List<ItemTag>;
+          _groupNamesById = {for (final g in groups) g.id: g.name};
         });
       }
     } catch (_) {}
@@ -254,6 +274,8 @@ class _HomeScreenState extends State<HomeScreen>
       _showVideogameAddChooser();
     } else if (widget.category == CollectionCategory.lego) {
       _showLegoAddChooser();
+    } else if (widget.category == CollectionCategory.watch) {
+      _showWatchAddChooser();
     } else {
       _showManualAddFlow();
     }
@@ -453,12 +475,11 @@ class _HomeScreenState extends State<HomeScreen>
       onSearch: () {
         showCatalogSearchSheet(
           context,
-          title: 'Rechercher un film ou une série',
-          hint: 'Titre',
-          apiHint: TmdbService.isConfigured
-              ? null
-              : 'Ajoute TMDB_API_KEY dans .env',
-          search: TmdbService.search,
+          title: 'Rechercher un film (Blu-ray, DVD…)',
+          hint: 'Titre du film',
+          apiHint: MovieCatalogService.catalogLabel,
+          search: MovieCatalogService.search,
+          accent: _accentColor,
           onManualEntry: _showManualAddFlow,
         ).then((hit) {
           if (hit != null && mounted) _openFromCatalogHit(hit);
@@ -476,10 +497,9 @@ class _HomeScreenState extends State<HomeScreen>
           context,
           title: 'Rechercher un jeu',
           hint: 'Nom du jeu',
-          apiHint: RawgService.isConfigured
-              ? null
-              : 'Ajoute RAWG_API_KEY dans .env',
-          search: RawgService.search,
+          apiHint: VideogameCatalogService.catalogLabel,
+          search: VideogameCatalogService.search,
+          accent: _accentColor,
           onManualEntry: _showManualAddFlow,
         ).then((hit) {
           if (hit != null && mounted) _openFromCatalogHit(hit);
@@ -496,14 +516,29 @@ class _HomeScreenState extends State<HomeScreen>
         showCatalogSearchSheet(
           context,
           title: 'Rechercher un set Lego',
-          hint: 'Nom ou n° de set',
-          apiHint: RebrickableService.isConfigured
-              ? null
-              : 'Ajoute REBRICKABLE_API_KEY dans .env',
-          search: RebrickableService.search,
+          hint: 'Nom ou n° de set (ex: 75192)',
+          apiHint: LegoCatalogService.catalogLabel,
+          search: LegoCatalogService.search,
+          accent: _accentColor,
           onManualEntry: () => _showManualAddFlow(
             legoKind: widget.fixedLegoKind,
           ),
+        ).then((hit) {
+          if (hit != null && mounted) _openFromCatalogHit(hit);
+        });
+      },
+    );
+  }
+
+  void _showWatchAddChooser() {
+    _showCatalogAddChooser(
+      label: widget.screenTitle ?? 'Montres',
+      color: _accentColor,
+      onSearch: () {
+        showWatchQuickSearchSheet(
+          context,
+          accent: _accentColor,
+          onManualEntry: _showManualAddFlow,
         ).then((hit) {
           if (hit != null && mounted) _openFromCatalogHit(hit);
         });
@@ -737,26 +772,14 @@ class _HomeScreenState extends State<HomeScreen>
         resolvedTime = details?['playing_time'] as int?;
       }
 
-      var dupQuery = client
-          .from('collection_items')
-          .select('id, quantity')
-          .eq('category', widget.category.dbValue)
-          .eq('title', title.trim());
-
       final resolvedSub = widget.customTypeId ?? subcategory;
-      if (resolvedSub != null) {
-        dupQuery = dupQuery.eq('subcategory', resolvedSub);
-      }
-
-      if (options.groupId != null) {
-        dupQuery = dupQuery.eq('group_id', options.groupId!);
-      } else {
-        dupQuery = dupQuery
-            .filter('group_id', 'is', null)
-            .or(CollectionItemScope.personalOrFilter(userId));
-      }
-
-      final existing = await dupQuery.maybeSingle();
+      final existing = await findDuplicateRow(
+        title: title,
+        categoryDb: widget.category.dbValue,
+        isWishlist: options.isWishlist,
+        subcategory: resolvedSub,
+        groupId: options.groupId,
+      );
       var message = '« $title » ajouté';
       if (existing != null) {
         final newQty =
@@ -912,16 +935,10 @@ class _HomeScreenState extends State<HomeScreen>
             }
 
             return FutureBuilder<List<CollectionItem>>(
-              future: _tagService.enrichItems(
-                snapshot.data!
-                    .map((json) => CollectionItem.fromJson(json))
-                    .toList(),
-              ),
+              future: _tagService.enrichItems(_parseItems(snapshot.data!)),
               builder: (context, enrichedSnap) {
-                final allItems = enrichedSnap.data ??
-                    snapshot.data!
-                        .map((json) => CollectionItem.fromJson(json))
-                        .toList();
+                final allItems =
+                    enrichedSnap.data ?? _parseItems(snapshot.data!);
                 final scoped = _filterHubScope(allItems);
                 final collection = scoped
                     .where((item) =>
@@ -975,17 +992,6 @@ class _HomeScreenState extends State<HomeScreen>
   List<CategoryQuickAction> _quickActions() {
     return switch (widget.category) {
       CollectionCategory.boardgame => [
-          CategoryQuickAction(
-            label: 'Chercher BGG',
-            icon: Icons.search_rounded,
-            onTap: () {
-              if (kIsWeb && !BggService.webBggAvailable) {
-                _showBoardgameAddChooser();
-              } else {
-                _showBggSearchDialog();
-              }
-            },
-          ),
           CategoryQuickAction(
             label: 'Tirage au sort',
             icon: Icons.casino_outlined,
@@ -1075,24 +1081,46 @@ class _HomeScreenState extends State<HomeScreen>
   }) {
     final filtered = filters.apply(items);
     final countLabel = _buildCountLabel(items, filtered);
-    final groupOptions = items
-        .where((i) => i.groupId != null)
-        .map((i) => MapEntry(i.groupId!, i.groupName ?? 'Groupe'))
-        .fold<Map<String, String>>(
-          <String, String>{},
-          (acc, entry) => acc..putIfAbsent(entry.key, () => entry.value),
+    final groupIdSet = items
+        .map((i) => i.groupId)
+        .whereType<String>()
+        .toSet();
+    final groupOptions = groupIdSet
+        .map(
+          (id) => GroupFilterOption(
+            id: id,
+            label: _groupNamesById[id] ??
+                items
+                    .where((i) => i.groupId == id)
+                    .map((i) => i.groupName)
+                    .whereType<String>()
+                    .firstOrNull ??
+                'Groupe',
+          ),
         )
-        .entries
-        .map((e) => GroupFilterOption(id: e.key, label: e.value))
         .toList()
       ..sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
 
-    final cardRarityOptions = widget.category == CollectionCategory.card
-        ? (distinctCardRarities(items).toList()
+    final cardSubcategoryOptions = widget.category == CollectionCategory.card &&
+            widget.fixedCardSubcategory == null
+        ? distinctCardSubcategories(items)
+        : const <CardSubcategory>[];
+    final selectedUniverse = filters.cardSubcategories.length == 1
+        ? filters.cardSubcategories.first
+        : null;
+    final universeScoped = selectedUniverse != null
+        ? items
+            .where((i) => i.subcategory == selectedUniverse)
+            .toList()
+        : items;
+    final cardRarityOptions = widget.category == CollectionCategory.card &&
+            selectedUniverse != null
+        ? (distinctCardRarities(universeScoped).toList()
           ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())))
         : const <String>[];
-    final pokemonTypeOptions = widget.category == CollectionCategory.card
-        ? (distinctPokemonTypes(items).toList()
+    final pokemonTypeOptions = widget.category == CollectionCategory.card &&
+            selectedUniverse == CardSubcategory.pokemon.dbValue
+        ? (distinctPokemonTypes(universeScoped).toList()
           ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())))
         : const <String>[];
 
@@ -1128,9 +1156,12 @@ class _HomeScreenState extends State<HomeScreen>
           boardgameGenres: widget.category == CollectionCategory.boardgame
               ? distinctBoardgameGenres(items)
               : const [],
-          showCardFilter: widget.category == CollectionCategory.card,
+          showCardFilter: false,
+          showCardSubcategoryFilter: cardSubcategoryOptions.isNotEmpty,
+          showCardUniverseDetailFilters: selectedUniverse != null,
           cardRarities: cardRarityOptions,
           pokemonTypes: pokemonTypeOptions,
+          cardSubcategoryOptions: cardSubcategoryOptions,
           groupOptions: groupOptions,
         ),
         Padding(

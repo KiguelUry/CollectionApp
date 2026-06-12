@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:xml/xml.dart';
 
 import '../config/app_env.dart';
+import '../models/bgg_expansion.dart';
 import '../utils/search_relevance.dart';
 
 enum BggSearchSort {
@@ -364,10 +365,129 @@ class BggService {
     };
   }
 
-  /// Page fichiers BGG (livrets PDF souvent listés là).
-  static String? rulesFilesUrl(String? bggId) {
+  /// Fiche BGG du jeu (règles, fichiers, forum).
+  static String? gamePageUrl(String? bggId) {
     if (bggId == null || bggId.isEmpty) return null;
-    return 'https://boardgamegeek.com/boardgame/$bggId/files';
+    return 'https://boardgamegeek.com/boardgame/$bggId';
+  }
+
+  @Deprecated('Use gamePageUrl')
+  static String? rulesFilesUrl(String? bggId) => gamePageUrl(bggId);
+
+  static String _stripHtml(String? html) {
+    if (html == null || html.isEmpty) return '';
+    return html
+        .replaceAll(RegExp(r'<[^>]*>'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  static String? _expansionSummary(XmlElement item) {
+    final desc = item.findElements('description').firstOrNull?.innerText;
+    final clean = _stripHtml(desc);
+    if (clean.isEmpty) return null;
+    return clean.length > 140 ? '${clean.substring(0, 137)}…' : clean;
+  }
+
+  static int _compareExpansionsByPopularity(BggExpansion a, BggExpansion b) {
+    final ra = a.bggRank;
+    final rb = b.bggRank;
+    if (ra != null && rb != null) return ra.compareTo(rb);
+    if (ra != null) return -1;
+    if (rb != null) return 1;
+    final ya = a.year ?? 0;
+    final yb = b.year ?? 0;
+    if (ya != yb) return yb.compareTo(ya);
+    return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+  }
+
+  /// Extensions BGG du jeu de base (`inbound="true"` sur le lien expansion).
+  static Future<List<BggExpansion>> fetchExpansions(String baseGameBggId) async {
+    if (baseGameBggId.isEmpty || (_useWebProxy && !_webProxyReady)) {
+      return [];
+    }
+
+    try {
+      final url = Uri.https('boardgamegeek.com', '/xmlapi2/thing', {
+        'id': baseGameBggId,
+      });
+      final response = await _getWithRetry(url);
+      if (response.statusCode != 200 || response.body.isEmpty) return [];
+
+      final document = XmlDocument.parse(response.body);
+      final baseItem = document.findAllElements('item').firstOrNull;
+      if (baseItem == null) return [];
+
+      final expansionIds = <String, String>{};
+      for (final link in baseItem.findAllElements('link')) {
+        final type = link.getAttribute('type');
+        if (type != 'boardgameexpansion' && type != 'boardgameintegration') {
+          continue;
+        }
+        final inbound = link.getAttribute('inbound');
+        if (inbound == 'false') continue;
+        final id = link.getAttribute('id');
+        final title = link.getAttribute('value');
+        if (id != null && id.isNotEmpty && title != null && title.isNotEmpty) {
+          expansionIds[id] = title;
+        }
+      }
+      if (expansionIds.isEmpty) return [];
+
+      final expansions = <BggExpansion>[];
+      final ids = expansionIds.keys.toList();
+
+      for (var i = 0; i < ids.length; i += _thingChunkSize) {
+        final chunk = ids.skip(i).take(_thingChunkSize).toList();
+        final detailUrl = Uri.https('boardgamegeek.com', '/xmlapi2/thing', {
+          'id': chunk.join(','),
+          'stats': '1',
+        });
+        final detailRes = await _getWithRetry(detailUrl);
+        if (detailRes.statusCode != 200 || detailRes.body.isEmpty) continue;
+
+        final detailDoc = XmlDocument.parse(detailRes.body);
+        for (final item in detailDoc.findAllElements('item')) {
+          final id = item.getAttribute('id');
+          if (id == null) continue;
+
+          final image =
+              item.findAllElements('image').firstOrNull?.innerText ??
+              item.findAllElements('thumbnail').firstOrNull?.innerText;
+          final yearRaw =
+              item.findElements('yearpublished').firstOrNull?.getAttribute('value');
+          final year = int.tryParse(yearRaw ?? '');
+
+          final rankEl = item.findAllElements('rank').where(
+            (r) => r.getAttribute('name') == 'boardgame',
+          );
+          final rawRank = rankEl.isNotEmpty
+              ? rankEl.first.getAttribute('value')
+              : null;
+          int? rank;
+          if (rawRank != null && rawRank != 'Not Ranked') {
+            rank = int.tryParse(rawRank);
+          }
+
+          expansions.add(
+            BggExpansion(
+              bggId: id,
+              title: _primaryTitle(item),
+              imageUrl: image?.isNotEmpty == true ? image : null,
+              year: year,
+              summary: _expansionSummary(item),
+              bggRank: rank,
+            ),
+          );
+        }
+      }
+
+      expansions.sort(_compareExpansionsByPopularity);
+      return expansions;
+    } catch (e) {
+      if (kDebugMode) debugPrint('BGG expansions $baseGameBggId: $e');
+      return [];
+    }
   }
 
   static Future<Map<String, dynamic>?> getGameFullDetails(String bggId) async {

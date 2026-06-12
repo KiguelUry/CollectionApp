@@ -48,6 +48,8 @@ class CollectionListFilters {
   Set<String> groupIds;
   Set<String> cardRarities;
   Set<String> pokemonTypes;
+  /// Sous-catégories cartes (pokemon, onepiece…) — vue « toutes les cartes ».
+  Set<String> cardSubcategories;
 
   CollectionListFilters({
     this.searchQuery = '',
@@ -62,10 +64,12 @@ class CollectionListFilters {
     Set<String>? groupIds,
     Set<String>? cardRarities,
     Set<String>? pokemonTypes,
+    Set<String>? cardSubcategories,
   })  : groupIds = groupIds ?? <String>{},
         boardgameGenres = boardgameGenres ?? <String>{},
         cardRarities = cardRarities ?? <String>{},
-        pokemonTypes = pokemonTypes ?? <String>{};
+        pokemonTypes = pokemonTypes ?? <String>{},
+        cardSubcategories = cardSubcategories ?? <String>{};
 
   bool get hasActiveFilters =>
       searchQuery.trim().isNotEmpty ||
@@ -78,6 +82,7 @@ class CollectionListFilters {
       boardgameGenres.isNotEmpty ||
       cardRarities.isNotEmpty ||
       pokemonTypes.isNotEmpty ||
+      cardSubcategories.isNotEmpty ||
       sort != CollectionSort.titleAsc;
 
   CollectionListFilters copyWith({
@@ -93,6 +98,7 @@ class CollectionListFilters {
     Set<String>? groupIds,
     Set<String>? cardRarities,
     Set<String>? pokemonTypes,
+    Set<String>? cardSubcategories,
     bool clearLocation = false,
     bool clearTag = false,
     bool clearHolder = false,
@@ -119,6 +125,9 @@ class CollectionListFilters {
       pokemonTypes: clearCardFilters
           ? <String>{}
           : (pokemonTypes ?? this.pokemonTypes),
+      cardSubcategories: clearCardFilters
+          ? <String>{}
+          : (cardSubcategories ?? this.cardSubcategories),
     );
   }
 
@@ -172,6 +181,16 @@ class CollectionListFilters {
           (t) => pokemonTypes.any((s) => s.toLowerCase() == t.toLowerCase()),
         );
       }).toList();
+    }
+
+    if (cardSubcategories.isNotEmpty) {
+      result = result
+          .where(
+            (i) =>
+                i.subcategory != null &&
+                cardSubcategories.contains(i.subcategory),
+          )
+          .toList();
     }
 
     if (ownershipView == CollectionOwnershipView.personal) {

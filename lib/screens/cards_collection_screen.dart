@@ -97,6 +97,7 @@ class _CardsCollectionScreenState extends State<CardsCollectionScreen> {
           category: CollectionCategory.card,
           screenTitle: sub.label,
           fixedCardSubcategory: sub,
+          accentOverride: _accent,
         ),
       ),
     );
@@ -144,24 +145,25 @@ class _CardsCollectionScreenState extends State<CardsCollectionScreen> {
               showTitleInHero: false,
               subtitle:
                   'Ma collection ou parcours par univers — utilise l\'icône recherche dans une collection.',
-              items: [
-                CategoryTypeHubItem(
-                  label: 'Toutes mes cartes',
-                  description: 'Vue globale de la collection cartes',
-                  icon: Icons.view_module_rounded,
-                  color: _accent,
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (ctx) => const HomeScreen(
-                          category: CollectionCategory.card,
-                          screenTitle: 'Toutes les cartes',
-                        ),
+              featuredItem: CategoryTypeHubItem(
+                label: 'Toutes mes cartes',
+                description: 'Vue globale — filtre par univers (Pokémon, One Piece…)',
+                icon: Icons.view_module_rounded,
+                color: _accent,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (ctx) => const HomeScreen(
+                        category: CollectionCategory.card,
+                        screenTitle: 'Toutes les cartes',
+                        accentOverride: _accent,
                       ),
-                    );
-                  },
-                ),
+                    ),
+                  );
+                },
+              ),
+              items: [
                 for (final sub in CardSubcategory.hubOrder)
                   CategoryTypeHubItem(
                     label: sub.label,

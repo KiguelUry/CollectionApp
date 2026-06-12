@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 
+import '../utils/catalog_http.dart';
+
 /// Sets Lego — [Rebrickable](https://rebrickable.com/api/v3/docs/)
 /// Clé : `REBRICKABLE_API_KEY` dans `.env`
 class RebrickableService {
@@ -15,6 +17,7 @@ class RebrickableService {
   static bool get isConfigured => _apiKey != null;
 
   static Map<String, String> get _headers => {
+        ...catalogHttpHeaders,
         if (_apiKey != null) 'Authorization': 'key $_apiKey',
       };
 
@@ -28,7 +31,12 @@ class RebrickableService {
         'page_size': '20',
       });
       final response = await http.get(uri, headers: _headers);
-      if (response.statusCode != 200) return [];
+      if (response.statusCode != 200) {
+        if (kDebugMode) {
+          debugPrint('Rebrickable search ${response.statusCode}');
+        }
+        return [];
+      }
 
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       final list = data['results'] as List<dynamic>? ?? [];

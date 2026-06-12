@@ -4,7 +4,6 @@ import '../../models/card_subcategory.dart';
 import '../../models/tcg_set_info.dart';
 import '../../services/user_card_collection_service.dart';
 import '../../widgets/app_app_bar.dart';
-import '../../screens/tcg/tcg_rarity_gallery_screen.dart';
 import '../../widgets/tcg/tcg_set_logo.dart';
 import 'tcg_set_cards_screen.dart';
 
@@ -24,7 +23,7 @@ class TcgSetsBlockScreen extends StatefulWidget {
 }
 
 class _TcgSetsBlockScreenState extends State<TcgSetsBlockScreen> {
-  Set<String> _ownedSetIds = {};
+  Map<String, int> _ownedCounts = {};
   String _query = '';
 
   @override
@@ -34,18 +33,16 @@ class _TcgSetsBlockScreenState extends State<TcgSetsBlockScreen> {
   }
 
   Future<void> _loadOwned() async {
-    final owned =
-        await UserCardCollectionService().ownedSetCodes(widget.subcategory);
-    if (mounted) setState(() => _ownedSetIds = owned);
+    final counts =
+        await UserCardCollectionService().ownedCountsBySet(widget.subcategory);
+    if (mounted) setState(() => _ownedCounts = counts);
   }
 
-  bool _hasSet(TcgSetInfo set) {
-    return _ownedSetIds.contains(set.id) ||
-        (set.code != null && _ownedSetIds.contains(set.code));
-  }
+  int _ownedInSet(TcgSetInfo set) =>
+      UserCardCollectionService().ownedInSet(_ownedCounts, set);
 
   int get _ownedCount =>
-      widget.block.sets.where(_hasSet).length;
+      widget.block.sets.where((s) => _ownedInSet(s) > 0).length;
 
   List<TcgSetInfo> get _visibleSets {
     final q = _query.trim().toLowerCase();
@@ -144,7 +141,8 @@ class _TcgSetsBlockScreenState extends State<TcgSetsBlockScreen> {
               delegate: SliverChildBuilderDelegate(
                 (context, i) {
                   final set = visibleSets[i];
-                  final owned = _hasSet(set);
+                  final ownedCount = _ownedInSet(set);
+                  final total = set.totalCards ?? 0;
                   return TweenAnimationBuilder<double>(
                     tween: Tween(begin: 0, end: 1),
                     duration: Duration(milliseconds: 280 + i * 25),
@@ -206,15 +204,18 @@ class _TcgSetsBlockScreenState extends State<TcgSetsBlockScreen> {
                                 ],
                               ),
                             ),
-                            if (owned)
+                            if (ownedCount > 0)
                               Positioned(
                                 top: 8,
                                 right: 8,
                                 child: Container(
-                                  padding: const EdgeInsets.all(4),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 7,
+                                    vertical: 3,
+                                  ),
                                   decoration: BoxDecoration(
-                                    color: Colors.green.shade600,
-                                    shape: BoxShape.circle,
+                                    color: Colors.green.shade700,
+                                    borderRadius: BorderRadius.circular(10),
                                     boxShadow: [
                                       BoxShadow(
                                         color: Colors.black
@@ -223,10 +224,15 @@ class _TcgSetsBlockScreenState extends State<TcgSetsBlockScreen> {
                                       ),
                                     ],
                                   ),
-                                  child: const Icon(
-                                    Icons.check,
-                                    color: Colors.white,
-                                    size: 14,
+                                  child: Text(
+                                    total > 0
+                                        ? '$ownedCount/$total'
+                                        : '$ownedCount',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w800,
+                                    ),
                                   ),
                                 ),
                               ),

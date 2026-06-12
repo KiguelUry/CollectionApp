@@ -9,6 +9,7 @@ class BggNetworkImage extends StatelessWidget {
   final double? width;
   final double? height;
   final bool bookCover;
+  final bool boxedCover;
   final bool largeSource;
 
   const BggNetworkImage({
@@ -18,6 +19,7 @@ class BggNetworkImage extends StatelessWidget {
     this.width,
     this.height,
     this.bookCover = false,
+    this.boxedCover = false,
     this.largeSource = false,
   });
 
@@ -29,6 +31,7 @@ class BggNetworkImage extends StatelessWidget {
       height: height,
       fit: fit,
       bookCover: bookCover,
+      boxedCover: boxedCover,
       largeSource: largeSource,
     );
   }

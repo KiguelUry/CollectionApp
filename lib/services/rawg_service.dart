@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 
+import '../utils/catalog_http.dart';
+
 /// Jeux vidéo — [RAWG](https://rawg.io/apidocs)
 /// Clé : `RAWG_API_KEY` dans `.env`
 class RawgService {
@@ -25,8 +27,13 @@ class RawgService {
         'search': q,
         'page_size': '20',
       });
-      final response = await http.get(uri);
-      if (response.statusCode != 200) return [];
+      final response = await http.get(uri, headers: catalogHttpHeaders);
+      if (response.statusCode != 200) {
+        if (kDebugMode) {
+          debugPrint('RAWG ${response.statusCode}: ${response.body}');
+        }
+        return [];
+      }
 
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       final list = data['results'] as List<dynamic>? ?? [];

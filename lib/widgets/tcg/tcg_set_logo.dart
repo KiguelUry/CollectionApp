@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
@@ -87,19 +88,17 @@ class _TcgSetLogoState extends State<TcgSetLogo> {
       );
     }
 
-    return Image.network(
-      u,
+    return CachedNetworkImage(
+      imageUrl: u,
       key: ValueKey('img-$u'),
       fit: BoxFit.contain,
-      headers: tcgHttpHeaders,
-      errorBuilder: (_, _, _) {
+      httpHeaders: tcgHttpHeaders,
+      fadeInDuration: const Duration(milliseconds: 120),
+      errorWidget: (_, _, _) {
         WidgetsBinding.instance.addPostFrameCallback((_) => _tryNext());
         return _fallback();
       },
-      loadingBuilder: (context, child, progress) {
-        if (progress == null) return child;
-        return _fallback();
-      },
+      placeholder: (_, _) => _fallback(),
     );
   }
 

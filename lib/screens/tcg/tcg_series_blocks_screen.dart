@@ -7,7 +7,6 @@ import '../../utils/app_haptics.dart';
 import '../../models/collection_category.dart';
 import '../home_screen.dart';
 import '../../widgets/app_app_bar.dart';
-import '../../screens/tcg/tcg_rarity_gallery_screen.dart';
 import '../../widgets/tcg/tcg_set_logo.dart';
 import '../../widgets/ui/empty_state.dart';
 import '../../widgets/ui/loading_placeholder.dart';
@@ -103,23 +102,6 @@ class _TcgSeriesBlocksScreenState extends State<TcgSeriesBlocksScreen> {
             icon: const Icon(Icons.collections_bookmark_outlined),
             label: const Text('Ma collection'),
           ),
-          if (_blocks != null && _blocks!.isNotEmpty)
-            TextButton.icon(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (ctx) => TcgRarityGalleryScreen(
-                      subcategory: widget.subcategory,
-                      title: '${widget.subcategory.label} · raretés',
-                      sets: _blocks!.expand((b) => b.sets).toList(),
-                    ),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.star_outline),
-              label: const Text('Par rareté'),
-            ),
         ],
       ),
       body: _loading

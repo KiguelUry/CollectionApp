@@ -27,7 +27,7 @@ enum CollectionCategory {
         CollectionCategory.lego => 'Lego & maquettes',
         CollectionCategory.watch => 'Montres',
         CollectionCategory.videogame => 'Jeux vidéo',
-        CollectionCategory.movie => 'Films',
+        CollectionCategory.movie => 'Films (physique)',
         CollectionCategory.custom => 'Collection perso',
       };
 
@@ -42,7 +42,7 @@ enum CollectionCategory {
         CollectionCategory.lego => 'Sets, boîte, montage',
         CollectionCategory.watch => 'Montres & bracelets',
         CollectionCategory.videogame => 'Jeux console & PC',
-        CollectionCategory.movie => 'Films & séries',
+        CollectionCategory.movie => 'Blu-ray, DVD, coffrets',
         CollectionCategory.custom => 'Type personnalisé',
       };
 
@@ -64,7 +64,7 @@ enum CollectionCategory {
   Color get color => switch (this) {
         CollectionCategory.boardgame => Colors.orange,
         CollectionCategory.book => Colors.indigo,
-        CollectionCategory.card => Colors.deepPurple,
+        CollectionCategory.card => const Color(0xFFE65100),
         CollectionCategory.car => Colors.blue,
         CollectionCategory.stamp => Colors.brown,
         CollectionCategory.coin => Colors.amber,

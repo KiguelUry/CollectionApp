@@ -70,10 +70,7 @@ List<String> tcgSetLogoCandidates({
     case CardSubcategory.onepiece:
       if (setId != null) add(onepieceSetLogoUrl(setId));
     case CardSubcategory.lorcana:
-      if (setCode != null) {
-        add('https://lorcast.com/images/sets/${setCode.toLowerCase()}.webp');
-        add('https://lorcast.com/images/sets/${setCode.toLowerCase()}.png');
-      }
+      break;
     default:
       break;
   }

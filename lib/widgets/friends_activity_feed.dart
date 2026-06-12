@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import '../models/activity_event.dart';
 import '../models/collection_category.dart';
 import '../services/activity_service.dart';
+import '../services/friend_service.dart';
 import '../utils/activity_feed_grouper.dart';
+import '../utils/copy_friend_item.dart';
 import 'collection_cover_image.dart';
 import 'profile_avatar.dart';
 
@@ -17,9 +19,11 @@ class FriendsActivityFeed extends StatefulWidget {
 
 class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
   final _service = ActivityService();
+  final _friendService = FriendService();
   List<ActivityFeedGroup> _groups = [];
   bool _loading = true;
   String? _error;
+  String? _addingItemId;
 
   @override
   void initState() {
@@ -74,6 +78,51 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
       'trophies_updated' => Colors.orange.shade700,
       _ => Colors.teal.shade600,
     };
+  }
+
+  bool _canAddFrom(ActivityEvent e) =>
+      e.itemId != null && e.eventType != 'trophies_updated';
+
+  Future<void> _addFromActivity(ActivityEvent e) async {
+    final itemId = e.itemId;
+    if (itemId == null) return;
+
+    setState(() => _addingItemId = itemId);
+    try {
+      final item = await _friendService.fetchFriendItem(e.actorId, itemId);
+      if (!mounted) return;
+      if (item == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Objet introuvable ou collection non partagée'),
+          ),
+        );
+        return;
+      }
+      await showCopyFriendItemSheet(
+        context,
+        source: item,
+        friendUsername: e.actorUsername,
+      );
+    } catch (err) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Impossible d\'ajouter : $err')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _addingItemId = null);
+    }
+  }
+
+  void _openActivityDetail(ActivityFeedGroup group) {
+    if (group.isBurst) {
+      _showBurstDetail(group);
+      return;
+    }
+    final e = group.head;
+    if (!_canAddFrom(e)) return;
+    _showSingleDetail(e);
   }
 
   @override
@@ -148,7 +197,7 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
         color: Theme.of(context).colorScheme.surface,
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
-          onTap: group.isBurst ? () => _showBurstDetail(group) : null,
+          onTap: () => _openActivityDetail(group),
           child: Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
@@ -214,7 +263,7 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
                   _buildThumbnailStrip(group),
                 ] else if (e.itemTitle != null) ...[
                   const SizedBox(height: 10),
-                  _buildSinglePreview(e),
+                  _buildSinglePreview(e, showAdd: _canAddFrom(e)),
                 ],
               ],
             ),
@@ -293,7 +342,7 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
     );
   }
 
-  Widget _buildSinglePreview(ActivityEvent e) {
+  Widget _buildSinglePreview(ActivityEvent e, {bool showAdd = false}) {
     CollectionCategory? cat;
     if (e.itemCategory != null) {
       try {
@@ -342,7 +391,54 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
             ),
           ),
         ),
+        if (showAdd) _addButton(e),
       ],
+    );
+  }
+
+  Widget _addButton(ActivityEvent e) {
+    final loading = _addingItemId == e.itemId;
+    return IconButton(
+      tooltip: 'Ajouter à ma collection',
+      visualDensity: VisualDensity.compact,
+      onPressed: loading ? null : () => _addFromActivity(e),
+      icon: loading
+          ? SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.teal.shade700,
+              ),
+            )
+          : Icon(Icons.add_circle_outline, color: Colors.teal.shade700),
+    );
+  }
+
+  void _showSingleDetail(ActivityEvent e) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                e.description,
+                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+              const SizedBox(height: 12),
+              _buildSinglePreview(e, showAdd: true),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -401,6 +497,7 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
                       overflow: TextOverflow.ellipsis,
                     ),
                     dense: true,
+                    trailing: _canAddFrom(ev) ? _addButton(ev) : null,
                   );
                 },
               ),

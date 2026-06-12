@@ -97,15 +97,21 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                   children: [
                     if (widget.itemImageUrl != null &&
                         widget.itemImageUrl!.trim().isNotEmpty) ...[
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: SizedBox(
-                          width: 96,
-                          height: 96,
-                          child: BggNetworkImage(url: widget.itemImageUrl!),
+                      Center(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: SizedBox(
+                            width: 160,
+                            height: 160,
+                            child: BggNetworkImage(
+                              url: widget.itemImageUrl!,
+                              boxedCover: true,
+                              largeSource: true,
+                            ),
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 12),
                     ],
                     Text(
                       widget.itemTitle,

@@ -19,21 +19,26 @@ import '../widgets/personal_whereabouts_field.dart';
 import '../widgets/star_rating_bar.dart';
 import '../widgets/assign_book_series_sheet.dart';
 import '../widgets/item_tags_editor.dart';
+import '../widgets/boardgame_expansions_section.dart';
 import '../utils/boardgame_display.dart';
 import '../services/bgg_service.dart';
 import '../utils/copy_friend_item.dart';
+import '../utils/friend_item_overlap.dart';
+import '../utils/wishlist_promote.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class ItemDetailScreen extends StatefulWidget {
   final CollectionItem item;
   final bool readOnly;
   final String? friendUsername;
+  final FriendOverlapKind? friendOverlap;
 
   const ItemDetailScreen({
     super.key,
     required this.item,
     this.readOnly = false,
     this.friendUsername,
+    this.friendOverlap,
   });
 
   @override
@@ -229,6 +234,24 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     }
   }
 
+  Future<void> _promoteFromWishlist() async {
+    try {
+      await promoteWishlistToCollection(_item);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('« ${_item.title} » est dans ta collection')),
+        );
+        await _reloadItem();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur : $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _lend() async {
     if (_item.isWishlist || _item.isSold) return;
 
@@ -400,8 +423,9 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                             url: _item.imageUrl!,
                             height: 280,
                             bookCover: isBook,
+                            boxedCover:
+                                !isBook && _item.category != CollectionCategory.card,
                             largeSource: true,
-                            fit: isBook ? BoxFit.contain : BoxFit.cover,
                           ),
                         )
                       : Container(color: _item.category.color),
@@ -445,6 +469,56 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         ),
                       ),
                     if (ro) const SizedBox(height: 12),
+                    if (ro &&
+                        widget.friendOverlap != null &&
+                        widget.friendOverlap != FriendOverlapKind.none)
+                      Card(
+                        color: widget.friendOverlap ==
+                                FriendOverlapKind.inCollection
+                            ? Colors.green.shade50
+                            : Colors.amber.shade50,
+                        child: ListTile(
+                          leading: Icon(
+                            widget.friendOverlap ==
+                                    FriendOverlapKind.inCollection
+                                ? Icons.check_circle_outline
+                                : Icons.favorite_border,
+                            color: widget.friendOverlap ==
+                                    FriendOverlapKind.inCollection
+                                ? Colors.green.shade700
+                                : Colors.amber.shade800,
+                          ),
+                          title: Text(
+                            widget.friendOverlap ==
+                                    FriendOverlapKind.inCollection
+                                ? 'Tu as déjà cet objet'
+                                : 'Déjà dans ta wishlist',
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          subtitle: const Text(
+                            'Utilise + en haut pour l\'ajouter ou compléter ta collection',
+                          ),
+                        ),
+                      ),
+                    if (ro &&
+                        widget.friendOverlap != null &&
+                        widget.friendOverlap != FriendOverlapKind.none)
+                      const SizedBox(height: 12),
+                    if (!ro && isWishlist) ...[
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: _promoteFromWishlist,
+                          icon: const Icon(Icons.check_circle),
+                          label: const Text('Je l\'ai — ajouter à ma collection'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: Colors.green.shade700,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
                     Wrap(
                       spacing: 8,
                       children: [
@@ -482,6 +556,13 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       isBoardgame: isBoardgame,
                       metadataRows: metadataRows,
                     ),
+                    if (isBoardgame)
+                      BoardgameExpansionsSection(
+                        item: _item,
+                        readOnly: ro,
+                        onItemUpdated: (updated) =>
+                            setState(() => _item = updated),
+                      ),
                     const SizedBox(height: 16),
                     ListTile(
                       contentPadding: EdgeInsets.zero,
@@ -970,35 +1051,73 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     final players = formatPlayerCount(_item.minPlayers, _item.maxPlayers);
     final time = formatPlayingTime(_item.playingTime);
     final bggId = _item.metadata?['bgg_id']?.toString();
-    final rulesUrl = BggService.rulesFilesUrl(bggId);
+    final bggPageUrl = BggService.gamePageUrl(bggId);
+    final m = _item.metadata ?? {};
+    final year = m['year_published'] ?? m['year'];
+    final minAge = m['min_age'];
+    final boardAccent = Colors.orange.shade800;
 
-    if (!isBoardgame && metadataRows.isEmpty) {
+    final extraRows = isBoardgame
+        ? metadataRows
+            .where((r) => r.key != 'Parution' && r.key != 'Âge')
+            .toList()
+        : metadataRows;
+
+    if (!isBoardgame && extraRows.isEmpty) {
       return const SizedBox.shrink();
     }
     if (isBoardgame &&
         players == null &&
         time == null &&
-        metadataRows.isEmpty &&
-        rulesUrl == null) {
+        year == null &&
+        minAge == null &&
+        extraRows.isEmpty &&
+        bggPageUrl == null) {
       return const SizedBox.shrink();
+    }
+
+    final boardTiles = <Widget>[];
+    if (isBoardgame) {
+      if (players != null) {
+        boardTiles.add(_infoTile(Icons.people, players, boardAccent));
+      }
+      if (time != null) {
+        boardTiles.add(_infoTile(Icons.timer, time, boardAccent));
+      }
+      if (year != null && year.toString().isNotEmpty) {
+        boardTiles.add(
+          _infoTile(Icons.calendar_today, year.toString(), boardAccent),
+        );
+      }
+      if (minAge != null) {
+        boardTiles.add(_infoTile(Icons.child_care, '$minAge+', boardAccent));
+      }
     }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildSectionTitle('Informations'),
-        if (isBoardgame) ...[
-          if (players != null || time != null)
+        if (boardTiles.isNotEmpty) ...[
+          if (boardTiles.length >= 2)
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                if (players != null) _infoTile(Icons.people, players),
-                if (time != null) _infoTile(Icons.timer, time),
-              ],
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: boardTiles.take(2).toList(),
             ),
-          if (metadataRows.isNotEmpty) const SizedBox(height: 8),
+          if (boardTiles.length > 2) ...[
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: boardTiles.skip(2).take(2).toList(),
+            ),
+          ] else if (boardTiles.length == 1)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: boardTiles,
+            ),
+          if (extraRows.isNotEmpty) const SizedBox(height: 12),
         ],
-        ...metadataRows.map(
+        ...extraRows.map(
           (row) => ListTile(
             contentPadding: EdgeInsets.zero,
             title: Text(
@@ -1011,21 +1130,15 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
             ),
           ),
         ),
-        if (rulesUrl != null) ...[
+        if (bggPageUrl != null) ...[
           const SizedBox(height: 8),
           OutlinedButton.icon(
             onPressed: () async {
-              final uri = Uri.parse(rulesUrl);
-              if (await canLaunchUrl(uri)) {
-                await launchUrl(uri, mode: LaunchMode.externalApplication);
-              }
+              final uri = Uri.parse(bggPageUrl);
+              await launchUrl(uri, mode: LaunchMode.externalApplication);
             },
-            icon: const Icon(Icons.menu_book_outlined),
-            label: const Text('Livrets & fichiers sur BGG'),
-          ),
-          Text(
-            'BGG ne fournit pas le PDF dans l\'app : ouverture de la page communautaire.',
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+            icon: const Icon(Icons.open_in_new),
+            label: const Text('Voir sur BoardGameGeek'),
           ),
         ],
       ],
@@ -1042,13 +1155,20 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     );
   }
 
-  Widget _infoTile(IconData icon, String label) {
-    return Column(
-      children: [
-        Icon(icon, color: Colors.deepPurple, size: 30),
-        const SizedBox(height: 4),
-        Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
-      ],
+  Widget _infoTile(IconData icon, String label, [Color? iconColor]) {
+    return SizedBox(
+      width: 88,
+      child: Column(
+        children: [
+          Icon(icon, color: iconColor ?? Colors.deepPurple, size: 30),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
     );
   }
 }

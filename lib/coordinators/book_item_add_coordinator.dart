@@ -10,7 +10,7 @@ import '../services/profile_service.dart';
 import '../services/book_catalog_service.dart';
 import '../services/open_library_service.dart';
 import '../utils/book_title_parser.dart';
-import '../utils/collection_item_scope.dart';
+import '../utils/wishlist_promote.dart';
 import '../widgets/add_item_manual_dialog.dart';
 import '../widgets/add_item_options_dialog.dart';
 import '../widgets/book_search_dialog.dart' show showBookSearch;
@@ -492,21 +492,13 @@ class BookItemAddCoordinator {
     try {
       await ProfileService().ensureCurrentUserProfile();
 
-      var dupQuery = client
-          .from('collection_items')
-          .select('id, quantity')
-          .eq('category', 'book')
-          .eq('title', title.trim());
-
-      if (options.groupId != null) {
-        dupQuery = dupQuery.eq('group_id', options.groupId!);
-      } else {
-        dupQuery = dupQuery
-            .filter('group_id', 'is', null)
-            .or(CollectionItemScope.personalOrFilter(userId));
-      }
-
-      final existing = await dupQuery.maybeSingle();
+      final existing = await findDuplicateRow(
+        title: title,
+        categoryDb: 'book',
+        isWishlist: options.isWishlist,
+        subcategory: subcategory,
+        groupId: options.groupId,
+      );
       var message = '« $title » ajouté';
       if (seriesId != null) {
         message = '« $title » ajouté à la série';

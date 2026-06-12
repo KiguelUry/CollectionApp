@@ -318,6 +318,22 @@ class FriendService {
     return true;
   }
 
+  /// Un objet précis chez un ami (fil d'activité, lien direct).
+  Future<CollectionItem?> fetchFriendItem(
+    String friendProfileId,
+    String itemId,
+  ) async {
+    if (!await canViewFriendCollection(friendProfileId)) return null;
+
+    final row = await _client
+        .from('collection_items')
+        .select('*, locations(label), groups(name)')
+        .eq('id', itemId)
+        .maybeSingle();
+    if (row == null) return null;
+    return CollectionItem.fromJson(Map<String, dynamic>.from(row));
+  }
+
   /// Collection active de l'ami (perso + groupes visibles via RLS).
   Future<List<CollectionItem>> fetchFriendCollectionItems(
     String friendProfileId,

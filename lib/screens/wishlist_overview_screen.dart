@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../services/collection_stats_service.dart';
+import '../utils/wishlist_promote.dart';
 import '../widgets/bgg_network_image.dart';
 import '../widgets/app_app_bar.dart';
 import 'home_screen.dart';
@@ -201,7 +202,25 @@ class _WishlistOverviewScreenState extends State<WishlistOverviewScreen> {
         ),
         title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
         subtitle: Text(item.listSubtitle ?? category.label),
-        trailing: const Icon(Icons.chevron_right),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: Icon(Icons.check_circle, color: Colors.green.shade700),
+              tooltip: 'Je l\'ai',
+              onPressed: () async {
+                await promoteWishlistToCollection(item);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('« ${item.title} » dans ta collection')),
+                  );
+                  _load();
+                }
+              },
+            ),
+            const Icon(Icons.chevron_right),
+          ],
+        ),
         onTap: () => Navigator.push(
           context,
           MaterialPageRoute(

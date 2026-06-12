@@ -28,103 +28,113 @@ class CategoryCollectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final accent = accentOverride ?? category.color;
     final onAccent = CategoryAccentTheme.onHeader(accent);
+    final showCollectionsHome = !AppNavigation.isOnCollectionsHome(context);
+    final hasToolbar = showCollectionsHome ||
+        quickActions.isNotEmpty ||
+        extraActions.isNotEmpty;
 
     return Material(
       child: Container(
         decoration: CategoryAccentTheme.headerDecoration(accent),
         child: SafeArea(
-        bottom: false,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
-              child: Row(
-                children: [
-                  if (Navigator.canPop(context))
-                    IconButton(
-                      icon: Icon(Icons.arrow_back_rounded, color: onAccent),
-                      onPressed: () => Navigator.maybePop(context),
-                    ),
-                  Expanded(
-                    child: Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                        color: onAccent,
+          bottom: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 4, 12, 0),
+                child: Row(
+                  children: [
+                    if (Navigator.canPop(context))
+                      IconButton(
+                        icon: Icon(Icons.arrow_back_rounded, color: onAccent),
+                        onPressed: () => Navigator.maybePop(context),
+                      )
+                    else
+                      const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: onAccent,
+                          height: 1.15,
+                        ),
                       ),
                     ),
-                  ),
-                  if (!AppNavigation.isOnCollectionsHome(context))
-                    IconButton(
-                      tooltip: 'Collections',
-                      icon: Icon(Icons.grid_view_rounded, color: onAccent),
-                      onPressed: () => AppNavigation.openCollections(context),
-                    ),
-                  ...extraActions,
+                  ],
+                ),
+              ),
+              TabBar(
+                controller: tabController,
+                indicatorColor: onAccent,
+                labelColor: onAccent,
+                unselectedLabelColor: onAccent.withValues(alpha: 0.65),
+                dividerColor: Colors.transparent,
+                tabs: const [
+                  Tab(text: 'Collection'),
+                  Tab(text: 'Wishlist'),
                 ],
               ),
-            ),
-            if (quickActions.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
+              if (hasToolbar)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
                   child: Row(
                     children: [
-                      for (var i = 0; i < quickActions.length; i++) ...[
-                        if (i > 0) const SizedBox(width: 4),
-                        _QuickIcon(
-                          action: quickActions[i],
+                      if (showCollectionsHome)
+                        _ToolbarIcon(
+                          tooltip: 'Collections',
+                          icon: Icons.grid_view_rounded,
                           color: onAccent,
+                          onTap: () => AppNavigation.openCollections(context),
                         ),
-                      ],
+                      for (final action in quickActions)
+                        _ToolbarIcon(
+                          tooltip: action.label,
+                          icon: action.icon,
+                          color: onAccent,
+                          onTap: action.onTap,
+                        ),
+                      const Spacer(),
+                      ...extraActions,
                     ],
                   ),
                 ),
-              ),
-            TabBar(
-              controller: tabController,
-              indicatorColor: onAccent,
-              labelColor: onAccent,
-              unselectedLabelColor: onAccent.withValues(alpha: 0.65),
-              dividerColor: Colors.transparent,
-              tabs: const [
-                Tab(text: 'Collection'),
-                Tab(text: 'Wishlist'),
-              ],
-            ),
-          ],
+            ],
+          ),
         ),
-      ),
       ),
     );
   }
 }
 
-class _QuickIcon extends StatelessWidget {
-  final CategoryQuickAction action;
+class _ToolbarIcon extends StatelessWidget {
+  final String tooltip;
+  final IconData icon;
   final Color color;
+  final VoidCallback onTap;
 
-  const _QuickIcon({
-    required this.action,
+  const _ToolbarIcon({
+    required this.tooltip,
+    required this.icon,
     required this.color,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: action.label,
+      message: tooltip,
       child: InkWell(
-        onTap: action.onTap,
+        onTap: onTap,
         borderRadius: BorderRadius.circular(20),
         child: Padding(
           padding: const EdgeInsets.all(8),
-          child: Icon(action.icon, size: 22, color: color),
+          child: Icon(icon, size: 22, color: color),
         ),
       ),
     );

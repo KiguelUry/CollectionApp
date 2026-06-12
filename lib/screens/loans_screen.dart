@@ -77,8 +77,21 @@ class _LoansScreenState extends State<LoansScreen> {
     final at = item.loanedAt;
     if (at == null) return '';
     final d = at.toLocal();
-    return 'depuis le ${d.day.toString().padLeft(2, '0')}/'
-        '${d.month.toString().padLeft(2, '0')}/${d.year}';
+    final days = DateTime.now().difference(at).inDays;
+    final dateStr =
+        '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+    if (days < 1) return 'depuis aujourd\'hui';
+    if (days == 1) return 'depuis hier';
+    return 'depuis $days j · $dateStr';
+  }
+
+  Color? _loanAccent(CollectionItem item) {
+    final at = item.loanedAt;
+    if (at == null) return null;
+    final days = DateTime.now().difference(at).inDays;
+    if (days >= 30) return Colors.red.shade700;
+    if (days >= 14) return Colors.orange.shade800;
+    return null;
   }
 
   @override
@@ -96,7 +109,9 @@ class _LoansScreenState extends State<LoansScreen> {
                     itemCount: _loans.length,
                     itemBuilder: (context, index) {
                       final item = _loans[index];
+                      final loanAccent = _loanAccent(item);
                       return Card(
+                        color: loanAccent?.withValues(alpha: 0.06),
                         child: ListTile(
                           leading: ClipRRect(
                             borderRadius: BorderRadius.circular(8),
@@ -122,6 +137,12 @@ class _LoansScreenState extends State<LoansScreen> {
                               item.category.label,
                               _formatLoanDate(item),
                             ].where((s) => s.isNotEmpty).join(' · '),
+                            style: loanAccent != null
+                                ? TextStyle(
+                                    color: loanAccent,
+                                    fontWeight: FontWeight.w600,
+                                  )
+                                : null,
                           ),
                           isThreeLine: true,
                           trailing: IconButton(

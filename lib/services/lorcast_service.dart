@@ -61,9 +61,7 @@ class LorcastService {
           name: s['name']?.toString() ?? code,
           code: code,
           seriesName: _isMainChapter(code) ? 'Chapitres' : 'Promos & spéciaux',
-          imageUrl: code.isNotEmpty
-              ? 'https://lorcast.com/images/sets/${code.toLowerCase()}.webp'
-              : null,
+          imageUrl: null,
           releaseDate: s['released_at']?.toString(),
         );
       }).toList();

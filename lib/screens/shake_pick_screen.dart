@@ -32,6 +32,7 @@ class _ShakePickScreenState extends State<ShakePickScreen>
   final _random = Random();
   List<CollectionItem> _allCandidates = [];
   ShakePickFilters _filters = const ShakePickFilters();
+  CollectionCategory? _categoryFilter;
   CollectionItem? _picked;
   bool _loading = true;
   bool _picking = false;
@@ -47,6 +48,7 @@ class _ShakePickScreenState extends State<ShakePickScreen>
   @override
   void initState() {
     super.initState();
+    _categoryFilter = widget.category;
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 600),
@@ -81,9 +83,9 @@ class _ShakePickScreenState extends State<ShakePickScreen>
         userId: userId,
       );
 
-      if (widget.category != null) {
-        personalQuery =
-            personalQuery.eq('category', widget.category!.dbValue);
+      final cat = _categoryFilter;
+      if (cat != null) {
+        personalQuery = personalQuery.eq('category', cat.dbValue);
       }
 
       final allRows = <Map<String, dynamic>>[
@@ -100,8 +102,8 @@ class _ShakePickScreenState extends State<ShakePickScreen>
             .eq('is_wishlist', false)
             .eq('is_sold', false)
             .eq('is_for_sale', false);
-        if (widget.category != null) {
-          groupQuery = groupQuery.eq('category', widget.category!.dbValue);
+        if (cat != null) {
+          groupQuery = groupQuery.eq('category', cat.dbValue);
         }
         for (final r in await groupQuery as List) {
           allRows.add(Map<String, dynamic>.from(r));
@@ -197,6 +199,7 @@ class _ShakePickScreenState extends State<ShakePickScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (widget.category == null) _buildCategoryPicker(),
         _buildFilters(),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
@@ -260,6 +263,35 @@ class _ShakePickScreenState extends State<ShakePickScreen>
             ),
           ),
       ],
+    );
+  }
+
+  Widget _buildCategoryPicker() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: DropdownButtonFormField<CollectionCategory?>(
+        initialValue: _categoryFilter,
+        decoration: const InputDecoration(
+          labelText: 'Univers',
+          border: OutlineInputBorder(),
+          isDense: true,
+        ),
+        items: [
+          const DropdownMenuItem(
+            value: null,
+            child: Text('Toutes les catégories'),
+          ),
+          for (final c in CollectionCategory.menuValues)
+            DropdownMenuItem(value: c, child: Text(c.label)),
+        ],
+        onChanged: (c) {
+          setState(() {
+            _categoryFilter = c;
+            _picked = null;
+          });
+          _loadCandidates();
+        },
+      ),
     );
   }
 

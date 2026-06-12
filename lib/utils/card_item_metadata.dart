@@ -1,3 +1,4 @@
+import '../models/card_subcategory.dart';
 import '../models/collection_item.dart';
 
 /// Métadonnées cartes pour filtres (rareté, type Pokémon…).
@@ -35,5 +36,21 @@ Set<String> distinctPokemonTypes(Iterable<CollectionItem> items) {
   for (final item in items) {
     out.addAll(pokemonTypesFromMetadata(item.metadata));
   }
+  return out;
+}
+
+List<CardSubcategory> distinctCardSubcategories(Iterable<CollectionItem> items) {
+  final seen = <String>{};
+  final out = <CardSubcategory>[];
+  for (final item in items) {
+    final sub = item.subcategory;
+    if (sub == null || sub.isEmpty || !seen.add(sub)) continue;
+    out.add(CardSubcategory.fromDbValue(sub));
+  }
+  out.sort((a, b) {
+    if (a == CardSubcategory.other) return 1;
+    if (b == CardSubcategory.other) return -1;
+    return a.label.compareTo(b.label);
+  });
   return out;
 }

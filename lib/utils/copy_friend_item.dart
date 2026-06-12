@@ -3,7 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/collection_item.dart';
 import '../services/profile_service.dart';
-import '../utils/collection_item_scope.dart';
+import '../utils/wishlist_promote.dart';
 import '../widgets/add_item_options_dialog.dart';
 
 /// Ajoute un objet vu chez un ami dans ta collection ou ta wishlist.
@@ -82,27 +82,13 @@ Future<void> _insertCopy(
   try {
     await ProfileService().ensureCurrentUserProfile();
 
-    var dupQuery = client
-        .from('collection_items')
-        .select('id, quantity, is_wishlist')
-        .eq('category', source.category.dbValue)
-        .eq('title', source.title.trim());
-
-    if (source.subcategory != null) {
-      dupQuery = dupQuery.eq('subcategory', source.subcategory!);
-    }
-
-    if (options.groupId != null) {
-      dupQuery = dupQuery.eq('group_id', options.groupId!);
-    } else {
-      dupQuery = dupQuery
-          .filter('group_id', 'is', null)
-          .or(CollectionItemScope.personalOrFilter(userId));
-    }
-
-    dupQuery = dupQuery.eq('is_wishlist', options.isWishlist);
-
-    final existing = await dupQuery.maybeSingle();
+    final existing = await findDuplicateRow(
+      title: source.title,
+      categoryDb: source.category.dbValue,
+      isWishlist: options.isWishlist,
+      subcategory: source.subcategory,
+      groupId: options.groupId,
+    );
     var message = '« ${source.title} » ajouté';
 
     if (existing != null) {

@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../models/collection_category.dart';
 import '../models/lego_build_kind.dart';
-import '../services/rebrickable_service.dart';
+import '../services/lego_catalog_service.dart';
+import '../theme/category_hub_theme.dart';
 import '../widgets/catalog_search_sheet.dart';
+import '../widgets/category_catalog_hub_body.dart';
 import '../widgets/category_hub_header.dart';
 import '../widgets/category_type_hub.dart';
-import '../widgets/ui/hub_search_bar.dart';
 import 'home_screen.dart';
 
 /// Hub Lego & maquettes.
@@ -14,27 +15,17 @@ class LegoCollectionScreen extends StatelessWidget {
   const LegoCollectionScreen({super.key});
 
   static final _accent = Colors.red.shade700;
+  static final _theme = CategoryHubTheme.lego(_accent);
 
   void _openSearch(BuildContext context) {
     showCatalogSearchSheet(
       context,
       title: 'Rechercher un set Lego',
       hint: 'Nom ou n° de set (ex: 75192)',
-      apiHint: RebrickableService.isConfigured
-          ? 'Catalogue Rebrickable'
-          : 'Ajoute REBRICKABLE_API_KEY dans .env pour la recherche auto',
-      search: RebrickableService.search,
-      onManualEntry: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (ctx) => const HomeScreen(
-              category: CollectionCategory.lego,
-              screenTitle: 'Lego & maquettes',
-            ),
-          ),
-        );
-      },
+      apiHint: LegoCatalogService.catalogLabel,
+      search: LegoCatalogService.search,
+      accent: _accent,
+      onManualEntry: () => _openHome(context),
     ).then((hit) {
       if (hit == null || !context.mounted) return;
       Navigator.push(
@@ -50,6 +41,19 @@ class LegoCollectionScreen extends StatelessWidget {
     });
   }
 
+  void _openHome(BuildContext context, {String? screenTitle, LegoBuildKind? kind}) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (ctx) => HomeScreen(
+          category: CollectionCategory.lego,
+          screenTitle: screenTitle ?? 'Lego & maquettes',
+          fixedLegoKind: kind,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -61,18 +65,11 @@ class LegoCollectionScreen extends StatelessWidget {
             accentColor: _accent,
           ),
           Expanded(
-            child: CategoryTypeHub(
-              accentColor: _accent,
-              title: 'Lego & maquettes',
-              showTitleInHero: false,
-              subtitle: 'Sets Lego, Creator, maquettes et scale models.',
-              header: HubSearchBar(
-                accent: _accent,
-                hint: 'Rechercher un set',
-                subtitle: 'N° ou nom · Rebrickable si clé API',
-                icon: Icons.search_rounded,
-                onTap: () => _openSearch(context),
-              ),
+            child: CategoryCatalogHubBody(
+              hubTitle: 'Lego & maquettes',
+              theme: _theme,
+              onSearch: () => _openSearch(context),
+              onClassicList: () => _openHome(context, screenTitle: 'Tous les sets'),
               items: [
                 for (final kind in LegoBuildKind.values)
                   CategoryTypeHubItem(
@@ -80,31 +77,9 @@ class LegoCollectionScreen extends StatelessWidget {
                     description: kind.description,
                     icon: kind.icon,
                     color: kind.color,
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (ctx) => HomeScreen(
-                            category: CollectionCategory.lego,
-                            screenTitle: kind.label,
-                            fixedLegoKind: kind,
-                          ),
-                        ),
-                      );
-                    },
+                    onTap: () => _openHome(context, screenTitle: kind.label, kind: kind),
                   ),
               ],
-              onClassicList: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (ctx) => const HomeScreen(
-                      category: CollectionCategory.lego,
-                      screenTitle: 'Tous les sets',
-                    ),
-                  ),
-                );
-              },
             ),
           ),
         ],

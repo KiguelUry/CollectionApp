@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../utils/boardgame_display.dart';
+import '../utils/boardgame_expansions.dart';
+import '../utils/friend_item_overlap.dart';
 import 'bgg_network_image.dart';
 
 /// Tuile grille pour un objet de collection (grisée si vendu).
@@ -13,6 +15,7 @@ class CollectionItemTile extends StatelessWidget {
   final bool showGroupBadge;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
+  final FriendOverlapKind? overlapKind;
 
   const CollectionItemTile({
     super.key,
@@ -23,6 +26,7 @@ class CollectionItemTile extends StatelessWidget {
     this.showGroupBadge = true,
     this.onTap,
     this.onLongPress,
+    this.overlapKind,
   });
 
   bool get _isGrayed => item.isSold;
@@ -64,6 +68,14 @@ class CollectionItemTile extends StatelessWidget {
                   right: 4,
                   child: _badge('×$totalQuantity', Colors.deepPurple),
                 ),
+              if (category == CollectionCategory.boardgame &&
+                  ownedExpansionCount(item) > 0)
+                Positioned(
+                  bottom: 4,
+                  right: 4,
+                  child: _expansionBadge(ownedExpansionCount(item)),
+                ),
+              if (_overlapBadge != null) _overlapBadge!,
               if (item.isOnLoan && !item.isSold)
                 Positioned(
                   top: 4,
@@ -83,7 +95,11 @@ class CollectionItemTile extends StatelessWidget {
                   right: 4,
                   child: _badge('Vendu', Colors.grey.shade700),
                 ),
-              if (showGroupBadge && item.isGroupOwned && !item.isSold)
+              if (showGroupBadge &&
+                  item.isGroupOwned &&
+                  !item.isSold &&
+                  !(category == CollectionCategory.boardgame &&
+                      ownedExpansionCount(item) > 0))
                 Positioned(
                   bottom: 4,
                   right: 4,
@@ -198,6 +214,7 @@ class CollectionItemTile extends StatelessWidget {
                     right: 4,
                     child: _badge('×$totalQuantity', Colors.deepPurple),
                   ),
+                if (_overlapBadge != null) _overlapBadge!,
               ],
             ),
           ),
@@ -254,15 +271,48 @@ class CollectionItemTile extends StatelessWidget {
     return item.locationLabel;
   }
 
+  Widget _expansionBadge(int count) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.green.shade700,
+        borderRadius: BorderRadius.circular(10),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.2),
+            blurRadius: 4,
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.add_circle_outline, size: 12, color: Colors.white),
+          const SizedBox(width: 2),
+          Text(
+            '$count',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildImage() {
     Widget image;
     if (item.imageUrl != null) {
       final isBook = category == CollectionCategory.book;
       final isCard = category == CollectionCategory.card;
+      final isBoardgame = category == CollectionCategory.boardgame;
       image = BggNetworkImage(
         url: item.imageUrl!,
         fit: isCard ? BoxFit.contain : BoxFit.cover,
         bookCover: isBook,
+        boxedCover: isBoardgame,
         largeSource: !isBook && !isCard,
       );
     } else {
@@ -285,6 +335,17 @@ class CollectionItemTile extends StatelessWidget {
     }
 
     return image;
+  }
+
+  Positioned? get _overlapBadge {
+    final kind = overlapKind;
+    if (kind == null || kind == FriendOverlapKind.none) return null;
+    final inColl = kind == FriendOverlapKind.inCollection;
+    return Positioned(
+      top: 4,
+      left: 4,
+      child: _badge(inColl ? 'Toi' : '♥', inColl ? Colors.green.shade700 : Colors.amber.shade800),
+    );
   }
 
   Widget _badge(String label, Color color) {

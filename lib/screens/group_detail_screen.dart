@@ -19,6 +19,7 @@ import '../navigation/app_navigation.dart';
 import '../widgets/group_badge.dart';
 import '../widgets/profile_avatar.dart';
 import '../widgets/group_members_sheet.dart';
+import '../widgets/group_stats_banner.dart';
 import 'group_edit_screen.dart';
 import 'item_detail_screen.dart';
 
@@ -40,10 +41,12 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
   late CollectionGroup _group;
   late final Stream<List<Map<String, dynamic>>> _stream;
   late final TabController _scopeTabController;
-  CollectionListFilters _collectionFilters = CollectionListFilters();
-  CollectionListFilters _wishlistFilters = CollectionListFilters();
+  /// Les objets du groupe ont tous un `group_id` : éviter le filtre « Personnel » par défaut.
+  late CollectionListFilters _collectionFilters;
+  late CollectionListFilters _wishlistFilters;
   CollectionViewMode _viewMode = CollectionViewMode.grid;
   CollectionCategory _selectedCategory = CollectionCategory.boardgame;
+  bool _categorySynced = false;
   List<StorageLocation> _locations = [];
   List<ItemTag> _tags = [];
 
@@ -51,6 +54,14 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
   void initState() {
     super.initState();
     _group = widget.group;
+    _collectionFilters = CollectionListFilters(
+      ownershipView: CollectionOwnershipView.groups,
+      groupIds: {_group.id},
+    );
+    _wishlistFilters = CollectionListFilters(
+      ownershipView: CollectionOwnershipView.groups,
+      groupIds: {_group.id},
+    );
     _scopeTabController = TabController(length: 2, vsync: this);
     _stream = Supabase.instance.client
         .from('collection_items')
@@ -182,27 +193,39 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                   .where((i) => !i.isWishlist && isActiveCollectionItem(i))
                   .toList();
               final wishlist = all.where((i) => i.isWishlist).toList();
+              _pickInitialCategory(collection);
 
-              return TabBarView(
-                controller: _scopeTabController,
+              return Column(
                 children: [
-                  _buildScopePane(
-                    items: collection,
-                    isWishlist: false,
-                    filters: _collectionFilters,
-                    searchController: _collectionSearch,
-                    onFiltersChanged: (f) =>
-                        setState(() => _collectionFilters = f),
-                    emptyHint: 'Aucun objet partagé dans ce groupe.',
+                  GroupStatsBanner(
+                    collectionItems: collection,
+                    wishlistItems: wishlist,
+                    accent: accent,
                   ),
-                  _buildScopePane(
-                    items: wishlist,
-                    isWishlist: true,
-                    filters: _wishlistFilters,
-                    searchController: _wishlistSearch,
-                    onFiltersChanged: (f) =>
-                        setState(() => _wishlistFilters = f),
-                    emptyHint: 'Rien en wishlist pour ce groupe.',
+                  Expanded(
+                    child: TabBarView(
+                      controller: _scopeTabController,
+                      children: [
+                        _buildScopePane(
+                          items: collection,
+                          isWishlist: false,
+                          filters: _collectionFilters,
+                          searchController: _collectionSearch,
+                          onFiltersChanged: (f) =>
+                              setState(() => _collectionFilters = f),
+                          emptyHint: 'Aucun objet partagé dans ce groupe.',
+                        ),
+                        _buildScopePane(
+                          items: wishlist,
+                          isWishlist: true,
+                          filters: _wishlistFilters,
+                          searchController: _wishlistSearch,
+                          onFiltersChanged: (f) =>
+                              setState(() => _wishlistFilters = f),
+                          emptyHint: 'Rien en wishlist pour ce groupe.',
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               );
@@ -211,6 +234,23 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
         },
       ),
     );
+  }
+
+  void _pickInitialCategory(List<CollectionItem> items) {
+    if (_categorySynced || items.isEmpty) return;
+    if (items.any((i) => i.category == _selectedCategory)) {
+      _categorySynced = true;
+      return;
+    }
+    for (final cat in CollectionCategory.values) {
+      if (items.any((i) => i.category == cat)) {
+        _categorySynced = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) setState(() => _selectedCategory = cat);
+        });
+        return;
+      }
+    }
   }
 
   Widget _buildScopePane({
