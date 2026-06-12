@@ -7,6 +7,7 @@ import '../../services/onepiece_tcg_service.dart';
 import '../../services/pokemon_tcg_service.dart';
 import '../../services/scryfall_service.dart';
 import '../../services/ygoprodeck_service.dart';
+import '../../utils/collection_grid_layout.dart';
 import '../../utils/tcg_bulk_add.dart';
 import '../../utils/tcg_rarity_order.dart';
 import '../../widgets/app_app_bar.dart';
@@ -151,11 +152,11 @@ class _TcgRarityGalleryScreenState extends State<TcgRarityGalleryScreen> {
                         : GridView.builder(
                             padding: const EdgeInsets.fromLTRB(8, 4, 8, 80),
                             gridDelegate:
-                                const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 3,
+                                CollectionGridLayout.gridDelegate(
+                              context,
+                              mobileColumns: 3,
                               childAspectRatio: 0.5,
-                              crossAxisSpacing: 4,
-                              mainAxisSpacing: 4,
+                              spacing: 4,
                             ),
                             itemCount: _filtered.length,
                             itemBuilder: (context, i) {

@@ -3,26 +3,38 @@ import 'package:flutter/material.dart';
 
 import '../models/collection_category.dart';
 
-/// Grille collection : plus compacte sur web PC, inchangée sur mobile natif.
+/// Grilles plus denses sur web PC ; mobile natif (Android/iOS) inchangé.
 abstract final class CollectionGridLayout {
-  /// Web sur écran large (PC) — pas l'app Android/iOS.
   static bool isWebDesktop(BuildContext context) {
     if (!kIsWeb) return false;
     return MediaQuery.sizeOf(context).width >= 720;
   }
 
-  static int crossAxisCount(BuildContext context, {int mobile = 3}) {
+  /// `mobile` = colonnes sur app native et web étroit.
+  static int columns(BuildContext context, {required int mobile}) {
     if (!kIsWeb) return mobile;
     final w = MediaQuery.sizeOf(context).width;
     if (w < 600) return mobile;
-    if (w < 900) return mobile + 2;
-    if (w < 1200) return mobile + 3;
-    return mobile + 4;
+    if (w < 900) return mobile + 3;
+    if (w < 1200) return mobile + 4;
+    if (w < 1600) return mobile + 5;
+    return mobile + 6;
   }
+
+  static int crossAxisCount(BuildContext context, {int mobile = 3}) =>
+      columns(context, mobile: mobile);
+
+  static int hubColumns(BuildContext context) => columns(context, mobile: 2);
+
+  static int tcgCardColumns(BuildContext context) =>
+      columns(context, mobile: 3);
+
+  static int tcgSetColumns(BuildContext context) => columns(context, mobile: 2);
 
   static double? maxContentWidth(BuildContext context) {
     if (!isWebDesktop(context)) return null;
-    return 1280;
+    final w = MediaQuery.sizeOf(context).width;
+    return w.clamp(1280.0, 1680.0);
   }
 
   static double aspectRatio(CollectionCategory category, BuildContext context) {
@@ -32,9 +44,23 @@ abstract final class CollectionGridLayout {
       _ => 0.85,
     };
     if (isWebDesktop(context) && category == CollectionCategory.boardgame) {
-      return 0.82;
+      return 0.84;
     }
     return base;
+  }
+
+  static SliverGridDelegateWithFixedCrossAxisCount gridDelegate(
+    BuildContext context, {
+    required int mobileColumns,
+    required double childAspectRatio,
+    double spacing = 12,
+  }) {
+    return SliverGridDelegateWithFixedCrossAxisCount(
+      crossAxisCount: columns(context, mobile: mobileColumns),
+      crossAxisSpacing: spacing,
+      mainAxisSpacing: spacing,
+      childAspectRatio: childAspectRatio,
+    );
   }
 
   static Widget constrainOnWebDesktop({

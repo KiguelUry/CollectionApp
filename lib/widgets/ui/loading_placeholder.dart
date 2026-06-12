@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../utils/collection_grid_layout.dart';
+
 /// Grille ou liste de placeholders pendant le chargement.
 class LoadingPlaceholder extends StatelessWidget {
   final int count;
@@ -16,7 +18,7 @@ class LoadingPlaceholder extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final body = grid
-        ? _buildGrid()
+        ? _buildGrid(context)
         : _buildList();
 
     if (message == null || message!.trim().isEmpty) return body;
@@ -36,15 +38,15 @@ class LoadingPlaceholder extends StatelessWidget {
     );
   }
 
-  Widget _buildGrid() {
+  Widget _buildGrid(BuildContext context) {
     return GridView.builder(
       padding: const EdgeInsets.all(16),
       physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 14,
-        mainAxisSpacing: 14,
+      gridDelegate: CollectionGridLayout.gridDelegate(
+        context,
+        mobileColumns: 2,
         childAspectRatio: 0.92,
+        spacing: 14,
       ),
       itemCount: count,
       itemBuilder: (_, _) => const _ShimmerBox(height: 120),

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../utils/collection_grid_grouper.dart';
+import '../utils/collection_grid_layout.dart';
 import '../widgets/collection_item_tile.dart';
 import 'item_detail_screen.dart';
 
@@ -25,11 +26,11 @@ class MediaArtistAlbumsScreen extends StatelessWidget {
       appBar: AppBar(title: Text(artist)),
       body: GridView.builder(
         padding: const EdgeInsets.all(12),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 3,
-          crossAxisSpacing: 10,
-          mainAxisSpacing: 10,
+        gridDelegate: CollectionGridLayout.gridDelegate(
+          context,
+          mobileColumns: 3,
           childAspectRatio: 0.85,
+          spacing: 10,
         ),
         itemCount: grouped.length,
         itemBuilder: (context, index) {

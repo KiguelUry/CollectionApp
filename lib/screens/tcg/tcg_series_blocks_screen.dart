@@ -4,6 +4,7 @@ import '../../models/card_subcategory.dart';
 import '../../models/tcg_set_info.dart';
 import '../../services/user_card_collection_service.dart';
 import '../../utils/app_haptics.dart';
+import '../../utils/collection_grid_layout.dart';
 import '../../models/collection_category.dart';
 import '../home_screen.dart';
 import '../../widgets/app_app_bar.dart';
@@ -149,11 +150,11 @@ class _TcgSeriesBlocksScreenState extends State<TcgSeriesBlocksScreen> {
                             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                             sliver: SliverGrid(
                               gridDelegate:
-                                  const SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: 2,
+                                  CollectionGridLayout.gridDelegate(
+                                context,
+                                mobileColumns: 2,
                                 childAspectRatio: 0.92,
-                                crossAxisSpacing: 10,
-                                mainAxisSpacing: 10,
+                                spacing: 10,
                               ),
                               delegate: SliverChildBuilderDelegate(
                                 (context, i) {

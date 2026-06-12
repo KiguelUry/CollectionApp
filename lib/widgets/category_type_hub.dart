@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../utils/collection_grid_layout.dart';
+
 import '../theme/app_theme.dart';
 import '../utils/app_haptics.dart';
 
@@ -108,10 +110,9 @@ class CategoryTypeHub extends StatelessWidget {
         SliverPadding(
           padding: EdgeInsets.fromLTRB(16, featuredItem != null ? 4 : 4, 16, 8),
           sliver: SliverGrid(
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
+            gridDelegate: CollectionGridLayout.gridDelegate(
+              context,
+              mobileColumns: 2,
               childAspectRatio: 0.88,
             ),
             delegate: SliverChildBuilderDelegate(

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/card_subcategory.dart';
 import '../../models/tcg_set_info.dart';
 import '../../services/user_card_collection_service.dart';
+import '../../utils/collection_grid_layout.dart';
 import '../../widgets/app_app_bar.dart';
 import '../../widgets/tcg/tcg_set_logo.dart';
 import 'tcg_set_cards_screen.dart';
@@ -132,11 +133,10 @@ class _TcgSetsBlockScreenState extends State<TcgSetsBlockScreen> {
                     ),
                   )
                 : SliverGrid(
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
+              gridDelegate: CollectionGridLayout.gridDelegate(
+                context,
+                mobileColumns: 2,
                 childAspectRatio: 0.85,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
               ),
               delegate: SliverChildBuilderDelegate(
                 (context, i) {

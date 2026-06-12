@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/collection_item.dart';
 import '../services/inventory_service.dart';
 import '../utils/collection_grid_grouper.dart';
+import '../utils/collection_grid_layout.dart';
 import '../widgets/bgg_network_image.dart';
 import '../widgets/collection_item_tile.dart';
 import '../widgets/app_app_bar.dart';
@@ -162,10 +163,9 @@ class _InventoryManageScreenState extends State<InventoryManageScreen> {
       onRefresh: _load,
       child: GridView.builder(
         padding: const EdgeInsets.all(12),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 3,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
+        gridDelegate: CollectionGridLayout.gridDelegate(
+          context,
+          mobileColumns: 3,
           childAspectRatio: 0.85,
         ),
         itemCount: _forSale.length,
@@ -197,10 +197,9 @@ class _InventoryManageScreenState extends State<InventoryManageScreen> {
       onRefresh: _load,
       child: GridView.builder(
         padding: const EdgeInsets.all(12),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 3,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
+        gridDelegate: CollectionGridLayout.gridDelegate(
+          context,
+          mobileColumns: 3,
           childAspectRatio: 0.85,
         ),
         itemCount: _sold.length,

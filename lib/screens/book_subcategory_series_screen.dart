@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../utils/book_add_actions.dart';
+import '../utils/collection_grid_layout.dart';
 import '../models/book_author_group.dart';
 import '../models/book_series.dart';
 import '../models/book_subcategory.dart';
@@ -250,12 +251,11 @@ class _BookSubcategorySeriesScreenState
                     SliverPadding(
                       padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
                       sliver: SliverGrid(
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
+                        gridDelegate: CollectionGridLayout.gridDelegate(
+                          context,
+                          mobileColumns: 2,
                           childAspectRatio: 0.92,
-                          crossAxisSpacing: 10,
-                          mainAxisSpacing: 10,
+                          spacing: 10,
                         ),
                         delegate: SliverChildBuilderDelegate(
                           (context, i) {
