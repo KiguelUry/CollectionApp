@@ -3,6 +3,7 @@ import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../services/friend_service.dart';
 import '../utils/collection_grid_grouper.dart';
+import '../utils/collection_grid_layout.dart';
 import '../navigation/app_navigation.dart';
 import '../utils/copy_friend_item.dart';
 import '../utils/friend_item_overlap.dart';
@@ -325,43 +326,53 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
 
     final grouped = CollectionGridGrouper.group(items);
 
-    return GridView.builder(
-      padding: const EdgeInsets.all(12),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: 0.85,
-      ),
-      itemCount: grouped.length,
-      itemBuilder: (context, index) {
-        final entry = grouped[index];
-        final item = entry.item;
+    return Builder(
+      builder: (context) {
+        final grid = GridView.builder(
+          padding: const EdgeInsets.all(12),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: CollectionGridLayout.crossAxisCount(context),
+            crossAxisSpacing: 12,
+            mainAxisSpacing: 12,
+            childAspectRatio:
+                CollectionGridLayout.aspectRatio(category, context),
+          ),
+          itemCount: grouped.length,
+          itemBuilder: (context, index) {
+            final entry = grouped[index];
+            final item = entry.item;
 
-        final overlap = _overlap?.kindFor(item);
+            final overlap = _overlap?.kindFor(item);
 
-        return CollectionItemTile(
-          item: item,
-          category: category,
-          totalQuantity: entry.totalQuantity,
-          showDuplicateBadge: entry.hasDuplicates,
-          overlapKind: overlap,
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (ctx) => ItemDetailScreen(
-                item: item.copyWith(quantity: entry.totalQuantity),
-                readOnly: true,
-                friendUsername: widget.username,
-                friendOverlap: overlap,
+            return CollectionItemTile(
+              item: item,
+              category: category,
+              totalQuantity: entry.totalQuantity,
+              showDuplicateBadge: entry.hasDuplicates,
+              overlapKind: overlap,
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (ctx) => ItemDetailScreen(
+                    item: item.copyWith(quantity: entry.totalQuantity),
+                    readOnly: true,
+                    friendUsername: widget.username,
+                    friendOverlap: overlap,
+                  ),
+                ),
               ),
-            ),
-          ),
-          onLongPress: () => showCopyFriendItemSheet(
-            context,
-            source: item,
-            friendUsername: widget.username,
-          ),
+              onLongPress: () => showCopyFriendItemSheet(
+                context,
+                source: item,
+                friendUsername: widget.username,
+              ),
+            );
+          },
+        );
+
+        return CollectionGridLayout.constrainOnWebDesktop(
+          context: context,
+          child: grid,
         );
       },
     );

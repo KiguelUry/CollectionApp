@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:functions_client/functions_client.dart';
 import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:xml/xml.dart';
 
 import '../config/app_env.dart';
@@ -76,10 +78,49 @@ class BggService {
     return headers;
   }
 
+  /// Sur le web, passe par `functions.invoke` (auth Supabase + CORS fiables).
+  static Future<http.Response> _getViaSupabaseProxy(Uri bggUri) async {
+    final client = Supabase.instance.client;
+    http.Response? last;
+
+    for (var attempt = 0; attempt < _maxPollAttempts; attempt++) {
+      try {
+        final res = await client.functions.invoke(
+          'bgg-proxy',
+          method: HttpMethod.get,
+          queryParameters: {
+            'path': bggUri.path,
+            ...bggUri.queryParameters,
+          },
+        );
+        final body = res.data is String
+            ? res.data as String
+            : (res.data?.toString() ?? '');
+        last = http.Response(body, res.status);
+      } on FunctionException catch (e) {
+        final details = e.details?.toString() ?? e.reasonPhrase ?? '';
+        last = http.Response(details, e.status);
+      } catch (e) {
+        if (kDebugMode) debugPrint('bgg-proxy invoke: $e');
+        return http.Response(e.toString(), 0);
+      }
+
+      final pending = last.statusCode == 202 ||
+          (last.statusCode == 200 && last.body.contains('Please try again'));
+      if (!pending) return last;
+      await Future.delayed(Duration(milliseconds: 400 + attempt * 250));
+    }
+    return last!;
+  }
+
   /// L'API XML BGG répond souvent 202 (« Please try again ») : on réessaie.
   static Future<http.Response> _getWithRetry(Uri url) async {
     if (_useWebProxy && !_webProxyReady) {
       return http.Response('', 503);
+    }
+
+    if (_useWebProxy) {
+      return _getViaSupabaseProxy(url);
     }
 
     final target = _requestUri(url);

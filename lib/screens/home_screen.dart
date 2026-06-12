@@ -15,6 +15,7 @@ import '../services/media_catalog_service.dart';
 import '../services/profile_service.dart';
 import '../utils/boardgame_genres.dart';
 import '../utils/collection_grid_grouper.dart';
+import '../utils/collection_grid_layout.dart';
 import '../utils/collection_item_filters.dart';
 import '../utils/card_item_metadata.dart';
 import '../utils/wishlist_promote.dart';
@@ -1288,38 +1289,42 @@ class _HomeScreenState extends State<HomeScreen>
 
     final grouped = CollectionGridGrouper.group(items);
 
-    final aspectRatio = switch (widget.category) {
-      CollectionCategory.boardgame => 0.72,
-      CollectionCategory.card => 0.5,
-      _ => 0.85,
-    };
-
-    return GridView.builder(
-      padding: const EdgeInsets.all(12),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: aspectRatio,
-      ),
-      itemCount: grouped.length,
-      itemBuilder: (context, index) {
-        final entry = grouped[index];
-        final item = entry.item;
-
-        return CollectionItemTile(
-          item: item,
-          category: widget.category,
-          totalQuantity: entry.totalQuantity,
-          showDuplicateBadge: entry.hasDuplicates,
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => ItemDetailScreen(
-                item: item.copyWith(quantity: entry.totalQuantity),
-              ),
-            ),
+    return Builder(
+      builder: (context) {
+        final grid = GridView.builder(
+          padding: const EdgeInsets.all(12),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: CollectionGridLayout.crossAxisCount(context),
+            crossAxisSpacing: 12,
+            mainAxisSpacing: 12,
+            childAspectRatio:
+                CollectionGridLayout.aspectRatio(widget.category, context),
           ),
+          itemCount: grouped.length,
+          itemBuilder: (context, index) {
+            final entry = grouped[index];
+            final item = entry.item;
+
+            return CollectionItemTile(
+              item: item,
+              category: widget.category,
+              totalQuantity: entry.totalQuantity,
+              showDuplicateBadge: entry.hasDuplicates,
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ItemDetailScreen(
+                    item: item.copyWith(quantity: entry.totalQuantity),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+
+        return CollectionGridLayout.constrainOnWebDesktop(
+          context: context,
+          child: grid,
         );
       },
     );
