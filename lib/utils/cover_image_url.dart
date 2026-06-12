@@ -1,3 +1,5 @@
+import 'web_image_proxy.dart';
+
 /// Tailles de couvertures Open Library (évite le flou / crop agressif).
 enum CoverSize { small, medium, large }
 
@@ -18,8 +20,6 @@ String openLibraryAuthorPhotoUrl(String authorOlid, {CoverSize size = CoverSize.
   };
   return 'https://covers.openlibrary.org/a/olid/$authorOlid-$suffix.jpg';
 }
-
-import 'web_image_proxy.dart';
 
 /// Choisit une URL plus nette pour l'affichage (listes vs fiche détail).
 String coverUrlForDisplay(String url, {required bool large}) {
