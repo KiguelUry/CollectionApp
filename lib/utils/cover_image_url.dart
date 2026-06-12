@@ -19,18 +19,30 @@ String openLibraryAuthorPhotoUrl(String authorOlid, {CoverSize size = CoverSize.
   return 'https://covers.openlibrary.org/a/olid/$authorOlid-$suffix.jpg';
 }
 
+import 'web_image_proxy.dart';
+
 /// Choisit une URL plus nette pour l'affichage (listes vs fiche détail).
 String coverUrlForDisplay(String url, {required bool large}) {
+  var resolved = url;
+
   // Grilles / listes : garder low.webp (chargement plus rapide).
-  if (url.contains('assets.tcgdex.net') && large && url.endsWith('/low.webp')) {
-    return url.replaceFirst('/low.webp', '/high.webp');
+  if (resolved.contains('assets.tcgdex.net') &&
+      large &&
+      resolved.endsWith('/low.webp')) {
+    resolved = resolved.replaceFirst('/low.webp', '/high.webp');
+  } else if (resolved.contains('covers.openlibrary.org')) {
+    if (large) {
+      resolved = resolved.replaceAll(
+        RegExp(r'-[SML]\.jpg', caseSensitive: false),
+        '-L.jpg',
+      );
+    } else {
+      resolved = resolved.replaceAll(
+        RegExp(r'-S\.jpg', caseSensitive: false),
+        '-M.jpg',
+      );
+    }
   }
-  if (!url.contains('covers.openlibrary.org')) return url;
-  if (large) {
-    return url.replaceAll(
-      RegExp(r'-[SML]\.jpg', caseSensitive: false),
-      '-L.jpg',
-    );
-  }
-  return url.replaceAll(RegExp(r'-S\.jpg', caseSensitive: false), '-M.jpg');
+
+  return coverUrlForWeb(resolved);
 }

@@ -30,8 +30,17 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Prepare .env asset for release build
-        run: cp .env.example .env
+      - name: Prepare .env from GitHub Secrets
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          BGG_APPLICATION_TOKEN: ${{ secrets.BGG_APPLICATION_TOKEN }}
+          GOOGLE_BOOKS_API_KEY: ${{ secrets.GOOGLE_BOOKS_API_KEY }}
+          DISCOGS_TOKEN: ${{ secrets.DISCOGS_TOKEN }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          RAWG_API_KEY: ${{ secrets.RAWG_API_KEY }}
+          REBRICKABLE_API_KEY: ${{ secrets.REBRICKABLE_API_KEY }}
+        run: bash scripts/write_ci_env.sh
 
       - name: Build web
         run: flutter build web --release --base-href "/CollectionApp/"
