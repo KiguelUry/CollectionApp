@@ -12,11 +12,14 @@ import 'tcg_set_cards_screen.dart';
 class TcgSetsBlockScreen extends StatefulWidget {
   final CardSubcategory subcategory;
   final TcgSeriesBlock block;
+  /// Langue TCGdex (Pokémon uniquement).
+  final String? tcgLang;
 
   const TcgSetsBlockScreen({
     super.key,
     required this.subcategory,
     required this.block,
+    this.tcgLang,
   });
 
   @override
@@ -161,6 +164,7 @@ class _TcgSetsBlockScreenState extends State<TcgSetsBlockScreen> {
                               builder: (ctx) => TcgSetCardsScreen(
                                 subcategory: widget.subcategory,
                                 set: set,
+                                tcgLang: widget.tcgLang,
                               ),
                             ),
                           ).then((_) => _loadOwned());

@@ -2,6 +2,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/card_subcategory.dart';
 import '../models/collection_category.dart';
+import '../models/pokemon_card_lang.dart';
 import '../models/tcg_set_info.dart';
 
 /// Cartes déjà dans la collection (pour badges « possédé »).
@@ -24,11 +25,27 @@ class UserCardCollectionService {
     CardSubcategory sub,
   ) {
     if (meta == null) return null;
+    if (sub == CardSubcategory.pokemon) {
+      final key = PokemonCardLang.catalogKeyFromMetadata(meta);
+      return key.isEmpty ? null : key;
+    }
     for (final key in _catalogIdKeys(sub)) {
       final id = meta[key]?.toString();
       if (id != null && id.isNotEmpty) return id;
     }
     return null;
+  }
+
+  /// Clé catalogue pour badges possédé / wishlist dans les grilles.
+  static String catalogKeyForTcgCard(
+    TcgCatalogCard card,
+    CardSubcategory sub,
+  ) {
+    if (sub == CardSubcategory.pokemon) {
+      final lang = card.raw['card_lang'] ?? PokemonCardLang.fr;
+      return PokemonCardLang.catalogKey(card.id, lang: lang);
+    }
+    return card.id;
   }
 
   Future<Set<String>> ownedCatalogIds(CardSubcategory sub) async {

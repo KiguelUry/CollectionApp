@@ -24,10 +24,12 @@ class CardCatalogService {
   static Future<List<Map<String, String>>> search(
     String query, {
     required CardSubcategory subcategory,
+    String pokemonLang = 'fr',
   }) async {
     try {
       return await switch (subcategory) {
-        CardSubcategory.pokemon => PokemonTcgService.search(query),
+        CardSubcategory.pokemon =>
+          PokemonTcgService.search(query, lang: pokemonLang),
         CardSubcategory.magic => ScryfallService.search(query),
         CardSubcategory.yugioh => YgoprodeckService.search(query),
         CardSubcategory.onepiece => OnepieceTcgService.search(query),
@@ -58,6 +60,7 @@ class CardCatalogService {
       if ((card['card_number'] ?? '').isNotEmpty)
         'card_number': card['card_number']!,
       if ((card['rarity'] ?? '').isNotEmpty) 'rarity': card['rarity']!,
+      if ((card['card_lang'] ?? '').isNotEmpty) 'card_lang': card['card_lang']!,
       if ((card['types'] ?? '').isNotEmpty)
         'types': card['types']!
             .split(',')
@@ -87,6 +90,7 @@ class CardCatalogService {
       if (card.setName != null) 'set_name': card.setName!,
       if (card.number != null) 'card_number': card.number!,
       if (card.rarity != null) 'rarity': card.rarity!,
+      if (card.raw['card_lang'] != null) 'card_lang': card.raw['card_lang']!,
     };
   }
 

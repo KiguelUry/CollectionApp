@@ -23,11 +23,14 @@ import '../../widgets/ui/loading_placeholder.dart';
 class TcgSetCardsScreen extends StatefulWidget {
   final CardSubcategory subcategory;
   final TcgSetInfo set;
+  /// Langue TCGdex (Pokémon uniquement).
+  final String? tcgLang;
 
   const TcgSetCardsScreen({
     super.key,
     required this.subcategory,
     required this.set,
+    this.tcgLang,
   });
 
   @override
@@ -107,6 +110,9 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
     );
   }
 
+  String _catalogKey(TcgCatalogCard card) =>
+      UserCardCollectionService.catalogKeyForTcgCard(card, widget.subcategory);
+
   Future<void> _quickAddCard(TcgCatalogCard card) async {
     final ok = await silentAddTcgCard(
       context,
@@ -115,14 +121,15 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
     );
     if (!mounted || !ok) return;
     setState(() {
-      _ownedIds.add(card.id);
-      _wishlistIds.remove(card.id);
+      _ownedIds.add(_catalogKey(card));
+      _wishlistIds.remove(_catalogKey(card));
     });
     _showAddedSnack(card.name);
   }
 
   Future<void> _toggleWishlist(TcgCatalogCard card) async {
-    final inWishlist = _wishlistIds.contains(card.id);
+    final key = _catalogKey(card);
+    final inWishlist = _wishlistIds.contains(key);
     final ok = await toggleTcgWishlist(
       context,
       subcategory: widget.subcategory,
@@ -132,9 +139,9 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
     if (!mounted || !ok) return;
     setState(() {
       if (inWishlist) {
-        _wishlistIds.remove(card.id);
+        _wishlistIds.remove(key);
       } else {
-        _wishlistIds.add(card.id);
+        _wishlistIds.add(key);
       }
     });
   }
@@ -185,6 +192,7 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
       CardSubcategory.pokemon =>
         PokemonTcgService.fetchCardsInSet(
           widget.set.id,
+          lang: widget.tcgLang ?? 'fr',
           setInfo: widget.set,
         ),
       CardSubcategory.magic =>
@@ -230,7 +238,7 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
   List<TcgCatalogCard> get _filtered {
     var list = _cards;
     if (_ownedOnly) {
-      list = list.where((c) => _ownedIds.contains(c.id)).toList();
+      list = list.where((c) => _ownedIds.contains(_catalogKey(c))).toList();
     }
     final q = _query.trim().toLowerCase();
     if (q.isNotEmpty) {
@@ -276,7 +284,7 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
   Widget build(BuildContext context) {
     final filtered = _filtered;
     final ownedInSet =
-        _cards.where((c) => _ownedIds.contains(c.id)).length;
+        _cards.where((c) => _ownedIds.contains(_catalogKey(c))).length;
     final total = widget.set.totalCards ?? _cards.length;
 
     return Scaffold(
@@ -409,8 +417,9 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
                         itemCount: filtered.length,
                         itemBuilder: (context, i) {
                           final card = filtered[i];
-                          final owned = _ownedIds.contains(card.id);
-                          final inWishlist = _wishlistIds.contains(card.id);
+                          final owned = _ownedIds.contains(_catalogKey(card));
+                          final inWishlist =
+                              _wishlistIds.contains(_catalogKey(card));
                           final sel = _selectedIds.contains(card.id);
                           return TcgCatalogCardTile(
                             name: card.name,

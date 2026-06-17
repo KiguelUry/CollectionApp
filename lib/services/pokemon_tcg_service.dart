@@ -3,24 +3,28 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import '../models/pokemon_card_lang.dart';
 import '../models/tcg_set_info.dart';
 import '../utils/pokemon_series_labels_fr.dart';
 import '../utils/pokemon_set_labels_fr.dart';
 import '../utils/tcg_set_image_url.dart';
 import '../utils/tcgdex_assets.dart';
 
-/// Pokémon — [TCGdex](https://tcgdex.dev) (gratuit, multilingue FR, sans clé).
-/// Remplace pokemontcg.io / Scrydex.
+/// Pokémon — [TCGdex](https://tcgdex.dev) (gratuit, multilingue, sans clé).
 class PokemonTcgService {
-  static const _base = 'https://api.tcgdex.net/v2/fr';
+  static String catalogKey(String tcgdexId, {String lang = PokemonCardLang.fr}) =>
+      PokemonCardLang.catalogKey(tcgdexId, lang: lang);
 
-  static Uri _uri(String path, [Map<String, String>? query]) {
-    return Uri.parse('$_base$path').replace(queryParameters: query);
+  static Uri _uri(String lang, String path, [Map<String, String>? query]) {
+    return Uri.parse('https://api.tcgdex.net/v2/$lang$path')
+        .replace(queryParameters: query);
   }
 
-  static Future<List<TcgSeriesBlock>> fetchBlocks() async {
+  static Future<List<TcgSeriesBlock>> fetchBlocks({
+    String lang = PokemonCardLang.fr,
+  }) async {
     try {
-      final seriesRes = await http.get(_uri('/series'));
+      final seriesRes = await http.get(_uri(lang, '/series'));
       if (seriesRes.statusCode != 200) return [];
 
       final seriesList = jsonDecode(seriesRes.body) as List<dynamic>;
@@ -30,13 +34,13 @@ class PokemonTcgService {
         final serieId = s['id']?.toString() ?? '';
         if (serieId.isEmpty) return null;
 
-        final setsRes = await http.get(_uri('/sets', {'serie.id': serieId}));
+        final setsRes = await http.get(_uri(lang, '/sets', {'serie.id': serieId}));
         if (setsRes.statusCode != 200) return null;
 
         final setsJson = jsonDecode(setsRes.body) as List<dynamic>;
         final serieName = s['name']?.toString() ?? serieId;
         final sets = setsJson
-            .map((e) => _mapSetBrief(e as Map<String, dynamic>, serieName))
+            .map((e) => _mapSetBrief(e as Map<String, dynamic>, serieName, lang))
             .where((set) => set.id.isNotEmpty)
             .toList();
         if (sets.isEmpty) return null;
@@ -44,14 +48,21 @@ class PokemonTcgService {
         sortSetsByReleaseNewest(sets);
 
         final blockLogo = normalizeTcgSetLogoUrl(
-              tcgdexAssetUrl(s['logo'], kind: 'series', id: serieId),
+              tcgdexAssetUrl(
+                s['logo'],
+                kind: 'series',
+                id: serieId,
+                lang: lang,
+              ),
             ) ??
             normalizeTcgSetLogoUrl(sets.firstOrNull?.imageUrl);
 
         return TcgSeriesBlock(
           id: serieId,
           name: serieName,
-          nameFr: PokemonSeriesLabelsFr.label(serieName),
+          nameFr: lang == PokemonCardLang.fr
+              ? PokemonSeriesLabelsFr.label(serieName)
+              : null,
           imageUrl: blockLogo,
           sets: sets,
         );
@@ -64,12 +75,16 @@ class PokemonTcgService {
       sortBlocksByReleaseNewest(blocks);
       return blocks;
     } catch (e) {
-      if (kDebugMode) debugPrint('TCGdex blocks: $e');
+      if (kDebugMode) debugPrint('TCGdex blocks ($lang): $e');
       return [];
     }
   }
 
-  static TcgSetInfo _mapSetBrief(Map<String, dynamic> s, String serieName) {
+  static TcgSetInfo _mapSetBrief(
+    Map<String, dynamic> s,
+    String serieName,
+    String lang,
+  ) {
     final id = s['id']?.toString() ?? '';
     final name = s['name']?.toString() ?? id;
     final abbr = s['abbreviation'] as Map<String, dynamic>?;
@@ -79,13 +94,15 @@ class PokemonTcgService {
     return TcgSetInfo(
       id: id,
       name: name,
-      nameFr: PokemonSetLabelsFr.setLabel(code, name),
+      nameFr: lang == PokemonCardLang.fr
+          ? PokemonSetLabelsFr.setLabel(code, name)
+          : null,
       code: code,
       seriesName: serieName,
       imageUrl: normalizeTcgSetLogoUrl(
-        tcgdexAssetUrl(s['logo'], kind: 'set', id: id),
+        tcgdexAssetUrl(s['logo'], kind: 'set', id: id, lang: lang),
       ),
-      symbolUrl: tcgdexAssetUrl(s['symbol'], kind: 'set', id: id),
+      symbolUrl: tcgdexAssetUrl(s['symbol'], kind: 'set', id: id, lang: lang),
       releaseDate: s['releaseDate']?.toString(),
       totalCards: cardCount?['official'] as int? ?? cardCount?['total'] as int?,
     );
@@ -93,12 +110,13 @@ class PokemonTcgService {
 
   static Future<List<TcgCatalogCard>> fetchCardsInSet(
     String setId, {
+    String lang = PokemonCardLang.fr,
     TcgSetInfo? setInfo,
   }) async {
     if (setId.isEmpty) return [];
     try {
       final response = await http.get(
-        _uri('/cards', {'set.id': setId}),
+        _uri(lang, '/cards', {'set.id': setId}),
       );
       if (response.statusCode != 200) return [];
 
@@ -108,6 +126,7 @@ class PokemonTcgService {
             (raw) => _mapCatalogBrief(
               raw as Map<String, dynamic>,
               setId,
+              lang: lang,
               setInfo: setInfo,
             ),
           )
@@ -117,7 +136,7 @@ class PokemonTcgService {
       fillMissingCardImages(cards);
       return cards;
     } catch (e) {
-      if (kDebugMode) debugPrint('TCGdex cards in set $setId: $e');
+      if (kDebugMode) debugPrint('TCGdex cards in set $setId ($lang): $e');
       return [];
     }
   }
@@ -126,11 +145,10 @@ class PokemonTcgService {
   static const _searchPageSize = 100;
   static const _searchMaxPages = 5;
 
-  /// URL image TCGdex reconstruite depuis l'id carte (ex. sm115-12).
   static String? tcgdexCardImageUrl(
     String cardId, {
     String? localId,
-    String lang = 'fr',
+    String lang = PokemonCardLang.fr,
   }) {
     final dash = cardId.lastIndexOf('-');
     if (dash <= 0) return null;
@@ -150,8 +168,30 @@ class PokemonTcgService {
 
   static TcgCatalogCard _ensureCardImage(TcgCatalogCard card) {
     if (card.imageUrl != null && card.imageUrl!.isNotEmpty) return card;
-    for (final lang in ['fr', 'en']) {
-      final url = tcgdexCardImageUrl(card.id, localId: card.number, lang: lang);
+    final lang = card.raw['card_lang'] ?? PokemonCardLang.fr;
+    final primary = tcgdexCardImageUrl(
+      card.id,
+      localId: card.number,
+      lang: lang,
+    );
+    if (primary != null) {
+      return TcgCatalogCard(
+        id: card.id,
+        name: card.name,
+        imageUrl: primary,
+        setName: card.setName,
+        number: card.number,
+        rarity: card.rarity,
+        raw: card.raw,
+      );
+    }
+    for (final fallback in PokemonCardLang.all) {
+      if (fallback == lang) continue;
+      final url = tcgdexCardImageUrl(
+        card.id,
+        localId: card.number,
+        lang: fallback,
+      );
       if (url != null) {
         return TcgCatalogCard(
           id: card.id,
@@ -167,8 +207,10 @@ class PokemonTcgService {
     return card;
   }
 
-  /// Complète bloc / série / total pour les résultats de recherche globale.
-  static Future<void> enrichSearchMetadata(List<TcgCatalogCard> cards) async {
+  static Future<void> enrichSearchMetadata(
+    List<TcgCatalogCard> cards, {
+    String lang = PokemonCardLang.fr,
+  }) async {
     final setIds = cards
         .map((c) => c.raw['set_id'] ?? '')
         .where((id) => id.isNotEmpty)
@@ -178,7 +220,10 @@ class PokemonTcgService {
     final cache = <String, Map<String, String>>{};
     for (final setId in setIds) {
       try {
-        final response = await http.get(_uri('/sets/$setId'));
+        final cardLang =
+            cards.firstWhere((c) => c.raw['set_id'] == setId).raw['card_lang'] ??
+                lang;
+        final response = await http.get(_uri(cardLang, '/sets/$setId'));
         if (response.statusCode != 200) continue;
         final s = jsonDecode(response.body) as Map<String, dynamic>;
         final serie = s['serie'] as Map<String, dynamic>?;
@@ -211,7 +256,6 @@ class PokemonTcgService {
     }
   }
 
-  /// Complète images + raretés manquantes.
   static Future<void> enrichCardDetails(List<TcgCatalogCard> cards) async {
     fillMissingCardImages(cards);
     await enrichRarities(cards);
@@ -221,7 +265,12 @@ class PokemonTcgService {
     if (stillMissing.isEmpty) return;
     for (final chunk in _chunks(stillMissing, _rarityBatch)) {
       final details = await Future.wait(
-        chunk.map((card) => _fetchCardById(card.id)),
+        chunk.map(
+          (card) => _fetchCardById(
+            card.id,
+            lang: card.raw['card_lang'] ?? PokemonCardLang.fr,
+          ),
+        ),
       );
       for (var i = 0; i < chunk.length; i++) {
         final d = details[i];
@@ -242,12 +291,16 @@ class PokemonTcgService {
     }
   }
 
-  /// Complète les raretés manquantes (liste TCGdex sans détail).
   static Future<void> enrichRarities(List<TcgCatalogCard> cards) async {
     final missing = cards.where((c) => c.rarity == null || c.rarity!.isEmpty);
     for (final chunk in _chunks(missing.toList(), _rarityBatch)) {
       final details = await Future.wait(
-        chunk.map((card) => _fetchCardById(card.id)),
+        chunk.map(
+          (card) => _fetchCardById(
+            card.id,
+            lang: card.raw['card_lang'] ?? PokemonCardLang.fr,
+          ),
+        ),
       );
       for (var i = 0; i < chunk.length; i++) {
         final d = details[i];
@@ -274,19 +327,25 @@ class PokemonTcgService {
     }
   }
 
-  static Future<TcgCatalogCard?> _fetchCardById(String id) async {
+  static Future<TcgCatalogCard?> _fetchCardById(
+    String id, {
+    String lang = PokemonCardLang.fr,
+  }) async {
     try {
-      final response = await http.get(_uri('/cards/$id'));
+      final response = await http.get(_uri(lang, '/cards/$id'));
       if (response.statusCode != 200) return null;
       final data = jsonDecode(response.body) as Map<String, dynamic>;
-      return _mapCatalogFull(data);
+      return _mapCatalogFull(data, lang: lang);
     } catch (e) {
-      if (kDebugMode) debugPrint('TCGdex card $id: $e');
+      if (kDebugMode) debugPrint('TCGdex card $id ($lang): $e');
       return null;
     }
   }
 
-  static Future<List<Map<String, String>>> search(String query) async {
+  static Future<List<Map<String, String>>> search(
+    String query, {
+    String lang = PokemonCardLang.fr,
+  }) async {
     final q = query.trim();
     if (q.length < 2) return [];
 
@@ -294,7 +353,7 @@ class PokemonTcgService {
       final hits = <Map<String, String>>[];
 
       for (var page = 1; page <= _searchMaxPages; page++) {
-        final response = await http.get(_uri('/cards', {
+        final response = await http.get(_uri(lang, '/cards', {
           'name': q,
           'pagination:page': page.toString(),
           'pagination:itemsPerPage': _searchPageSize.toString(),
@@ -309,7 +368,11 @@ class PokemonTcgService {
         for (final raw in list) {
           final map = raw as Map<String, dynamic>;
           final id = map['id']?.toString() ?? '';
-          final card = _mapCatalogBrief(map, _setIdFromCardId(id));
+          final card = _mapCatalogBrief(
+            map,
+            _setIdFromCardId(id),
+            lang: lang,
+          );
           if (card == null) continue;
           final enriched = _ensureCardImage(card);
           hits.add({
@@ -324,7 +387,7 @@ class PokemonTcgService {
 
       return hits;
     } catch (e) {
-      if (kDebugMode) debugPrint('TCGdex search: $e');
+      if (kDebugMode) debugPrint('TCGdex search ($lang): $e');
       return [];
     }
   }
@@ -357,6 +420,7 @@ class PokemonTcgService {
   static TcgCatalogCard? _mapCatalogBrief(
     Map<String, dynamic> card,
     String setId, {
+    String lang = PokemonCardLang.fr,
     TcgSetInfo? setInfo,
   }) {
     final name = card['name'] as String?;
@@ -367,12 +431,18 @@ class PokemonTcgService {
     return TcgCatalogCard(
       id: id,
       name: name,
-      imageUrl: _imageUrl(card['image']) ?? tcgdexCardImageUrl(id, localId: card['localId']?.toString()),
+      imageUrl: _imageUrl(card['image']) ??
+          tcgdexCardImageUrl(
+            id,
+            localId: card['localId']?.toString(),
+            lang: lang,
+          ),
       setName: setName.isNotEmpty ? setName : null,
       number: card['localId']?.toString(),
       rarity: card['rarity']?.toString(),
       raw: _rawMeta(
         id,
+        lang: lang,
         setId: setId,
         setName: setName,
         setCode: setInfo?.code,
@@ -385,7 +455,10 @@ class PokemonTcgService {
     );
   }
 
-  static TcgCatalogCard? _mapCatalogFull(Map<String, dynamic> card) {
+  static TcgCatalogCard? _mapCatalogFull(
+    Map<String, dynamic> card, {
+    String lang = PokemonCardLang.fr,
+  }) {
     final name = card['name'] as String?;
     if (name == null || name.isEmpty) return null;
 
@@ -403,6 +476,7 @@ class PokemonTcgService {
       rarity: card['rarity']?.toString(),
       raw: _rawMeta(
         id,
+        lang: lang,
         setId: setId,
         setName: set?['name']?.toString() ?? '',
         setCode: abbr?['official']?.toString(),
@@ -421,6 +495,7 @@ class PokemonTcgService {
 
   static Map<String, String> _rawMeta(
     String id, {
+    required String lang,
     required String setId,
     String setName = '',
     String? setCode,
@@ -433,6 +508,7 @@ class PokemonTcgService {
     return {
       'tcgdex_id': id,
       'pokemon_tcg_id': id,
+      'card_lang': lang,
       'set_id': setId,
       if (setCode != null && setCode.isNotEmpty) 'set_code': setCode,
       if (setName.isNotEmpty) 'set_name': setName,

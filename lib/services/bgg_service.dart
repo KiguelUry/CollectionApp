@@ -56,10 +56,18 @@ class BggService {
   ) async {
     if (!_webProxyReady) return null;
     try {
-      final response = await http.get(
-        _jsonApiUri(action, params),
-        headers: _requestHeaders(),
-      );
+      final anon = AppEnv.supabaseAnonKey;
+      // Firefox (ETP / bloqueurs) retire parfois Authorization cross-origin :
+      // apikey en query + header suffit pour les Edge Functions publiques.
+      final uri = _jsonApiUri(action, {
+        ...params,
+        if (_useWebJsonApi) 'apikey': anon,
+      });
+      final headers = <String, String>{
+        'Accept': 'application/json',
+        if (_useWebJsonApi) 'apikey': anon,
+      };
+      final response = await http.get(uri, headers: headers);
       if (response.statusCode != 200 || response.body.isEmpty) {
         lastSearchError = response.statusCode == 0
             ? 'Réseau bloqué. Vérifie la fonction bgg-api sur Supabase.'
@@ -103,16 +111,6 @@ class BggService {
     final token = dotenv.env['BGG_APPLICATION_TOKEN']?.trim();
     if (token != null && token.isNotEmpty) {
       headers['Authorization'] = 'Bearer $token';
-    }
-    return headers;
-  }
-
-  static Map<String, String> _requestHeaders() {
-    final headers = Map<String, String>.from(_headers);
-    if (_useWebJsonApi && _webProxyReady) {
-      final anon = AppEnv.supabaseAnonKey;
-      headers['apikey'] = anon;
-      headers['Authorization'] = 'Bearer $anon';
     }
     return headers;
   }

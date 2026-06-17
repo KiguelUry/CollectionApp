@@ -113,8 +113,10 @@ Future<bool> toggleTcgWishlist(
   required bool currentlyInWishlist,
 }) async {
   if (currentlyInWishlist) {
-    return UserCardCollectionService()
-        .removeWishlistByCatalogId(subcategory, card.id);
+    return UserCardCollectionService().removeWishlistByCatalogId(
+      subcategory,
+      UserCardCollectionService.catalogKeyForTcgCard(card, subcategory),
+    );
   }
   return silentAddTcgCardToWishlist(
     context,

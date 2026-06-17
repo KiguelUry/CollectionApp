@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../models/card_subcategory.dart';
 import '../models/collection_item.dart';
+import '../models/pokemon_card_lang.dart';
 import '../models/tcg_set_info.dart';
 import '../screens/tcg/tcg_set_cards_screen.dart';
 
@@ -14,6 +16,7 @@ bool openCardSetCatalog(BuildContext context, CollectionItem item) {
   if (setId.isEmpty) return false;
 
   final setName = meta['set_name']?.toString().trim();
+  final lang = meta['card_lang']?.toString() ?? PokemonCardLang.fr;
   final set = TcgSetInfo(
     id: setId,
     name: setName?.isNotEmpty == true ? setName! : setId,
@@ -26,7 +29,11 @@ bool openCardSetCatalog(BuildContext context, CollectionItem item) {
   Navigator.push(
     context,
     MaterialPageRoute(
-      builder: (_) => TcgSetCardsScreen(subcategory: sub, set: set),
+      builder: (_) => TcgSetCardsScreen(
+        subcategory: sub,
+        set: set,
+        tcgLang: sub == CardSubcategory.pokemon ? lang : null,
+      ),
     ),
   );
   return true;

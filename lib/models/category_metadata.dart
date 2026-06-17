@@ -2,6 +2,7 @@ import '../utils/boardgame_display.dart';
 import 'collection_category.dart';
 import 'book_subcategory.dart';
 import 'card_subcategory.dart';
+import 'pokemon_card_lang.dart';
 import 'collection_item.dart';
 
 enum CardCondition {
@@ -229,6 +230,12 @@ class CategoryMetadata {
         }
         if (m['rarity'] != null && m['rarity'].toString().trim().isNotEmpty) {
           rows.add(MapEntry('Rareté', m['rarity'].toString().trim()));
+        }
+        if (m['card_lang'] != null && m['card_lang'].toString().isNotEmpty) {
+          rows.add(MapEntry(
+            'Langue',
+            PokemonCardLang.label(m['card_lang'].toString()),
+          ));
         }
         if (m['condition'] != null) {
           rows.add(MapEntry('État', CardCondition.fromDbValue(m['condition'].toString()).label));

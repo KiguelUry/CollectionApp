@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../models/card_subcategory.dart';
 import '../../models/tcg_set_info.dart';
+import '../../models/pokemon_card_lang.dart';
 import '../../services/card_catalog_service.dart';
 import '../../services/pokemon_tcg_service.dart';
 import '../../services/user_card_collection_service.dart';
@@ -22,11 +23,13 @@ enum _GlobalSearchSort { name, rarity }
 class TcgGlobalSearchScreen extends StatefulWidget {
   final CardSubcategory subcategory;
   final String query;
+  final String? pokemonLang;
 
   const TcgGlobalSearchScreen({
     super.key,
     required this.subcategory,
     required this.query,
+    this.pokemonLang,
   });
 
   @override
@@ -38,14 +41,33 @@ class _TcgGlobalSearchScreenState extends State<TcgGlobalSearchScreen> {
   Set<String> _ownedIds = {};
   Set<String> _wishlistIds = {};
   bool _loading = true;
+  bool _enrichingRarities = false;
   late String _apiQuery;
+  late String _pokemonLang;
   late final TextEditingController _searchController;
   _GlobalSearchSort _sort = _GlobalSearchSort.name;
+  final Set<String> _rarityFilters = {};
+  final Set<String> _typeFilters = {};
+
+  static const _pokemonTypes = [
+    'Colorless',
+    'Darkness',
+    'Dragon',
+    'Fairy',
+    'Fighting',
+    'Fire',
+    'Grass',
+    'Lightning',
+    'Metal',
+    'Psychic',
+    'Water',
+  ];
 
   @override
   void initState() {
     super.initState();
     _apiQuery = widget.query;
+    _pokemonLang = widget.pokemonLang ?? PokemonCardLang.fr;
     _searchController = TextEditingController(text: widget.query);
     _load();
   }
@@ -74,6 +96,7 @@ class _TcgGlobalSearchScreenState extends State<TcgGlobalSearchScreen> {
       final hits = await CardCatalogService.search(
         _apiQuery,
         subcategory: widget.subcategory,
+        pokemonLang: _pokemonLang,
       );
       final cards = CardCatalogService.catalogCardsFromSearchHits(
         hits,
@@ -104,17 +127,52 @@ class _TcgGlobalSearchScreenState extends State<TcgGlobalSearchScreen> {
   Future<void> _maybeEnrichSearchMeta() async {
     if (widget.subcategory != CardSubcategory.pokemon) return;
     final copy = List<TcgCatalogCard>.from(_cards);
-    await PokemonTcgService.enrichSearchMetadata(copy);
+    await PokemonTcgService.enrichSearchMetadata(copy, lang: _pokemonLang);
     if (!mounted) return;
     setState(() => _cards = copy);
   }
 
   Future<void> _maybeEnrichPokemonDetails() async {
+    setState(() => _enrichingRarities = true);
     final copy = List<TcgCatalogCard>.from(_cards);
     await PokemonTcgService.enrichCardDetails(copy);
     if (!mounted) return;
-    setState(() => _cards = copy);
+    setState(() {
+      _cards = copy;
+      _enrichingRarities = false;
+    });
   }
+
+  Set<String> get _rarityOptions {
+    final out = <String>{};
+    for (final c in _cards) {
+      final r = c.rarity?.trim();
+      if (r != null && r.isNotEmpty) out.add(r);
+    }
+    return out;
+  }
+
+  Set<String> get _typeOptions {
+    if (widget.subcategory != CardSubcategory.pokemon) return {};
+    final out = <String>{};
+    for (final c in _cards) {
+      final types = c.raw['types'];
+      if (types != null && types.isNotEmpty) {
+        for (final t in types.split(',')) {
+          final s = t.trim();
+          if (s.isNotEmpty) out.add(s);
+        }
+      }
+    }
+    if (out.isEmpty) return _pokemonTypes.toSet();
+    return out;
+  }
+
+  List<String> get _sortedRarityOptions =>
+      sortRarityLabels(_rarityOptions.toList(), widget.subcategory);
+
+  String _catalogKey(TcgCatalogCard card) =>
+      UserCardCollectionService.catalogKeyForTcgCard(card, widget.subcategory);
 
   void _showAddedSnack(String name) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -134,14 +192,15 @@ class _TcgGlobalSearchScreenState extends State<TcgGlobalSearchScreen> {
     );
     if (!mounted || !ok) return;
     setState(() {
-      _ownedIds.add(card.id);
-      _wishlistIds.remove(card.id);
+      _ownedIds.add(_catalogKey(card));
+      _wishlistIds.remove(_catalogKey(card));
     });
     _showAddedSnack(card.name);
   }
 
   Future<void> _toggleWishlist(TcgCatalogCard card) async {
-    final inWishlist = _wishlistIds.contains(card.id);
+    final key = _catalogKey(card);
+    final inWishlist = _wishlistIds.contains(key);
     final ok = await toggleTcgWishlist(
       context,
       subcategory: widget.subcategory,
@@ -151,9 +210,9 @@ class _TcgGlobalSearchScreenState extends State<TcgGlobalSearchScreen> {
     if (!mounted || !ok) return;
     setState(() {
       if (inWishlist) {
-        _wishlistIds.remove(card.id);
+        _wishlistIds.remove(key);
       } else {
-        _wishlistIds.add(card.id);
+        _wishlistIds.add(key);
       }
     });
     ScaffoldMessenger.of(context).showSnackBar(
@@ -175,6 +234,27 @@ class _TcgGlobalSearchScreenState extends State<TcgGlobalSearchScreen> {
     if (q.isNotEmpty) {
       list = list.where((c) => c.name.toLowerCase().contains(q)).toList();
     }
+    if (_rarityFilters.isNotEmpty) {
+      list = list
+          .where(
+            (c) =>
+                c.rarity != null &&
+                _rarityFilters.any(
+                  (r) => r.toLowerCase() == c.rarity!.toLowerCase(),
+                ),
+          )
+          .toList();
+    }
+    if (_typeFilters.isNotEmpty) {
+      list = list.where((c) {
+        final types = c.raw['types']?.split(',') ?? [];
+        return types.any(
+          (t) => _typeFilters.any(
+            (sel) => sel.toLowerCase() == t.trim().toLowerCase(),
+          ),
+        );
+      }).toList();
+    }
     final sorted = List<TcgCatalogCard>.from(list);
     if (_sort == _GlobalSearchSort.name) {
       sorted.sort(
@@ -190,6 +270,62 @@ class _TcgGlobalSearchScreenState extends State<TcgGlobalSearchScreen> {
       );
     }
     return sorted;
+  }
+
+  Future<void> _openFilterDialog({
+    required String title,
+    required List<String> options,
+    required Set<String> selected,
+    required void Function(Set<String>) onApply,
+  }) async {
+    final tmp = Set<String>.from(selected);
+    final result = await showDialog<Set<String>>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setStateDialog) => AlertDialog(
+          title: Text(title),
+          content: SizedBox(
+            width: 360,
+            child: SingleChildScrollView(
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final o in options)
+                    FilterChip(
+                      label: Text(o, style: const TextStyle(fontSize: 12)),
+                      selected: tmp.contains(o),
+                      onSelected: (v) => setStateDialog(() {
+                        if (v) {
+                          tmp.add(o);
+                        } else {
+                          tmp.remove(o);
+                        }
+                      }),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Annuler'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, <String>{}),
+              child: const Text('Tout'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, tmp),
+              child: const Text('Appliquer'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (result == null) return;
+    onApply(result);
   }
 
   @override
@@ -222,6 +358,32 @@ class _TcgGlobalSearchScreenState extends State<TcgGlobalSearchScreen> {
                   },
                   onChanged: (_) => setState(() {}),
                 ),
+                if (widget.subcategory == CardSubcategory.pokemon) ...[
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    height: 32,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      children: [
+                        for (final lang in PokemonCardLang.all)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: FilterChip(
+                              label: Text(PokemonCardLang.label(lang),
+                                  style: const TextStyle(fontSize: 11)),
+                              selected: _pokemonLang == lang,
+                              onSelected: (_) {
+                                if (_pokemonLang == lang) return;
+                                setState(() => _pokemonLang = lang);
+                                _load();
+                              },
+                              showCheckmark: false,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 6),
                 Row(
                   children: [
@@ -233,6 +395,65 @@ class _TcgGlobalSearchScreenState extends State<TcgGlobalSearchScreen> {
                       ),
                     ),
                     const Spacer(),
+                    if (_enrichingRarities)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: widget.subcategory.color,
+                          ),
+                        ),
+                      ),
+                    IconButton(
+                      tooltip: _rarityFilters.isEmpty
+                          ? 'Filtrer par rareté'
+                          : 'Rareté (${_rarityFilters.length})',
+                      icon: Icon(
+                        Icons.star_outline,
+                        size: 20,
+                        color: _rarityFilters.isNotEmpty
+                            ? widget.subcategory.color
+                            : null,
+                      ),
+                      onPressed: _sortedRarityOptions.isEmpty
+                          ? null
+                          : () => _openFilterDialog(
+                                title: 'Rareté',
+                                options: _sortedRarityOptions,
+                                selected: _rarityFilters,
+                                onApply: (s) => setState(() {
+                                  _rarityFilters
+                                    ..clear()
+                                    ..addAll(s);
+                                }),
+                              ),
+                    ),
+                    if (widget.subcategory == CardSubcategory.pokemon)
+                      IconButton(
+                        tooltip: _typeFilters.isEmpty
+                            ? 'Type Pokémon'
+                            : 'Type (${_typeFilters.length})',
+                        icon: Icon(
+                          Icons.bolt_outlined,
+                          size: 20,
+                          color: _typeFilters.isNotEmpty
+                              ? widget.subcategory.color
+                              : null,
+                        ),
+                        onPressed: () => _openFilterDialog(
+                          title: 'Type Pokémon',
+                          options: _typeOptions.toList()..sort(),
+                          selected: _typeFilters,
+                          onApply: (s) => setState(() {
+                            _typeFilters
+                              ..clear()
+                              ..addAll(s);
+                          }),
+                        ),
+                      ),
                     FilterChip(
                       label: const Text('Nom', style: TextStyle(fontSize: 11)),
                       selected: _sort == _GlobalSearchSort.name,
@@ -289,8 +510,9 @@ class _TcgGlobalSearchScreenState extends State<TcgGlobalSearchScreen> {
                         itemCount: filtered.length,
                         itemBuilder: (context, i) {
                           final card = filtered[i];
-                          final owned = _ownedIds.contains(card.id);
-                          final inWishlist = _wishlistIds.contains(card.id);
+                          final owned = _ownedIds.contains(_catalogKey(card));
+                          final inWishlist =
+                              _wishlistIds.contains(_catalogKey(card));
                           return TcgCatalogCardTile(
                             name: card.name,
                             imageUrl: card.imageUrl,

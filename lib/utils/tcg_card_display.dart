@@ -1,4 +1,5 @@
 import '../models/collection_item.dart';
+import '../models/pokemon_card_lang.dart';
 import '../models/tcg_set_info.dart';
 
 /// Sous-titre compact sous le nom (bloc · série · n°/total).
@@ -41,6 +42,10 @@ String? tcgCollectionItemSubtitle(CollectionItem item) {
   if (m == null) return null;
 
   final parts = <String>[];
+  final lang = m['card_lang']?.toString();
+  if (lang != null && lang.isNotEmpty) {
+    parts.add(PokemonCardLang.shortLabel(lang));
+  }
   final block = m['block_name'] ?? m['series_name'];
   final set = m['set_name'];
   final blockTrim = block?.toString().trim();

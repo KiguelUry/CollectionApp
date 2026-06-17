@@ -2,15 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/card_subcategory.dart';
+import '../models/pokemon_card_lang.dart';
 import '../models/collection_category.dart';
 import '../services/lorcast_service.dart';
 import '../services/onepiece_tcg_service.dart';
-import '../services/pokemon_tcg_service.dart';
 import '../services/scryfall_service.dart';
 import '../services/ygoprodeck_service.dart';
 import '../widgets/category_hub_header.dart';
 import '../widgets/category_type_hub.dart';
 import 'home_screen.dart';
+import 'tcg/pokemon_series_blocks_screen.dart';
 import 'tcg/tcg_global_search_screen.dart';
 import 'tcg/tcg_series_blocks_screen.dart';
 
@@ -27,6 +28,7 @@ class _CardsCollectionScreenState extends State<CardsCollectionScreen> {
   static const _tipKey = 'ux_tip_cards_hub';
 
   CardSubcategory _searchSub = CardSubcategory.pokemon;
+  String _searchLang = PokemonCardLang.fr;
   final _searchController = TextEditingController();
 
   @override
@@ -57,6 +59,7 @@ class _CardsCollectionScreenState extends State<CardsCollectionScreen> {
         builder: (ctx) => TcgGlobalSearchScreen(
           subcategory: _searchSub,
           query: q,
+          pokemonLang: _searchSub == CardSubcategory.pokemon ? _searchLang : null,
         ),
       ),
     );
@@ -105,8 +108,15 @@ class _CardsCollectionScreenState extends State<CardsCollectionScreen> {
   }
 
   void _openCatalogBrowser(BuildContext context, CardSubcategory sub) {
+    if (sub == CardSubcategory.pokemon) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (ctx) => const PokemonSeriesBlocksScreen()),
+      );
+      return;
+    }
+
     final loadBlocks = switch (sub) {
-      CardSubcategory.pokemon => PokemonTcgService.fetchBlocks,
       CardSubcategory.magic => ScryfallService.fetchBlocks,
       CardSubcategory.yugioh => YgoprodeckService.fetchBlocks,
       CardSubcategory.onepiece => OnepieceTcgService.fetchBlocks,
@@ -169,6 +179,31 @@ class _CardsCollectionScreenState extends State<CardsCollectionScreen> {
                     ],
                   ),
                 ),
+                if (_searchSub == CardSubcategory.pokemon) ...[
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    height: 32,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      children: [
+                        for (final lang in PokemonCardLang.all)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: FilterChip(
+                              label: Text(
+                                PokemonCardLang.shortLabel(lang),
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                              selected: _searchLang == lang,
+                              onSelected: (_) =>
+                                  setState(() => _searchLang = lang),
+                              showCheckmark: false,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 8),
                 TextField(
                   controller: _searchController,
@@ -195,7 +230,7 @@ class _CardsCollectionScreenState extends State<CardsCollectionScreen> {
               title: 'Cartes',
               showTitleInHero: false,
               subtitle:
-                  'Recherche globale ci-dessus, ou parcours par univers.',
+                  'Pokémon FR / EN / JA (TCGdex) ; One Piece & Lorcana en anglais.',
               featuredItem: CategoryTypeHubItem(
                 label: 'Toutes mes cartes',
                 description: 'Vue globale — filtre par univers (Pokémon, One Piece…)',
