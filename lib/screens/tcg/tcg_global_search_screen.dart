@@ -8,12 +8,15 @@ import '../../services/user_card_collection_service.dart';
 import '../../utils/card_quick_add.dart';
 import '../../utils/collection_grid_layout.dart';
 import '../../utils/tcg_bulk_add.dart';
+import '../../utils/tcg_card_display.dart';
 import '../../utils/tcg_rarity_order.dart';
 import '../../widgets/app_app_bar.dart';
 import '../../widgets/cover_preview_sheet.dart';
 import '../../widgets/tcg/tcg_catalog_card_tile.dart';
 import '../../widgets/ui/empty_state.dart';
 import '../../widgets/ui/loading_placeholder.dart';
+
+enum _GlobalSearchSort { name, rarity }
 
 /// Résultats de recherche catalogue (toutes séries confondues).
 class TcgGlobalSearchScreen extends StatefulWidget {
@@ -37,6 +40,7 @@ class _TcgGlobalSearchScreenState extends State<TcgGlobalSearchScreen> {
   bool _loading = true;
   late String _apiQuery;
   late final TextEditingController _searchController;
+  _GlobalSearchSort _sort = _GlobalSearchSort.name;
 
   @override
   void initState() {
@@ -75,6 +79,9 @@ class _TcgGlobalSearchScreenState extends State<TcgGlobalSearchScreen> {
         hits,
         widget.subcategory,
       );
+      if (widget.subcategory == CardSubcategory.pokemon) {
+        PokemonTcgService.fillMissingCardImages(cards);
+      }
       final svc = UserCardCollectionService();
       final owned = await svc.ownedCatalogIds(widget.subcategory);
       final wishlist = await svc.wishlistCatalogIds(widget.subcategory);
@@ -86,17 +93,16 @@ class _TcgGlobalSearchScreenState extends State<TcgGlobalSearchScreen> {
         _loading = false;
       });
       if (widget.subcategory == CardSubcategory.pokemon) {
-        _maybeEnrichPokemonRarities();
+        _maybeEnrichPokemonDetails();
       }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  Future<void> _maybeEnrichPokemonRarities() async {
-    if (!_cards.any((c) => c.rarity == null || c.rarity!.isEmpty)) return;
+  Future<void> _maybeEnrichPokemonDetails() async {
     final copy = List<TcgCatalogCard>.from(_cards);
-    await PokemonTcgService.enrichRarities(copy);
+    await PokemonTcgService.enrichCardDetails(copy);
     if (!mounted) return;
     setState(() => _cards = copy);
   }
@@ -161,13 +167,19 @@ class _TcgGlobalSearchScreenState extends State<TcgGlobalSearchScreen> {
       list = list.where((c) => c.name.toLowerCase().contains(q)).toList();
     }
     final sorted = List<TcgCatalogCard>.from(list);
-    sortTcgCardsByRarity(
-      sorted,
-      widget.subcategory,
-      rarityOf: (c) => c.rarity,
-      tieBreaker: (c) => c.name,
-      numberOf: (c) => c.number,
-    );
+    if (_sort == _GlobalSearchSort.name) {
+      sorted.sort(
+        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+      );
+    } else {
+      sortTcgCardsByRarity(
+        sorted,
+        widget.subcategory,
+        rarityOf: (c) => c.rarity,
+        tieBreaker: (c) => c.name,
+        numberOf: (c) => c.number,
+      );
+    }
     return sorted;
   }
 
@@ -182,21 +194,65 @@ class _TcgGlobalSearchScreenState extends State<TcgGlobalSearchScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-            child: TextField(
-              decoration: const InputDecoration(
-                hintText: 'Affiner la recherche…',
-                isDense: true,
-                prefixIcon: Icon(Icons.search, size: 20),
-              ),
-              controller: _searchController,
-              onSubmitted: (v) {
-                final trimmed = v.trim();
-                if (trimmed.length >= 2 && trimmed != _apiQuery) {
-                  setState(() => _apiQuery = trimmed);
-                  _load();
-                }
-              },
-              onChanged: (_) => setState(() {}),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextField(
+                  decoration: const InputDecoration(
+                    hintText: 'Affiner la recherche…',
+                    isDense: true,
+                    prefixIcon: Icon(Icons.search, size: 20),
+                  ),
+                  controller: _searchController,
+                  onSubmitted: (v) {
+                    final trimmed = v.trim();
+                    if (trimmed.length >= 2 && trimmed != _apiQuery) {
+                      setState(() => _apiQuery = trimmed);
+                      _load();
+                    }
+                  },
+                  onChanged: (_) => setState(() {}),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Text(
+                      '${filtered.length} carte${filtered.length > 1 ? 's' : ''}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
+                    const Spacer(),
+                    FilterChip(
+                      label: const Text('Nom', style: TextStyle(fontSize: 11)),
+                      selected: _sort == _GlobalSearchSort.name,
+                      onSelected: (_) =>
+                          setState(() => _sort = _GlobalSearchSort.name),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    const SizedBox(width: 4),
+                    FilterChip(
+                      label: const Text('Rareté', style: TextStyle(fontSize: 11)),
+                      selected: _sort == _GlobalSearchSort.rarity,
+                      onSelected: (_) =>
+                          setState(() => _sort = _GlobalSearchSort.rarity),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ],
+                ),
+                if (!_loading && _cards.length >= 500)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      '500+ résultats max — affine ta recherche pour en voir plus.',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.orange.shade800,
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
           Expanded(
@@ -218,7 +274,7 @@ class _TcgGlobalSearchScreenState extends State<TcgGlobalSearchScreen> {
                         gridDelegate: CollectionGridLayout.gridDelegate(
                           context,
                           mobileColumns: 3,
-                          childAspectRatio: 0.5,
+                          childAspectRatio: 0.42,
                           spacing: 4,
                         ),
                         itemCount: filtered.length,
@@ -229,6 +285,7 @@ class _TcgGlobalSearchScreenState extends State<TcgGlobalSearchScreen> {
                           return TcgCatalogCardTile(
                             name: card.name,
                             imageUrl: card.imageUrl,
+                            detailLines: tcgCatalogDetailLines(card),
                             accent: widget.subcategory.color,
                             owned: owned,
                             inWishlist: inWishlist,

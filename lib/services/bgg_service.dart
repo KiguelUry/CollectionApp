@@ -1,9 +1,6 @@
-import 'dart:convert';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:xml/xml.dart';
 
 import '../config/app_env.dart';
@@ -58,15 +55,39 @@ class BggService {
     return headers;
   }
 
+  static Uri _requestUri(Uri bggUri) {
+    if (!_useWebProxy) return bggUri;
+    final base = AppEnv.supabaseUrl.replaceAll(RegExp(r'/+$'), '');
+    return Uri.parse('$base/functions/v1/bgg-proxy').replace(
+      queryParameters: {
+        'path': bggUri.path,
+        ...bggUri.queryParameters,
+      },
+    );
+  }
+
+  static Map<String, String> _requestHeaders() {
+    final headers = Map<String, String>.from(_headers);
+    if (_useWebProxy && _webProxyReady) {
+      final anon = AppEnv.supabaseAnonKey;
+      headers['apikey'] = anon;
+      headers['Authorization'] = 'Bearer $anon';
+    }
+    return headers;
+  }
+
   /// L'API XML BGG répond souvent 202 (« Please try again ») : on réessaie.
   static Future<http.Response> _getWithRetry(Uri url) async {
     if (_useWebProxy && !_webProxyReady) {
       return http.Response('', 503);
     }
 
+    final target = _useWebProxy ? _requestUri(url) : url;
+    final headers = _useWebProxy ? _requestHeaders() : _headers;
+
     http.Response? last;
     for (var attempt = 0; attempt < _maxPollAttempts; attempt++) {
-      last = _useWebProxy ? await _getViaSupabaseProxy(url) : await http.get(url, headers: _headers);
+      last = await http.get(target, headers: headers);
       final pending = last.statusCode == 202 ||
           (last.statusCode == 200 &&
               last.body.contains('Please try again'));
@@ -76,45 +97,6 @@ class BggService {
       );
     }
     return last!;
-  }
-
-  /// Appel proxy via le client Supabase (URL + clés déjà initialisés à l'auth).
-  static Future<http.Response> _getViaSupabaseProxy(Uri bggUri) async {
-    try {
-      final res = await Supabase.instance.client.functions.invoke(
-        'bgg-proxy',
-        method: HttpMethod.get,
-        queryParameters: {
-          'path': bggUri.path,
-          ...bggUri.queryParameters,
-        },
-      );
-
-      final body = _proxyBodyFromInvoke(res);
-      return http.Response(body, res.status);
-    } catch (e) {
-      final msg = e.toString();
-      if (msg.contains('NetworkError') || msg.contains('Failed to fetch')) {
-        final url = AppEnv.supabaseUrl;
-        lastSearchError =
-            'Connexion Supabase impossible ($url). '
-            'Vérifie SUPABASE_URL dans GitHub Secrets — '
-            'doit être exactement https://jfudrneoblsiingjqsio.supabase.co '
-            '(deux « i » dans lsiing).';
-      }
-      rethrow;
-    }
-  }
-
-  static String _proxyBodyFromInvoke(FunctionResponse res) {
-    final data = res.data;
-    if (data == null) return '';
-    if (data is String) return data;
-    if (data is List<int>) return utf8.decode(data);
-    if (data is Map && data.containsKey('error')) {
-      return data['error']?.toString() ?? '';
-    }
-    return data.toString();
   }
 
   static String _primaryTitle(XmlElement node) {

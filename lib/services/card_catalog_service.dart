@@ -49,6 +49,10 @@ class CardCatalogService {
     return {
       'catalog_source': card['source'] ?? '',
       if ((card['set_name'] ?? '').isNotEmpty) 'set_name': card['set_name']!,
+      if ((card['block_name'] ?? '').isNotEmpty) 'block_name': card['block_name']!,
+      if ((card['series_name'] ?? '').isNotEmpty)
+        'series_name': card['series_name']!,
+      if ((card['set_total'] ?? '').isNotEmpty) 'set_total': card['set_total']!,
       if ((card['set_id'] ?? '').isNotEmpty) 'set_id': card['set_id']!,
       if ((card['set_code'] ?? '').isNotEmpty) 'set_code': card['set_code']!,
       if ((card['card_number'] ?? '').isNotEmpty)

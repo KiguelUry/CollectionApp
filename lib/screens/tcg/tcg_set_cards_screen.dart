@@ -11,6 +11,7 @@ import '../../services/user_card_collection_service.dart';
 import '../../utils/collection_grid_layout.dart';
 import '../../utils/card_quick_add.dart';
 import '../../utils/tcg_bulk_add.dart';
+import '../../utils/tcg_card_display.dart';
 import '../../utils/tcg_rarity_order.dart';
 import '../../widgets/app_app_bar.dart';
 import '../../widgets/cover_preview_sheet.dart';
@@ -152,18 +153,26 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
         _wishlistIds = wishlist;
         _loading = false;
       });
-      _maybeEnrichPokemonRarities();
+      _maybeEnrichPokemonDetails();
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  Future<void> _maybeEnrichPokemonRarities() async {
+  Future<void> _maybeEnrichPokemonDetails() async {
     if (widget.subcategory != CardSubcategory.pokemon) return;
-    if (!_cards.any((c) => c.rarity == null || c.rarity!.isEmpty)) return;
+    if (!_cards.any(
+      (c) =>
+          c.rarity == null ||
+          c.rarity!.isEmpty ||
+          c.imageUrl == null ||
+          c.imageUrl!.isEmpty,
+    )) {
+      return;
+    }
     setState(() => _enrichingRarities = true);
     final copy = List<TcgCatalogCard>.from(_cards);
-    await PokemonTcgService.enrichRarities(copy);
+    await PokemonTcgService.enrichCardDetails(copy);
     if (!mounted) return;
     setState(() {
       _cards = copy;
@@ -174,7 +183,10 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
   Future<List<TcgCatalogCard>> _fetchCards() async {
     return switch (widget.subcategory) {
       CardSubcategory.pokemon =>
-        PokemonTcgService.fetchCardsInSet(widget.set.id),
+        PokemonTcgService.fetchCardsInSet(
+          widget.set.id,
+          setInfo: widget.set,
+        ),
       CardSubcategory.magic =>
         ScryfallService.fetchCardsInSet(widget.set.code ?? widget.set.id),
       CardSubcategory.yugioh =>
@@ -388,7 +400,7 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
                             CollectionGridLayout.gridDelegate(
                           context,
                           mobileColumns: 3,
-                          childAspectRatio: 0.5,
+                          childAspectRatio: 0.42,
                           spacing: 4,
                         ),
                         itemCount: filtered.length,
@@ -400,6 +412,12 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
                           return TcgCatalogCardTile(
                             name: card.name,
                             imageUrl: card.imageUrl,
+                            detailLines: tcgCatalogDetailLines(
+                              card,
+                              blockName: widget.set.seriesName,
+                              setName: widget.set.displayName,
+                              setTotal: widget.set.totalCards,
+                            ),
                             accent: widget.subcategory.color,
                             owned: owned,
                             inWishlist: inWishlist,

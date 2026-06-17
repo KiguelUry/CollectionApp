@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../bgg_network_image.dart';
 
-/// Tuile catalogue : fine cellule blanche + bandeau gris avec le nom.
+/// Tuile catalogue : image + infos (bloc, série, numéro).
 class TcgCatalogCardTile extends StatelessWidget {
   final String name;
   final String? imageUrl;
+  final List<String> detailLines;
   final Color accent;
   final bool owned;
   final bool inWishlist;
@@ -20,6 +21,7 @@ class TcgCatalogCardTile extends StatelessWidget {
     super.key,
     required this.name,
     this.imageUrl,
+    this.detailLines = const [],
     required this.accent,
     this.owned = false,
     this.inWishlist = false,
@@ -51,6 +53,7 @@ class TcgCatalogCardTile extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Expanded(
+                flex: 11,
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
@@ -163,26 +166,46 @@ class TcgCatalogCardTile extends StatelessWidget {
                   ],
                 ),
               ),
-              Container(
-                width: double.infinity,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 3, vertical: 3),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: const BorderRadius.vertical(
-                    bottom: Radius.circular(5),
+              Flexible(
+                flex: 9,
+                child: Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 3, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: const BorderRadius.vertical(
+                      bottom: Radius.circular(5),
+                    ),
                   ),
-                ),
-                child: Text(
-                  name,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 8,
-                    height: 1.05,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.black87,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 7.5,
+                          height: 1.05,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      for (final line in detailLines.take(3))
+                        Text(
+                          line,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 6,
+                            height: 1.1,
+                            color: Colors.grey.shade800,
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ),
