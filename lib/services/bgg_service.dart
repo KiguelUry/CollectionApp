@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:xml/xml.dart';
 
 import '../config/app_env.dart';
+import '../config/supabase_public_config.dart';
 import '../models/bgg_expansion.dart';
 import '../utils/search_relevance.dart';
 
@@ -57,7 +58,8 @@ class BggService {
 
   static Uri _requestUri(Uri bggUri) {
     if (!_useWebProxy) return bggUri;
-    final base = AppEnv.supabaseUrl.replaceAll(RegExp(r'/+$'), '');
+    // URL canonique (ignore les typos dans .env / secrets GitHub).
+    final base = SupabasePublicConfig.url.replaceAll(RegExp(r'/+$'), '');
     return Uri.parse('$base/functions/v1/bgg-proxy').replace(
       queryParameters: {
         'path': bggUri.path,

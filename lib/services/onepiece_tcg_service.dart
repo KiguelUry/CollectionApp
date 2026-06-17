@@ -99,25 +99,37 @@ class OnepieceTcgService {
     if (q.length < 2) return [];
 
     try {
-      final url = Uri.https('www.optcgapi.com', '/api/cards/search', {
-        'name': q,
-      });
-      final response = await http.get(
-        url,
-        headers: {'Accept': 'application/json'},
-      );
-      if (response.statusCode != 200) return [];
+      final hits = <Map<String, String>>[];
+      final seen = <String>{};
 
-      final body = jsonDecode(response.body);
-      final list = body is List
-          ? body
-          : (body as Map<String, dynamic>)['data'] as List<dynamic>? ?? [];
+      for (final path in [
+        '/api/sets/filtered/',
+        '/api/decks/filtered/',
+        '/api/promos/filtered/',
+      ]) {
+        final url = Uri.https('www.optcgapi.com', path, {'card_name': q});
+        final response = await http.get(
+          url,
+          headers: {'Accept': 'application/json'},
+        );
+        if (response.statusCode != 200) continue;
 
-      return list
-          .map((c) => _mapLegacy(c as Map<String, dynamic>))
-          .whereType<Map<String, String>>()
-          .take(24)
-          .toList();
+        final body = jsonDecode(response.body);
+        final list = body is List ? body : <dynamic>[];
+
+        for (final raw in list) {
+          final mapped = _mapLegacy(raw as Map<String, dynamic>);
+          if (mapped == null) continue;
+          final key = mapped['onepiece_card_id'] ?? mapped['title'] ?? '';
+          if (key.isEmpty || seen.contains(key)) continue;
+          seen.add(key);
+          hits.add(mapped);
+          if (hits.length >= 100) break;
+        }
+        if (hits.length >= 100) break;
+      }
+
+      return hits;
     } catch (e) {
       if (kDebugMode) debugPrint('One Piece TCG search: $e');
       return [];
@@ -168,6 +180,7 @@ class OnepieceTcgService {
 
     final cardSetId = card['card_set_id']?.toString() ?? '';
     final setId = card['set_id']?.toString() ?? '';
+    final block = _blockForSetId(setId);
 
     return TcgCatalogCard(
       id: cardSetId.isNotEmpty ? cardSetId : (card['id']?.toString() ?? name),
@@ -182,6 +195,8 @@ class OnepieceTcgService {
             : (card['card_id']?.toString() ?? card['id']?.toString() ?? ''),
         'set_id': setId,
         'set_name': card['set_name']?.toString() ?? '',
+        'block_name': block,
+        'series_name': block,
         'card_number': cardSetId,
         'rarity': card['rarity']?.toString() ?? '',
         'source': 'optcg',

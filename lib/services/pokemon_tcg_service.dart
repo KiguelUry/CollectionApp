@@ -150,17 +150,65 @@ class PokemonTcgService {
 
   static TcgCatalogCard _ensureCardImage(TcgCatalogCard card) {
     if (card.imageUrl != null && card.imageUrl!.isNotEmpty) return card;
-    final url = tcgdexCardImageUrl(card.id, localId: card.number);
-    if (url == null) return card;
-    return TcgCatalogCard(
-      id: card.id,
-      name: card.name,
-      imageUrl: url,
-      setName: card.setName,
-      number: card.number,
-      rarity: card.rarity,
-      raw: card.raw,
-    );
+    for (final lang in ['fr', 'en']) {
+      final url = tcgdexCardImageUrl(card.id, localId: card.number, lang: lang);
+      if (url != null) {
+        return TcgCatalogCard(
+          id: card.id,
+          name: card.name,
+          imageUrl: url,
+          setName: card.setName,
+          number: card.number,
+          rarity: card.rarity,
+          raw: card.raw,
+        );
+      }
+    }
+    return card;
+  }
+
+  /// Complète bloc / série / total pour les résultats de recherche globale.
+  static Future<void> enrichSearchMetadata(List<TcgCatalogCard> cards) async {
+    final setIds = cards
+        .map((c) => c.raw['set_id'] ?? '')
+        .where((id) => id.isNotEmpty)
+        .toSet();
+    if (setIds.isEmpty) return;
+
+    final cache = <String, Map<String, String>>{};
+    for (final setId in setIds) {
+      try {
+        final response = await http.get(_uri('/sets/$setId'));
+        if (response.statusCode != 200) continue;
+        final s = jsonDecode(response.body) as Map<String, dynamic>;
+        final serie = s['serie'] as Map<String, dynamic>?;
+        final cardCount = s['cardCount'] as Map<String, dynamic>?;
+        final total =
+            cardCount?['official'] as int? ?? cardCount?['total'] as int?;
+        cache[setId] = {
+          'set_name': s['name']?.toString() ?? '',
+          'block_name': serie?['name']?.toString() ?? '',
+          'series_name': serie?['name']?.toString() ?? '',
+          if (total != null && total > 0) 'set_total': total.toString(),
+        };
+      } catch (_) {}
+    }
+
+    for (var i = 0; i < cards.length; i++) {
+      final c = cards[i];
+      final setId = c.raw['set_id'] ?? '';
+      final meta = cache[setId];
+      if (meta == null) continue;
+      cards[i] = TcgCatalogCard(
+        id: c.id,
+        name: c.name,
+        imageUrl: c.imageUrl,
+        setName: meta['set_name'] ?? c.setName,
+        number: c.number,
+        rarity: c.rarity,
+        raw: {...c.raw, ...meta},
+      );
+    }
   }
 
   /// Complète images + raretés manquantes.

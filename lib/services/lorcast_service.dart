@@ -71,7 +71,10 @@ class LorcastService {
     }
   }
 
-  static Future<List<TcgCatalogCard>> fetchCardsInSet(String setIdOrCode) async {
+  static Future<List<TcgCatalogCard>> fetchCardsInSet(
+    String setIdOrCode, {
+    TcgSetInfo? setInfo,
+  }) async {
     if (setIdOrCode.isEmpty) return [];
     try {
       final path = '/v0/sets/${Uri.encodeComponent(setIdOrCode)}/cards';
@@ -90,7 +93,12 @@ class LorcastService {
               [];
 
       return list
-          .map((c) => _mapCatalogCard(c as Map<String, dynamic>))
+          .map(
+            (c) => _mapCatalogCard(
+              c as Map<String, dynamic>,
+              setInfo: setInfo,
+            ),
+          )
           .whereType<TcgCatalogCard>()
           .toList();
     } catch (e) {
@@ -135,7 +143,10 @@ class LorcastService {
     return int.tryParse(c) != null;
   }
 
-  static TcgCatalogCard? _mapCatalogCard(Map<String, dynamic> card) {
+  static TcgCatalogCard? _mapCatalogCard(
+    Map<String, dynamic> card, {
+    TcgSetInfo? setInfo,
+  }) {
     final baseName = card['name'] as String?;
     if (baseName == null || baseName.isEmpty) return null;
 
@@ -152,18 +163,22 @@ class LorcastService {
 
     final set = card['set'] as Map<String, dynamic>?;
     final id = card['id']?.toString() ?? card['slug']?.toString() ?? '';
+    final setName = set?['name']?.toString() ?? setInfo?.displayName ?? '';
+    final blockName = setInfo?.seriesName ?? 'Chapitres';
 
     return TcgCatalogCard(
       id: id,
       name: name,
       imageUrl: image,
-      setName: set?['name']?.toString(),
+      setName: setName.isNotEmpty ? setName : null,
       number: card['collector_number']?.toString(),
       rarity: card['rarity']?.toString(),
       raw: {
         'lorcast_id': id,
-        'set_id': set?['id']?.toString() ?? '',
-        'set_name': set?['name']?.toString() ?? '',
+        'set_id': set?['id']?.toString() ?? setInfo?.id ?? '',
+        'set_name': setName,
+        'block_name': blockName,
+        'series_name': blockName,
         'card_number': card['collector_number']?.toString() ?? '',
         'rarity': card['rarity']?.toString() ?? '',
         'source': 'lorcast',

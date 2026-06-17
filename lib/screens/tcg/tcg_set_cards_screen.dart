@@ -194,7 +194,10 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
       CardSubcategory.onepiece =>
         OnepieceTcgService.fetchCardsInSet(widget.set.id),
       CardSubcategory.lorcana =>
-        LorcastService.fetchCardsInSet(widget.set.id),
+        LorcastService.fetchCardsInSet(
+          widget.set.id,
+          setInfo: widget.set,
+        ),
       _ => [],
     };
   }
@@ -400,7 +403,7 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
                             CollectionGridLayout.gridDelegate(
                           context,
                           mobileColumns: 3,
-                          childAspectRatio: 0.42,
+                          childAspectRatio: 0.5,
                           spacing: 4,
                         ),
                         itemCount: filtered.length,
@@ -412,7 +415,7 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
                           return TcgCatalogCardTile(
                             name: card.name,
                             imageUrl: card.imageUrl,
-                            detailLines: tcgCatalogDetailLines(
+                            subtitle: tcgCatalogSubtitle(
                               card,
                               blockName: widget.set.seriesName,
                               setName: widget.set.displayName,

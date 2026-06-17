@@ -1,13 +1,18 @@
 import 'package:flutter/foundation.dart';
 
-import '../config/app_env.dart';
+import '../config/supabase_public_config.dart';
 
 const _proxiedHosts = {
   'cf.geekdo-images.com',
   'boardgamegeek.com',
   'covers.openlibrary.org',
   'assets.tcgdex.net',
+  'api.tcgdex.net',
   'images.pokemontcg.io',
+  'cards.lorcast.io',
+  'lorcast.io',
+  'www.optcgapi.com',
+  'optcgapi.com',
   'i.discogs.com',
   'img.discogs.com',
   'st.discogs.com',
@@ -29,6 +34,6 @@ String coverUrlForWeb(String url) {
   if (uri == null || !uri.hasScheme) return url;
   if (!_proxiedHosts.contains(uri.host.toLowerCase())) return url;
 
-  final base = AppEnv.supabaseUrl.replaceAll(RegExp(r'/+$'), '');
+  final base = SupabasePublicConfig.url.replaceAll(RegExp(r'/+$'), '');
   return '$base/functions/v1/image-proxy?url=${Uri.encodeComponent(url)}';
 }

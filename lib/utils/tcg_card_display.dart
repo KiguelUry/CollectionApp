@@ -1,29 +1,35 @@
 import '../models/tcg_set_info.dart';
 
-/// Lignes d'info sous la vignette catalogue (bloc, série, numéro).
-List<String> tcgCatalogDetailLines(
+/// Sous-titre compact sous le nom (bloc · série · n°/total).
+String? tcgCatalogSubtitle(
   TcgCatalogCard card, {
   String? blockName,
   String? setName,
   int? setTotal,
 }) {
-  final lines = <String>[];
   final block =
       blockName ?? card.raw['block_name'] ?? card.raw['series_name'];
   final set = setName ?? card.setName ?? card.raw['set_name'];
-  if (block != null && block.trim().isNotEmpty) {
-    lines.add('Bloc : ${block.trim()}');
+  final parts = <String>[];
+
+  final blockTrim = block?.trim();
+  final setTrim = set?.trim();
+  if (blockTrim != null &&
+      blockTrim.isNotEmpty &&
+      blockTrim.toLowerCase() != (setTrim ?? '').toLowerCase()) {
+    parts.add(blockTrim);
   }
-  if (set != null && set.trim().isNotEmpty) {
-    lines.add('Série : ${set.trim()}');
+  if (setTrim != null && setTrim.isNotEmpty) {
+    parts.add(setTrim);
   }
+
   final num = card.number ?? card.raw['card_number'];
-  final total =
-      setTotal ?? int.tryParse(card.raw['set_total'] ?? '');
+  final total = setTotal ?? int.tryParse(card.raw['set_total'] ?? '');
   if (num != null && num.trim().isNotEmpty) {
-    lines.add(
-      total != null && total > 0 ? 'N° : $num/$total' : 'N° : $num',
+    parts.add(
+      total != null && total > 0 ? '$num/$total' : num.trim(),
     );
   }
-  return lines;
+
+  return parts.isEmpty ? null : parts.join(' · ');
 }

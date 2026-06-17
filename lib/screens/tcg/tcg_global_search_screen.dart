@@ -94,10 +94,19 @@ class _TcgGlobalSearchScreenState extends State<TcgGlobalSearchScreen> {
       });
       if (widget.subcategory == CardSubcategory.pokemon) {
         _maybeEnrichPokemonDetails();
+        _maybeEnrichSearchMeta();
       }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _maybeEnrichSearchMeta() async {
+    if (widget.subcategory != CardSubcategory.pokemon) return;
+    final copy = List<TcgCatalogCard>.from(_cards);
+    await PokemonTcgService.enrichSearchMetadata(copy);
+    if (!mounted) return;
+    setState(() => _cards = copy);
   }
 
   Future<void> _maybeEnrichPokemonDetails() async {
@@ -274,7 +283,7 @@ class _TcgGlobalSearchScreenState extends State<TcgGlobalSearchScreen> {
                         gridDelegate: CollectionGridLayout.gridDelegate(
                           context,
                           mobileColumns: 3,
-                          childAspectRatio: 0.42,
+                          childAspectRatio: 0.5,
                           spacing: 4,
                         ),
                         itemCount: filtered.length,
@@ -285,7 +294,7 @@ class _TcgGlobalSearchScreenState extends State<TcgGlobalSearchScreen> {
                           return TcgCatalogCardTile(
                             name: card.name,
                             imageUrl: card.imageUrl,
-                            detailLines: tcgCatalogDetailLines(card),
+                            subtitle: tcgCatalogSubtitle(card),
                             accent: widget.subcategory.color,
                             owned: owned,
                             inWishlist: inWishlist,
