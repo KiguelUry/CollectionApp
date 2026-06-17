@@ -7,6 +7,7 @@ import '../models/collection_item.dart';
 import '../models/tcg_set_info.dart';
 import '../services/card_catalog_service.dart';
 import '../services/profile_service.dart';
+import '../services/user_card_collection_service.dart';
 
 /// Ajout immédiat (×1, chez moi) sans ouvrir le dialogue.
 Future<bool> silentAddTcgCard(
@@ -54,6 +55,72 @@ Future<bool> silentAddTcgCard(
   } catch (_) {
     return false;
   }
+}
+
+/// Ajout immédiat en wishlist (×1) sans dialogue.
+Future<bool> silentAddTcgCardToWishlist(
+  BuildContext context, {
+  required CardSubcategory subcategory,
+  required TcgCatalogCard card,
+}) async {
+  final client = Supabase.instance.client;
+  final userId = client.auth.currentUser!.id;
+
+  try {
+    await ProfileService().ensureCurrentUserProfile();
+    final item = CollectionItem(
+      id: '',
+      title: card.name.trim(),
+      category: CollectionCategory.card,
+      subcategory: subcategory.dbValue,
+      metadata: CardCatalogService.metadataFromTcgCard(card, subcategory),
+      imageUrl: card.imageUrl,
+      isWishlist: true,
+      quantity: 1,
+      addedBy: userId,
+    );
+    await client.from('collection_items').insert(
+          item.toInsertJson(
+            isWishlist: true,
+            locationUserId: null,
+            addedBy: userId,
+          ),
+        );
+    return true;
+  } on PostgrestException catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            ProfileService.isMissingProfileFk(e)
+                ? ProfileService.missingProfileUserMessage()
+                : e.message,
+          ),
+        ),
+      );
+    }
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+
+/// Bascule wishlist : ajoute ou retire selon l'état actuel.
+Future<bool> toggleTcgWishlist(
+  BuildContext context, {
+  required CardSubcategory subcategory,
+  required TcgCatalogCard card,
+  required bool currentlyInWishlist,
+}) async {
+  if (currentlyInWishlist) {
+    return UserCardCollectionService()
+        .removeWishlistByCatalogId(subcategory, card.id);
+  }
+  return silentAddTcgCardToWishlist(
+    context,
+    subcategory: subcategory,
+    card: card,
+  );
 }
 
 /// Dialogue léger pour ajouter plusieurs cartes d'un coup.

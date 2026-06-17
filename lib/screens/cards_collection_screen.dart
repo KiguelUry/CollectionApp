@@ -11,6 +11,7 @@ import '../services/ygoprodeck_service.dart';
 import '../widgets/category_hub_header.dart';
 import '../widgets/category_type_hub.dart';
 import 'home_screen.dart';
+import 'tcg/tcg_global_search_screen.dart';
 import 'tcg/tcg_series_blocks_screen.dart';
 
 /// Hub Cartes : univers populaires → navigateur de séries ou liste classique.
@@ -25,10 +26,40 @@ class _CardsCollectionScreenState extends State<CardsCollectionScreen> {
   static const _accent = Color(0xFFE65100);
   static const _tipKey = 'ux_tip_cards_hub';
 
+  CardSubcategory _searchSub = CardSubcategory.pokemon;
+  final _searchController = TextEditingController();
+
   @override
   void initState() {
     super.initState();
     _maybeShowTip();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _openGlobalSearch(BuildContext context) {
+    final q = _searchController.text.trim();
+    if (q.length < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Tape au moins 2 lettres pour lancer la recherche.'),
+        ),
+      );
+      return;
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (ctx) => TcgGlobalSearchScreen(
+          subcategory: _searchSub,
+          query: q,
+        ),
+      ),
+    );
   }
 
   Future<void> _maybeShowTip() async {
@@ -138,13 +169,63 @@ class _CardsCollectionScreenState extends State<CardsCollectionScreen> {
             title: 'Cartes',
             accentColor: _accent,
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(
+                  height: 40,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: [
+                      for (final sub in CardSubcategory.hubOrder.where(
+                        (s) => s.supportsCatalogSearch,
+                      ))
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: FilterChip(
+                            label: Text(
+                              sub.label,
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            selected: _searchSub == sub,
+                            onSelected: (_) =>
+                                setState(() => _searchSub = sub),
+                            avatar: Icon(sub.icon, size: 16, color: sub.color),
+                            showCheckmark: false,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _searchController,
+                  textInputAction: TextInputAction.search,
+                  onSubmitted: (_) => _openGlobalSearch(context),
+                  decoration: InputDecoration(
+                    hintText: _searchSub == CardSubcategory.pokemon
+                        ? 'Rechercher « dracaufeu » dans Pokémon…'
+                        : 'Rechercher une carte dans ${_searchSub.label}…',
+                    isDense: true,
+                    prefixIcon: const Icon(Icons.search, size: 20),
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.arrow_forward),
+                      onPressed: () => _openGlobalSearch(context),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
           Expanded(
             child: CategoryTypeHub(
               accentColor: _accent,
               title: 'Cartes',
               showTitleInHero: false,
               subtitle:
-                  'Ma collection ou parcours par univers — utilise l\'icône recherche dans une collection.',
+                  'Recherche globale ci-dessus, ou parcours par univers.',
               featuredItem: CategoryTypeHubItem(
                 label: 'Toutes mes cartes',
                 description: 'Vue globale — filtre par univers (Pokémon, One Piece…)',

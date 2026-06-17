@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_group.dart';
 import '../services/group_service.dart';
 import 'bgg_network_image.dart';
+import 'cover_preview_sheet.dart';
 import 'group_badge.dart';
 import 'item_whereabouts_field.dart';
 import 'personal_whereabouts_field.dart';
@@ -98,15 +99,22 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                     if (widget.itemImageUrl != null &&
                         widget.itemImageUrl!.trim().isNotEmpty) ...[
                       Center(
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: SizedBox(
-                            width: 160,
-                            height: 160,
-                            child: BggNetworkImage(
-                              url: widget.itemImageUrl!,
-                              boxedCover: true,
-                              largeSource: true,
+                        child: GestureDetector(
+                          onTap: () => showCoverPreview(
+                            context,
+                            imageUrl: widget.itemImageUrl,
+                            title: widget.itemTitle,
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: SizedBox(
+                              width: 160,
+                              height: 160,
+                              child: BggNetworkImage(
+                                url: widget.itemImageUrl!,
+                                boxedCover: true,
+                                largeSource: true,
+                              ),
                             ),
                           ),
                         ),

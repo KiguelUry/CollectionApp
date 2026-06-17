@@ -8,10 +8,13 @@ class TcgCatalogCardTile extends StatelessWidget {
   final String? imageUrl;
   final Color accent;
   final bool owned;
+  final bool inWishlist;
   final bool selected;
   final bool selectionMode;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
   final VoidCallback? onQuickAdd;
+  final VoidCallback? onQuickWishlist;
 
   const TcgCatalogCardTile({
     super.key,
@@ -19,10 +22,13 @@ class TcgCatalogCardTile extends StatelessWidget {
     this.imageUrl,
     required this.accent,
     this.owned = false,
+    this.inWishlist = false,
     this.selected = false,
     this.selectionMode = false,
     required this.onTap,
+    this.onLongPress,
     this.onQuickAdd,
+    this.onQuickWishlist,
   });
 
   @override
@@ -31,14 +37,13 @@ class TcgCatalogCardTile extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         borderRadius: BorderRadius.circular(6),
         child: DecoratedBox(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(6),
             border: Border.all(
-              color: selected
-                  ? accent
-                  : Colors.grey.shade300,
+              color: selected ? accent : Colors.grey.shade300,
               width: selected ? 2 : 0.8,
             ),
           ),
@@ -105,6 +110,34 @@ class TcgCatalogCardTile extends StatelessWidget {
                           ),
                         ),
                       ),
+                    if (onQuickWishlist != null && !selectionMode && !owned)
+                      Positioned(
+                        top: 2,
+                        left: 2,
+                        child: Material(
+                          color: inWishlist
+                              ? Colors.red.shade600
+                              : Colors.white.withValues(alpha: 0.92),
+                          shape: const CircleBorder(),
+                          elevation: 2,
+                          child: InkWell(
+                            onTap: onQuickWishlist,
+                            customBorder: const CircleBorder(),
+                            child: Padding(
+                              padding: const EdgeInsets.all(3),
+                              child: Icon(
+                                inWishlist
+                                    ? Icons.favorite
+                                    : Icons.favorite_border,
+                                size: 14,
+                                color: inWishlist
+                                    ? Colors.white
+                                    : Colors.red.shade600,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                     if (onQuickAdd != null && !selectionMode)
                       Positioned(
                         top: 2,
@@ -132,7 +165,8 @@ class TcgCatalogCardTile extends StatelessWidget {
               ),
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 3),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 3, vertical: 3),
                 decoration: BoxDecoration(
                   color: Colors.grey.shade300,
                   borderRadius: const BorderRadius.vertical(

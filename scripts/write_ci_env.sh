@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Génère .env pour le build CI (GitHub Actions) à partir des secrets du repo.
+# SUPABASE_URL doit être exact : https://jfudrneoblsiingjqsio.supabase.co (deux « i »).
 set -euo pipefail
 
 SUPABASE_URL="${SUPABASE_URL:-https://jfudrneoblsiingjqsio.supabase.co}"

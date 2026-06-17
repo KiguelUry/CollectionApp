@@ -13,6 +13,7 @@ import '../../utils/card_quick_add.dart';
 import '../../utils/tcg_bulk_add.dart';
 import '../../utils/tcg_rarity_order.dart';
 import '../../widgets/app_app_bar.dart';
+import '../../widgets/cover_preview_sheet.dart';
 import '../../widgets/tcg/tcg_catalog_card_tile.dart';
 import '../../widgets/ui/empty_state.dart';
 import '../../widgets/ui/loading_placeholder.dart';
@@ -35,6 +36,7 @@ class TcgSetCardsScreen extends StatefulWidget {
 class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
   List<TcgCatalogCard> _cards = [];
   Set<String> _ownedIds = {};
+  Set<String> _wishlistIds = {};
   bool _loading = true;
   bool _enrichingRarities = false;
   bool _ownedOnly = false;
@@ -83,9 +85,15 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
   }
 
   Future<void> _refreshOwned() async {
-    final owned =
-        await UserCardCollectionService().ownedCatalogIds(widget.subcategory);
-    if (mounted) setState(() => _ownedIds = owned);
+    final svc = UserCardCollectionService();
+    final owned = await svc.ownedCatalogIds(widget.subcategory);
+    final wishlist = await svc.wishlistCatalogIds(widget.subcategory);
+    if (mounted) {
+      setState(() {
+        _ownedIds = owned;
+        _wishlistIds = wishlist;
+      });
+    }
   }
 
   void _showAddedSnack(String name) {
@@ -105,20 +113,43 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
       card: card,
     );
     if (!mounted || !ok) return;
-    setState(() => _ownedIds.add(card.id));
+    setState(() {
+      _ownedIds.add(card.id);
+      _wishlistIds.remove(card.id);
+    });
     _showAddedSnack(card.name);
+  }
+
+  Future<void> _toggleWishlist(TcgCatalogCard card) async {
+    final inWishlist = _wishlistIds.contains(card.id);
+    final ok = await toggleTcgWishlist(
+      context,
+      subcategory: widget.subcategory,
+      card: card,
+      currentlyInWishlist: inWishlist,
+    );
+    if (!mounted || !ok) return;
+    setState(() {
+      if (inWishlist) {
+        _wishlistIds.remove(card.id);
+      } else {
+        _wishlistIds.add(card.id);
+      }
+    });
   }
 
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
       final cards = await _fetchCards();
-      final owned =
-          await UserCardCollectionService().ownedCatalogIds(widget.subcategory);
+      final svc = UserCardCollectionService();
+      final owned = await svc.ownedCatalogIds(widget.subcategory);
+      final wishlist = await svc.wishlistCatalogIds(widget.subcategory);
       if (!mounted) return;
       setState(() {
         _cards = cards;
         _ownedIds = owned;
+        _wishlistIds = wishlist;
         _loading = false;
       });
       _maybeEnrichPokemonRarities();
@@ -364,12 +395,14 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
                         itemBuilder: (context, i) {
                           final card = filtered[i];
                           final owned = _ownedIds.contains(card.id);
+                          final inWishlist = _wishlistIds.contains(card.id);
                           final sel = _selectedIds.contains(card.id);
                           return TcgCatalogCardTile(
                             name: card.name,
                             imageUrl: card.imageUrl,
                             accent: widget.subcategory.color,
                             owned: owned,
+                            inWishlist: inWishlist,
                             selectionMode: _bulkMode,
                             selected: sel,
                             onTap: () {
@@ -389,8 +422,16 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
                                 ).then((_) => _refreshOwned());
                               }
                             },
+                            onLongPress: () => showCoverPreview(
+                              context,
+                              imageUrl: card.imageUrl,
+                              title: card.name,
+                            ),
                             onQuickAdd:
                                 _bulkMode ? null : () => _quickAddCard(card),
+                            onQuickWishlist: _bulkMode || owned
+                                ? null
+                                : () => _toggleWishlist(card),
                           );
                         },
                       ),

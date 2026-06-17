@@ -85,4 +85,45 @@ class CardCatalogService {
       if (card.rarity != null) 'rarity': card.rarity!,
     };
   }
+
+  /// Convertit un hit de recherche catalogue en [TcgCatalogCard].
+  static TcgCatalogCard catalogCardFromSearchHit(
+    Map<String, String> hit,
+    CardSubcategory subcategory,
+  ) {
+    final idKeys = switch (subcategory) {
+      CardSubcategory.pokemon => ['tcgdex_id', 'pokemon_tcg_id'],
+      CardSubcategory.magic => ['scryfall_id'],
+      CardSubcategory.yugioh => ['ygoprodeck_id'],
+      CardSubcategory.lorcana => ['lorcast_id'],
+      CardSubcategory.onepiece => ['onepiece_card_id'],
+      _ => ['catalog_id'],
+    };
+
+    var id = '';
+    for (final key in idKeys) {
+      final v = hit[key];
+      if (v != null && v.isNotEmpty) {
+        id = v;
+        break;
+      }
+    }
+    if (id.isEmpty) id = hit['title'] ?? '';
+
+    return TcgCatalogCard(
+      id: id,
+      name: hit['title'] ?? '',
+      imageUrl: (hit['image_url'] ?? '').isNotEmpty ? hit['image_url'] : null,
+      setName: (hit['set_name'] ?? '').isNotEmpty ? hit['set_name'] : null,
+      number: (hit['card_number'] ?? '').isNotEmpty ? hit['card_number'] : null,
+      rarity: (hit['rarity'] ?? '').isNotEmpty ? hit['rarity'] : null,
+      raw: hit,
+    );
+  }
+
+  static List<TcgCatalogCard> catalogCardsFromSearchHits(
+    List<Map<String, String>> hits,
+    CardSubcategory subcategory,
+  ) =>
+      hits.map((h) => catalogCardFromSearchHit(h, subcategory)).toList();
 }

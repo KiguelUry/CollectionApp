@@ -13,6 +13,7 @@ import '../services/loan_service.dart';
 import '../widgets/app_app_bar.dart';
 import '../widgets/loan_item_dialog.dart';
 import '../widgets/collection_cover_image.dart';
+import '../widgets/cover_preview_sheet.dart';
 import '../widgets/group_badge.dart';
 import '../widgets/item_whereabouts_field.dart';
 import '../widgets/personal_whereabouts_field.dart';
@@ -417,18 +418,28 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
               background: Stack(
                 fit: StackFit.expand,
                 children: [
-                  _item.imageUrl != null
-                      ? SizedBox.expand(
-                          child: CollectionCoverImage(
-                            url: _item.imageUrl!,
-                            height: 280,
-                            bookCover: isBook,
-                            boxedCover:
-                                !isBook && _item.category != CollectionCategory.card,
-                            largeSource: true,
-                          ),
-                        )
-                      : Container(color: _item.category.color),
+                  GestureDetector(
+                    onTap: _item.imageUrl != null
+                        ? () => showCoverPreview(
+                              context,
+                              imageUrl: _item.imageUrl,
+                              title: _item.title,
+                              bookCover: isBook,
+                            )
+                        : null,
+                    child: _item.imageUrl != null
+                        ? SizedBox.expand(
+                            child: CollectionCoverImage(
+                              url: _item.imageUrl!,
+                              height: 280,
+                              bookCover: isBook,
+                              boxedCover: !isBook &&
+                                  _item.category != CollectionCategory.card,
+                              largeSource: true,
+                            ),
+                          )
+                        : Container(color: _item.category.color),
+                  ),
                   const DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(

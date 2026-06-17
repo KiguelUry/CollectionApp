@@ -32,6 +32,7 @@ import '../widgets/collection_filter_bar.dart';
 import '../widgets/wishlist_suggestions_banner.dart';
 import '../widgets/collection_item_list_tile.dart';
 import '../widgets/collection_item_tile.dart';
+import '../widgets/cover_preview_sheet.dart';
 import '../widgets/isbn_scan_sheet.dart';
 import 'shake_pick_screen.dart';
 import '../widgets/add_item_manual_dialog.dart';
@@ -1318,6 +1319,16 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                 ),
               ),
+              onLongPress: item.imageUrl != null &&
+                      item.imageUrl!.trim().isNotEmpty
+                  ? () => showCoverPreview(
+                        context,
+                        imageUrl: item.imageUrl,
+                        title: item.title,
+                        bookCover:
+                            widget.category == CollectionCategory.book,
+                      )
+                  : null,
             );
           },
         );

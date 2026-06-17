@@ -362,12 +362,17 @@ class CollectionFilterBar extends StatelessWidget {
         }
         final already = filters.cardSubcategories.length == 1 &&
             filters.cardSubcategories.contains(id);
-        onChanged(
-          filters.copyWith(
-            cardSubcategories: already ? {} : {id},
-            clearCardFilters: !already,
-          ),
-        );
+        if (already) {
+          onChanged(filters.copyWith(clearCardFilters: true));
+        } else {
+          onChanged(
+            filters.copyWith(
+              cardSubcategories: {id},
+              cardRarities: {},
+              pokemonTypes: {},
+            ),
+          );
+        }
       },
       backgroundColor: color?.withValues(alpha: 0.15),
     );
