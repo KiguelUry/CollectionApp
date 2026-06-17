@@ -165,8 +165,8 @@ class _BggSearchDialogState extends State<BggSearchDialog> {
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(
-                  'Recherche BGG indisponible sur le web : déploie la fonction '
-                  'Supabase « bgg-proxy » (voir supabase/functions/bgg-proxy).',
+                  'Recherche BGG indisponible : déploie la fonction '
+                  'Supabase « bgg-api » (voir supabase/functions/bgg-api).',
                   style: TextStyle(fontSize: 10, color: Colors.orange.shade800),
                 ),
               ),

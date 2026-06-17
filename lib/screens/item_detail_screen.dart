@@ -25,6 +25,7 @@ import '../utils/boardgame_display.dart';
 import '../services/bgg_service.dart';
 import '../utils/copy_friend_item.dart';
 import '../utils/friend_item_overlap.dart';
+import '../utils/navigate_to_card_set.dart';
 import '../utils/wishlist_promote.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -368,6 +369,11 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     final metadataRows = CategoryMetadata.detailRows(_item);
     final isBoardgame = _item.category == CollectionCategory.boardgame;
     final isBook = _item.category == CollectionCategory.book;
+    final isCard = _item.category == CollectionCategory.card;
+    final cardSetName = _item.metadata?['set_name']?.toString().trim();
+    final canOpenSet = isCard &&
+        _item.cardSubcategory?.hasSetBrowser == true &&
+        (_item.metadata?['set_id']?.toString().trim().isNotEmpty ?? false);
     final ro = widget.readOnly;
     final isWishlist = _item.isWishlist;
     final ownedQty = isWishlist ? 0 : _item.quantity;
@@ -433,9 +439,9 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                               url: _item.imageUrl!,
                               height: 280,
                               bookCover: isBook,
-                              boxedCover: !isBook &&
-                                  _item.category != CollectionCategory.card,
+                              boxedCover: isBook || isCard,
                               largeSource: true,
+                              fit: isCard ? BoxFit.contain : BoxFit.cover,
                             ),
                           )
                         : Container(color: _item.category.color),
@@ -553,13 +559,28 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         ),
                       ),
                     ],
-                    if (!isBoardgame && !isWishlist) ...[
+                    if (!isBoardgame && !isWishlist && !isCard) ...[
                       const SizedBox(height: 12),
                       _buildSectionTitle('Tags'),
                       ItemTagsEditor(
                         itemId: _item.id,
                         initialTags: _item.tags,
                         readOnly: ro,
+                      ),
+                    ],
+                    if (canOpenSet) ...[
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () => openCardSetCatalog(context, _item),
+                          icon: const Icon(Icons.layers_outlined),
+                          label: Text(
+                            cardSetName != null && cardSetName.isNotEmpty
+                                ? 'Voir la série $cardSetName'
+                                : 'Voir la série',
+                          ),
+                        ),
                       ),
                     ],
                     const SizedBox(height: 16),

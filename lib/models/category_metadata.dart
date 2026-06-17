@@ -207,7 +207,28 @@ class CategoryMetadata {
         break;
       case CollectionCategory.card:
         if (item.subcategory != null) {
-          rows.add(MapEntry('Univers', CardSubcategory.fromDbValue(item.subcategory).label));
+          rows.add(MapEntry(
+            'Univers',
+            CardSubcategory.fromDbValue(item.subcategory).label,
+          ));
+        }
+        final block = m['block_name'] ?? m['series_name'];
+        if (block != null && block.toString().trim().isNotEmpty) {
+          rows.add(MapEntry('Bloc', block.toString().trim()));
+        }
+        if (m['set_name'] != null && m['set_name'].toString().trim().isNotEmpty) {
+          rows.add(MapEntry('Série', m['set_name'].toString().trim()));
+        }
+        final cardNum = m['card_number'] ?? m['number'];
+        final setTotal = m['set_total'];
+        if (cardNum != null && cardNum.toString().trim().isNotEmpty) {
+          final numLabel = setTotal != null && setTotal.toString().trim().isNotEmpty
+              ? '${cardNum.toString().trim()}/${setTotal.toString().trim()}'
+              : cardNum.toString().trim();
+          rows.add(MapEntry('Numéro', numLabel));
+        }
+        if (m['rarity'] != null && m['rarity'].toString().trim().isNotEmpty) {
+          rows.add(MapEntry('Rareté', m['rarity'].toString().trim()));
         }
         if (m['condition'] != null) {
           rows.add(MapEntry('État', CardCondition.fromDbValue(m['condition'].toString()).label));

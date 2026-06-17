@@ -74,7 +74,7 @@ class _CardsCollectionScreenState extends State<CardsCollectionScreen> {
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           content: const Text(
-            'Astuce : « Ma collection » pour voir tes cartes, ou parcours les séries.',
+            'Astuce : « Toutes mes cartes » pour ta collection, ou parcours les séries par univers.',
           ),
           duration: const Duration(seconds: 5),
         ),
@@ -82,41 +82,11 @@ class _CardsCollectionScreenState extends State<CardsCollectionScreen> {
     });
   }
 
-  Future<void> _openSubcategory(BuildContext context, CardSubcategory sub) async {
-    if (!sub.hasSetBrowser) {
-      _openMyCollection(context, sub);
-      return;
-    }
-
-    final choice = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: Icon(Icons.collections_bookmark_rounded, color: sub.color),
-              title: Text('Ma collection — ${sub.label}'),
-              subtitle: const Text('Toutes tes cartes de cet univers'),
-              onTap: () => Navigator.pop(ctx, 'mine'),
-            ),
-            ListTile(
-              leading: Icon(Icons.layers_rounded, color: sub.color),
-              title: const Text('Parcourir le catalogue'),
-              subtitle: const Text('Blocs, séries, cartes possédées x/x'),
-              onTap: () => Navigator.pop(ctx, 'browse'),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (!context.mounted || choice == null) return;
-    if (choice == 'mine') {
-      _openMyCollection(context, sub);
-    } else {
+  void _openSubcategory(BuildContext context, CardSubcategory sub) {
+    if (sub.hasSetBrowser) {
       _openCatalogBrowser(context, sub);
+    } else {
+      _openMyCollection(context, sub);
     }
   }
 

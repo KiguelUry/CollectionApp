@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
@@ -29,17 +31,63 @@ class BggService {
   static const _thingChunkSize = 8;
   static const _maxPollAttempts = 10;
 
-  /// Sur le web, les appels passent par la Edge Function Supabase `bgg-proxy`.
-  static bool get _useWebProxy => kIsWeb;
+  /// Sur le web : API JSON `bgg-api` (XML parsé côté serveur).
+  static bool get _useWebJsonApi => kIsWeb;
 
-  /// Recherche BGG : bloquée sur le web (CORS / proxy trop fragile). App native OK.
-  static bool get supportsWebSearch => !kIsWeb;
+  /// Recherche BGG : web via `bgg-api`, app native en direct.
+  static bool get supportsWebSearch => !_useWebJsonApi || _webProxyReady;
 
   static bool get _webProxyReady {
     return AppEnv.supabaseUrl.isNotEmpty && AppEnv.supabaseAnonKey.isNotEmpty;
   }
 
-  static bool get webBggAvailable => supportsWebSearch && (!_useWebProxy || _webProxyReady);
+  static bool get webBggAvailable => supportsWebSearch;
+
+  static Uri _jsonApiUri(String action, Map<String, String> params) {
+    final base = SupabasePublicConfig.url.replaceAll(RegExp(r'/+$'), '');
+    return Uri.parse('$base/functions/v1/bgg-api').replace(
+      queryParameters: {'action': action, ...params},
+    );
+  }
+
+  static Future<Map<String, dynamic>?> _jsonApiGet(
+    String action,
+    Map<String, String> params,
+  ) async {
+    if (!_webProxyReady) return null;
+    try {
+      final response = await http.get(
+        _jsonApiUri(action, params),
+        headers: _requestHeaders(),
+      );
+      if (response.statusCode != 200 || response.body.isEmpty) {
+        lastSearchError = response.statusCode == 0
+            ? 'Réseau bloqué. Vérifie la fonction bgg-api sur Supabase.'
+            : 'BGG API ${response.statusCode}';
+        return null;
+      }
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) return null;
+      final err = decoded['error'];
+      if (err != null) {
+        lastSearchError = err.toString();
+        return null;
+      }
+      return decoded;
+    } catch (e) {
+      lastSearchError = 'BGG API : $e';
+      return null;
+    }
+  }
+
+  static List<Map<String, String>> _gamesFromJsonList(dynamic raw) {
+    if (raw is! List) return [];
+    return raw
+        .whereType<Map>()
+        .map((g) => g.map((k, v) => MapEntry(k.toString(), v?.toString() ?? '')))
+        .where((g) => g['id']?.isNotEmpty == true)
+        .toList();
+  }
 
   /// Dernière erreur recherche (affichée sur le web en release).
   static String? lastSearchError;
@@ -59,21 +107,9 @@ class BggService {
     return headers;
   }
 
-  static Uri _requestUri(Uri bggUri) {
-    if (!_useWebProxy) return bggUri;
-    // URL canonique (ignore les typos dans .env / secrets GitHub).
-    final base = SupabasePublicConfig.url.replaceAll(RegExp(r'/+$'), '');
-    return Uri.parse('$base/functions/v1/bgg-proxy').replace(
-      queryParameters: {
-        'path': bggUri.path,
-        ...bggUri.queryParameters,
-      },
-    );
-  }
-
   static Map<String, String> _requestHeaders() {
     final headers = Map<String, String>.from(_headers);
-    if (_useWebProxy && _webProxyReady) {
+    if (_useWebJsonApi && _webProxyReady) {
       final anon = AppEnv.supabaseAnonKey;
       headers['apikey'] = anon;
       headers['Authorization'] = 'Bearer $anon';
@@ -83,12 +119,12 @@ class BggService {
 
   /// L'API XML BGG répond souvent 202 (« Please try again ») : on réessaie.
   static Future<http.Response> _getWithRetry(Uri url) async {
-    if (_useWebProxy && !_webProxyReady) {
+    if (_useWebJsonApi) {
       return http.Response('', 503);
     }
 
-    final target = _useWebProxy ? _requestUri(url) : url;
-    final headers = _useWebProxy ? _requestHeaders() : _headers;
+    final target = url;
+    final headers = _headers;
 
     http.Response? last;
     for (var attempt = 0; attempt < _maxPollAttempts; attempt++) {
@@ -124,9 +160,19 @@ class BggService {
     lastSearchError = null;
     if (!supportsWebSearch) {
       lastSearchError =
-          'Recherche BGG disponible sur l\'app Android. Sur le web, utilise « Saisir à la main ».';
+          'Recherche BGG indisponible : configure Supabase (fonction bgg-api).';
       return [];
     }
+
+    if (_useWebJsonApi) {
+      final data = await _jsonApiGet('search', {
+        'query': trimmed,
+        'sort': sort == BggSearchSort.recent ? 'recent' : 'smart',
+      });
+      if (data == null) return [];
+      return _gamesFromJsonList(data['games']);
+    }
+
     try {
       final url = Uri.https('boardgamegeek.com', '/xmlapi2/search', {
         'query': trimmed,
@@ -252,6 +298,21 @@ class BggService {
   /// Jeux « hot » du moment sur BGG (tendances), mis en cache 30 min.
   static Future<List<Map<String, String>>> fetchHotBoardgames() async {
     if (!supportsWebSearch) return [];
+
+    if (_useWebJsonApi) {
+      if (_hotCache != null &&
+          _hotCacheAt != null &&
+          DateTime.now().difference(_hotCacheAt!) <
+              const Duration(minutes: 30)) {
+        return _hotCache!;
+      }
+      final data = await _jsonApiGet('hot', {});
+      final games = _gamesFromJsonList(data?['games']);
+      _hotCache = games;
+      _hotCacheAt = DateTime.now();
+      return games;
+    }
+
     if (_hotCache != null &&
         _hotCacheAt != null &&
         DateTime.now().difference(_hotCacheAt!) <
@@ -308,7 +369,7 @@ class BggService {
   static Future<Map<String, _BggThingMeta>> _fetchThingMeta(
     List<String> ids,
   ) async {
-    if (ids.isEmpty || (_useWebProxy && !_webProxyReady)) return {};
+    if (ids.isEmpty || _useWebJsonApi) return {};
 
     final result = <String, _BggThingMeta>{};
 
@@ -433,8 +494,24 @@ class BggService {
 
   /// Extensions BGG du jeu de base (`inbound="true"` sur le lien expansion).
   static Future<List<BggExpansion>> fetchExpansions(String baseGameBggId) async {
-    if (baseGameBggId.isEmpty || (_useWebProxy && !_webProxyReady)) {
-      return [];
+    if (baseGameBggId.isEmpty) return [];
+    if (_useWebJsonApi) {
+      if (!_webProxyReady) return [];
+      final data = await _jsonApiGet('expansions', {'id': baseGameBggId});
+      final raw = data?['expansions'];
+      if (raw is! List) return [];
+      return raw.whereType<Map>().map((e) {
+        return BggExpansion(
+          bggId: e['bggId']?.toString() ?? '',
+          title: e['title']?.toString() ?? '',
+          imageUrl: e['imageUrl']?.toString(),
+          year: e['year'] is int ? e['year'] as int : int.tryParse('${e['year']}'),
+          summary: e['summary']?.toString(),
+          bggRank: e['bggRank'] is int
+              ? e['bggRank'] as int
+              : int.tryParse('${e['bggRank']}'),
+        );
+      }).where((e) => e.bggId.isNotEmpty).toList();
     }
 
     try {
@@ -521,7 +598,12 @@ class BggService {
   }
 
   static Future<Map<String, dynamic>?> getGameFullDetails(String bggId) async {
-    if (_useWebProxy && !_webProxyReady) return null;
+    if (_useWebJsonApi) {
+      if (!_webProxyReady) return null;
+      final data = await _jsonApiGet('game', {'id': bggId});
+      final game = data?['game'];
+      return game is Map<String, dynamic> ? game : null;
+    }
 
     try {
       final url = Uri.https('boardgamegeek.com', '/xmlapi2/thing', {

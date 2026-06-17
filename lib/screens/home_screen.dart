@@ -18,6 +18,7 @@ import '../utils/collection_grid_grouper.dart';
 import '../utils/collection_grid_layout.dart';
 import '../utils/collection_item_filters.dart';
 import '../utils/card_item_metadata.dart';
+import '../utils/tcg_rarity_order.dart';
 import '../utils/wishlist_promote.dart';
 import '../models/collection_list_filters.dart';
 import '../models/collection_view_mode.dart';
@@ -259,11 +260,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   void _onAddPressed() {
     if (widget.category.supportsBggSearch) {
-      if (kIsWeb) {
-        _showBoardgameAddChooser();
-      } else {
-        _showBggSearchDialog();
-      }
+      _showBoardgameAddChooser();
     } else if (widget.category.supportsOpenLibrarySearch) {
       _showBookSearchDialog();
     } else if (widget.category == CollectionCategory.card) {
@@ -549,40 +546,6 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void _showBoardgameAddChooser() {
-    if (kIsWeb) {
-      showModalBottomSheet<void>(
-        context: context,
-        showDragHandle: true,
-        builder: (ctx) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-                child: Text(
-                  'La recherche BGG n\'est pas disponible sur le web '
-                  '(utilise l\'app Android). Tu peux ajouter un jeu manuellement.',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: Colors.grey.shade700,
-                  ),
-                ),
-              ),
-              ListTile(
-                leading: const Icon(Icons.edit_outlined),
-                title: const Text('Saisir le nom à la main'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showManualAddFlow();
-                },
-              ),
-            ],
-          ),
-        ),
-      );
-      return;
-    }
-
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -1133,8 +1096,12 @@ class _HomeScreenState extends State<HomeScreen>
             widget.fixedCardSubcategory == null
         ? distinctCardSubcategories(items)
         : const <CardSubcategory>[];
-    final selectedUniverse = filters.cardSubcategories.length == 1
-        ? filters.cardSubcategories.first
+    final selectedUniverse = widget.fixedCardSubcategory?.dbValue ??
+        (filters.cardSubcategories.length == 1
+            ? filters.cardSubcategories.first
+            : null);
+    final universeSub = selectedUniverse != null
+        ? CardSubcategory.fromDbValue(selectedUniverse)
         : null;
     final universeScoped = selectedUniverse != null
         ? items
@@ -1142,12 +1109,14 @@ class _HomeScreenState extends State<HomeScreen>
             .toList()
         : items;
     final cardRarityOptions = widget.category == CollectionCategory.card &&
-            selectedUniverse != null
-        ? (distinctCardRarities(universeScoped).toList()
-          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())))
+            universeSub != null
+        ? sortRarityLabels(
+            distinctCardRarities(universeScoped).toList(),
+            universeSub,
+          )
         : const <String>[];
     final pokemonTypeOptions = widget.category == CollectionCategory.card &&
-            selectedUniverse == CardSubcategory.pokemon.dbValue
+            universeSub == CardSubcategory.pokemon
         ? (distinctPokemonTypes(universeScoped).toList()
           ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())))
         : const <String>[];
@@ -1186,7 +1155,7 @@ class _HomeScreenState extends State<HomeScreen>
               : const [],
           showCardFilter: false,
           showCardSubcategoryFilter: cardSubcategoryOptions.isNotEmpty,
-          showCardUniverseDetailFilters: selectedUniverse != null,
+          showCardUniverseDetailFilters: universeSub != null,
           cardRarities: cardRarityOptions,
           pokemonTypes: pokemonTypeOptions,
           cardSubcategoryOptions: cardSubcategoryOptions,

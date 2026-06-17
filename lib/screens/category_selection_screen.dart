@@ -21,6 +21,7 @@ import 'watch_collection_screen.dart';
 import 'wishlist_overview_screen.dart';
 import '../theme/app_theme.dart';
 import '../utils/app_haptics.dart';
+import '../utils/category_hub_order.dart';
 import '../utils/collection_item_scope.dart';
 
 class CategorySelectionScreen extends StatefulWidget {
@@ -40,11 +41,19 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
   List<UserCollectionType> _customTypes = [];
   CollectionSummary _summary = const CollectionSummary();
   bool _loadingCounts = true;
+  List<CollectionCategory> _orderedCategories = CollectionCategory.menuValues;
+  bool _reorderMode = false;
 
   @override
   void initState() {
     super.initState();
+    _loadCategoryOrder();
     _load();
+  }
+
+  Future<void> _loadCategoryOrder() async {
+    final ordered = await CategoryHubOrder.loadOrderedMenuCategories();
+    if (mounted) setState(() => _orderedCategories = ordered);
   }
 
   Future<String> _getUsername() async {
@@ -208,16 +217,28 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
   }
 
   int get _gridItemCount =>
-      CollectionCategory.menuValues.length +
+      _orderedCategories.length +
       _customTypes.length +
       1;
 
+  void _onReorderCategories(int oldIndex, int newIndex) {
+    if (newIndex > oldIndex) newIndex -= 1;
+    setState(() {
+      final next = List<CollectionCategory>.from(_orderedCategories);
+      final item = next.removeAt(oldIndex);
+      next.insert(newIndex, item);
+      _orderedCategories = next;
+    });
+    CategoryHubOrder.saveOrder(_orderedCategories);
+    AppHaptics.selection();
+  }
+
   Widget _buildGridItem(int index) {
-    final builtInCount = CollectionCategory.menuValues.length;
+    final builtInCount = _orderedCategories.length;
     if (index < builtInCount) {
       return _AnimatedCategoryCard(
         index: index,
-        child: _buildCategoryCard(CollectionCategory.menuValues[index]),
+        child: _buildCategoryCard(_orderedCategories[index]),
       );
     }
     if (index < builtInCount + _customTypes.length) {
@@ -266,6 +287,14 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
       appBar: AppBar(
         title: const Text('Collections'),
         actions: [
+          IconButton(
+            icon: Icon(_reorderMode ? Icons.check : Icons.reorder),
+            tooltip: _reorderMode ? 'Terminer' : 'Réorganiser',
+            onPressed: () {
+              AppHaptics.selection();
+              setState(() => _reorderMode = !_reorderMode);
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.bar_chart_outlined),
             tooltip: 'Statistiques',
@@ -317,17 +346,35 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
           Expanded(
             child: _loadingCounts
                 ? const Center(child: CircularProgressIndicator())
-                : GridView.builder(
-                    padding: const EdgeInsets.all(16),
-                    gridDelegate: CollectionGridLayout.gridDelegate(
-                      context,
-                      mobileColumns: 2,
-                      childAspectRatio: 0.88,
-                      spacing: 14,
-                    ),
-                    itemCount: _gridItemCount,
-                    itemBuilder: (context, index) => _buildGridItem(index),
-                  ),
+                : _reorderMode
+                    ? ReorderableListView(
+                        padding: const EdgeInsets.all(16),
+                        onReorder: _onReorderCategories,
+                        children: [
+                          for (var i = 0; i < _orderedCategories.length; i++)
+                            ListTile(
+                              key: ValueKey(_orderedCategories[i]),
+                              leading: Icon(
+                                _orderedCategories[i].icon,
+                                color: _orderedCategories[i].color,
+                              ),
+                              title: Text(_orderedCategories[i].label),
+                              subtitle: Text(_orderedCategories[i].description),
+                              trailing: const Icon(Icons.drag_handle),
+                            ),
+                        ],
+                      )
+                    : GridView.builder(
+                        padding: const EdgeInsets.all(16),
+                        gridDelegate: CollectionGridLayout.gridDelegate(
+                          context,
+                          mobileColumns: 2,
+                          childAspectRatio: 0.88,
+                          spacing: 14,
+                        ),
+                        itemCount: _gridItemCount,
+                        itemBuilder: (context, index) => _buildGridItem(index),
+                      ),
           ),
         ],
       ),

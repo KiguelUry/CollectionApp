@@ -4,6 +4,7 @@ import '../models/collection_item.dart';
 import '../utils/boardgame_display.dart';
 import '../utils/boardgame_expansions.dart';
 import '../utils/friend_item_overlap.dart';
+import '../utils/tcg_card_display.dart';
 import 'bgg_network_image.dart';
 
 /// Tuile grille pour un objet de collection (grisée si vendu).
@@ -226,17 +227,36 @@ class CollectionItemTile extends StatelessWidget {
                 bottom: Radius.circular(5),
               ),
             ),
-            child: Text(
-              item.title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 8,
-                height: 1.05,
-                fontWeight: FontWeight.w600,
-                color: _isGrayed ? Colors.grey : Colors.black87,
-              ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  item.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 8,
+                    height: 1.05,
+                    fontWeight: FontWeight.w600,
+                    color: _isGrayed ? Colors.grey : Colors.black87,
+                  ),
+                ),
+                if (_cardSubtitle != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    _cardSubtitle!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 7,
+                      height: 1.05,
+                      color: Colors.grey.shade800,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ],
@@ -251,6 +271,8 @@ class CollectionItemTile extends StatelessWidget {
       child: child,
     );
   }
+
+  String? get _cardSubtitle => tcgCollectionItemSubtitle(item);
 
   String? get _subtitleLine {
     if (category == CollectionCategory.boardgame) {

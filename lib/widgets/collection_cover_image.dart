@@ -1,7 +1,19 @@
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../utils/cover_image_url.dart';
+
+/// Hôtes / formats que le web charge mieux via <img> natif (CORS, AVIF…).
+bool _preferWebHtmlImage(String url) {
+  if (!kIsWeb) return false;
+  final uri = Uri.tryParse(url);
+  if (uri == null) return false;
+  final host = uri.host.toLowerCase();
+  final path = uri.path.toLowerCase();
+  if (path.endsWith('.avif')) return true;
+  return host == 'cards.lorcast.io' || host == 'www.optcgapi.com';
+}
 
 /// Couverture nette (cache disque + mémoire, ratio livre, URLs adaptées).
 class CollectionCoverImage extends StatelessWidget {
@@ -37,32 +49,66 @@ class CollectionCoverImage extends StatelessWidget {
     final cacheH = _cachePixelSize(h, dpr);
 
     final padded = bookCover || boxedCover;
-    Widget image = CachedNetworkImage(
-      imageUrl: displayUrl,
-      width: w,
-      height: h,
-      fit: padded ? BoxFit.contain : fit,
-      filterQuality: FilterQuality.medium,
-      memCacheWidth: cacheW,
-      memCacheHeight: cacheH,
-      maxWidthDiskCache: cacheW,
-      maxHeightDiskCache: cacheH,
-      fadeInDuration: const Duration(milliseconds: 120),
-      fadeOutDuration: const Duration(milliseconds: 80),
-      placeholder: (_, _) => _fallback(
-        child: Center(
-          child: SizedBox(
-            width: 22,
-            height: 22,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: Colors.grey.shade500,
+    final imageFit = padded ? BoxFit.contain : fit;
+    Widget image;
+
+    if (_preferWebHtmlImage(displayUrl)) {
+      image = Image.network(
+        displayUrl,
+        width: w,
+        height: h,
+        fit: imageFit,
+        filterQuality: FilterQuality.medium,
+        webHtmlElementStrategy: WebHtmlElementStrategy.prefer,
+        loadingBuilder: (context, child, progress) {
+          if (progress == null) return child;
+          return _fallback(
+            child: Center(
+              child: SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.grey.shade500,
+                  value: progress.expectedTotalBytes != null
+                      ? progress.cumulativeBytesLoaded /
+                          progress.expectedTotalBytes!
+                      : null,
+                ),
+              ),
+            ),
+          );
+        },
+        errorBuilder: (_, _, _) => _fallback(),
+      );
+    } else {
+      image = CachedNetworkImage(
+        imageUrl: displayUrl,
+        width: w,
+        height: h,
+        fit: imageFit,
+        filterQuality: FilterQuality.medium,
+        memCacheWidth: cacheW,
+        memCacheHeight: cacheH,
+        maxWidthDiskCache: cacheW,
+        maxHeightDiskCache: cacheH,
+        fadeInDuration: const Duration(milliseconds: 120),
+        fadeOutDuration: const Duration(milliseconds: 80),
+        placeholder: (_, _) => _fallback(
+          child: Center(
+            child: SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.grey.shade500,
+              ),
             ),
           ),
         ),
-      ),
-      errorWidget: (_, _, _) => _fallback(),
-    );
+        errorWidget: (_, _, _) => _fallback(),
+      );
+    }
 
     if (padded) {
       image = ColoredBox(
