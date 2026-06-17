@@ -32,11 +32,14 @@ class BggService {
   /// Sur le web, les appels passent par la Edge Function Supabase `bgg-proxy`.
   static bool get _useWebProxy => kIsWeb;
 
+  /// Recherche BGG : bloquée sur le web (CORS / proxy trop fragile). App native OK.
+  static bool get supportsWebSearch => !kIsWeb;
+
   static bool get _webProxyReady {
     return AppEnv.supabaseUrl.isNotEmpty && AppEnv.supabaseAnonKey.isNotEmpty;
   }
 
-  static bool get webBggAvailable => !_useWebProxy || _webProxyReady;
+  static bool get webBggAvailable => supportsWebSearch && (!_useWebProxy || _webProxyReady);
 
   /// Dernière erreur recherche (affichée sur le web en release).
   static String? lastSearchError;
@@ -119,6 +122,11 @@ class BggService {
     if (trimmed.isEmpty) return [];
 
     lastSearchError = null;
+    if (!supportsWebSearch) {
+      lastSearchError =
+          'Recherche BGG disponible sur l\'app Android. Sur le web, utilise « Saisir à la main ».';
+      return [];
+    }
     try {
       final url = Uri.https('boardgamegeek.com', '/xmlapi2/search', {
         'query': trimmed,
@@ -243,6 +251,7 @@ class BggService {
 
   /// Jeux « hot » du moment sur BGG (tendances), mis en cache 30 min.
   static Future<List<Map<String, String>>> fetchHotBoardgames() async {
+    if (!supportsWebSearch) return [];
     if (_hotCache != null &&
         _hotCacheAt != null &&
         DateTime.now().difference(_hotCacheAt!) <

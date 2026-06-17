@@ -549,7 +549,40 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void _showBoardgameAddChooser() {
-    final proxyOk = BggService.webBggAvailable;
+    if (kIsWeb) {
+      showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        builder: (ctx) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                child: Text(
+                  'La recherche BGG n\'est pas disponible sur le web '
+                  '(utilise l\'app Android). Tu peux ajouter un jeu manuellement.',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.grey.shade700,
+                  ),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('Saisir le nom à la main'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showManualAddFlow();
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+      return;
+    }
+
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -560,18 +593,11 @@ class _HomeScreenState extends State<HomeScreen>
             ListTile(
               leading: const Icon(Icons.search),
               title: const Text('Chercher sur BGG'),
-              subtitle: Text(
-                proxyOk
-                    ? 'Recherche complète (via Supabase)'
-                    : 'Indisponible : déploie la fonction bgg-proxy (voir README Supabase)',
-              ),
-              enabled: proxyOk,
-              onTap: proxyOk
-                  ? () {
-                      Navigator.pop(ctx);
-                      _showBggSearchDialog();
-                    }
-                  : null,
+              subtitle: const Text('Recherche complète via BoardGameGeek'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showBggSearchDialog();
+              },
             ),
             ListTile(
               leading: const Icon(Icons.edit_outlined),
