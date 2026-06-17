@@ -38,22 +38,14 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
   Map<CollectionCategory, int> _groupCounts = {};
   Map<CollectionCategory, int> _wishlistCounts = {};
   Map<String, int> _customCounts = {};
-  List<UserCollectionType> _customTypes = [];
   CollectionSummary _summary = const CollectionSummary();
   bool _loadingCounts = true;
-  List<CollectionCategory> _orderedCategories = CollectionCategory.menuValues;
-  bool _reorderMode = false;
+  List<HubTileEntry> _orderedTiles = [];
 
   @override
   void initState() {
     super.initState();
-    _loadCategoryOrder();
     _load();
-  }
-
-  Future<void> _loadCategoryOrder() async {
-    final ordered = await CategoryHubOrder.loadOrderedMenuCategories();
-    if (mounted) setState(() => _orderedCategories = ordered);
   }
 
   Future<String> _getUsername() async {
@@ -82,6 +74,9 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     };
     final customCounts = <String, int>{};
     var customTypes = <UserCollectionType>[];
+    var orderedTiles = <HubTileEntry>[
+      ...CollectionCategory.menuValues.map(HubTileEntry.category),
+    ];
     CollectionSummary summary = const CollectionSummary();
     String? loadError;
 
@@ -143,6 +138,9 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
       try {
         customTypes = await UserCollectionTypeService().fetchMine();
       } catch (_) {}
+
+      orderedTiles =
+          await CategoryHubOrder.loadOrderedTiles(customTypes);
     } catch (e) {
       loadError = e.toString();
     }
@@ -153,7 +151,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
         _groupCounts = groupCounts;
         _wishlistCounts = wishCounts;
         _customCounts = customCounts;
-        _customTypes = customTypes;
+        _orderedTiles = orderedTiles;
         _summary = summary;
         _loadingCounts = false;
       });
@@ -216,36 +214,61 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     _load();
   }
 
-  int get _gridItemCount =>
-      _orderedCategories.length +
-      _customTypes.length +
-      1;
+  int get _gridItemCount => _orderedTiles.length + 1;
 
-  void _onReorderCategories(int oldIndex, int newIndex) {
-    if (newIndex > oldIndex) newIndex -= 1;
+  void _onReorderTiles(int from, int to) {
+    if (from == to || from < 0 || to < 0) return;
+    if (from >= _orderedTiles.length || to >= _orderedTiles.length) return;
     setState(() {
-      final next = List<CollectionCategory>.from(_orderedCategories);
-      final item = next.removeAt(oldIndex);
-      next.insert(newIndex, item);
-      _orderedCategories = next;
+      final next = List<HubTileEntry>.from(_orderedTiles);
+      final item = next.removeAt(from);
+      next.insert(to, item);
+      _orderedTiles = next;
     });
-    CategoryHubOrder.saveOrder(_orderedCategories);
+    CategoryHubOrder.saveTileOrder(_orderedTiles);
     AppHaptics.selection();
   }
 
+  Widget _wrapDraggableTile(int index, Widget child) {
+    final scheme = Theme.of(context).colorScheme;
+    return LongPressDraggable<int>(
+      data: index,
+      delay: const Duration(milliseconds: 220),
+      feedback: Material(
+        elevation: 8,
+        borderRadius: BorderRadius.circular(20),
+        color: scheme.surface,
+        child: SizedBox(width: 148, height: 172, child: child),
+      ),
+      childWhenDragging: Opacity(opacity: 0.35, child: child),
+      child: DragTarget<int>(
+        onWillAcceptWithDetails: (d) => d.data != index,
+        onAcceptWithDetails: (d) => _onReorderTiles(d.data, index),
+        builder: (context, candidate, rejected) {
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            decoration: candidate.isNotEmpty
+                ? BoxDecoration(
+                    border: Border.all(color: scheme.primary, width: 2),
+                    borderRadius: BorderRadius.circular(20),
+                  )
+                : null,
+            child: child,
+          );
+        },
+      ),
+    );
+  }
+
   Widget _buildGridItem(int index) {
-    final builtInCount = _orderedCategories.length;
-    if (index < builtInCount) {
+    if (index < _orderedTiles.length) {
+      final entry = _orderedTiles[index];
+      final child = entry.category != null
+          ? _buildCategoryCard(entry.category!)
+          : _buildCustomTypeCard(entry.customType!);
       return _AnimatedCategoryCard(
         index: index,
-        child: _buildCategoryCard(_orderedCategories[index]),
-      );
-    }
-    if (index < builtInCount + _customTypes.length) {
-      final type = _customTypes[index - builtInCount];
-      return _AnimatedCategoryCard(
-        index: index,
-        child: _buildCustomTypeCard(type),
+        child: _wrapDraggableTile(index, child),
       );
     }
     return _AnimatedCategoryCard(
@@ -288,14 +311,6 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
         title: const Text('Collections'),
         actions: [
           IconButton(
-            icon: Icon(_reorderMode ? Icons.check : Icons.reorder),
-            tooltip: _reorderMode ? 'Terminer' : 'Réorganiser',
-            onPressed: () {
-              AppHaptics.selection();
-              setState(() => _reorderMode = !_reorderMode);
-            },
-          ),
-          IconButton(
             icon: const Icon(Icons.bar_chart_outlined),
             tooltip: 'Statistiques',
             onPressed: _openStats,
@@ -332,6 +347,13 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
                     color: Colors.grey.shade700,
                   ),
                 ),
+                Text(
+                  'Maintenir une tuile pour la déplacer',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.grey.shade600,
+                  ),
+                ),
                 if (!_loadingCounts) ...[
                   const SizedBox(height: 10),
                   CollapsibleCollectionOverview(
@@ -346,35 +368,17 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
           Expanded(
             child: _loadingCounts
                 ? const Center(child: CircularProgressIndicator())
-                : _reorderMode
-                    ? ReorderableListView(
-                        padding: const EdgeInsets.all(16),
-                        onReorder: _onReorderCategories,
-                        children: [
-                          for (var i = 0; i < _orderedCategories.length; i++)
-                            ListTile(
-                              key: ValueKey(_orderedCategories[i]),
-                              leading: Icon(
-                                _orderedCategories[i].icon,
-                                color: _orderedCategories[i].color,
-                              ),
-                              title: Text(_orderedCategories[i].label),
-                              subtitle: Text(_orderedCategories[i].description),
-                              trailing: const Icon(Icons.drag_handle),
-                            ),
-                        ],
-                      )
-                    : GridView.builder(
-                        padding: const EdgeInsets.all(16),
-                        gridDelegate: CollectionGridLayout.gridDelegate(
-                          context,
-                          mobileColumns: 2,
-                          childAspectRatio: 0.88,
-                          spacing: 14,
-                        ),
-                        itemCount: _gridItemCount,
-                        itemBuilder: (context, index) => _buildGridItem(index),
-                      ),
+                : GridView.builder(
+                    padding: const EdgeInsets.all(16),
+                    gridDelegate: CollectionGridLayout.gridDelegate(
+                      context,
+                      mobileColumns: 2,
+                      childAspectRatio: 0.88,
+                      spacing: 14,
+                    ),
+                    itemCount: _gridItemCount,
+                    itemBuilder: (context, index) => _buildGridItem(index),
+                  ),
           ),
         ],
       ),

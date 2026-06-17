@@ -208,7 +208,8 @@ class CollectionItem {
       'location_user_id': isWishlist ? null : locationUserId,
       'min_players': minPlayers,
       'max_players': maxPlayers,
-      'playing_time': playingTime,
+      'playing_time':
+          playingTime != null && playingTime! > 0 ? playingTime : null,
       'rating': rating,
       'review': review,
       'purchase_price': purchasePrice,

@@ -162,7 +162,8 @@ function parseThingItem(xml: string, id: string): Record<string, unknown> | null
     ...(attr("minage") != null ? { min_age: attr("minage") } : {}),
     min_players: attr("minplayers") ?? null,
     max_players: attr("maxplayers") ?? null,
-    playing_time: playingTime ?? null,
+    playing_time:
+      playingTime != null && playingTime > 0 ? playingTime : null,
     ...(categories.length ? { bgg_categories: categories } : {}),
   };
 }

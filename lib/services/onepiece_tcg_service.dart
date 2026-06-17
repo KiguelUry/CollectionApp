@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../models/tcg_set_info.dart';
 import '../utils/tcg_set_image_url.dart';
+import '../utils/onepiece_card_utils.dart';
 
 /// API communautaire One Piece TCG (gratuit).
 /// https://www.optcgapi.com
@@ -120,7 +121,10 @@ class OnepieceTcgService {
         for (final raw in list) {
           final mapped = _mapLegacy(raw as Map<String, dynamic>);
           if (mapped == null) continue;
-          final key = mapped['onepiece_card_id'] ?? mapped['title'] ?? '';
+          final key = mapped['onepiece_card_id'] ??
+              mapped['onepiece_image_id'] ??
+              mapped['title'] ??
+              '';
           if (key.isEmpty || seen.contains(key)) continue;
           seen.add(key);
           hits.add(mapped);
@@ -179,26 +183,28 @@ class OnepieceTcgService {
     if (name == null || name.isEmpty) return null;
 
     final cardSetId = card['card_set_id']?.toString() ?? '';
+    final catalogId = OnepieceCardUtils.catalogId(card);
     final setId = card['set_id']?.toString() ?? '';
     final block = _blockForSetId(setId);
+    final rarity = OnepieceCardUtils.displayRarity(card);
 
     return TcgCatalogCard(
-      id: cardSetId.isNotEmpty ? cardSetId : (card['id']?.toString() ?? name),
+      id: catalogId.isNotEmpty ? catalogId : name,
       name: name,
       imageUrl: card['card_image']?.toString() ?? card['image']?.toString(),
       setName: card['set_name']?.toString(),
       number: cardSetId,
-      rarity: card['rarity']?.toString(),
+      rarity: rarity,
       raw: {
-        'onepiece_card_id': cardSetId.isNotEmpty
-            ? cardSetId
-            : (card['card_id']?.toString() ?? card['id']?.toString() ?? ''),
+        'onepiece_card_id': catalogId,
+        if (cardSetId.isNotEmpty) 'card_set_id': cardSetId,
         'set_id': setId,
         'set_name': card['set_name']?.toString() ?? '',
         'block_name': block,
         'series_name': block,
         'card_number': cardSetId,
-        'rarity': card['rarity']?.toString() ?? '',
+        if (rarity != null) 'rarity': rarity,
+        if (OnepieceCardUtils.isParallel(card)) 'is_parallel': 'true',
         'source': 'optcg',
       },
     );

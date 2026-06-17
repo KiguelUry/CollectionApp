@@ -753,14 +753,14 @@ class _HomeScreenState extends State<HomeScreen>
             (bggDetails['image_url'] as String?) ?? resolvedImageUrl;
         resolvedMin = bggDetails['min_players'] as int?;
         resolvedMax = bggDetails['max_players'] as int?;
-        resolvedTime = bggDetails['playing_time'] as int?;
+        resolvedTime = _positivePlayingTime(bggDetails['playing_time']);
       } else if (bggId != null) {
         final details = await BggService.getGameFullDetails(bggId);
         resolvedImageUrl =
             (details?['image_url'] as String?) ?? resolvedImageUrl;
         resolvedMin = details?['min_players'] as int?;
         resolvedMax = details?['max_players'] as int?;
-        resolvedTime = details?['playing_time'] as int?;
+        resolvedTime = _positivePlayingTime(details?['playing_time']);
       }
 
       final resolvedSub = widget.customTypeId ?? subcategory;
@@ -1394,4 +1394,10 @@ class _HomeScreenState extends State<HomeScreen>
       },
     );
   }
+}
+
+int? _positivePlayingTime(dynamic value) {
+  if (value is int) return value > 0 ? value : null;
+  final parsed = int.tryParse('$value');
+  return parsed != null && parsed > 0 ? parsed : null;
 }

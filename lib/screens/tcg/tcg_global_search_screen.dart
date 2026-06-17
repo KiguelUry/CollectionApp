@@ -514,6 +514,7 @@ class _TcgGlobalSearchScreenState extends State<TcgGlobalSearchScreen> {
                           final inWishlist =
                               _wishlistIds.contains(_catalogKey(card));
                           return TcgCatalogCardTile(
+                            key: ValueKey(_catalogKey(card)),
                             name: card.name,
                             imageUrl: card.imageUrl,
                             subtitle: tcgCatalogSubtitle(card),

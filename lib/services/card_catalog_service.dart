@@ -13,7 +13,7 @@ class CardCatalogService {
   static bool supportsSearch(CardSubcategory sub) => sub.supportsCatalogSearch;
 
   static String catalogLabel(CardSubcategory sub) => switch (sub) {
-        CardSubcategory.pokemon => 'TCGdex (FR)',
+        CardSubcategory.pokemon => 'TCGdex (FR · EN · JA)',
         CardSubcategory.magic => 'Scryfall',
         CardSubcategory.yugioh => 'YGOProDeck',
         CardSubcategory.onepiece => 'OPTCG API',

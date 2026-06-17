@@ -40,6 +40,16 @@ int tcgRarityRank(String? rarity, CardSubcategory sub) {
     if (r.contains('ultimate')) return 65;
   }
 
+  if (sub == CardSubcategory.onepiece) {
+    final star = r.contains('★') || r.contains('parallel');
+    if (r.contains('sec')) return star ? 86 : 80;
+    if (r == 'l' || r.startsWith('l ')) return star ? 72 : 65;
+    if (r.contains('sr')) return star ? 62 : 55;
+    if (r.contains('r')) return star ? 52 : 45;
+    if (r.contains('uc')) return 30;
+    if (r == 'c' || r.startsWith('c ')) return 10;
+  }
+
   return 500;
 }
 

@@ -449,7 +449,7 @@ class BggService {
       if (minAge != null) 'min_age': minAge,
       'min_players': parseAttr('minplayers'),
       'max_players': parseAttr('maxplayers'),
-      'playing_time': playingTime,
+      'playing_time': _positivePlayingTime(playingTime),
       if (categories.isNotEmpty) 'bgg_categories': categories,
     };
   }
@@ -618,5 +618,11 @@ class BggService {
       if (kDebugMode) debugPrint('Erreur détails BGG: $e');
     }
     return null;
+  }
+
+  static int? _positivePlayingTime(dynamic value) {
+    if (value is int) return value > 0 ? value : null;
+    final parsed = int.tryParse('$value');
+    return parsed != null && parsed > 0 ? parsed : null;
   }
 }

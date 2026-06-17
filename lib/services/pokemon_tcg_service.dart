@@ -350,6 +350,54 @@ class PokemonTcgService {
     if (q.length < 2) return [];
 
     try {
+      final perLang = await Future.wait(
+        PokemonCardLang.all.map((l) => _searchSingleLang(q, lang: l)),
+      );
+
+      final merged = <String, Map<String, String>>{};
+      for (final list in perLang) {
+        for (final hit in list) {
+          final tcgdexId = hit['tcgdex_id'] ?? '';
+          final cardLang = hit['card_lang'] ?? PokemonCardLang.fr;
+          if (tcgdexId.isEmpty) continue;
+          merged[PokemonCardLang.catalogKey(tcgdexId, lang: cardLang)] = hit;
+        }
+      }
+
+      final ids = merged.values
+          .map((h) => h['tcgdex_id'])
+          .whereType<String>()
+          .where((id) => id.isNotEmpty)
+          .toSet()
+          .take(25);
+
+      for (final id in ids) {
+        for (final l in PokemonCardLang.all) {
+          final key = PokemonCardLang.catalogKey(id, lang: l);
+          if (merged.containsKey(key)) continue;
+          final card = await _fetchCardById(id, lang: l);
+          if (card == null) continue;
+          final enriched = _ensureCardImage(card);
+          merged[key] = {
+            'title': enriched.name,
+            'image_url': enriched.imageUrl ?? '',
+            ...enriched.raw,
+          };
+        }
+      }
+
+      return merged.values.toList();
+    } catch (e) {
+      if (kDebugMode) debugPrint('TCGdex search: $e');
+      return [];
+    }
+  }
+
+  static Future<List<Map<String, String>>> _searchSingleLang(
+    String q, {
+    required String lang,
+  }) async {
+    try {
       final hits = <Map<String, String>>[];
 
       for (var page = 1; page <= _searchMaxPages; page++) {
