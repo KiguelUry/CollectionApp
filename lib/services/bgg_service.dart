@@ -14,6 +14,9 @@ enum BggSearchSort {
   /// Pertinence du titre + popularité BGG (classement).
   smart,
 
+  /// Classement BGG global (les plus connus en premier).
+  popularity,
+
   /// Année de sortie la plus récente.
   recent,
 }
@@ -26,8 +29,8 @@ class _BggThingMeta {
 }
 
 class BggService {
-  static const _maxSearchResults = 40;
-  static const _maxMetaLookup = 15;
+  static const _maxSearchResults = 50;
+  static const _maxMetaLookup = 50;
   static const _thingChunkSize = 8;
   static const _maxPollAttempts = 10;
 
@@ -165,10 +168,14 @@ class BggService {
     if (_useWebJsonApi) {
       final data = await _jsonApiGet('search', {
         'query': trimmed,
-        'sort': sort == BggSearchSort.recent ? 'recent' : 'smart',
+        'sort': switch (sort) {
+          BggSearchSort.recent => 'recent',
+          BggSearchSort.popularity => 'popularity',
+          _ => 'smart',
+        },
       });
       if (data == null) return [];
-      return _gamesFromJsonList(data['games']);
+      return enrichGameMaps(_gamesFromJsonList(data['games']));
     }
 
     try {
@@ -234,7 +241,7 @@ class BggService {
 
       _sortResults(ranked, trimmed, sort, meta);
 
-      return ranked.take(20).toList();
+      return ranked.take(40).toList();
     } catch (e) {
       lastSearchError = 'Recherche BGG impossible : $e';
       if (kDebugMode) debugPrint('Erreur recherche BGG: $e');
@@ -278,6 +285,13 @@ class BggService {
           if (y != 0) return y;
           return rankOf(a).compareTo(rankOf(b));
         });
+      case BggSearchSort.popularity:
+        items.sort((a, b) {
+          final r = rankOf(a).compareTo(rankOf(b));
+          if (r != 0) return r;
+          return titleRelevanceScore(b['title']!, query)
+              .compareTo(titleRelevanceScore(a['title']!, query));
+        });
       case BggSearchSort.smart:
         sortByScore(
           items,
@@ -285,9 +299,9 @@ class BggService {
             final rel = titleRelevanceScore(g['title']!, query);
             final rank = rankOf(g);
             final popularityBonus = rank < 999_999
-                ? (2000 - rank.clamp(0, 2000))
+                ? (3000 - rank.clamp(0, 3000))
                 : 0;
-            return rel * 10 + popularityBonus;
+            return rel * 6 + popularityBonus;
           },
         );
     }
@@ -308,7 +322,7 @@ class BggService {
       final games = _gamesFromJsonList(data?['games']);
       _hotCache = games;
       _hotCacheAt = DateTime.now();
-      return games;
+      return await enrichGameMaps(games);
     }
 
     if (_hotCache != null &&
@@ -326,7 +340,7 @@ class BggService {
       if (response.statusCode != 200 || response.body.isEmpty) return [];
 
       final document = XmlDocument.parse(response.body);
-      final items = <Map<String, String>>[];
+      var items = <Map<String, String>>[];
 
       for (final node in document.findAllElements('item')) {
         final id = node.getAttribute('id') ?? '';
@@ -351,8 +365,18 @@ class BggService {
           if (hotRank.isNotEmpty) 'hot_rank': hotRank,
           if (thumb.isNotEmpty) 'image_url': thumb,
         });
-        if (items.length >= 20) break;
+        if (items.length >= 50) break;
       }
+
+      items = await enrichGameMaps(items);
+      items.sort((a, b) {
+        final ha = int.tryParse(a['hot_rank'] ?? '') ?? 999;
+        final hb = int.tryParse(b['hot_rank'] ?? '') ?? 999;
+        if (ha != hb) return ha.compareTo(hb);
+        final ra = int.tryParse(a['bgg_rank'] ?? '') ?? 999999;
+        final rb = int.tryParse(b['bgg_rank'] ?? '') ?? 999999;
+        return ra.compareTo(rb);
+      });
 
       _hotCache = items;
       _hotCacheAt = DateTime.now();
@@ -367,7 +391,27 @@ class BggService {
   static Future<Map<String, _BggThingMeta>> _fetchThingMeta(
     List<String> ids,
   ) async {
-    if (ids.isEmpty || _useWebJsonApi) return {};
+    if (ids.isEmpty) return {};
+
+    if (_useWebJsonApi) {
+      final result = <String, _BggThingMeta>{};
+      for (var i = 0; i < ids.length; i += _thingChunkSize) {
+        final chunk = ids.skip(i).take(_thingChunkSize).toList();
+        final data = await _jsonApiGet('meta', {'ids': chunk.join(',')});
+        final list = _gamesFromJsonList(data?['games']);
+        for (final g in list) {
+          final id = g['id'] ?? '';
+          if (id.isEmpty) continue;
+          final rank = int.tryParse(g['bgg_rank'] ?? '');
+          final thumb = g['image_url'];
+          result[id] = _BggThingMeta(
+            rank: rank,
+            thumbnail: thumb != null && thumb.isNotEmpty ? thumb : null,
+          );
+        }
+      }
+      return result;
+    }
 
     final result = <String, _BggThingMeta>{};
 
@@ -414,6 +458,40 @@ class BggService {
     }
 
     return result;
+  }
+
+  /// Complète rang BGG + vignettes manquantes (web via bgg-api/meta).
+  static Future<List<Map<String, String>>> enrichGameMaps(
+    List<Map<String, String>> games,
+  ) async {
+    if (games.isEmpty) return games;
+
+    final needMeta = games.where((g) {
+      final id = g['id'] ?? '';
+      if (id.isEmpty) return false;
+      final noImg = (g['image_url'] ?? '').isEmpty;
+      final noRank = (g['bgg_rank'] ?? '').isEmpty;
+      return noImg || noRank;
+    }).toList();
+
+    if (needMeta.isEmpty) return games;
+
+    final ids = needMeta.map((g) => g['id']!).toList();
+    final meta = await _fetchThingMeta(ids);
+
+    return games.map((g) {
+      final m = meta[g['id']];
+      if (m == null) return g;
+      return {
+        ...g,
+        if ((g['bgg_rank'] ?? '').isEmpty && m.rank != null)
+          'bgg_rank': m.rank.toString(),
+        if ((g['image_url'] ?? '').isEmpty &&
+            m.thumbnail != null &&
+            m.thumbnail!.isNotEmpty)
+          'image_url': m.thumbnail!,
+      };
+    }).toList();
   }
 
   static Map<String, dynamic>? _parseThingItem(XmlElement item) {

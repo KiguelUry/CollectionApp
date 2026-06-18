@@ -4,6 +4,7 @@ import '../../models/bgg_catalog_game.dart';
 import '../../services/boardgame_discovery_service.dart';
 import '../../services/user_boardgame_collection_service.dart';
 import '../../utils/boardgame_bulk_add.dart';
+import '../../utils/boardgame_quick_add.dart';
 import '../../utils/collection_grid_layout.dart';
 import '../../widgets/app_app_bar.dart';
 import '../../widgets/catalog/catalog_item_tile.dart';
@@ -125,19 +126,16 @@ class _BggCatalogGridScreenState extends State<BggCatalogGridScreen> {
     });
   }
 
-  Future<void> _quickAdd(BggCatalogGame game) async {
-    final ok = await silentAddBoardgame(context, game: game);
-    if (!mounted || !ok) return;
+  Future<void> _openAddDialog(BggCatalogGame game) async {
+    await quickAddBoardgameFromCatalog(context, game: game);
+    if (!mounted) return;
+    final svc = UserBoardgameCollectionService();
+    final owned = await svc.ownedCatalogKeys();
+    final wishlist = await svc.wishlistCatalogKeys();
     setState(() {
-      _ownedKeys.add(_key(game));
-      _wishlistKeys.remove(_key(game));
+      _ownedKeys = owned;
+      _wishlistKeys = wishlist;
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        content: Text('« ${game.title} » ajouté à ta collection'),
-      ),
-    );
   }
 
   Future<void> _toggleWishlist(BggCatalogGame game) async {
@@ -255,14 +253,25 @@ class _BggCatalogGridScreenState extends State<BggCatalogGridScreen> {
                                   owned: owned,
                                   inWishlist: inWishlist,
                                   aspectRatio: 1,
-                                  onTap: () => _quickAdd(game),
+                                  onTap: () => _openAddDialog(game),
                                   onLongPress: () => showCoverPreview(
                                     context,
                                     imageUrl: game.imageUrl,
                                     title: game.title,
                                   ),
-                                  onQuickAdd:
-                                      owned ? null : () => _quickAdd(game),
+                                  onQuickAdd: owned
+                                      ? null
+                                      : () async {
+                                          final ok = await silentAddBoardgame(
+                                            context,
+                                            game: game,
+                                          );
+                                          if (!mounted || !ok) return;
+                                          setState(() {
+                                            _ownedKeys.add(_key(game));
+                                            _wishlistKeys.remove(_key(game));
+                                          });
+                                        },
                                   onQuickWishlist: owned
                                       ? null
                                       : () => _toggleWishlist(game),

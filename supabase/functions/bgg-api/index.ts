@@ -12,8 +12,9 @@ const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Methods": "GET, OPTIONS",
 };
 
-const MAX_SEARCH = 40;
-const MAX_META = 15;
+const MAX_SEARCH = 50;
+const MAX_META = 50;
+const MAX_HOT = 50;
 const THING_CHUNK = 8;
 
 type GameHit = Record<string, string>;
@@ -85,9 +86,39 @@ function parseHotItems(xml: string): GameHit[] {
     if (hotRank) hit.hot_rank = hotRank;
     if (thumb) hit.image_url = thumb;
     out.push(hit);
-    if (out.length >= 20) break;
+    if (out.length >= MAX_HOT) break;
   }
   return out;
+}
+
+async function enrichGameHits(hits: GameHit[]): Promise<GameHit[]> {
+  const ids = hits.map((g) => g.id).filter((id) => /^\d+$/.test(id));
+  if (ids.length === 0) return hits;
+
+  const meta = new Map<string, ThingMeta>();
+  for (let i = 0; i < ids.length; i += THING_CHUNK) {
+    const chunk = ids.slice(i, i + THING_CHUNK);
+    try {
+      const thingXml = await fetchBgg("/xmlapi2/thing", {
+        id: chunk.join(","),
+        stats: "1",
+      });
+      for (const [id, m] of parseThingMeta(thingXml)) {
+        meta.set(id, m);
+      }
+    } catch {
+      // métadonnées optionnelles
+    }
+  }
+
+  return hits.map((g) => {
+    const m = meta.get(g.id);
+    if (!m) return g;
+    const next: GameHit = { ...g };
+    if (m.rank != null && !next.bgg_rank) next.bgg_rank = String(m.rank);
+    if (m.thumbnail && !next.image_url) next.image_url = m.thumbnail;
+    return next;
+  });
 }
 
 function parseThingMeta(xml: string): Map<string, ThingMeta> {
@@ -304,15 +335,26 @@ function sortSearchResults(
     return;
   }
 
+  if (sort === "popularity") {
+    items.sort((a, b) => {
+      const ra = rankOf(a);
+      const rb = rankOf(b);
+      if (ra !== rb) return ra - rb;
+      return titleRelevanceScore(b.title, query) -
+        titleRelevanceScore(a.title, query);
+    });
+    return;
+  }
+
   items.sort((a, b) => {
     const relA = titleRelevanceScore(a.title, query);
     const relB = titleRelevanceScore(b.title, query);
     const rankA = rankOf(a);
     const rankB = rankOf(b);
-    const popA = rankA < 999_999 ? 2000 - Math.min(rankA, 2000) : 0;
-    const popB = rankB < 999_999 ? 2000 - Math.min(rankB, 2000) : 0;
-    const scoreA = relA * 10 + popA;
-    const scoreB = relB * 10 + popB;
+    const popA = rankA < 999_999 ? 3000 - Math.min(rankA, 3000) : 0;
+    const popB = rankB < 999_999 ? 3000 - Math.min(rankB, 3000) : 0;
+    const scoreA = relA * 6 + popA;
+    const scoreB = relB * 6 + popB;
     return scoreB - scoreA;
   });
 }
@@ -331,43 +373,53 @@ async function handleSearch(query: string, sort: string): Promise<Response> {
   if (candidates.length === 0) return json({ games: [] });
 
   candidates.sort(
-    (a, b) => titleRelevanceScore(b.title, trimmed) -
+    (a, b) =>
+      titleRelevanceScore(b.title, trimmed) -
       titleRelevanceScore(a.title, trimmed),
   );
 
   const top = candidates.slice(0, MAX_META);
+  const enriched = await enrichGameHits(top);
   const meta = new Map<string, ThingMeta>();
-
-  for (let i = 0; i < top.length; i += THING_CHUNK) {
-    const chunk = top.slice(i, i + THING_CHUNK).map((g) => g.id);
-    try {
-      const thingXml = await fetchBgg("/xmlapi2/thing", {
-        id: chunk.join(","),
-        stats: "1",
-      });
-      for (const [id, m] of parseThingMeta(thingXml)) {
-        meta.set(id, m);
-      }
-    } catch {
-      // métadonnées optionnelles
+  for (const g of enriched) {
+    const rank = parseInt(g.bgg_rank ?? "", 10);
+    if (!Number.isNaN(rank)) {
+      meta.set(g.id, { rank, thumbnail: g.image_url });
+    } else if (g.image_url) {
+      meta.set(g.id, { thumbnail: g.image_url });
     }
   }
 
-  const ranked = top.map((g) => {
-    const m = meta.get(g.id);
-    const hit: GameHit = { ...g };
-    if (m?.rank != null) hit.bgg_rank = String(m.rank);
-    if (m?.thumbnail) hit.image_url = m.thumbnail;
-    return hit;
-  });
-
-  sortSearchResults(ranked, trimmed, sort, meta);
-  return json({ games: ranked.slice(0, 20) });
+  sortSearchResults(enriched, trimmed, sort, meta);
+  return json({ games: enriched.slice(0, 40) });
 }
 
 async function handleHot(): Promise<Response> {
   const xml = await fetchBgg("/xmlapi2/hot", { type: "boardgame" });
-  return json({ games: parseHotItems(xml) });
+  const hot = parseHotItems(xml);
+  const enriched = await enrichGameHits(hot);
+  enriched.sort((a, b) => {
+    const ha = parseInt(a.hot_rank ?? "999", 10);
+    const hb = parseInt(b.hot_rank ?? "999", 10);
+    if (ha !== hb) return ha - hb;
+    const ra = parseInt(a.bgg_rank ?? "999999", 10);
+    const rb = parseInt(b.bgg_rank ?? "999999", 10);
+    return ra - rb;
+  });
+  return json({ games: enriched });
+}
+
+async function handleMeta(idsParam: string): Promise<Response> {
+  const ids = idsParam
+    .split(",")
+    .map((s) => s.trim())
+    .filter((id) => /^\d+$/.test(id))
+    .slice(0, MAX_META);
+  if (ids.length === 0) return json({ games: [] });
+
+  const hits: GameHit[] = ids.map((id) => ({ id, title: "" }));
+  const enriched = await enrichGameHits(hits);
+  return json({ games: enriched });
 }
 
 async function handleGame(id: string): Promise<Response> {
@@ -450,6 +502,8 @@ Deno.serve(async (req) => {
         );
       case "hot":
         return await handleHot();
+      case "meta":
+        return await handleMeta(url.searchParams.get("ids") ?? "");
       case "game": {
         const id = url.searchParams.get("id") ?? "";
         return await handleGame(id);

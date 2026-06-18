@@ -18,6 +18,26 @@ const boardgameDiscoveryGenres = <(String en, String fr)>[
   ('Abstract', 'Abstrait'),
 ];
 
+const _defaultLimit = 48;
+
+void sortBggCatalogByPopularity(List<BggCatalogGame> games) {
+  int rankValue(BggCatalogGame g) {
+    final r = int.tryParse(g.bggRank ?? '');
+    if (r == null || r <= 0 || r >= 999999) return 999999;
+    return r;
+  }
+
+  games.sort((a, b) {
+    final ra = rankValue(a);
+    final rb = rankValue(b);
+    if (ra != rb) return ra.compareTo(rb);
+    final ha = int.tryParse(a.hotRank ?? '') ?? 999;
+    final hb = int.tryParse(b.hotRank ?? '') ?? 999;
+    if (ha != hb) return ha.compareTo(hb);
+    return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+  });
+}
+
 class BoardgameDiscoveryService {
   final _suggestions = WishlistSuggestionService();
   final _client = Supabase.instance.client;
@@ -62,88 +82,171 @@ class BoardgameDiscoveryService {
     return out;
   }
 
-  Future<List<BggCatalogGame>> fetchPopular({int limit = 24}) async {
-    final hot = await BggService.fetchHotBoardgames();
-    final owned = await _ownedKeys();
-    return _dedupe(
-      hot
-          .map((m) => BggCatalogGame.fromBggMap(m))
-          .where((g) => g.title.isNotEmpty && !_isOwned(g, owned))
-          .toList(),
-    ).take(limit).toList();
+  Future<List<BggCatalogGame>> _finalize(
+    List<Map<String, String>> raw, {
+    required Set<String> owned,
+    int limit = _defaultLimit,
+    String? Function(Map<String, String> map)? subtitleFor,
+  }) async {
+    final enriched = await BggService.enrichGameMaps(raw);
+    final games = enriched
+        .map(
+          (m) => BggCatalogGame.fromBggMap(
+            m,
+            subtitle: subtitleFor != null ? subtitleFor(m) : null,
+          ),
+        )
+        .where((g) => g.title.isNotEmpty && !_isOwned(g, owned))
+        .toList();
+    final deduped = _dedupe(games);
+    sortBggCatalogByPopularity(deduped);
+    return deduped.take(limit).toList();
   }
 
-  Future<List<BggCatalogGame>> fetchFriendsLove({int limit = 24}) async {
+  Future<List<BggCatalogGame>> fetchPopular({int limit = _defaultLimit}) async {
     final owned = await _ownedKeys();
-    final suggestions =
-        await _suggestions.fetchBoardgameSuggestions(limit: limit + 10);
-    return _dedupe(
-      suggestions
-          .map(
-            (s) => BggCatalogGame(
-              bggId: s.bggId ?? '',
-              title: s.title,
-              imageUrl: s.imageUrl,
-              subtitle: s.reason,
-              genres: s.genres,
-            ),
-          )
-          .where((g) => !_isOwned(g, owned))
-          .toList(),
-    ).take(limit).toList();
-  }
+    final raw = <Map<String, String>>[];
 
-  Future<List<BggCatalogGame>> fetchForYou({int limit = 24}) async {
-    final owned = await _ownedKeys();
-    final out = <BggCatalogGame>[];
+    raw.addAll(await BggService.fetchHotBoardgames());
 
-    final friends = await _suggestions.fetchBoardgameSuggestions(limit: 12);
-    for (final s in friends) {
-      out.add(
-        BggCatalogGame(
-          bggId: s.bggId ?? '',
-          title: s.title,
-          imageUrl: s.imageUrl,
-          subtitle: s.reason,
-          genres: s.genres,
-        ),
+    for (final (en, _) in boardgameDiscoveryGenres.take(5)) {
+      final hits = await BggService.searchGames(
+        en,
+        sort: BggSearchSort.popularity,
       );
+      raw.addAll(hits.take(12));
+    }
+
+    return _finalize(raw, owned: owned, limit: limit);
+  }
+
+  Future<List<BggCatalogGame>> fetchFriendsLove({int limit = _defaultLimit}) async {
+    final owned = await _ownedKeys();
+    final raw = <Map<String, String>>[];
+    final subtitles = <String, String>{};
+
+    final suggestions =
+        await _suggestions.fetchBoardgameSuggestions(limit: limit + 12);
+    for (final s in suggestions) {
+      if (s.bggId != null && s.bggId!.isNotEmpty) {
+        raw.add({
+          'id': s.bggId!,
+          'title': s.title,
+          if (s.imageUrl != null && s.imageUrl!.isNotEmpty)
+            'image_url': s.imageUrl!,
+        });
+        subtitles[s.bggId!] = s.reason;
+        continue;
+      }
+      final hits = await BggService.searchGames(
+        s.title,
+        sort: BggSearchSort.smart,
+      );
+      if (hits.isEmpty) continue;
+      final hit = Map<String, String>.from(hits.first);
+      hit['title'] = s.title;
+      if (s.imageUrl != null && s.imageUrl!.isNotEmpty) {
+        hit['image_url'] = s.imageUrl!;
+      }
+      final id = hit['id'] ?? '';
+      if (id.isNotEmpty) subtitles[id] = s.reason;
+      raw.add(hit);
+    }
+
+    final enriched = await BggService.enrichGameMaps(raw);
+    final games = enriched
+        .map((m) {
+          final id = m['id'] ?? '';
+          return BggCatalogGame.fromBggMap(
+            m,
+            subtitle: subtitles[id] ?? m['title'],
+          );
+        })
+        .where((g) => g.title.isNotEmpty && !_isOwned(g, owned))
+        .toList();
+
+    final deduped = _dedupe(games);
+    sortBggCatalogByPopularity(deduped);
+    return deduped.take(limit).toList();
+  }
+
+  Future<List<BggCatalogGame>> fetchForYou({int limit = _defaultLimit}) async {
+    final owned = await _ownedKeys();
+    final raw = <Map<String, String>>[];
+    final subtitles = <String, String>{};
+
+    final friends =
+        await _suggestions.fetchBoardgameSuggestions(limit: 16);
+    for (final s in friends) {
+      if (s.bggId != null && s.bggId!.isNotEmpty) {
+        raw.add({
+          'id': s.bggId!,
+          'title': s.title,
+          if (s.imageUrl != null && s.imageUrl!.isNotEmpty)
+            'image_url': s.imageUrl!,
+        });
+        subtitles[s.bggId!] = s.reason;
+      } else {
+        final hits = await BggService.searchGames(
+          s.title,
+          sort: BggSearchSort.smart,
+        );
+        if (hits.isEmpty) continue;
+        final hit = Map<String, String>.from(hits.first);
+        hit['title'] = s.title;
+        subtitles[hit['id'] ?? ''] = s.reason;
+        raw.add(hit);
+      }
     }
 
     final myGenres = await _myTopGenres();
+    final genresToQuery = myGenres.isNotEmpty
+        ? myGenres
+        : ['Strategy', 'Family', 'Party'];
+
+    for (final genre in genresToQuery) {
+      final hits = await BggService.searchGames(
+        genre,
+        sort: BggSearchSort.popularity,
+      );
+      for (final h in hits.take(14)) {
+        final id = h['id'] ?? '';
+        if (id.isNotEmpty) {
+          subtitles.putIfAbsent(
+            id,
+            () => myGenres.isNotEmpty
+                ? 'Populaire en $genre'
+                : 'Souvent aimé · $genre',
+          );
+        }
+        raw.add(h);
+      }
+    }
+
     final hot = await BggService.fetchHotBoardgames();
-    for (final m in hot) {
-      final g = BggCatalogGame.fromBggMap(m);
-      if (_isOwned(g, owned)) continue;
-      if (myGenres.isNotEmpty) {
-        final genreHint = myGenres.first;
-        out.add(
-          BggCatalogGame(
-            bggId: g.bggId,
-            title: g.title,
-            imageUrl: g.imageUrl,
-            year: g.year,
-            bggRank: g.bggRank,
-            hotRank: g.hotRank,
-            subtitle: 'Tendance BGG · tu aimes $genreHint',
-          ),
-        );
-      } else {
-        out.add(g);
+    for (final h in hot.take(20)) {
+      final id = h['id'] ?? '';
+      if (id.isNotEmpty) {
+        subtitles.putIfAbsent(id, () => 'Tendance BGG');
       }
-      if (out.length >= limit + 8) break;
+      raw.add(h);
     }
 
-    if (out.length < 8) {
-      final search = await BggService.searchGames('board game');
-      for (final m in search) {
-        final g = BggCatalogGame.fromBggMap(m);
-        if (!_isOwned(g, owned)) out.add(g);
-        if (out.length >= limit + 4) break;
-      }
-    }
+    final enriched = await BggService.enrichGameMaps(raw);
+    final games = enriched
+        .map((m) {
+          final id = m['id'] ?? '';
+          return BggCatalogGame.fromBggMap(
+            m,
+            subtitle: subtitles[id],
+          );
+        })
+        .where((g) => g.title.isNotEmpty && !_isOwned(g, owned))
+        .toList();
 
-    return _dedupe(out).take(limit).toList();
+    final deduped = _dedupe(games);
+    sortBggCatalogByPopularity(deduped);
+    return deduped.take(limit).toList();
   }
 
   Future<List<String>> _myTopGenres() async {
@@ -166,36 +269,35 @@ class BoardgameDiscoveryService {
     }
     final sorted = scores.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
-    return sorted.map((e) => e.key).take(3).toList();
+    return sorted.map((e) => e.key).take(4).toList();
   }
 
-  Future<List<BggCatalogGame>> search(String query, {int limit = 30}) async {
+  Future<List<BggCatalogGame>> search(
+    String query, {
+    int limit = _defaultLimit,
+  }) async {
     final owned = await _ownedKeys();
-    final hits = await BggService.searchGames(query);
-    return _dedupe(
-      hits
-          .map((m) => BggCatalogGame.fromBggMap(m))
-          .where((g) => g.title.isNotEmpty && !_isOwned(g, owned))
-          .toList(),
-    ).take(limit).toList();
+    final hits = await BggService.searchGames(
+      query,
+      sort: BggSearchSort.smart,
+    );
+    return _finalize(hits, owned: owned, limit: limit);
   }
 
   Future<List<BggCatalogGame>> fetchByGenre(
     String genreEn, {
-    int limit = 24,
+    int limit = _defaultLimit,
   }) async {
     final owned = await _ownedKeys();
-    final hits = await BggService.searchGames(genreEn);
-    return _dedupe(
-      hits
-          .map(
-            (m) => BggCatalogGame.fromBggMap(
-              m,
-              subtitle: genreEn,
-            ),
-          )
-          .where((g) => g.title.isNotEmpty && !_isOwned(g, owned))
-          .toList(),
-    ).take(limit).toList();
+    final hits = await BggService.searchGames(
+      genreEn,
+      sort: BggSearchSort.popularity,
+    );
+    return _finalize(
+      hits,
+      owned: owned,
+      limit: limit,
+      subtitleFor: (_) => genreEn,
+    );
   }
 }
