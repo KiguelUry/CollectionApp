@@ -15,6 +15,7 @@ const ALLOWED_HOSTS = new Set([
   "assets.tcgdex.net",
   "api.tcgdex.net",
   "images.pokemontcg.io",
+  "images.ygoprodeck.com",
   "i.discogs.com",
   "img.discogs.com",
   "st.discogs.com",

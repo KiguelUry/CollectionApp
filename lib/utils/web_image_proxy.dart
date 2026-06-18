@@ -9,6 +9,7 @@ const _proxiedHosts = {
   'assets.tcgdex.net',
   'api.tcgdex.net',
   'images.pokemontcg.io',
+  'images.ygoprodeck.com',
   // Lorcast / OPTCG : chargement direct (CORS OK pour <img>, pas besoin du proxy).
   'i.discogs.com',
   'img.discogs.com',

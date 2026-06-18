@@ -133,6 +133,14 @@ Future<bool> silentAddBoardgameToWishlist(
   }
 }
 
+Future<bool> silentRemoveBoardgame({
+  required BggCatalogGame game,
+}) async {
+  return UserBoardgameCollectionService().removeOwnedByCatalogKey(
+    game.catalogKey,
+  );
+}
+
 Future<bool> toggleBoardgameWishlist(
   BuildContext context, {
   required BggCatalogGame game,

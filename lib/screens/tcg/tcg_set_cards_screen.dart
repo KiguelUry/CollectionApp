@@ -114,6 +114,16 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
       UserCardCollectionService.catalogKeyForTcgCard(card, widget.subcategory);
 
   Future<void> _quickAddCard(TcgCatalogCard card) async {
+    final key = _catalogKey(card);
+    if (_ownedIds.contains(key)) {
+      final ok = await UserCardCollectionService().removeOwnedByCatalogId(
+        widget.subcategory,
+        key,
+      );
+      if (!mounted || !ok) return;
+      setState(() => _ownedIds.remove(key));
+      return;
+    }
     final ok = await silentAddTcgCard(
       context,
       subcategory: widget.subcategory,
@@ -460,7 +470,7 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
                             ),
                             onQuickAdd:
                                 _bulkMode ? null : () => _quickAddCard(card),
-                            onQuickWishlist: _bulkMode || owned
+                            onQuickWishlist: _bulkMode
                                 ? null
                                 : () => _toggleWishlist(card),
                           );

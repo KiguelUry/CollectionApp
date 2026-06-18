@@ -116,6 +116,31 @@ class UserCardCollectionService {
     return false;
   }
 
+  Future<bool> removeOwnedByCatalogId(
+    CardSubcategory sub,
+    String catalogId,
+  ) async {
+    final userId = _userId;
+    if (userId == null || catalogId.isEmpty) return false;
+
+    final rows = await _client
+        .from('collection_items')
+        .select('id, metadata')
+        .eq('category', CollectionCategory.card.dbValue)
+        .eq('subcategory', sub.dbValue)
+        .eq('is_wishlist', false)
+        .or('added_by.eq.$userId,location_user_id.eq.$userId');
+
+    for (final row in rows as List) {
+      final meta = row['metadata'] as Map<String, dynamic>?;
+      if (catalogIdFromMetadata(meta, sub) == catalogId) {
+        await _client.from('collection_items').delete().eq('id', row['id']);
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// Nombre de cartes possédées par set (`set_id` / `set_code`).
   Future<Map<String, int>> ownedCountsBySet(CardSubcategory sub) async {
     final userId = _userId;

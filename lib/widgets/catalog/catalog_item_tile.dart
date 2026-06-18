@@ -12,6 +12,7 @@ class CatalogItemTile extends StatelessWidget {
   final bool inWishlist;
   final double aspectRatio;
   final IconData placeholderIcon;
+  final bool highQualityImage;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
   final VoidCallback? onQuickAdd;
@@ -27,6 +28,7 @@ class CatalogItemTile extends StatelessWidget {
     this.inWishlist = false,
     this.aspectRatio = 1,
     this.placeholderIcon = Icons.casino_outlined,
+    this.highQualityImage = true,
     required this.onTap,
     this.onLongPress,
     this.onQuickAdd,
@@ -70,6 +72,8 @@ class CatalogItemTile extends StatelessWidget {
                                   ? BggNetworkImage(
                                       url: imageUrl!,
                                       fit: BoxFit.contain,
+                                      boxedCover: highQualityImage,
+                                      largeSource: highQualityImage,
                                     )
                                   : Icon(
                                       placeholderIcon,
@@ -98,7 +102,7 @@ class CatalogItemTile extends StatelessWidget {
                           ),
                         ),
                       ),
-                    if (onQuickWishlist != null && !owned)
+                    if (onQuickWishlist != null)
                       Positioned(
                         top: 2,
                         left: 2,
@@ -126,21 +130,21 @@ class CatalogItemTile extends StatelessWidget {
                           ),
                         ),
                       ),
-                    if (onQuickAdd != null && !owned)
+                    if (onQuickAdd != null)
                       Positioned(
                         top: 2,
                         right: 2,
                         child: Material(
-                          color: accent,
+                          color: owned ? Colors.green.shade600 : accent,
                           shape: const CircleBorder(),
                           elevation: 2,
                           child: InkWell(
                             onTap: onQuickAdd,
                             customBorder: const CircleBorder(),
-                            child: const Padding(
-                              padding: EdgeInsets.all(3),
+                            child: Padding(
+                              padding: const EdgeInsets.all(3),
                               child: Icon(
-                                Icons.add,
+                                owned ? Icons.remove : Icons.add,
                                 size: 14,
                                 color: Colors.white,
                               ),

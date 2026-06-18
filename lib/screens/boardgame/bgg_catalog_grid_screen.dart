@@ -370,22 +370,28 @@ class _BggCatalogGridScreenState extends State<BggCatalogGridScreen> {
                                     title: game.title,
                                     boxedCover: true,
                                   ),
-                                  onQuickAdd: owned
-                                      ? null
-                                      : () async {
-                                          final ok = await silentAddBoardgame(
-                                            context,
-                                            game: game,
-                                          );
-                                          if (!mounted || !ok) return;
-                                          setState(() {
-                                            _ownedKeys.add(_key(game));
-                                            _wishlistKeys.remove(_key(game));
-                                          });
-                                        },
-                                  onQuickWishlist: owned
-                                      ? null
-                                      : () => _toggleWishlist(game),
+                                  onQuickAdd: () async {
+                                    if (owned) {
+                                      final ok = await silentRemoveBoardgame(
+                                        game: game,
+                                      );
+                                      if (!mounted || !ok) return;
+                                      setState(() {
+                                        _ownedKeys.remove(_key(game));
+                                      });
+                                      return;
+                                    }
+                                    final ok = await silentAddBoardgame(
+                                      context,
+                                      game: game,
+                                    );
+                                    if (!mounted || !ok) return;
+                                    setState(() {
+                                      _ownedKeys.add(_key(game));
+                                      _wishlistKeys.remove(_key(game));
+                                    });
+                                  },
+                                  onQuickWishlist: () => _toggleWishlist(game),
                                 );
                               },
                             ),

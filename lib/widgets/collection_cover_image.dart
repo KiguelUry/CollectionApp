@@ -12,7 +12,9 @@ bool _preferWebHtmlImage(String url) {
   final host = uri.host.toLowerCase();
   final path = uri.path.toLowerCase();
   if (path.endsWith('.avif')) return true;
-  return host == 'cards.lorcast.io' || host == 'www.optcgapi.com';
+  return host == 'cards.lorcast.io' ||
+      host == 'www.optcgapi.com' ||
+      host == 'images.ygoprodeck.com';
 }
 
 /// Couverture nette (cache disque + mémoire, ratio livre, URLs adaptées).

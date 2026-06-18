@@ -51,17 +51,17 @@ String coverUrlForDisplay(String url, {required bool large}) {
   return coverUrlForWeb(resolved);
 }
 
-/// Passe d'une vignette BGG à l'image pleine résolution quand c'est possible.
+/// Passe d'une vignette BGG à une image plus nette (sans casser l'URL).
 String bggLargeImageUrl(String url) {
   var u = url;
-  if (u.contains('_t.')) {
-    u = u.replaceAll(RegExp(r'_t(\.(jpg|jpeg|png|webp))', caseSensitive: false), r'$1');
+  if (RegExp(r'_t\.(jpg|jpeg|png|webp)', caseSensitive: false).hasMatch(u)) {
+    u = u.replaceAll(
+      RegExp(r'_t(\.(jpg|jpeg|png|webp))', caseSensitive: false),
+      r'$1',
+    );
   }
   if (u.contains('/fit-in/')) {
-    u = u.replaceFirst(RegExp(r'/fit-in/\d+x\d+/'), '/original/');
-  }
-  if (u.contains('/thumb/')) {
-    u = u.replaceFirst('/thumb/', '/original/');
+    u = u.replaceFirst(RegExp(r'/fit-in/\d+x\d+/'), '/fit-in/684x1024/');
   }
   return u;
 }

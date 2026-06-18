@@ -108,7 +108,16 @@ class BggService {
     if (raw is! List) return [];
     return raw
         .whereType<Map>()
-        .map((g) => g.map((k, v) => MapEntry(k.toString(), v?.toString() ?? '')))
+        .map((g) {
+          final map = g.map(
+            (k, v) => MapEntry(k.toString(), v?.toString() ?? ''),
+          );
+          if ((map['image_url'] ?? '').isEmpty &&
+              (map['thumbnail_url'] ?? '').isNotEmpty) {
+            map['image_url'] = map['thumbnail_url']!;
+          }
+          return map;
+        })
         .where((g) => g['id']?.isNotEmpty == true)
         .toList();
   }
@@ -333,9 +342,10 @@ class BggService {
       }
       final data = await _jsonApiGet('hot', {});
       final games = _gamesFromJsonList(data?['games']);
-      _hotCache = games;
+      final enriched = await enrichGameMaps(games);
+      _hotCache = enriched;
       _hotCacheAt = DateTime.now();
-      return games;
+      return enriched;
     }
 
     if (_hotCache != null &&
@@ -415,18 +425,21 @@ class BggService {
         final data = await _jsonApiGet('meta', {'ids': chunk});
         out.addAll(_gamesFromJsonList(data?['games']));
       }
-      return out;
+      return enrichGameMaps(out);
     }
 
     final meta = await _fetchThingMeta(unique);
     return unique.map((id) {
       final m = meta[id];
+      final imageUrl = (m?.image != null && m!.image!.isNotEmpty)
+          ? m.image!
+          : (m?.thumbnail ?? '');
       return {
         'id': id,
         'title': m?.title ?? '',
         if (m?.year != null && m!.year!.isNotEmpty) 'year': m.year!,
         if (m?.rank != null) 'bgg_rank': m!.rank.toString(),
-        if (m?.image != null && m!.image!.isNotEmpty) 'image_url': m.image!,
+        if (imageUrl.isNotEmpty) 'image_url': imageUrl,
         if (m?.categories.isNotEmpty == true)
           'bgg_categories': m!.categories.join('|'),
         if (m?.avgRating != null) 'avg_rating': m!.avgRating!.toStringAsFixed(1),
@@ -451,8 +464,12 @@ class BggService {
           if (id.isEmpty) continue;
           final rank = int.tryParse(g['bgg_rank'] ?? '');
           final thumb = g['image_url'];
+          final thumbAlt = g['thumbnail_url'];
           final title = g['title'];
           final year = g['year'];
+          final imageUrl = (thumb != null && thumb.isNotEmpty)
+              ? thumb
+              : (thumbAlt != null && thumbAlt.isNotEmpty ? thumbAlt : null);
           final cats = (g['bgg_categories'] ?? '')
               .split('|')
               .where((s) => s.isNotEmpty)
@@ -460,8 +477,8 @@ class BggService {
           final avg = double.tryParse(g['avg_rating'] ?? '');
           result[id] = _BggThingMeta(
             rank: rank,
-            thumbnail: thumb != null && thumb.isNotEmpty ? thumb : null,
-            image: thumb != null && thumb.isNotEmpty ? thumb : null,
+            thumbnail: thumbAlt != null && thumbAlt.isNotEmpty ? thumbAlt : null,
+            image: imageUrl,
             title: title != null && title.isNotEmpty ? title : null,
             year: year != null && year.isNotEmpty ? year : null,
             categories: cats,
@@ -563,6 +580,14 @@ class BggService {
     return games.map((g) {
       final m = meta[g['id']];
       if (m == null) return g;
+      var imageUrl = g['image_url'] ?? '';
+      if (imageUrl.isEmpty) {
+        if (m.image != null && m.image!.isNotEmpty) {
+          imageUrl = m.image!;
+        } else if (m.thumbnail != null && m.thumbnail!.isNotEmpty) {
+          imageUrl = m.thumbnail!;
+        }
+      }
       return {
         ...g,
         if ((g['title'] ?? '').isEmpty && m.title != null && m.title!.isNotEmpty)
@@ -571,10 +596,7 @@ class BggService {
           'year': m.year!,
         if ((g['bgg_rank'] ?? '').isEmpty && m.rank != null)
           'bgg_rank': m.rank.toString(),
-        if ((g['image_url'] ?? '').isEmpty &&
-            m.image != null &&
-            m.image!.isNotEmpty)
-          'image_url': m.image!,
+        if (imageUrl.isNotEmpty) 'image_url': imageUrl,
         if ((g['bgg_categories'] ?? '').isEmpty && m.categories.isNotEmpty)
           'bgg_categories': m.categories.join('|'),
         if ((g['avg_rating'] ?? '').isEmpty && m.avgRating != null)

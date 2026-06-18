@@ -112,7 +112,7 @@ class TcgCatalogCardTile extends StatelessWidget {
                           ),
                         ),
                       ),
-                    if (onQuickWishlist != null && !selectionMode && !owned)
+                    if (onQuickWishlist != null && !selectionMode)
                       Positioned(
                         top: 2,
                         left: 2,
@@ -145,16 +145,16 @@ class TcgCatalogCardTile extends StatelessWidget {
                         top: 2,
                         right: 2,
                         child: Material(
-                          color: accent,
+                          color: owned ? Colors.green.shade600 : accent,
                           shape: const CircleBorder(),
                           elevation: 2,
                           child: InkWell(
                             onTap: onQuickAdd,
                             customBorder: const CircleBorder(),
-                            child: const Padding(
-                              padding: EdgeInsets.all(3),
+                            child: Padding(
+                              padding: const EdgeInsets.all(3),
                               child: Icon(
-                                Icons.add,
+                                owned ? Icons.remove : Icons.add,
                                 size: 14,
                                 color: Colors.white,
                               ),

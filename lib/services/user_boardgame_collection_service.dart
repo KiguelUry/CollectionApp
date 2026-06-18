@@ -78,4 +78,26 @@ class UserBoardgameCollectionService {
     }
     return false;
   }
+
+  Future<bool> removeOwnedByCatalogKey(String catalogKey) async {
+    final userId = _userId;
+    if (userId == null || catalogKey.isEmpty) return false;
+
+    final rows = await _client
+        .from('collection_items')
+        .select('id, title, metadata')
+        .eq('category', CollectionCategory.boardgame.dbValue)
+        .eq('is_wishlist', false)
+        .or('added_by.eq.$userId,location_user_id.eq.$userId');
+
+    for (final row in rows as List) {
+      final title = row['title'] as String? ?? '';
+      final meta = row['metadata'] as Map<String, dynamic>?;
+      if (catalogKeyFromMetadata(meta, title) == catalogKey) {
+        await _client.from('collection_items').delete().eq('id', row['id']);
+        return true;
+      }
+    }
+    return false;
+  }
 }

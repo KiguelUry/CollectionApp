@@ -185,6 +185,16 @@ class _TcgGlobalSearchScreenState extends State<TcgGlobalSearchScreen> {
   }
 
   Future<void> _quickAddCard(TcgCatalogCard card) async {
+    final key = _catalogKey(card);
+    if (_ownedIds.contains(key)) {
+      final ok = await UserCardCollectionService().removeOwnedByCatalogId(
+        widget.subcategory,
+        key,
+      );
+      if (!mounted || !ok) return;
+      setState(() => _ownedIds.remove(key));
+      return;
+    }
     final ok = await silentAddTcgCard(
       context,
       subcategory: widget.subcategory,
@@ -532,8 +542,7 @@ class _TcgGlobalSearchScreenState extends State<TcgGlobalSearchScreen> {
                               title: card.name,
                             ),
                             onQuickAdd: () => _quickAddCard(card),
-                            onQuickWishlist:
-                                owned ? null : () => _toggleWishlist(card),
+                            onQuickWishlist: () => _toggleWishlist(card),
                           );
                         },
                       ),
