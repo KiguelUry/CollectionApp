@@ -9,6 +9,8 @@ class BggCatalogGame {
   /// Sous-titre affiché (année, joueurs, raison sociale…).
   final String? subtitle;
   final List<String> genres;
+  /// Horodatage ms (feed amis) pour tri récent.
+  final int? addedAtMs;
 
   const BggCatalogGame({
     required this.bggId,
@@ -19,6 +21,7 @@ class BggCatalogGame {
     this.hotRank,
     this.subtitle,
     this.genres = const [],
+    this.addedAtMs,
   });
 
   String get catalogKey =>
@@ -27,6 +30,7 @@ class BggCatalogGame {
   factory BggCatalogGame.fromBggMap(
     Map<String, String> map, {
     String? subtitle,
+    int? addedAtMs,
   }) {
     final id = map['id'] ?? map['bgg_id'] ?? '';
     final year = map['year'] ?? map['year_published'] ?? '';
@@ -50,6 +54,24 @@ class BggCatalogGame {
       bggRank: rank.isEmpty ? null : rank,
       hotRank: hot.isEmpty ? null : hot,
       subtitle: subtitle ?? (parts.isEmpty ? null : parts.join(' · ')),
+      addedAtMs: addedAtMs,
+    );
+  }
+
+  BggCatalogGame copyWith({
+    String? subtitle,
+    int? addedAtMs,
+  }) {
+    return BggCatalogGame(
+      bggId: bggId,
+      title: title,
+      imageUrl: imageUrl,
+      year: year,
+      bggRank: bggRank,
+      hotRank: hotRank,
+      subtitle: subtitle ?? this.subtitle,
+      genres: genres,
+      addedAtMs: addedAtMs ?? this.addedAtMs,
     );
   }
 

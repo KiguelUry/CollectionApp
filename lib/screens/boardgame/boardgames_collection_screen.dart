@@ -182,7 +182,7 @@ class _BoardgamesCollectionScreenState extends State<BoardgamesCollectionScreen>
                 ),
                 CategoryTypeHubItem(
                   label: 'Populaires',
-                  description: 'Les jeux « hot » du moment sur BoardGameGeek',
+                  description: 'Tendances BGG + grands classiques récents',
                   icon: Icons.local_fire_department,
                   color: Colors.red,
                   onTap: () => _openGrid(
@@ -192,15 +192,15 @@ class _BoardgamesCollectionScreenState extends State<BoardgamesCollectionScreen>
                   ),
                 ),
                 CategoryTypeHubItem(
-                  label: 'Tes amis adorent',
+                  label: 'Ajouts récents des amis',
                   description:
-                      'Jeux bien notés chez tes amis que tu n\'as pas encore',
+                      'Jeux que tes amis viennent d\'ajouter — le plus récent en premier',
                   icon: Icons.people_outline,
                   color: Colors.teal,
                   onTap: () => _openGrid(
                     context,
                     source: BggCatalogSource.friends,
-                    title: 'Tes amis adorent',
+                    title: 'Ajouts récents des amis',
                   ),
                 ),
                 CategoryTypeHubItem(

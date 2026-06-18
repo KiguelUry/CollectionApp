@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../utils/collection_item_filters.dart';
 import '../utils/search_relevance.dart';
@@ -335,6 +336,31 @@ class FriendService {
   }
 
   /// Collection active de l'ami (perso + groupes visibles via RLS).
+  Future<List<CollectionItem>> fetchFriendRecentBoardgames(
+    String friendProfileId, {
+    int limit = 20,
+  }) async {
+    if (!await canViewFriendCollection(friendProfileId)) {
+      return [];
+    }
+
+    final rows = await _client
+        .from('collection_items')
+        .select('*, locations(label), groups(name)')
+        .or(
+          'added_by.eq.$friendProfileId,location_user_id.eq.$friendProfileId',
+        )
+        .eq('category', CollectionCategory.boardgame.dbValue)
+        .eq('is_wishlist', false)
+        .order('created_at', ascending: false)
+        .limit(limit);
+
+    return (rows as List)
+        .map((r) => CollectionItem.fromJson(Map<String, dynamic>.from(r)))
+        .where(isActiveCollectionItem)
+        .toList();
+  }
+
   Future<List<CollectionItem>> fetchFriendCollectionItems(
     String friendProfileId,
   ) async {

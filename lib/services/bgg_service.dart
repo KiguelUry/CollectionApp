@@ -24,8 +24,15 @@ enum BggSearchSort {
 class _BggThingMeta {
   final int? rank;
   final String? thumbnail;
+  final String? title;
+  final String? year;
 
-  const _BggThingMeta({this.rank, this.thumbnail});
+  const _BggThingMeta({
+    this.rank,
+    this.thumbnail,
+    this.title,
+    this.year,
+  });
 }
 
 class BggService {
@@ -322,7 +329,7 @@ class BggService {
       final games = _gamesFromJsonList(data?['games']);
       _hotCache = games;
       _hotCacheAt = DateTime.now();
-      return await enrichGameMaps(games);
+      return games;
     }
 
     if (_hotCache != null &&
@@ -387,6 +394,38 @@ class BggService {
     }
   }
 
+  /// Fiche BGG par IDs (catalogue curé, genres).
+  static Future<List<Map<String, String>>> fetchGamesByIds(
+    List<String> ids,
+  ) async {
+    final unique = ids.where((id) => id.isNotEmpty).toSet().toList();
+    if (unique.isEmpty) return [];
+    if (!supportsWebSearch) return [];
+
+    if (_useWebJsonApi) {
+      final out = <Map<String, String>>[];
+      for (var i = 0; i < unique.length; i += _maxMetaLookup) {
+        final chunk = unique.skip(i).take(_maxMetaLookup).join(',');
+        final data = await _jsonApiGet('meta', {'ids': chunk});
+        out.addAll(_gamesFromJsonList(data?['games']));
+      }
+      return out;
+    }
+
+    final meta = await _fetchThingMeta(unique);
+    return unique.map((id) {
+      final m = meta[id];
+      return {
+        'id': id,
+        'title': m?.title ?? '',
+        if (m?.year != null && m!.year!.isNotEmpty) 'year': m.year!,
+        if (m?.rank != null) 'bgg_rank': m!.rank.toString(),
+        if (m?.thumbnail != null && m!.thumbnail!.isNotEmpty)
+          'image_url': m.thumbnail!,
+      };
+    }).where((g) => g['id']!.isNotEmpty).toList();
+  }
+
   /// Rangs + miniatures (via API thing ; sur le web : proxy Supabase).
   static Future<Map<String, _BggThingMeta>> _fetchThingMeta(
     List<String> ids,
@@ -404,9 +443,13 @@ class BggService {
           if (id.isEmpty) continue;
           final rank = int.tryParse(g['bgg_rank'] ?? '');
           final thumb = g['image_url'];
+          final title = g['title'];
+          final year = g['year'];
           result[id] = _BggThingMeta(
             rank: rank,
             thumbnail: thumb != null && thumb.isNotEmpty ? thumb : null,
+            title: title != null && title.isNotEmpty ? title : null,
+            year: year != null && year.isNotEmpty ? year : null,
           );
         }
       }
@@ -444,10 +487,14 @@ class BggService {
           final thumb =
               item.findAllElements('thumbnail').firstOrNull?.innerText ??
               item.findAllElements('image').firstOrNull?.innerText;
+          final year =
+              item.findElements('yearpublished').firstOrNull?.getAttribute('value');
 
           result[id] = _BggThingMeta(
             rank: rank,
             thumbnail: thumb?.isNotEmpty == true ? thumb : null,
+            title: _primaryTitle(item),
+            year: year,
           );
         }
       } catch (e) {
@@ -484,6 +531,10 @@ class BggService {
       if (m == null) return g;
       return {
         ...g,
+        if ((g['title'] ?? '').isEmpty && m.title != null && m.title!.isNotEmpty)
+          'title': m.title!,
+        if ((g['year'] ?? '').isEmpty && m.year != null && m.year!.isNotEmpty)
+          'year': m.year!,
         if ((g['bgg_rank'] ?? '').isEmpty && m.rank != null)
           'bgg_rank': m.rank.toString(),
         if ((g['image_url'] ?? '').isEmpty &&

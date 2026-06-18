@@ -18,7 +18,7 @@ const MAX_HOT = 50;
 const THING_CHUNK = 8;
 
 type GameHit = Record<string, string>;
-type ThingMeta = { rank?: number; thumbnail?: string };
+type ThingMeta = { rank?: number; thumbnail?: string; title?: string; year?: string };
 
 function normalize(s: string): string {
   return s.toLowerCase().trim().replace(/\s+/g, " ");
@@ -117,6 +117,8 @@ async function enrichGameHits(hits: GameHit[]): Promise<GameHit[]> {
     const next: GameHit = { ...g };
     if (m.rank != null && !next.bgg_rank) next.bgg_rank = String(m.rank);
     if (m.thumbnail && !next.image_url) next.image_url = m.thumbnail;
+    if (m.title && !next.title) next.title = m.title;
+    if (m.year && !next.year) next.year = m.year;
     return next;
   });
 }
@@ -141,9 +143,13 @@ function parseThingMeta(xml: string): Map<string, ThingMeta> {
     const thumb =
       inner.match(/<thumbnail>([^<]*)<\/thumbnail>/i)?.[1]?.trim() ??
       inner.match(/<image>([^<]*)<\/image>/i)?.[1]?.trim();
+    const year =
+      inner.match(/<yearpublished[^>]*value="([^"]*)"/i)?.[1] ?? "";
     out.set(id, {
       rank,
       thumbnail: thumb || undefined,
+      title: primaryTitle(inner),
+      ...(year ? { year } : {}),
     });
   }
   return out;

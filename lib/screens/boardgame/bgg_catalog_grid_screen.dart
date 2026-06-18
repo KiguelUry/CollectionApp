@@ -45,59 +45,108 @@ class _BggCatalogGridScreenState extends State<BggCatalogGridScreen> {
   static const _accent = Colors.orange;
 
   final _discovery = BoardgameDiscoveryService();
+  final _scrollController = ScrollController();
   late final TextEditingController _searchController;
 
-  List<BggCatalogGame> _games = [];
+  List<BggCatalogGame> _allGames = [];
   Set<String> _ownedKeys = {};
   Set<String> _wishlistKeys = {};
+  int _visibleCount = catalogPageSize;
+  bool _hideOwnedAndWishlist = false;
   bool _loading = true;
+  bool _loadingMore = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
     _searchController = TextEditingController(text: widget.initialQuery ?? '');
+    _scrollController.addListener(_onScroll);
     _load();
   }
 
   @override
   void dispose() {
+    _scrollController.dispose();
     _searchController.dispose();
     super.dispose();
   }
 
   String _key(BggCatalogGame g) => g.catalogKey;
 
+  List<BggCatalogGame> get _filteredGames {
+    if (!_hideOwnedAndWishlist) return _allGames;
+    return _allGames.where((g) {
+      final k = _key(g);
+      return !_ownedKeys.contains(k) && !_wishlistKeys.contains(k);
+    }).toList();
+  }
+
+  List<BggCatalogGame> get _visibleGames {
+    final filtered = _filteredGames;
+    if (_visibleCount >= filtered.length) return filtered;
+    return filtered.take(_visibleCount).toList();
+  }
+
+  bool get _canLoadMore => _visibleCount < _filteredGames.length;
+
+  void _onScroll() {
+    if (!_canLoadMore || _loadingMore || _loading) return;
+    final pos = _scrollController.position;
+    if (pos.pixels >= pos.maxScrollExtent - 320) {
+      _loadMore();
+    }
+  }
+
+  void _loadMore() {
+    if (!_canLoadMore) return;
+    setState(() {
+      _loadingMore = true;
+      _visibleCount += catalogPageSize;
+      _loadingMore = false;
+    });
+  }
+
+  Future<List<BggCatalogGame>> _fetchGames() async {
+    return switch (widget.source) {
+      BggCatalogSource.popular => _discovery.fetchPopular(),
+      BggCatalogSource.forYou => _discovery.fetchForYou(),
+      BggCatalogSource.friends => _discovery.fetchFriendRecentAdds(),
+      BggCatalogSource.genre => _discovery.fetchByGenre(
+          widget.genreEn ?? '',
+        ),
+      BggCatalogSource.search => _discovery.search(
+          _searchController.text.trim().isNotEmpty
+              ? _searchController.text.trim()
+              : (widget.initialQuery ?? ''),
+        ),
+    };
+  }
+
   Future<void> _load() async {
     setState(() {
       _loading = true;
       _error = null;
+      _visibleCount = catalogPageSize;
     });
 
     try {
-      final games = await switch (widget.source) {
-        BggCatalogSource.popular => _discovery.fetchPopular(),
-        BggCatalogSource.forYou => _discovery.fetchForYou(),
-        BggCatalogSource.friends => _discovery.fetchFriendsLove(),
-        BggCatalogSource.genre => _discovery.fetchByGenre(
-            widget.genreEn ?? '',
-          ),
-        BggCatalogSource.search => _discovery.search(
-            _searchController.text.trim().isNotEmpty
-                ? _searchController.text.trim()
-                : (widget.initialQuery ?? ''),
-          ),
-      };
-
+      final gamesFuture = _fetchGames();
       final svc = UserBoardgameCollectionService();
-      final owned = await svc.ownedCatalogKeys();
-      final wishlist = await svc.wishlistCatalogKeys();
+      final ownedFuture = svc.ownedCatalogKeys();
+      final wishlistFuture = svc.wishlistCatalogKeys();
+
+      final results = await Future.wait([
+        gamesFuture,
+        ownedFuture,
+        wishlistFuture,
+      ]);
 
       if (!mounted) return;
       setState(() {
-        _games = games;
-        _ownedKeys = owned;
-        _wishlistKeys = wishlist;
+        _allGames = results[0] as List<BggCatalogGame>;
+        _ownedKeys = results[1] as Set<String>;
+        _wishlistKeys = results[2] as Set<String>;
         _loading = false;
       });
     } catch (e) {
@@ -117,25 +166,40 @@ class _BggCatalogGridScreenState extends State<BggCatalogGridScreen> {
       );
       return;
     }
-    setState(() => _loading = true);
-    final games = await _discovery.search(q);
+    setState(() {
+      _loading = true;
+      _visibleCount = catalogPageSize;
+    });
+    try {
+      final games = await _discovery.search(q);
+      if (!mounted) return;
+      setState(() {
+        _allGames = games;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = e.toString();
+      });
+    }
+  }
+
+  Future<void> _refreshOwnedState() async {
+    final svc = UserBoardgameCollectionService();
+    final owned = await svc.ownedCatalogKeys();
+    final wishlist = await svc.wishlistCatalogKeys();
     if (!mounted) return;
     setState(() {
-      _games = games;
-      _loading = false;
+      _ownedKeys = owned;
+      _wishlistKeys = wishlist;
     });
   }
 
   Future<void> _openAddDialog(BggCatalogGame game) async {
     await quickAddBoardgameFromCatalog(context, game: game);
-    if (!mounted) return;
-    final svc = UserBoardgameCollectionService();
-    final owned = await svc.ownedCatalogKeys();
-    final wishlist = await svc.wishlistCatalogKeys();
-    setState(() {
-      _ownedKeys = owned;
-      _wishlistKeys = wishlist;
-    });
+    await _refreshOwnedState();
   }
 
   Future<void> _toggleWishlist(BggCatalogGame game) async {
@@ -171,6 +235,8 @@ class _BggCatalogGridScreenState extends State<BggCatalogGridScreen> {
     final showSearch =
         widget.source == BggCatalogSource.search ||
         widget.source == BggCatalogSource.genre;
+    final visible = _visibleGames;
+    final filteredCount = _filteredGames.length;
 
     return Scaffold(
       appBar: AppAppBar(title: widget.title),
@@ -208,6 +274,32 @@ class _BggCatalogGridScreenState extends State<BggCatalogGridScreen> {
                 ),
               ),
             ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+            child: Row(
+              children: [
+                FilterChip(
+                  label: const Text('Masquer ceux que j\'ai déjà'),
+                  selected: _hideOwnedAndWishlist,
+                  onSelected: (v) {
+                    setState(() {
+                      _hideOwnedAndWishlist = v;
+                      _visibleCount = catalogPageSize;
+                    });
+                  },
+                ),
+                const Spacer(),
+                if (!_loading && filteredCount > 0)
+                  Text(
+                    '$filteredCount jeu${filteredCount > 1 ? 'x' : ''}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+              ],
+            ),
+          ),
           Expanded(
             child: _loading
                 ? const LoadingPlaceholder(grid: true, count: 9)
@@ -218,18 +310,21 @@ class _BggCatalogGridScreenState extends State<BggCatalogGridScreen> {
                         message: _error!,
                         iconColor: _accent,
                       )
-                    : _games.isEmpty
+                    : visible.isEmpty
                         ? EmptyState(
                             icon: Icons.casino_outlined,
                             title: 'Aucun jeu',
-                            message: widget.source == BggCatalogSource.friends
-                                ? 'Ajoute des amis ou leurs collections ne sont pas partagées.'
-                                : 'Essaie une autre recherche ou reviens plus tard.',
+                            message: _hideOwnedAndWishlist
+                                ? 'Tout est déjà dans ta collection ou ta wishlist. Désactive le filtre.'
+                                : widget.source == BggCatalogSource.friends
+                                    ? 'Aucun ami n\'a ajouté de jeu récemment (ou collections non partagées).'
+                                    : 'Essaie une autre recherche ou reviens plus tard.',
                             iconColor: _accent,
                           )
                         : RefreshIndicator(
                             onRefresh: _load,
                             child: GridView.builder(
+                              controller: _scrollController,
                               padding: const EdgeInsets.all(12),
                               gridDelegate:
                                   CollectionGridLayout.gridDelegate(
@@ -238,9 +333,24 @@ class _BggCatalogGridScreenState extends State<BggCatalogGridScreen> {
                                 childAspectRatio: 0.62,
                                 spacing: 6,
                               ),
-                              itemCount: _games.length,
+                              itemCount:
+                                  visible.length + (_canLoadMore ? 1 : 0),
                               itemBuilder: (context, i) {
-                                final game = _games[i];
+                                if (i >= visible.length) {
+                                  return const Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.all(16),
+                                      child: SizedBox(
+                                        width: 24,
+                                        height: 24,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }
+                                final game = visible[i];
                                 final owned = _ownedKeys.contains(_key(game));
                                 final inWishlist =
                                     _wishlistKeys.contains(_key(game));
