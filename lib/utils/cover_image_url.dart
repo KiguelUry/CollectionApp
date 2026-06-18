@@ -60,8 +60,5 @@ String bggLargeImageUrl(String url) {
       r'$1',
     );
   }
-  if (u.contains('/fit-in/')) {
-    u = u.replaceFirst(RegExp(r'/fit-in/\d+x\d+/'), '/fit-in/684x1024/');
-  }
   return u;
 }

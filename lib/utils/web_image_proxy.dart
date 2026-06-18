@@ -3,14 +3,13 @@ import 'package:flutter/foundation.dart';
 import '../config/supabase_public_config.dart';
 
 const _proxiedHosts = {
-  'cf.geekdo-images.com',
-  'boardgamegeek.com',
   'covers.openlibrary.org',
   'assets.tcgdex.net',
   'api.tcgdex.net',
   'images.pokemontcg.io',
   'images.ygoprodeck.com',
-  // Lorcast / OPTCG : chargement direct (CORS OK pour <img>, pas besoin du proxy).
+  // BGG : <img> natif (cf. collection_cover_image) — pas le proxy.
+  // Lorcast / OPTCG : chargement direct aussi.
   'i.discogs.com',
   'img.discogs.com',
   'st.discogs.com',

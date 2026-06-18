@@ -4,6 +4,12 @@ import 'package:flutter/material.dart';
 
 import '../utils/cover_image_url.dart';
 
+/// Hôtes chargés en direct sur le web (<img> natif, sans proxy CORS).
+const _directWebImageHosts = {
+  'cf.geekdo-images.com',
+  'boardgamegeek.com',
+};
+
 /// Hôtes / formats que le web charge mieux via <img> natif (CORS, AVIF…).
 bool _preferWebHtmlImage(String url) {
   if (!kIsWeb) return false;
@@ -11,6 +17,7 @@ bool _preferWebHtmlImage(String url) {
   if (uri == null) return false;
   final host = uri.host.toLowerCase();
   final path = uri.path.toLowerCase();
+  if (_directWebImageHosts.contains(host)) return true;
   if (path.endsWith('.avif')) return true;
   return host == 'cards.lorcast.io' ||
       host == 'www.optcgapi.com' ||

@@ -344,12 +344,11 @@ class BggService {
       final games = _gamesFromJsonList(data?['games']);
       if (games.isEmpty) return [];
       final enriched = await enrichGameMaps(games);
-      final withImages = await _fillMissingImages(enriched);
-      if (withImages.isNotEmpty) {
-        _hotCache = withImages;
+      if (enriched.isNotEmpty) {
+        _hotCache = enriched;
         _hotCacheAt = DateTime.now();
       }
-      return withImages;
+      return enriched;
     }
 
     if (_hotCache != null &&
@@ -463,12 +462,14 @@ class BggService {
 
   /// Complète les couvertures via fiche BGG si meta/hot n'en ont pas.
   static Future<List<Map<String, String>>> _fillMissingImages(
-    List<Map<String, String>> games,
-  ) async {
+    List<Map<String, String>> games, {
+    int maxLookups = 16,
+  }) async {
     final missing = games
         .where(
           (g) => (g['image_url'] ?? '').isEmpty && (g['id'] ?? '').isNotEmpty,
         )
+        .take(maxLookups)
         .toList();
     if (missing.isEmpty) return games;
 

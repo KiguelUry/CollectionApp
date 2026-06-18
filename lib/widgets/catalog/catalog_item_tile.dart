@@ -28,7 +28,7 @@ class CatalogItemTile extends StatelessWidget {
     this.inWishlist = false,
     this.aspectRatio = 1,
     this.placeholderIcon = Icons.casino_outlined,
-    this.highQualityImage = true,
+    this.highQualityImage = false,
     required this.onTap,
     this.onLongPress,
     this.onQuickAdd,
