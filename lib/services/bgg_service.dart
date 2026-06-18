@@ -342,9 +342,12 @@ class BggService {
       }
       final data = await _jsonApiGet('hot', {});
       final games = _gamesFromJsonList(data?['games']);
+      if (games.isEmpty) return [];
       final enriched = await enrichGameMaps(games);
-      _hotCache = enriched;
-      _hotCacheAt = DateTime.now();
+      if (enriched.isNotEmpty) {
+        _hotCache = enriched;
+        _hotCacheAt = DateTime.now();
+      }
       return enriched;
     }
 
@@ -425,7 +428,14 @@ class BggService {
         final data = await _jsonApiGet('meta', {'ids': chunk});
         out.addAll(_gamesFromJsonList(data?['games']));
       }
-      return enrichGameMaps(out);
+      final enriched = await enrichGameMaps(out);
+      final byId = <String, Map<String, String>>{
+        for (final g in enriched)
+          if ((g['id'] ?? '').isNotEmpty) g['id']!: g,
+      };
+      return unique
+          .map((id) => byId[id] ?? {'id': id, 'title': ''})
+          .toList();
     }
 
     final meta = await _fetchThingMeta(unique);

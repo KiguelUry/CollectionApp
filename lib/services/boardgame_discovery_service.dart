@@ -58,6 +58,8 @@ void sortBggCatalogByHotAndRecency(List<BggCatalogGame> games) {
 
 bool isDiscoverableQuality(BggCatalogGame g) {
   final rank = _rankValue(g);
+  // Pas de rang BGG (meta indisponible) : on garde quand même les jeux curés / hot.
+  if (rank >= 999999) return true;
   if (rank < 8000) return true;
   final hot = int.tryParse(g.hotRank ?? '');
   if (hot != null && hot <= 50) return true;
@@ -86,17 +88,34 @@ class BoardgameDiscoveryService {
     List<Map<String, String>> raw, {
     Map<String, String>? subtitles,
     Map<String, int>? addedAtMs,
+    Map<String, String>? titleFallbacks,
+    Map<String, String>? imageFallbacks,
   }) {
     return raw
         .map((m) {
           final id = m['id'] ?? '';
+          final patched = Map<String, String>.from(m);
+          if ((patched['title'] ?? '').trim().isEmpty) {
+            final fallback = titleFallbacks?[id];
+            if (fallback != null && fallback.isNotEmpty) {
+              patched['title'] = fallback;
+            } else if (id.isNotEmpty) {
+              patched['title'] = 'Jeu #$id';
+            }
+          }
+          if ((patched['image_url'] ?? '').isEmpty) {
+            final img = imageFallbacks?[id];
+            if (img != null && img.isNotEmpty) {
+              patched['image_url'] = img;
+            }
+          }
           return BggCatalogGame.fromBggMap(
-            m,
+            patched,
             subtitle: subtitles?[id],
             addedAtMs: addedAtMs?[id],
           );
         })
-        .where((g) => g.title.isNotEmpty)
+        .where((g) => g.bggId.isNotEmpty || g.title.isNotEmpty)
         .toList();
   }
 
@@ -145,16 +164,18 @@ class BoardgameDiscoveryService {
 
   /// Hot BGG + tops globaux, tri tendance puis popularité.
   Future<List<BggCatalogGame>> fetchPopular({int limit = 120}) async {
-    final results = await Future.wait([
-      BggService.fetchHotBoardgames(),
-      _fromIds(boardgameGlobalTopIds, qualityOnly: true),
-    ]);
-    final hotMaps = results[0] as List<Map<String, String>>;
-    final curated = results[1] as List<BggCatalogGame>;
-
+    final hotMaps = await BggService.fetchHotBoardgames();
     final hotGames = _dedupe(_mapsToGames(hotMaps));
     sortBggCatalogByHotAndRecency(hotGames);
 
+    if (hotGames.length >= limit) {
+      return hotGames.take(limit).toList();
+    }
+
+    final curated = await _fromIds(
+      boardgameGlobalTopIds,
+      qualityOnly: false,
+    );
     final merged = _dedupe([...hotGames, ...curated]);
     sortBggCatalogByHotAndRecency(merged);
     return merged.take(limit).toList();
@@ -193,9 +214,23 @@ class BoardgameDiscoveryService {
         for (final r in needLookup)
           r.bggId!: r.addedAt.millisecondsSinceEpoch,
       };
+      final titleFallbacks = {
+        for (final r in needLookup) r.bggId!: r.title,
+      };
+      final imageFallbacks = {
+        for (final r in needLookup)
+          if (r.imageUrl != null && r.imageUrl!.isNotEmpty)
+            r.bggId!: r.imageUrl!,
+      };
       final raw = await BggService.fetchGamesByIds(ids);
       ready.addAll(
-        _mapsToGames(raw, subtitles: subtitles, addedAtMs: addedAt),
+        _mapsToGames(
+          raw,
+          subtitles: subtitles,
+          addedAtMs: addedAt,
+          titleFallbacks: titleFallbacks,
+          imageFallbacks: imageFallbacks,
+        ),
       );
     }
 
@@ -221,15 +256,12 @@ class BoardgameDiscoveryService {
     }
     idSet.addAll(boardgameGlobalTopIds.take(25));
 
-    final results = await Future.wait([
-      fetchFriendRecentAdds(limit: 24),
-      _fromIds(idSet.toList(), qualityOnly: true),
-      BggService.fetchHotBoardgames(),
-    ]);
-
-    final friends = results[0] as List<BggCatalogGame>;
-    final curated = results[1] as List<BggCatalogGame>;
-    final hotMaps = results[2] as List<Map<String, String>>;
+    final friends = await fetchFriendRecentAdds(limit: 24);
+    final curated = await _fromIds(
+      idSet.toList(),
+      qualityOnly: false,
+    );
+    final hotMaps = await BggService.fetchHotBoardgames();
     final hot = _dedupe(_mapsToGames(hotMaps));
 
     final genreLabels = {
@@ -283,7 +315,7 @@ class BoardgameDiscoveryService {
       seedIds,
       genreEn: genreEn,
       subtitles: subtitles,
-      qualityOnly: true,
+      qualityOnly: false,
     );
     return games.take(limit).toList();
   }
