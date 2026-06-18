@@ -24,14 +24,20 @@ enum BggSearchSort {
 class _BggThingMeta {
   final int? rank;
   final String? thumbnail;
+  final String? image;
   final String? title;
   final String? year;
+  final List<String> categories;
+  final double? avgRating;
 
   const _BggThingMeta({
     this.rank,
     this.thumbnail,
+    this.image,
     this.title,
     this.year,
+    this.categories = const [],
+    this.avgRating,
   });
 }
 
@@ -420,8 +426,10 @@ class BggService {
         'title': m?.title ?? '',
         if (m?.year != null && m!.year!.isNotEmpty) 'year': m.year!,
         if (m?.rank != null) 'bgg_rank': m!.rank.toString(),
-        if (m?.thumbnail != null && m!.thumbnail!.isNotEmpty)
-          'image_url': m.thumbnail!,
+        if (m?.image != null && m!.image!.isNotEmpty) 'image_url': m.image!,
+        if (m?.categories.isNotEmpty == true)
+          'bgg_categories': m!.categories.join('|'),
+        if (m?.avgRating != null) 'avg_rating': m!.avgRating!.toStringAsFixed(1),
       };
     }).where((g) => g['id']!.isNotEmpty).toList();
   }
@@ -445,11 +453,19 @@ class BggService {
           final thumb = g['image_url'];
           final title = g['title'];
           final year = g['year'];
+          final cats = (g['bgg_categories'] ?? '')
+              .split('|')
+              .where((s) => s.isNotEmpty)
+              .toList();
+          final avg = double.tryParse(g['avg_rating'] ?? '');
           result[id] = _BggThingMeta(
             rank: rank,
             thumbnail: thumb != null && thumb.isNotEmpty ? thumb : null,
+            image: thumb != null && thumb.isNotEmpty ? thumb : null,
             title: title != null && title.isNotEmpty ? title : null,
             year: year != null && year.isNotEmpty ? year : null,
+            categories: cats,
+            avgRating: avg,
           );
         }
       }
@@ -484,17 +500,35 @@ class BggService {
             rank = int.tryParse(rawRank);
           }
 
-          final thumb =
-              item.findAllElements('thumbnail').firstOrNull?.innerText ??
+          final fullImage =
               item.findAllElements('image').firstOrNull?.innerText;
+          final thumb = item.findAllElements('thumbnail').firstOrNull?.innerText;
+          final imageUrl = (fullImage != null && fullImage.isNotEmpty)
+              ? fullImage
+              : thumb;
           final year =
               item.findElements('yearpublished').firstOrNull?.getAttribute('value');
+          final categories = item
+              .findAllElements('link')
+              .where((l) => l.getAttribute('type') == 'boardgamecategory')
+              .map((l) => l.getAttribute('value'))
+              .whereType<String>()
+              .where((v) => v.isNotEmpty)
+              .toList();
+          final avgRaw = item
+              .findAllElements('average')
+              .firstOrNull
+              ?.getAttribute('value');
+          final avgRating = double.tryParse(avgRaw ?? '');
 
           result[id] = _BggThingMeta(
             rank: rank,
+            image: imageUrl?.isNotEmpty == true ? imageUrl : null,
             thumbnail: thumb?.isNotEmpty == true ? thumb : null,
             title: _primaryTitle(item),
             year: year,
+            categories: categories,
+            avgRating: avgRating,
           );
         }
       } catch (e) {
@@ -538,9 +572,13 @@ class BggService {
         if ((g['bgg_rank'] ?? '').isEmpty && m.rank != null)
           'bgg_rank': m.rank.toString(),
         if ((g['image_url'] ?? '').isEmpty &&
-            m.thumbnail != null &&
-            m.thumbnail!.isNotEmpty)
-          'image_url': m.thumbnail!,
+            m.image != null &&
+            m.image!.isNotEmpty)
+          'image_url': m.image!,
+        if ((g['bgg_categories'] ?? '').isEmpty && m.categories.isNotEmpty)
+          'bgg_categories': m.categories.join('|'),
+        if ((g['avg_rating'] ?? '').isEmpty && m.avgRating != null)
+          'avg_rating': m.avgRating!.toStringAsFixed(1),
       };
     }).toList();
   }

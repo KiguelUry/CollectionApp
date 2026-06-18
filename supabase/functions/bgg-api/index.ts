@@ -18,7 +18,15 @@ const MAX_HOT = 50;
 const THING_CHUNK = 8;
 
 type GameHit = Record<string, string>;
-type ThingMeta = { rank?: number; thumbnail?: string; title?: string; year?: string };
+type ThingMeta = {
+  rank?: number;
+  thumbnail?: string;
+  image?: string;
+  title?: string;
+  year?: string;
+  categories?: string[];
+  avgRating?: number;
+};
 
 function normalize(s: string): string {
   return s.toLowerCase().trim().replace(/\s+/g, " ");
@@ -116,9 +124,15 @@ async function enrichGameHits(hits: GameHit[]): Promise<GameHit[]> {
     if (!m) return g;
     const next: GameHit = { ...g };
     if (m.rank != null && !next.bgg_rank) next.bgg_rank = String(m.rank);
-    if (m.thumbnail && !next.image_url) next.image_url = m.thumbnail;
+    if (m.image && !next.image_url) next.image_url = m.image;
+    else if (m.thumbnail && !next.image_url) next.image_url = m.thumbnail;
+    if (m.thumbnail) next.thumbnail_url = m.thumbnail;
     if (m.title && !next.title) next.title = m.title;
     if (m.year && !next.year) next.year = m.year;
+    if (m.categories?.length) next.bgg_categories = m.categories.join("|");
+    if (m.avgRating != null && !next.avg_rating) {
+      next.avg_rating = m.avgRating.toFixed(1);
+    }
     return next;
   });
 }
@@ -140,16 +154,31 @@ function parseThingMeta(xml: string): Map<string, ThingMeta> {
       const n = parseInt(rawRank, 10);
       if (!Number.isNaN(n)) rank = n;
     }
-    const thumb =
-      inner.match(/<thumbnail>([^<]*)<\/thumbnail>/i)?.[1]?.trim() ??
+    const fullImage =
       inner.match(/<image>([^<]*)<\/image>/i)?.[1]?.trim();
+    const thumb =
+      inner.match(/<thumbnail>([^<]*)<\/thumbnail>/i)?.[1]?.trim();
     const year =
       inner.match(/<yearpublished[^>]*value="([^"]*)"/i)?.[1] ?? "";
+    const categories: string[] = [];
+    const linkRe = /<link\b([^>]*)\/?>/gi;
+    let lm: RegExpExecArray | null;
+    while ((lm = linkRe.exec(inner)) !== null) {
+      const attrs = lm[1];
+      if (!/type="boardgamecategory"/i.test(attrs)) continue;
+      const val = attrs.match(/\bvalue="([^"]*)"/i)?.[1];
+      if (val) categories.push(val);
+    }
+    const avgRaw = inner.match(/<average[^>]*value="([^"]*)"/i)?.[1];
+    const avgRating = avgRaw ? parseFloat(avgRaw) : undefined;
     out.set(id, {
       rank,
+      image: fullImage || undefined,
       thumbnail: thumb || undefined,
       title: primaryTitle(inner),
       ...(year ? { year } : {}),
+      ...(categories.length ? { categories } : {}),
+      ...(avgRating != null && !Number.isNaN(avgRating) ? { avgRating } : {}),
     });
   }
   return out;

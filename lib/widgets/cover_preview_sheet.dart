@@ -8,6 +8,7 @@ Future<void> showCoverPreview(
   required String? imageUrl,
   String? title,
   bool bookCover = false,
+  bool boxedCover = false,
 }) async {
   if (imageUrl == null || imageUrl.trim().isEmpty) return;
 
@@ -18,6 +19,7 @@ Future<void> showCoverPreview(
       imageUrl: imageUrl.trim(),
       title: title,
       bookCover: bookCover,
+      boxedCover: boxedCover,
     ),
   );
 }
@@ -26,11 +28,13 @@ class _CoverPreviewDialog extends StatelessWidget {
   final String imageUrl;
   final String? title;
   final bool bookCover;
+  final bool boxedCover;
 
   const _CoverPreviewDialog({
     required this.imageUrl,
     this.title,
     this.bookCover = false,
+    this.boxedCover = false,
   });
 
   @override
@@ -79,7 +83,14 @@ class _CoverPreviewDialog extends StatelessWidget {
                         largeSource: true,
                         fit: BoxFit.contain,
                       )
-                    : AspectRatio(
+                    : boxedCover
+                        ? BggNetworkImage(
+                            url: imageUrl,
+                            boxedCover: true,
+                            largeSource: true,
+                            fit: BoxFit.contain,
+                          )
+                        : AspectRatio(
                         aspectRatio: 63 / 88,
                         child: BggNetworkImage(
                           url: imageUrl,

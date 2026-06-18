@@ -368,6 +368,7 @@ class _BggCatalogGridScreenState extends State<BggCatalogGridScreen> {
                                     context,
                                     imageUrl: game.imageUrl,
                                     title: game.title,
+                                    boxedCover: true,
                                   ),
                                   onQuickAdd: owned
                                       ? null

@@ -36,11 +36,13 @@ class BggCatalogGame {
     final year = map['year'] ?? map['year_published'] ?? '';
     final rank = map['bgg_rank'] ?? '';
     final hot = map['hot_rank'] ?? '';
+    final avg = map['avg_rating'] ?? '';
     final players = _playersLabel(
       map['min_players'],
       map['max_players'],
     );
     final parts = <String>[
+      if (avg.isNotEmpty) '★ $avg',
       if (year.isNotEmpty) year,
       if (players != null) players,
       if (rank.isNotEmpty && rank != '999999') 'BGG #$rank',

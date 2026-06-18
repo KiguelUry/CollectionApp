@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/collection_category.dart';
+import '../models/collection_item.dart';
 import '../utils/collection_item_filters.dart';
 import 'friend_service.dart';
 
@@ -40,8 +41,9 @@ class FriendBoardgameFeedService {
     if (friendRows.isEmpty) return [];
 
     final byId = <String, Map<String, dynamic>>{
-      for (final f in friendRows) f['id'] as String: f,
-    };
+      for (final f in friendRows)
+        (f['profile_id'] as String? ?? ''): f,
+    }..remove('');
 
     final feeds = await Future.wait(
       byId.keys.map((friendId) async {
@@ -51,10 +53,10 @@ class FriendBoardgameFeedService {
             limit: 24,
           );
           final username =
-              byId[friendId]?['username'] as String? ?? 'Un ami';
+              byId[friendId]?['username']?.toString() ?? 'Un ami';
           return (friendId, username, items);
         } catch (_) {
-          return (friendId, '', <dynamic>[]);
+          return (friendId, '', <CollectionItem>[]);
         }
       }),
     );

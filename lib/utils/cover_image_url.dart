@@ -25,6 +25,10 @@ String openLibraryAuthorPhotoUrl(String authorOlid, {CoverSize size = CoverSize.
 String coverUrlForDisplay(String url, {required bool large}) {
   var resolved = url;
 
+  if (large && resolved.contains('geekdo-images.com')) {
+    resolved = bggLargeImageUrl(resolved);
+  }
+
   // Grilles / listes : garder low.webp (chargement plus rapide).
   if (resolved.contains('assets.tcgdex.net') &&
       large &&
@@ -45,4 +49,19 @@ String coverUrlForDisplay(String url, {required bool large}) {
   }
 
   return coverUrlForWeb(resolved);
+}
+
+/// Passe d'une vignette BGG à l'image pleine résolution quand c'est possible.
+String bggLargeImageUrl(String url) {
+  var u = url;
+  if (u.contains('_t.')) {
+    u = u.replaceAll(RegExp(r'_t(\.(jpg|jpeg|png|webp))', caseSensitive: false), r'$1');
+  }
+  if (u.contains('/fit-in/')) {
+    u = u.replaceFirst(RegExp(r'/fit-in/\d+x\d+/'), '/original/');
+  }
+  if (u.contains('/thumb/')) {
+    u = u.replaceFirst('/thumb/', '/original/');
+  }
+  return u;
 }
