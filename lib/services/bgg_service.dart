@@ -344,11 +344,12 @@ class BggService {
       final games = _gamesFromJsonList(data?['games']);
       if (games.isEmpty) return [];
       final enriched = await enrichGameMaps(games);
-      if (enriched.isNotEmpty) {
-        _hotCache = enriched;
+      final withImages = await _fillMissingImages(enriched);
+      if (withImages.isNotEmpty) {
+        _hotCache = withImages;
         _hotCacheAt = DateTime.now();
       }
-      return enriched;
+      return withImages;
     }
 
     if (_hotCache != null &&
@@ -433,13 +434,16 @@ class BggService {
         for (final g in enriched)
           if ((g['id'] ?? '').isNotEmpty) g['id']!: g,
       };
-      return unique
-          .map((id) => byId[id] ?? {'id': id, 'title': ''})
-          .toList();
+      return _fillMissingImages(
+        unique
+            .map((id) => byId[id] ?? {'id': id, 'title': ''})
+            .toList(),
+      );
     }
 
     final meta = await _fetchThingMeta(unique);
-    return unique.map((id) {
+    return _fillMissingImages(
+      unique.map((id) {
       final m = meta[id];
       final imageUrl = (m?.image != null && m!.image!.isNotEmpty)
           ? m.image!
@@ -454,7 +458,34 @@ class BggService {
           'bgg_categories': m!.categories.join('|'),
         if (m?.avgRating != null) 'avg_rating': m!.avgRating!.toStringAsFixed(1),
       };
-    }).where((g) => g['id']!.isNotEmpty).toList();
+    }).where((g) => g['id']!.isNotEmpty).toList());
+  }
+
+  /// Complète les couvertures via fiche BGG si meta/hot n'en ont pas.
+  static Future<List<Map<String, String>>> _fillMissingImages(
+    List<Map<String, String>> games,
+  ) async {
+    final missing = games
+        .where(
+          (g) => (g['image_url'] ?? '').isEmpty && (g['id'] ?? '').isNotEmpty,
+        )
+        .toList();
+    if (missing.isEmpty) return games;
+
+    for (var i = 0; i < missing.length; i += 4) {
+      final chunk = missing.skip(i).take(4);
+      await Future.wait(
+        chunk.map((g) async {
+          final id = g['id']!;
+          final details = await getGameFullDetails(id);
+          final url = details?['image_url']?.toString();
+          if (url != null && url.isNotEmpty) {
+            g['image_url'] = url;
+          }
+        }),
+      );
+    }
+    return games;
   }
 
   /// Rangs + miniatures (via API thing ; sur le web : proxy Supabase).
@@ -579,7 +610,8 @@ class BggService {
       if (id.isEmpty) return false;
       final noImg = (g['image_url'] ?? '').isEmpty;
       final noRank = (g['bgg_rank'] ?? '').isEmpty;
-      return noImg || noRank;
+      final noTitle = (g['title'] ?? '').isEmpty;
+      return noImg || noRank || noTitle;
     }).toList();
 
     if (needMeta.isEmpty) return games;

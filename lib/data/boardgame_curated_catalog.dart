@@ -77,12 +77,22 @@ List<String> curatedIdsForGenre(String genreEn, {int max = 80}) {
   return ids.take(max).toList();
 }
 
-bool boardgameMapMatchesGenre(Map<String, String> map, String genreEn) {
+bool boardgameMapMatchesGenre(
+  Map<String, String> map,
+  String genreEn, {
+  Set<String>? allowedIds,
+}) {
+  final id = map['id'] ?? '';
   final allowed = boardgameGenreBggCategories[genreEn];
-  if (allowed == null || allowed.isEmpty) return true;
   final raw = map['bgg_categories'] ?? '';
-  // IDs déjà curés par genre : si l'API ne renvoie pas les catégories, on garde.
-  if (raw.isEmpty) return true;
+
+  if (raw.isEmpty) {
+    // Sans catégories BGG : on ne garde que les IDs curés pour ce genre.
+    return allowedIds == null || allowedIds.contains(id);
+  }
+
+  if (allowed == null || allowed.isEmpty) return true;
+
   final cats = raw.split('|').map((s) => s.trim().toLowerCase()).toSet();
   for (final a in allowed) {
     if (cats.contains(a.toLowerCase())) return true;

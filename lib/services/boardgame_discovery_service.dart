@@ -124,11 +124,21 @@ class BoardgameDiscoveryService {
     Map<String, String>? subtitles,
     bool qualityOnly = true,
     String? genreEn,
+    Set<String>? allowedIds,
   }) async {
     if (ids.isEmpty) return [];
     final raw = await BggService.fetchGamesByIds(ids);
+    final genreAllowed = allowedIds ?? (genreEn != null ? ids.toSet() : null);
     final filteredRaw = genreEn != null && genreEn.isNotEmpty
-        ? raw.where((m) => boardgameMapMatchesGenre(m, genreEn)).toList()
+        ? raw
+            .where(
+              (m) => boardgameMapMatchesGenre(
+                m,
+                genreEn,
+                allowedIds: genreAllowed,
+              ),
+            )
+            .toList()
         : raw;
     var games = _mapsToGames(filteredRaw, subtitles: subtitles);
     games = _dedupe(games);
@@ -306,15 +316,12 @@ class BoardgameDiscoveryService {
     String genreEn, {
     int limit = 120,
   }) async {
-    final seedIds = <String>{
-      ...curatedIdsForGenre(genreEn, max: 60),
-      ...boardgameGlobalTopIds.take(35),
-    }.toList();
-    final subtitles = {for (final id in seedIds) id: genreEn};
+    final seedIds = curatedIdsForGenre(genreEn, max: limit + 20);
+    final allowedIds = seedIds.toSet();
     final games = await _fromIds(
       seedIds,
       genreEn: genreEn,
-      subtitles: subtitles,
+      allowedIds: allowedIds,
       qualityOnly: false,
     );
     return games.take(limit).toList();
