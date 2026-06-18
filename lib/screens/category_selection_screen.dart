@@ -10,6 +10,7 @@ import '../services/user_collection_type_service.dart';
 import '../utils/collection_grid_layout.dart';
 import '../widgets/create_custom_collection_dialog.dart';
 import 'books_collection_screen.dart';
+import 'boardgame/boardgames_collection_screen.dart';
 import 'cards_collection_screen.dart';
 import 'home_screen.dart';
 import 'lego_collection_screen.dart';
@@ -178,6 +179,8 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
       context,
       MaterialPageRoute(
         builder: (context) => switch (category) {
+          CollectionCategory.boardgame =>
+            const BoardgamesCollectionScreen(),
           CollectionCategory.book => const BooksCollectionScreen(),
           CollectionCategory.card => const CardsCollectionScreen(),
           CollectionCategory.media => const MediaCollectionScreen(),
