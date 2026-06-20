@@ -33,6 +33,13 @@ class UserBoardgameCollectionService {
       final title = row['title'] as String? ?? '';
       final meta = row['metadata'] as Map<String, dynamic>?;
       keys.add(catalogKeyFromMetadata(meta, title));
+      final ownedExp = meta?['owned_expansion_bgg_ids'];
+      if (ownedExp is List) {
+        for (final id in ownedExp) {
+          final s = id.toString();
+          if (s.isNotEmpty) keys.add(s);
+        }
+      }
     }
     return keys;
   }

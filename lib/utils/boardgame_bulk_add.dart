@@ -7,6 +7,10 @@ import '../models/collection_item.dart';
 import '../services/bgg_service.dart';
 import '../services/profile_service.dart';
 import '../services/user_boardgame_collection_service.dart';
+import '../services/collection_refresh.dart';
+import 'boardgame_cover.dart';
+import 'boardgame_expansion_flow.dart';
+import 'boardgame_expansions.dart';
 
 Future<Map<String, dynamic>?> _resolveBggDetails(BggCatalogGame game) async {
   if (game.bggId.isEmpty) return null;
@@ -26,6 +30,9 @@ CollectionItem _itemFromGame(
       'year_published',
       'min_age',
       'bgg_categories',
+      'bgg_is_expansion',
+      'base_game_bgg_id',
+      'base_game_title',
     ]) {
       final v = details[key];
       if (v != null) meta[key] = v;
@@ -47,7 +54,10 @@ CollectionItem _itemFromGame(
     title: game.title.trim(),
     category: CollectionCategory.boardgame,
     metadata: meta.isEmpty ? null : meta,
-    imageUrl: game.imageUrl ?? details?['image_url'] as String?,
+    imageUrl: boardgameStorageImageUrl(
+      details: details,
+      catalogUrl: game.imageUrl,
+    ),
     isWishlist: isWishlist,
     quantity: 1,
     addedBy: userId,
@@ -68,6 +78,55 @@ Future<bool> silentAddBoardgame(
   try {
     await ProfileService().ensureCurrentUserProfile();
     final details = await _resolveBggDetails(game);
+    if (game.bggId.isNotEmpty && details != null) {
+      final link = boardgameExpansionLinkFromDetails(details);
+      if (link.isExpansion && link.baseBggId != null) {
+        final base = await findOwnedBaseBoardgame(link.baseBggId!);
+        if (base != null) {
+          await attachExpansionToBaseItem(
+            baseItem: base,
+            expansionBggId: game.bggId,
+          );
+          return true;
+        }
+        final meta = <String, dynamic>{
+          'bgg_id': game.bggId,
+          'expansion_of_bgg_id': link.baseBggId!,
+          if (link.baseTitle != null) 'expansion_of_title': link.baseTitle!,
+        };
+        for (final key in ['year_published', 'min_age', 'bgg_categories']) {
+          final v = details[key];
+          if (v != null) meta[key] = v;
+        }
+        final item = CollectionItem(
+          id: '',
+          title: game.title.trim(),
+          category: CollectionCategory.boardgame,
+          metadata: meta,
+          imageUrl: boardgameStorageImageUrl(
+            details: details,
+            catalogUrl: game.imageUrl,
+          ),
+          isWishlist: false,
+          quantity: 1,
+          addedBy: userId,
+          minPlayers: details['min_players'] as int?,
+          maxPlayers: details['max_players'] as int?,
+          playingTime: details['playing_time'] is int
+              ? details['playing_time'] as int
+              : null,
+        );
+        await client.from('collection_items').insert(
+              item.toInsertJson(
+                isWishlist: false,
+                locationUserId: userId,
+                addedBy: userId,
+              ),
+            );
+        CollectionRefresh.instance.bump();
+        return true;
+      }
+    }
     final item = _itemFromGame(game, details, isWishlist: false, userId: userId);
     await client.from('collection_items').insert(
           item.toInsertJson(
@@ -76,6 +135,7 @@ Future<bool> silentAddBoardgame(
             addedBy: userId,
           ),
         );
+    CollectionRefresh.instance.bump();
     return true;
   } on PostgrestException catch (e) {
     if (context.mounted) {
@@ -114,6 +174,7 @@ Future<bool> silentAddBoardgameToWishlist(
             addedBy: userId,
           ),
         );
+    CollectionRefresh.instance.bump();
     return true;
   } on PostgrestException catch (e) {
     if (context.mounted) {
@@ -136,9 +197,37 @@ Future<bool> silentAddBoardgameToWishlist(
 Future<bool> silentRemoveBoardgame({
   required BggCatalogGame game,
 }) async {
-  return UserBoardgameCollectionService().removeOwnedByCatalogKey(
+  final userId = Supabase.instance.client.auth.currentUser?.id;
+  if (userId == null) return false;
+
+  if (game.bggId.isNotEmpty) {
+    final rows = await Supabase.instance.client
+        .from('collection_items')
+        .select('id, title, metadata')
+        .eq('category', CollectionCategory.boardgame.dbValue)
+        .eq('is_wishlist', false)
+        .or('added_by.eq.$userId,location_user_id.eq.$userId');
+
+    for (final row in rows as List) {
+      final meta = row['metadata'] as Map<String, dynamic>?;
+      final owned = ownedExpansionBggIds(meta).toSet();
+      if (!owned.contains(game.bggId)) continue;
+      owned.remove(game.bggId);
+      final updated = metadataWithOwnedExpansions(meta, owned.toList());
+      await Supabase.instance.client
+          .from('collection_items')
+          .update({'metadata': updated})
+          .eq('id', row['id']);
+      CollectionRefresh.instance.bump();
+      return true;
+    }
+  }
+
+  final ok = await UserBoardgameCollectionService().removeOwnedByCatalogKey(
     game.catalogKey,
   );
+  if (ok) CollectionRefresh.instance.bump();
+  return ok;
 }
 
 Future<bool> toggleBoardgameWishlist(

@@ -219,6 +219,27 @@ function parseThingItem(xml: string, id: string): Record<string, unknown> | null
   const playingTime =
     attr("playingtime") ?? attr("maxplaytime") ?? attr("minplaytime");
 
+  const itemType = inner.match(/\btype="([^"]*)"/i)?.[1];
+  const isExpansion = itemType === "boardgameexpansion";
+
+  let baseBggId: string | undefined;
+  let baseTitle: string | undefined;
+  const linkRe2 = /<link\b([^>]*)\/?>/gi;
+  let lm2: RegExpExecArray | null;
+  while ((lm2 = linkRe2.exec(inner)) !== null) {
+    const attrs = lm2[1];
+    const type = attrs.match(/\btype="([^"]*)"/i)?.[1];
+    if (type !== "boardgameexpansion") continue;
+    if (/inbound="true"/i.test(attrs)) continue;
+    const baseId = attrs.match(/\bid="(\d+)"/i)?.[1];
+    const baseName = attrs.match(/\bvalue="([^"]*)"/i)?.[1];
+    if (baseId) {
+      baseBggId = baseId;
+      baseTitle = baseName;
+      break;
+    }
+  }
+
   return {
     bgg_id: id,
     ...(image ? { image_url: image } : {}),
@@ -231,6 +252,9 @@ function parseThingItem(xml: string, id: string): Record<string, unknown> | null
     playing_time:
       playingTime != null && playingTime > 0 ? playingTime : null,
     ...(categories.length ? { bgg_categories: categories } : {}),
+    ...(isExpansion ? { bgg_is_expansion: true } : {}),
+    ...(baseBggId ? { base_game_bgg_id: baseBggId } : {}),
+    ...(baseTitle ? { base_game_title: baseTitle } : {}),
   };
 }
 

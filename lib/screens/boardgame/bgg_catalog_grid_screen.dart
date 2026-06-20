@@ -3,12 +3,12 @@ import 'package:flutter/material.dart';
 import '../../models/bgg_catalog_game.dart';
 import '../../services/boardgame_discovery_service.dart';
 import '../../services/user_boardgame_collection_service.dart';
+import '../../utils/boardgame_cover.dart';
 import '../../utils/boardgame_bulk_add.dart';
 import '../../utils/boardgame_quick_add.dart';
 import '../../utils/collection_grid_layout.dart';
 import '../../widgets/app_app_bar.dart';
 import '../../widgets/catalog/catalog_item_tile.dart';
-import '../../widgets/cover_preview_sheet.dart';
 import '../../widgets/ui/empty_state.dart';
 import '../../widgets/ui/loading_placeholder.dart';
 
@@ -56,6 +56,7 @@ class _BggCatalogGridScreenState extends State<BggCatalogGridScreen> {
   bool _loading = true;
   bool _loadingMore = false;
   String? _error;
+  int _refreshSeed = 0;
 
   @override
   void initState() {
@@ -109,11 +110,14 @@ class _BggCatalogGridScreenState extends State<BggCatalogGridScreen> {
 
   Future<List<BggCatalogGame>> _fetchGames() async {
     return switch (widget.source) {
-      BggCatalogSource.popular => _discovery.fetchPopular(),
-      BggCatalogSource.forYou => _discovery.fetchForYou(),
+      BggCatalogSource.popular =>
+        _discovery.fetchPopular(refreshSeed: _refreshSeed),
+      BggCatalogSource.forYou =>
+        _discovery.fetchForYou(refreshSeed: _refreshSeed),
       BggCatalogSource.friends => _discovery.fetchFriendRecentAdds(),
       BggCatalogSource.genre => _discovery.fetchByGenre(
           widget.genreEn ?? '',
+          refreshSeed: _refreshSeed,
         ),
       BggCatalogSource.search => _discovery.search(
           _searchController.text.trim().isNotEmpty
@@ -123,7 +127,12 @@ class _BggCatalogGridScreenState extends State<BggCatalogGridScreen> {
     };
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool userRefresh = false}) async {
+    if (userRefresh &&
+        widget.source != BggCatalogSource.search &&
+        widget.source != BggCatalogSource.friends) {
+      _refreshSeed++;
+    }
     setState(() {
       _loading = true;
       _error = null;
@@ -239,7 +248,18 @@ class _BggCatalogGridScreenState extends State<BggCatalogGridScreen> {
     final filteredCount = _filteredGames.length;
 
     return Scaffold(
-      appBar: AppAppBar(title: widget.title),
+      appBar: AppAppBar(
+        title: widget.title,
+        actions: [
+          if (widget.source != BggCatalogSource.search &&
+              widget.source != BggCatalogSource.friends)
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              tooltip: 'Autres suggestions',
+              onPressed: _loading ? null : () => _load(userRefresh: true),
+            ),
+        ],
+      ),
       body: Column(
         children: [
           if (showSearch || widget.source == BggCatalogSource.search)
@@ -322,7 +342,7 @@ class _BggCatalogGridScreenState extends State<BggCatalogGridScreen> {
                             iconColor: _accent,
                           )
                         : RefreshIndicator(
-                            onRefresh: _load,
+                            onRefresh: () => _load(userRefresh: true),
                             child: GridView.builder(
                               controller: _scrollController,
                               padding: const EdgeInsets.all(12),
@@ -364,11 +384,9 @@ class _BggCatalogGridScreenState extends State<BggCatalogGridScreen> {
                                   inWishlist: inWishlist,
                                   aspectRatio: 1,
                                   onTap: () => _openAddDialog(game),
-                                  onLongPress: () => showCoverPreview(
+                                  onLongPress: () => showBoardgameCatalogCoverPreview(
                                     context,
-                                    imageUrl: game.imageUrl,
-                                    title: game.title,
-                                    boxedCover: true,
+                                    game: game,
                                   ),
                                   onQuickAdd: () async {
                                     if (owned) {

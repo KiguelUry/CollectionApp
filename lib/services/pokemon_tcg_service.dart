@@ -157,7 +157,19 @@ class PokemonTcgService {
     final seriesMatch = RegExp(r'^[a-zA-Z]+').firstMatch(setId);
     final series = seriesMatch?.group(0);
     if (series == null || series.isEmpty || num.isEmpty) return null;
-    return 'https://assets.tcgdex.net/$lang/$series/$setId/$num/high.webp';
+    // FR : pas de /high.webp (404) — URL de base suffit.
+    return 'https://assets.tcgdex.net/$lang/$series/$setId/$num';
+  }
+
+  static String? tcgdexCardImageUrlHigh(
+    String cardId, {
+    String? localId,
+    String lang = PokemonCardLang.en,
+  }) {
+    final base = tcgdexCardImageUrl(cardId, localId: localId, lang: lang);
+    if (base == null) return null;
+    if (lang == PokemonCardLang.fr) return base;
+    return '$base/high.webp';
   }
 
   static void fillMissingCardImages(List<TcgCatalogCard> cards) {
@@ -167,7 +179,17 @@ class PokemonTcgService {
   }
 
   static TcgCatalogCard _ensureCardImage(TcgCatalogCard card) {
-    if (card.imageUrl != null && card.imageUrl!.isNotEmpty) return card;
+    if (card.imageUrl != null && card.imageUrl!.isNotEmpty) {
+      return TcgCatalogCard(
+        id: card.id,
+        name: card.name,
+        imageUrl: _normalizeTcgdexImageUrl(card.imageUrl!),
+        setName: card.setName,
+        number: card.number,
+        rarity: card.rarity,
+        raw: card.raw,
+      );
+    }
     final lang = card.raw['card_lang'] ?? PokemonCardLang.fr;
     final primary = tcgdexCardImageUrl(
       card.id,
@@ -205,6 +227,25 @@ class PokemonTcgService {
       }
     }
     return card;
+  }
+
+  static String _normalizeTcgdexImageUrl(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null || uri.host != 'assets.tcgdex.net') return url;
+    if (uri.pathSegments.length >= 2 &&
+        uri.pathSegments[1] == PokemonCardLang.fr &&
+        url.endsWith('/high.webp')) {
+      return url.replaceFirst('/high.webp', '');
+    }
+    if (!url.contains('/high.') &&
+        !url.endsWith('.webp') &&
+        !url.endsWith('.png') &&
+        !url.endsWith('.jpg')) {
+      final lang = uri.pathSegments.length >= 2 ? uri.pathSegments[1] : '';
+      if (lang == PokemonCardLang.fr) return url;
+      return '$url/high.webp';
+    }
+    return url;
   }
 
   static Future<void> enrichSearchMetadata(
@@ -265,12 +306,16 @@ class PokemonTcgService {
     if (stillMissing.isEmpty) return;
     for (final chunk in _chunks(stillMissing, _rarityBatch)) {
       final details = await Future.wait(
-        chunk.map(
-          (card) => _fetchCardById(
-            card.id,
-            lang: card.raw['card_lang'] ?? PokemonCardLang.fr,
-          ),
-        ),
+        chunk.map((card) async {
+          final cardLang =
+              card.raw['card_lang']?.toString() ?? PokemonCardLang.fr;
+          var d = await _fetchCardById(card.id, lang: cardLang);
+          if ((d?.imageUrl == null || d!.imageUrl!.isEmpty) &&
+              cardLang != PokemonCardLang.en) {
+            d = await _fetchCardById(card.id, lang: PokemonCardLang.en);
+          }
+          return d;
+        }),
       );
       for (var i = 0; i < chunk.length; i++) {
         final d = details[i];
@@ -449,12 +494,19 @@ class PokemonTcgService {
   static String? _imageUrl(dynamic image) {
     if (image is Map) {
       final high = image['high']?.toString();
-      if (high != null && high.isNotEmpty) return high;
+      if (high != null && high.isNotEmpty) {
+        return _normalizeTcgdexImageUrl(high);
+      }
       final low = image['low']?.toString();
-      if (low != null && low.isNotEmpty) return low;
+      if (low != null && low.isNotEmpty) {
+        return _normalizeTcgdexImageUrl(low);
+      }
     }
     final url = image?.toString();
     if (url == null || url.isEmpty) return null;
+    if (url.contains('assets.tcgdex.net')) {
+      return _normalizeTcgdexImageUrl(url);
+    }
     if (url.contains('/high.') ||
         url.contains('/low.') ||
         url.endsWith('.webp') ||

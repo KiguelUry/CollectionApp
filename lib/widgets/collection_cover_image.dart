@@ -21,7 +21,8 @@ bool _preferWebHtmlImage(String url) {
   if (path.endsWith('.avif')) return true;
   return host == 'cards.lorcast.io' ||
       host == 'www.optcgapi.com' ||
-      host == 'images.ygoprodeck.com';
+      host == 'images.ygoprodeck.com' ||
+      host == 'assets.tcgdex.net';
 }
 
 /// Couverture nette (cache disque + mémoire, ratio livre, URLs adaptées).

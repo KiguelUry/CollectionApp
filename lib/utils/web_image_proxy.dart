@@ -2,12 +2,20 @@ import 'package:flutter/foundation.dart';
 
 import '../config/supabase_public_config.dart';
 
+/// Hôtes chargés en direct sur le web (<img> natif, CORS OK — pas le proxy).
+const _directWebImageHosts = {
+  'cf.geekdo-images.com',
+  'boardgamegeek.com',
+  'images.ygoprodeck.com',
+  'assets.tcgdex.net',
+  'cards.lorcast.io',
+  'www.optcgapi.com',
+};
+
 const _proxiedHosts = {
   'covers.openlibrary.org',
-  'assets.tcgdex.net',
   'api.tcgdex.net',
   'images.pokemontcg.io',
-  'images.ygoprodeck.com',
   // BGG : <img> natif (cf. collection_cover_image) — pas le proxy.
   // Lorcast / OPTCG : chargement direct aussi.
   'i.discogs.com',
@@ -29,6 +37,7 @@ String coverUrlForWeb(String url) {
 
   final uri = Uri.tryParse(url);
   if (uri == null || !uri.hasScheme) return url;
+  if (_directWebImageHosts.contains(uri.host.toLowerCase())) return url;
   if (!_proxiedHosts.contains(uri.host.toLowerCase())) return url;
 
   final base = SupabasePublicConfig.url.replaceAll(RegExp(r'/+$'), '');

@@ -674,6 +674,23 @@ class BggService {
         .where((v) => v.isNotEmpty)
         .toList();
 
+    final itemType = item.getAttribute('type');
+    final isExpansion = itemType == 'boardgameexpansion';
+
+    String? baseBggId;
+    String? baseTitle;
+    for (final link in item.findAllElements('link')) {
+      if (link.getAttribute('type') != 'boardgameexpansion') continue;
+      if (link.getAttribute('inbound') == 'true') continue;
+      final linkId = link.getAttribute('id');
+      final linkTitle = link.getAttribute('value');
+      if (linkId != null && linkId.isNotEmpty) {
+        baseBggId = linkId;
+        baseTitle = linkTitle;
+        break;
+      }
+    }
+
     return {
       if (bggId != null) 'bgg_id': bggId,
       if (image != null && image.isNotEmpty) 'image_url': image,
@@ -683,6 +700,10 @@ class BggService {
       'max_players': parseAttr('maxplayers'),
       'playing_time': _positivePlayingTime(playingTime),
       if (categories.isNotEmpty) 'bgg_categories': categories,
+      if (isExpansion) 'bgg_is_expansion': true,
+      if (baseBggId != null) 'base_game_bgg_id': baseBggId,
+      if (baseTitle != null && baseTitle.isNotEmpty)
+        'base_game_title': baseTitle,
     };
   }
 

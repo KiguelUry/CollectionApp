@@ -27,6 +27,12 @@ String coverUrlForDisplay(String url, {required bool large}) {
 
   if (large && resolved.contains('geekdo-images.com')) {
     resolved = bggLargeImageUrl(resolved);
+    if (resolved.contains('/fit-in/')) {
+      resolved = resolved.replaceFirst(
+        RegExp(r'/fit-in/\d+x\d+/'),
+        '/fit-in/1200x1200/',
+      );
+    }
   }
 
   // Grilles / listes : garder low.webp (chargement plus rapide).

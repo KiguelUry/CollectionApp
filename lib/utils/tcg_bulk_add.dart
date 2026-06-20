@@ -8,6 +8,7 @@ import '../models/tcg_set_info.dart';
 import '../services/card_catalog_service.dart';
 import '../services/profile_service.dart';
 import '../services/user_card_collection_service.dart';
+import '../services/collection_refresh.dart';
 
 /// Ajout immédiat (×1, chez moi) sans ouvrir le dialogue.
 Future<bool> silentAddTcgCard(
@@ -38,6 +39,7 @@ Future<bool> silentAddTcgCard(
             addedBy: userId,
           ),
         );
+    CollectionRefresh.instance.bump();
     return true;
   } on PostgrestException catch (e) {
     if (context.mounted) {
@@ -86,6 +88,7 @@ Future<bool> silentAddTcgCardToWishlist(
             addedBy: userId,
           ),
         );
+    CollectionRefresh.instance.bump();
     return true;
   } on PostgrestException catch (e) {
     if (context.mounted) {

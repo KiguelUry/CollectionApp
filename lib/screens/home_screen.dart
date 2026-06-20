@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -14,6 +16,9 @@ import '../services/card_catalog_service.dart';
 import '../services/media_catalog_service.dart';
 import '../services/profile_service.dart';
 import '../utils/boardgame_genres.dart';
+import '../utils/boardgame_expansion_flow.dart';
+import '../utils/boardgame_expansion_reconcile.dart';
+import '../utils/boardgame_collection_visibility.dart';
 import '../utils/collection_grid_grouper.dart';
 import '../utils/collection_grid_layout.dart';
 import '../utils/collection_item_filters.dart';
@@ -26,6 +31,7 @@ import '../models/item_tag.dart';
 import '../models/storage_location.dart';
 import '../services/group_service.dart';
 import '../services/location_service.dart';
+import '../services/collection_refresh.dart';
 import '../services/tag_service.dart';
 import '../widgets/category_collection_header.dart';
 import '../widgets/category_collection_shell.dart';
@@ -92,6 +98,12 @@ class _HomeScreenState extends State<HomeScreen>
 
   late final String _userId;
   late final Stream<List<Map<String, dynamic>>> _itemsStream;
+  StreamSubscription<List<Map<String, dynamic>>>? _itemsSub;
+  List<Map<String, dynamic>> _itemRows = [];
+  bool _itemsLoading = true;
+  int _enrichGeneration = 0;
+  List<CollectionItem>? _enrichedItems;
+  bool _expansionReconcileDone = false;
   CollectionListFilters _collectionFilters = CollectionListFilters();
   CollectionListFilters _wishlistFilters = CollectionListFilters();
   CollectionViewMode _viewMode = CollectionViewMode.grid;
@@ -110,12 +122,36 @@ class _HomeScreenState extends State<HomeScreen>
         .stream(primaryKey: ['id'])
         .eq('category', widget.category.dbValue);
     _itemsStream = rawStream.map(_filterAndScopeRows);
+    _itemsSub = _itemsStream.listen(_onItemRows);
+    CollectionRefresh.instance.addListener(_reloadItemsFromDb);
+    _reloadItemsFromDb();
     _loadFilterData();
     if (widget.pendingCatalogHit != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _openFromCatalogHit(widget.pendingCatalogHit!);
       });
     }
+    if (widget.category == CollectionCategory.boardgame) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _maybeReconcileExpansions();
+      });
+    }
+  }
+
+  Future<void> _maybeReconcileExpansions() async {
+    if (_expansionReconcileDone || !mounted) return;
+    _expansionReconcileDone = true;
+    final result = await reconcileBoardgameExpansions();
+    if (!mounted || !result.changed) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          result.mergedCount == 1
+              ? '1 extension rattachée à son jeu de base'
+              : '${result.mergedCount} extensions rattachées à leurs jeux de base',
+        ),
+      ),
+    );
   }
 
   List<Map<String, dynamic>> _filterAndScopeRows(
@@ -157,10 +193,51 @@ class _HomeScreenState extends State<HomeScreen>
 
   @override
   void dispose() {
+    _itemsSub?.cancel();
+    CollectionRefresh.instance.removeListener(_reloadItemsFromDb);
     _tabController.dispose();
     _collectionSearch.dispose();
     _wishlistSearch.dispose();
     super.dispose();
+  }
+
+  void _onItemRows(List<Map<String, dynamic>> rows) {
+    if (!mounted) return;
+    setState(() {
+      _itemRows = rows;
+      _itemsLoading = false;
+    });
+    _scheduleEnrich();
+  }
+
+  Future<void> _reloadItemsFromDb() async {
+    try {
+      var query = Supabase.instance.client
+          .from('collection_items')
+          .select()
+          .eq('category', widget.category.dbValue);
+      final data = await query;
+      if (!mounted) return;
+      _onItemRows(_filterAndScopeRows(List<Map<String, dynamic>>.from(data)));
+    } catch (_) {
+      if (mounted) setState(() => _itemsLoading = false);
+    }
+  }
+
+  void _scheduleEnrich() {
+    final gen = ++_enrichGeneration;
+    final parsed = _parseItems(_itemRows);
+    _tagService.enrichItems(parsed).then((items) {
+      if (!mounted || gen != _enrichGeneration) return;
+      setState(() => _enrichedItems = items);
+    });
+  }
+
+  List<CollectionItem> _visibleCollectionItems(List<CollectionItem> scoped) {
+    if (widget.category != CollectionCategory.boardgame) return scoped;
+    return scoped
+        .where((item) => !isBoardgameHiddenInGlobalCollection(item, scoped))
+        .toList();
   }
 
   bool get _addingToWishlist => _tabController.index == 1;
@@ -780,6 +857,7 @@ class _HomeScreenState extends State<HomeScreen>
             .update({'quantity': newQty})
             .eq('id', existing['id']);
         message = 'Quantité mise à jour ($newQty)';
+        CollectionRefresh.instance.bump();
       } else {
         final meta = Map<String, dynamic>.from(metadata ?? {});
         if (options.holderLabel != null &&
@@ -792,6 +870,9 @@ class _HomeScreenState extends State<HomeScreen>
             'year_published',
             'min_age',
             'bgg_categories',
+            'bgg_is_expansion',
+            'base_game_bgg_id',
+            'base_game_title',
           ]) {
             final v = bggDetails[key];
             if (v != null) meta[key] = v;
@@ -804,35 +885,86 @@ class _HomeScreenState extends State<HomeScreen>
           meta['custom_type_name'] = widget.customTypeName;
         }
 
-        final item = CollectionItem(
-          id: '',
-          title: title.trim(),
-          category: widget.category,
-          subcategory: resolvedSub,
-          metadata: meta.isEmpty ? null : meta,
-          imageUrl: resolvedImageUrl,
-          isWishlist: options.isWishlist,
-          quantity: options.quantity,
-          locationId: options.locationId,
-          groupId: options.groupId,
-          minPlayers: resolvedMin,
-          maxPlayers: resolvedMax,
-          playingTime: resolvedTime,
-        );
-
-        await client.from('collection_items').insert(
-              item.toInsertJson(
-                isWishlist: options.isWishlist,
-                locationUserId: options.isWishlist
-                    ? null
-                    : (options.locationUserId ?? userId),
-                addedBy: userId,
-              ),
+        if (widget.category == CollectionCategory.boardgame &&
+            bggId != null &&
+            !options.isWishlist) {
+          final expansionMsg = await insertBoardgameWithExpansionRules(
+            context: context,
+            title: title,
+            bggId: bggId,
+            bggDetails: bggDetails,
+            imageUrl: resolvedImageUrl,
+            isWishlist: false,
+            quantity: options.quantity,
+            locationId: options.locationId,
+            groupId: options.groupId,
+            locationUserId: options.locationUserId,
+            minPlayers: resolvedMin,
+            maxPlayers: resolvedMax,
+            playingTime: resolvedTime,
+          );
+          if (expansionMsg != null) {
+            message = expansionMsg;
+          } else {
+            final item = CollectionItem(
+              id: '',
+              title: title.trim(),
+              category: widget.category,
+              subcategory: resolvedSub,
+              metadata: meta.isEmpty ? null : meta,
+              imageUrl: resolvedImageUrl,
+              isWishlist: options.isWishlist,
+              quantity: options.quantity,
+              locationId: options.locationId,
+              groupId: options.groupId,
+              minPlayers: resolvedMin,
+              maxPlayers: resolvedMax,
+              playingTime: resolvedTime,
             );
+
+            await client.from('collection_items').insert(
+                  item.toInsertJson(
+                    isWishlist: options.isWishlist,
+                    locationUserId: options.isWishlist
+                        ? null
+                        : (options.locationUserId ?? userId),
+                    addedBy: userId,
+                  ),
+                );
+          }
+        } else {
+          final item = CollectionItem(
+            id: '',
+            title: title.trim(),
+            category: widget.category,
+            subcategory: resolvedSub,
+            metadata: meta.isEmpty ? null : meta,
+            imageUrl: resolvedImageUrl,
+            isWishlist: options.isWishlist,
+            quantity: options.quantity,
+            locationId: options.locationId,
+            groupId: options.groupId,
+            minPlayers: resolvedMin,
+            maxPlayers: resolvedMax,
+            playingTime: resolvedTime,
+          );
+
+          await client.from('collection_items').insert(
+                item.toInsertJson(
+                  isWishlist: options.isWishlist,
+                  locationUserId: options.isWishlist
+                      ? null
+                      : (options.locationUserId ?? userId),
+                  addedBy: userId,
+                ),
+              );
+        }
         if (options.isWishlist) {
           message = '« $title » ajouté à la wishlist';
         }
       }
+
+      CollectionRefresh.instance.bump();
 
       if (!mounted) return;
       Navigator.pop(dialogContext);
@@ -915,65 +1047,9 @@ class _HomeScreenState extends State<HomeScreen>
               extraActions: _headerActions,
             ),
             Expanded(
-              child: StreamBuilder<List<Map<String, dynamic>>>(
-          stream: _itemsStream,
-          builder: (context, snapshot) {
-            if (snapshot.hasError) {
-              return Center(child: Text('Erreur : ${snapshot.error}'));
-            }
-            if (!snapshot.hasData) {
-              return const Center(child: CircularProgressIndicator());
-            }
-
-            return FutureBuilder<List<CollectionItem>>(
-              future: _tagService.enrichItems(_parseItems(snapshot.data!)),
-              builder: (context, enrichedSnap) {
-                final allItems =
-                    enrichedSnap.data ?? _parseItems(snapshot.data!);
-                final scoped = _filterHubScope(allItems);
-                final collection = scoped
-                    .where((item) =>
-                        !item.isWishlist && isActiveCollectionItem(item))
-                    .toList();
-                final wishlist = scoped.where((item) => item.isWishlist).toList();
-
-                return TabBarView(
-                  controller: _tabController,
-                  children: [
-                    _buildTab(
-                      items: collection,
-                      filters: _collectionFilters,
-                      searchController: _collectionSearch,
-                      onFiltersChanged: (f) =>
-                          setState(() => _collectionFilters = f),
-                      emptyHint: 'Ta collection est vide ici.',
-                      showScopeFilters: true,
-                      showLocationFilter:
-                          widget.category != CollectionCategory.boardgame,
-                      showTagFilter:
-                          widget.category != CollectionCategory.boardgame,
-                    ),
-                    _buildTab(
-                      items: wishlist,
-                      filters: _wishlistFilters,
-                      searchController: _wishlistSearch,
-                      onFiltersChanged: (f) =>
-                          setState(() => _wishlistFilters = f),
-                      emptyHint: 'Rien en wishlist pour cette catégorie.',
-                      showScopeFilters: true,
-                      showLocationFilter:
-                          widget.category != CollectionCategory.boardgame,
-                      showTagFilter:
-                          widget.category != CollectionCategory.boardgame,
-                      showWishlistSuggestions:
-                          widget.category == CollectionCategory.boardgame,
-                    ),
-                  ],
-                );
-              },
-            );
-          },
-        ),
+              child: _itemsLoading && _enrichedItems == null
+                  ? const Center(child: CircularProgressIndicator())
+                  : _buildCollectionTabs(),
             ),
           ],
         ),
@@ -1057,6 +1133,44 @@ class _HomeScreenState extends State<HomeScreen>
       return '$personal objet${personal > 1 ? 's' : ''} · $inGroup en groupe${inGroup > 1 ? 's' : ''}';
     }
     return '${items.length} objet${items.length > 1 ? 's' : ''}';
+  }
+
+  Widget _buildCollectionTabs() {
+    final allItems = _enrichedItems ?? _parseItems(_itemRows);
+    final scoped = _filterHubScope(allItems);
+    final rawCollection = scoped
+        .where((item) => !item.isWishlist && isActiveCollectionItem(item))
+        .toList();
+    final collection = _visibleCollectionItems(rawCollection);
+    final wishlist = scoped.where((item) => item.isWishlist).toList();
+
+    return TabBarView(
+      controller: _tabController,
+      children: [
+        _buildTab(
+          items: collection,
+          filters: _collectionFilters,
+          searchController: _collectionSearch,
+          onFiltersChanged: (f) => setState(() => _collectionFilters = f),
+          emptyHint: 'Ta collection est vide ici.',
+          showScopeFilters: true,
+          showLocationFilter: widget.category != CollectionCategory.boardgame,
+          showTagFilter: widget.category != CollectionCategory.boardgame,
+        ),
+        _buildTab(
+          items: wishlist,
+          filters: _wishlistFilters,
+          searchController: _wishlistSearch,
+          onFiltersChanged: (f) => setState(() => _wishlistFilters = f),
+          emptyHint: 'Rien en wishlist pour cette catégorie.',
+          showScopeFilters: true,
+          showLocationFilter: widget.category != CollectionCategory.boardgame,
+          showTagFilter: widget.category != CollectionCategory.boardgame,
+          showWishlistSuggestions:
+              widget.category == CollectionCategory.boardgame,
+        ),
+      ],
+    );
   }
 
   Widget _buildTab({
@@ -1330,7 +1444,10 @@ class _HomeScreenState extends State<HomeScreen>
 
         return CollectionGridLayout.constrainOnWebDesktop(
           context: context,
-          child: grid,
+          child: RefreshIndicator(
+            onRefresh: _reloadItemsFromDb,
+            child: grid,
+          ),
         );
       },
     );
@@ -1372,7 +1489,9 @@ class _HomeScreenState extends State<HomeScreen>
 
     final grouped = CollectionGridGrouper.group(items);
 
-    return ListView.builder(
+    return RefreshIndicator(
+      onRefresh: _reloadItemsFromDb,
+      child: ListView.builder(
       padding: const EdgeInsets.only(bottom: 88),
       itemCount: grouped.length,
       itemBuilder: (context, index) {
@@ -1392,6 +1511,7 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         );
       },
+      ),
     );
   }
 }

@@ -71,11 +71,9 @@ class _CoverPreviewDialog extends StatelessWidget {
             maxScale: 4,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(12),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: size.width * 0.92,
-                  maxHeight: size.height * 0.72,
-                ),
+              child: SizedBox(
+                width: size.width * 0.92,
+                height: size.height * 0.72,
                 child: bookCover
                     ? BggNetworkImage(
                         url: imageUrl,

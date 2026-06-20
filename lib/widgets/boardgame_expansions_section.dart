@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/bgg_expansion.dart';
 import '../models/collection_item.dart';
 import '../services/bgg_service.dart';
+import '../services/collection_refresh.dart';
 import '../utils/boardgame_expansions.dart';
 import 'bgg_network_image.dart';
 
@@ -100,6 +101,7 @@ class _BoardgameExpansionsSectionState extends State<BoardgameExpansionsSection>
           .eq('id', widget.item.id);
       if (!mounted) return;
       widget.onItemUpdated(widget.item.copyWith(metadata: meta));
+      CollectionRefresh.instance.bump();
     } catch (e) {
       if (!mounted) return;
       setState(() => _owned = ownedExpansionBggIds(widget.item.metadata).toSet());

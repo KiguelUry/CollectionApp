@@ -10,6 +10,7 @@ import '../models/collection_item.dart';
 import '../models/item_condition.dart';
 import '../services/group_service.dart';
 import '../services/loan_service.dart';
+import '../services/collection_refresh.dart';
 import '../widgets/app_app_bar.dart';
 import '../widgets/loan_item_dialog.dart';
 import '../widgets/collection_cover_image.dart';
@@ -22,6 +23,8 @@ import '../widgets/assign_book_series_sheet.dart';
 import '../widgets/item_tags_editor.dart';
 import '../widgets/boardgame_expansions_section.dart';
 import '../utils/boardgame_display.dart';
+import '../utils/boardgame_collection_visibility.dart';
+import '../utils/boardgame_expansion_flow.dart';
 import '../services/bgg_service.dart';
 import '../utils/copy_friend_item.dart';
 import '../utils/friend_item_overlap.dart';
@@ -361,6 +364,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
         .from('collection_items')
         .delete()
         .eq('id', _item.id);
+    CollectionRefresh.instance.bump();
     if (mounted) Navigator.pop(context);
   }
 
@@ -377,6 +381,8 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     final ro = widget.readOnly;
     final isWishlist = _item.isWishlist;
     final ownedQty = isWishlist ? 0 : _item.quantity;
+
+    final expansionOf = boardgameExpansionOfLabel(_item);
 
     return Scaffold(
       appBar: AppAppBar(
@@ -486,6 +492,47 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         ),
                       ),
                     if (ro) const SizedBox(height: 12),
+                    if (!ro && isBoardgame && expansionOf != null) ...[
+                      Card(
+                        color: Colors.orange.shade50,
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Text(
+                                'Extension de $expansionOf',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.orange.shade900,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              FilledButton.icon(
+                                onPressed: () async {
+                                  final base = await promoteOrphanExpansionToBase(
+                                    orphanExpansion: _item,
+                                  );
+                                  if (!mounted || base == null) return;
+                                  Navigator.pushReplacement(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (ctx) =>
+                                          ItemDetailScreen(item: base),
+                                    ),
+                                  );
+                                },
+                                icon: const Icon(Icons.extension),
+                                label: const Text(
+                                  'Ajouter le jeu de base à la collection',
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     if (ro &&
                         widget.friendOverlap != null &&
                         widget.friendOverlap != FriendOverlapKind.none)

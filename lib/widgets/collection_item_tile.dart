@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../utils/boardgame_display.dart';
+import '../utils/boardgame_collection_visibility.dart';
 import '../utils/boardgame_expansions.dart';
 import '../utils/friend_item_overlap.dart';
 import '../utils/tcg_card_display.dart';
@@ -276,6 +277,10 @@ class CollectionItemTile extends StatelessWidget {
 
   String? get _subtitleLine {
     if (category == CollectionCategory.boardgame) {
+      final expansionOf = boardgameExpansionOfLabel(item);
+      if (expansionOf != null) {
+        return 'Extension de $expansionOf';
+      }
       final parts = <String>[];
       final players = formatPlayerCount(item.minPlayers, item.maxPlayers);
       if (players != null) parts.add(players);

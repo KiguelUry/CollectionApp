@@ -64,6 +64,22 @@ const Map<String, List<String>> boardgameGenreBggCategories = {
   'Economic': ['Economic', 'Industry / Manufacturing'],
   'Adventure': ['Adventure', 'Exploration', 'Fantasy', 'Fighting'],
   'Abstract': ['Abstract Strategy', 'Abstract'],
+  'Deduction': ['Deduction', 'Mystery'],
+  'Fantasy': ['Fantasy'],
+  'Science Fiction': ['Science Fiction', 'Space Exploration'],
+  'Horror': ['Horror'],
+  'Wargame': ['Wargame'],
+  'Humor': ['Humor'],
+  'Negotiation': ['Negotiation'],
+  'Racing': ['Racing'],
+  'Puzzle': ['Puzzle'],
+  'Medieval': ['Medieval', 'Renaissance'],
+  'Miniatures': ['Miniatures'],
+  'Trains': ['Trains', 'Transportation'],
+  'Zombies': ['Zombies'],
+  'Trivia': ['Trivia'],
+  'Real-time': ['Real-time'],
+  'Exploration': ['Exploration'],
 };
 
 List<String> curatedIdsForGenre(String genreEn, {int max = 80}) {
@@ -83,6 +99,8 @@ bool boardgameMapMatchesGenre(
   Set<String>? allowedIds,
 }) {
   final id = map['id'] ?? '';
+  if (allowedIds != null && allowedIds.contains(id)) return true;
+
   final allowed = boardgameGenreBggCategories[genreEn];
   final raw = map['bgg_categories'] ?? '';
 

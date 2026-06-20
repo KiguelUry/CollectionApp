@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../data/boardgame_curated_catalog.dart';
@@ -8,6 +10,7 @@ import '../services/bgg_service.dart';
 import '../services/friend_boardgame_feed_service.dart';
 
 /// Genres BGG courants pour la découverte par tuile.
+/// Liste complète BGG : boardgamegeek.com/browse/boardgamecategory
 const boardgameDiscoveryGenres = <(String en, String fr)>[
   ('Strategy', 'Stratégie'),
   ('Family', 'Familial'),
@@ -17,9 +20,41 @@ const boardgameDiscoveryGenres = <(String en, String fr)>[
   ('Economic', 'Économique'),
   ('Adventure', 'Aventure'),
   ('Abstract', 'Abstrait'),
+  ('Deduction', 'Déduction'),
+  ('Fantasy', 'Fantasy'),
+  ('Science Fiction', 'Science-fiction'),
+  ('Horror', 'Horreur'),
+  ('Wargame', 'Guerre'),
+  ('Humor', 'Humour'),
+  ('Negotiation', 'Négociation'),
+  ('Racing', 'Course'),
+  ('Puzzle', 'Puzzle'),
+  ('Medieval', 'Médiéval'),
+  ('Miniatures', 'Figurines'),
+  ('Trains', 'Trains'),
+  ('Zombies', 'Zombies'),
+  ('Trivia', 'Quiz / culture'),
+  ('Real-time', 'Temps réel'),
+  ('Exploration', 'Exploration'),
 ];
 
 const catalogPageSize = 40;
+
+void shuffleDiscoveryGames(List<BggCatalogGame> games, {int seed = 0}) {
+  if (games.length <= 1) return;
+  final rnd = Random(seed);
+  final keep = min(10, games.length ~/ 3);
+  if (games.length <= keep + 2) {
+    games.shuffle(rnd);
+    return;
+  }
+  final head = games.sublist(0, keep);
+  final tail = games.sublist(keep)..shuffle(rnd);
+  games
+    ..clear()
+    ..addAll(head)
+    ..addAll(tail);
+}
 
 int _rankValue(BggCatalogGame g) {
   final r = int.tryParse(g.bggRank ?? '');
@@ -173,13 +208,18 @@ class BoardgameDiscoveryService {
   }
 
   /// Hot BGG + tops globaux, tri tendance puis popularité.
-  Future<List<BggCatalogGame>> fetchPopular({int limit = 120}) async {
+  Future<List<BggCatalogGame>> fetchPopular({
+    int limit = 120,
+    int refreshSeed = 0,
+  }) async {
     final hotMaps = await BggService.fetchHotBoardgames();
     final hotGames = _dedupe(_mapsToGames(hotMaps));
     sortBggCatalogByHotAndRecency(hotGames);
 
     if (hotGames.length >= limit) {
-      return hotGames.take(limit).toList();
+      final out = hotGames.take(limit).toList();
+      if (refreshSeed > 0) shuffleDiscoveryGames(out, seed: refreshSeed);
+      return out;
     }
 
     final curated = await _fromIds(
@@ -188,6 +228,7 @@ class BoardgameDiscoveryService {
     );
     final merged = _dedupe([...hotGames, ...curated]);
     sortBggCatalogByHotAndRecency(merged);
+    if (refreshSeed > 0) shuffleDiscoveryGames(merged, seed: refreshSeed);
     return merged.take(limit).toList();
   }
 
@@ -254,7 +295,10 @@ class BoardgameDiscoveryService {
     return merged.take(limit).toList();
   }
 
-  Future<List<BggCatalogGame>> fetchForYou({int limit = 120}) async {
+  Future<List<BggCatalogGame>> fetchForYou({
+    int limit = 120,
+    int refreshSeed = 0,
+  }) async {
     final genres = await _myTopGenres();
     final genreKeys = genres.isNotEmpty
         ? genres
@@ -296,6 +340,7 @@ class BoardgameDiscoveryService {
 
     final merged = _dedupe([...friends, ...curatedLabeled, ...hotLabeled]);
     sortBggCatalogByPopularity(merged);
+    if (refreshSeed > 0) shuffleDiscoveryGames(merged, seed: refreshSeed);
     return merged.take(limit).toList();
   }
 
@@ -315,8 +360,9 @@ class BoardgameDiscoveryService {
   Future<List<BggCatalogGame>> fetchByGenre(
     String genreEn, {
     int limit = 120,
+    int refreshSeed = 0,
   }) async {
-    final seedIds = curatedIdsForGenre(genreEn, max: limit + 20);
+    final seedIds = curatedIdsForGenre(genreEn, max: limit + 40);
     final allowedIds = seedIds.toSet();
     final games = await _fromIds(
       seedIds,
@@ -324,6 +370,7 @@ class BoardgameDiscoveryService {
       allowedIds: allowedIds,
       qualityOnly: false,
     );
+    if (refreshSeed > 0) shuffleDiscoveryGames(games, seed: refreshSeed);
     return games.take(limit).toList();
   }
 }
