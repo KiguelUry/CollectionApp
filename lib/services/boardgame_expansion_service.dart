@@ -1,0 +1,401 @@
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../models/collection_category.dart';
+import '../models/collection_item.dart';
+import '../services/bgg_service.dart';
+import '../services/collection_refresh.dart';
+import '../utils/boardgame_cover.dart';
+import '../utils/boardgame_expansions.dart';
+
+/// Gestion extensions BGG via `is_expansion` + `parent_game_id`.
+class BoardgameExpansionService {
+  final _client = Supabase.instance.client;
+
+  String? get _userId => _client.auth.currentUser?.id;
+
+  /// Masqué de la collection globale si extension liée à un parent.
+  static bool isHiddenInGlobalList(CollectionItem item) {
+    if (item.category != CollectionCategory.boardgame) return false;
+    if (!item.isExpansion) return false;
+    return item.parentGameId != null && item.parentGameId!.isNotEmpty;
+  }
+
+  static String? orphanExpansionLabel(CollectionItem item) {
+    if (!item.isExpansion || item.parentGameId != null) return null;
+    final title = item.parentGameTitle;
+    if (title != null && title.isNotEmpty) return title;
+    return item.metadata?['expansion_of_title']?.toString();
+  }
+
+  Future<CollectionItem?> findBaseByBggId(String bggId) async {
+    if (bggId.isEmpty) return null;
+    final userId = _userId;
+    if (userId == null) return null;
+
+    final rows = await _client
+        .from('collection_items')
+        .select()
+        .eq('category', CollectionCategory.boardgame.dbValue)
+        .eq('is_wishlist', false)
+        .eq('is_expansion', false)
+        .or('added_by.eq.$userId,location_user_id.eq.$userId');
+
+    for (final row in rows as List) {
+      final item = CollectionItem.fromJson(row as Map<String, dynamic>);
+      if (item.metadata?['bgg_id']?.toString() == bggId) return item;
+    }
+    return null;
+  }
+  Future<CollectionItem?> findExpansionByBggId(String expansionBggId) async {
+    if (expansionBggId.isEmpty) return null;
+    final userId = _userId;
+    if (userId == null) return null;
+
+    final rows = await _client
+        .from('collection_items')
+        .select()
+        .eq('category', CollectionCategory.boardgame.dbValue)
+        .eq('is_wishlist', false)
+        .or('added_by.eq.$userId,location_user_id.eq.$userId');
+
+    for (final row in rows as List) {
+      final item = CollectionItem.fromJson(row as Map<String, dynamic>);
+      if (item.metadata?['bgg_id']?.toString() == expansionBggId) {
+        return item;
+      }
+    }
+    return null;
+  }
+
+  /// Lie une ligne extension existante au jeu de base (réconciliation).
+  Future<void> linkExistingItemToBase({
+    required CollectionItem base,
+    required CollectionItem expansion,
+  }) async {
+    if (expansion.id == base.id) return;
+
+    await _client.from('collection_items').update({
+      'is_expansion': true,
+      'parent_game_id': base.id,
+    }).eq('id', expansion.id);
+
+    final expBggId = expansion.metadata?['bgg_id']?.toString();
+    if (expBggId != null && expBggId.isNotEmpty) {
+      await syncLegacyOwnedIds(base);
+    }
+    CollectionRefresh.instance.bump();
+  }
+
+  /// Metadata legacy uniquement (pas de ligne enfant).
+  Future<void> attachExpansionMetadataOnly({
+    required CollectionItem base,
+    required String expansionBggId,
+  }) async {
+    final owned = ownedExpansionBggIds(base.metadata).toSet()..add(expansionBggId);
+    final meta = metadataWithOwnedExpansions(base.metadata, owned.toList());
+    await _client
+        .from('collection_items')
+        .update({'metadata': meta})
+        .eq('id', base.id);
+    CollectionRefresh.instance.bump();
+  }
+
+  Future<CollectionItem?> findBaseByItemId(String parentGameId) async {
+    final row = await _client
+        .from('collection_items')
+        .select()
+        .eq('id', parentGameId)
+        .maybeSingle();
+    if (row == null) return null;
+    return CollectionItem.fromJson(Map<String, dynamic>.from(row));
+  }
+
+  /// IDs BGG des extensions liées (enfants + legacy metadata).
+  Future<Set<String>> ownedExpansionBggIdsForBase(CollectionItem base) async {
+    final owned = ownedExpansionBggIds(base.metadata).toSet();
+
+    final children = await _client
+        .from('collection_items')
+        .select('metadata')
+        .eq('parent_game_id', base.id)
+        .eq('is_expansion', true);
+
+    for (final row in children as List) {
+      final meta = row['metadata'] as Map<String, dynamic>?;
+      final id = meta?['bgg_id']?.toString();
+      if (id != null && id.isNotEmpty) owned.add(id);
+    }
+    return owned;
+  }
+
+  Future<void> syncLegacyOwnedIds(CollectionItem base) async {
+    final owned = await ownedExpansionBggIdsForBase(base);
+    final meta = metadataWithOwnedExpansions(base.metadata, owned.toList());
+    await _client
+        .from('collection_items')
+        .update({'metadata': meta})
+        .eq('id', base.id);
+  }
+
+  /// Lie une extension existante ou en crée une nouvelle sous le jeu de base.
+  Future<CollectionItem> linkExpansionToBase({
+    required CollectionItem base,
+    required String expansionBggId,
+    required String title,
+    Map<String, dynamic>? bggDetails,
+    String? imageUrl,
+    int? minPlayers,
+    int? maxPlayers,
+    int? playingTime,
+  }) async {
+    final userId = _userId;
+    if (userId == null) throw StateError('Non connecté');
+
+    final existingChild = await _findChildByBggId(base.id, expansionBggId);
+    if (existingChild != null) {
+      if (existingChild.parentGameId == base.id) return existingChild;
+      await _client.from('collection_items').update({
+        'is_expansion': true,
+        'parent_game_id': base.id,
+      }).eq('id', existingChild.id);
+      CollectionRefresh.instance.bump();
+      return existingChild.copyWith(
+        isExpansion: true,
+        parentGameId: base.id,
+      );
+    }
+
+    final meta = _expansionMeta(
+      bggId: expansionBggId,
+      details: bggDetails,
+    );
+
+    final inserted = await _client
+        .from('collection_items')
+        .insert({
+          'title': title.trim(),
+          'category': CollectionCategory.boardgame.dbValue,
+          'metadata': meta,
+          'image_url': boardgameStorageImageUrl(
+            details: bggDetails,
+            catalogUrl: imageUrl,
+          ),
+          'is_wishlist': false,
+          'quantity': 1,
+          'added_by': userId,
+          'location_user_id': userId,
+          'is_expansion': true,
+          'parent_game_id': base.id,
+          'min_players': minPlayers,
+          'max_players': maxPlayers,
+          'playing_time': playingTime,
+        })
+        .select()
+        .single();
+
+    await syncLegacyOwnedIds(base);
+    CollectionRefresh.instance.bump();
+    return CollectionItem.fromJson(Map<String, dynamic>.from(inserted));
+  }
+
+  Future<void> unlinkExpansionFromBase({
+    required CollectionItem base,
+    required String expansionBggId,
+  }) async {
+    final child = await _findChildByBggId(base.id, expansionBggId);
+    if (child != null) {
+      await _client.from('collection_items').delete().eq('id', child.id);
+    }
+
+    final legacy = ownedExpansionBggIds(base.metadata).toSet()
+      ..remove(expansionBggId);
+    final meta = metadataWithOwnedExpansions(base.metadata, legacy.toList());
+    await _client
+        .from('collection_items')
+        .update({'metadata': meta})
+        .eq('id', base.id);
+    CollectionRefresh.instance.bump();
+  }
+
+  /// Extension orpheline visible globalement (sans parent).
+  Future<CollectionItem> insertOrphanExpansion({
+    required String title,
+    required String expansionBggId,
+    required String baseBggId,
+    required String? baseTitle,
+    Map<String, dynamic>? bggDetails,
+    String? imageUrl,
+    int quantity = 1,
+    String? locationId,
+    String? groupId,
+    int? minPlayers,
+    int? maxPlayers,
+    int? playingTime,
+  }) async {
+    final userId = _userId;
+    if (userId == null) throw StateError('Non connecté');
+
+    final meta = {
+      ..._expansionMeta(bggId: expansionBggId, details: bggDetails),
+      'expansion_of_bgg_id': baseBggId,
+      if (baseTitle != null && baseTitle.isNotEmpty)
+        'expansion_of_title': baseTitle,
+      'base_game_bgg_id': baseBggId,
+      if (baseTitle != null) 'base_game_title': baseTitle,
+    };
+
+    final inserted = await _client
+        .from('collection_items')
+        .insert({
+          'title': title.trim(),
+          'category': CollectionCategory.boardgame.dbValue,
+          'metadata': meta,
+          'image_url': boardgameStorageImageUrl(
+            details: bggDetails,
+            catalogUrl: imageUrl,
+          ),
+          'is_wishlist': false,
+          'quantity': quantity,
+          'location_id': locationId,
+          'group_id': groupId,
+          'added_by': userId,
+          'location_user_id': userId,
+          'is_expansion': true,
+          'parent_game_id': null,
+          'min_players': minPlayers,
+          'max_players': maxPlayers,
+          'playing_time': playingTime,
+        })
+        .select()
+        .single();
+
+    CollectionRefresh.instance.bump();
+    return CollectionItem.fromJson(Map<String, dynamic>.from(inserted));
+  }
+
+  /// Rattache une extension orpheline au jeu de base (crée la base si besoin).
+  Future<CollectionItem> promoteOrphanToBase({
+    required CollectionItem orphan,
+  }) async {
+    final baseBggId = orphan.metadata?['expansion_of_bgg_id']?.toString() ??
+        orphan.metadata?['base_game_bgg_id']?.toString();
+    if (baseBggId == null || baseBggId.isEmpty) {
+      throw StateError('Extension sans jeu de base BGG');
+    }
+
+    var base = await findBaseByBggId(baseBggId);
+    if (base == null) {
+      base = await _createBaseFromBgg(baseBggId, orphan);
+    }
+
+    final expBggId = orphan.metadata?['bgg_id']?.toString() ?? '';
+    await _client.from('collection_items').update({
+      'is_expansion': true,
+      'parent_game_id': base.id,
+    }).eq('id', orphan.id);
+
+    if (expBggId.isNotEmpty) {
+      await syncLegacyOwnedIds(base);
+    }
+
+    CollectionRefresh.instance.bump();
+    return base;
+  }
+
+  Future<CollectionItem?> _findChildByBggId(
+    String parentId,
+    String expansionBggId,
+  ) async {
+    final rows = await _client
+        .from('collection_items')
+        .select()
+        .eq('parent_game_id', parentId)
+        .eq('is_expansion', true);
+
+    for (final row in rows as List) {
+      final item = CollectionItem.fromJson(row as Map<String, dynamic>);
+      if (item.metadata?['bgg_id']?.toString() == expansionBggId) {
+        return item;
+      }
+    }
+
+    final userId = _userId;
+    if (userId == null) return null;
+    final standalone = await _client
+        .from('collection_items')
+        .select()
+        .eq('category', CollectionCategory.boardgame.dbValue)
+        .eq('is_wishlist', false)
+        .or('added_by.eq.$userId,location_user_id.eq.$userId');
+
+    for (final row in standalone as List) {
+      final item = CollectionItem.fromJson(row as Map<String, dynamic>);
+      if (item.metadata?['bgg_id']?.toString() != expansionBggId) continue;
+      if (item.id == parentId) continue;
+      return item;
+    }
+    return null;
+  }
+
+  Future<CollectionItem> _createBaseFromBgg(
+    String baseBggId,
+    CollectionItem orphanHint,
+  ) async {
+    final userId = _userId!;
+    final details = await BggService.getGameFullDetails(baseBggId);
+    final title = orphanHint.parentGameTitle ??
+        details?['base_game_title']?.toString() ??
+        orphanHint.metadata?['expansion_of_title']?.toString() ??
+        'Jeu de base';
+
+    final meta = <String, dynamic>{'bgg_id': baseBggId};
+    if (details != null) {
+      for (final key in ['year_published', 'min_age', 'bgg_categories']) {
+        final v = details[key];
+        if (v != null) meta[key] = v;
+      }
+    }
+
+    final inserted = await _client
+        .from('collection_items')
+        .insert({
+          'title': title,
+          'category': CollectionCategory.boardgame.dbValue,
+          'metadata': meta,
+          'image_url': boardgameStorageImageUrl(details: details),
+          'is_wishlist': false,
+          'quantity': 1,
+          'added_by': userId,
+          'location_user_id': userId,
+          'is_expansion': false,
+          'parent_game_id': null,
+          'min_players': details?['min_players'],
+          'max_players': details?['max_players'],
+          'playing_time': details?['playing_time'],
+        })
+        .select()
+        .single();
+
+    return CollectionItem.fromJson(Map<String, dynamic>.from(inserted));
+  }
+
+  Map<String, dynamic> _expansionMeta({
+    required String bggId,
+    Map<String, dynamic>? details,
+  }) {
+    final meta = <String, dynamic>{'bgg_id': bggId, 'bgg_is_expansion': true};
+    if (details != null) {
+      for (final key in [
+        'year_published',
+        'min_age',
+        'bgg_categories',
+        'base_game_bgg_id',
+        'base_game_title',
+      ]) {
+        final v = details[key];
+        if (v != null) meta[key] = v;
+      }
+    }
+    return meta;
+  }
+}

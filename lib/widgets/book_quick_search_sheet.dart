@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/book_subcategory.dart';
 import '../services/book_catalog_service.dart';
+import '../services/book_intelligence_service.dart';
 import '../utils/debounced_runner.dart';
 import 'collection_cover_image.dart';
 import 'ui/empty_state.dart';
@@ -10,6 +11,7 @@ Future<void> showBookQuickSearchSheet(
   BuildContext context, {
   required void Function(Map<String, String> book, BookSubcategory sub) onBookSelected,
   BookSubcategory initialSub = BookSubcategory.manga,
+  String? initialQuery,
   VoidCallback? onManualEntry,
 }) {
   return showModalBottomSheet<void>(
@@ -19,6 +21,7 @@ Future<void> showBookQuickSearchSheet(
     useSafeArea: true,
     builder: (ctx) => _BookQuickSearchSheet(
       initialSub: initialSub,
+      initialQuery: initialQuery,
       onBookSelected: onBookSelected,
       onManualEntry: onManualEntry,
     ),
@@ -27,11 +30,13 @@ Future<void> showBookQuickSearchSheet(
 
 class _BookQuickSearchSheet extends StatefulWidget {
   final BookSubcategory initialSub;
+  final String? initialQuery;
   final void Function(Map<String, String> book, BookSubcategory sub) onBookSelected;
   final VoidCallback? onManualEntry;
 
   const _BookQuickSearchSheet({
     required this.initialSub,
+    this.initialQuery,
     required this.onBookSelected,
     this.onManualEntry,
   });
@@ -52,6 +57,11 @@ class _BookQuickSearchSheetState extends State<_BookQuickSearchSheet> {
   void initState() {
     super.initState();
     _controller.addListener(_onTextChanged);
+    final q = widget.initialQuery?.trim();
+    if (q != null && q.length >= 2) {
+      _controller.text = q;
+      _search(q);
+    }
   }
 
   @override
@@ -217,6 +227,19 @@ class _BookQuickSearchSheetState extends State<_BookQuickSearchSheet> {
       itemBuilder: (context, i) {
         final book = _results[i];
         final imageUrl = book['image_url'];
+        final enriched = BookIntelligenceService.enrichSingle(book, _sub);
+        final seriesLine = enriched.parsed.hasSeries
+            ? [
+                if (enriched.parsed.seriesName != null)
+                  enriched.parsed.seriesName!,
+                if (enriched.parsed.volumeNumber != null)
+                  'T. ${enriched.parsed.volumeNumber!.toStringAsFixed(
+                    enriched.parsed.volumeNumber! % 1 == 0 ? 0 : 1,
+                  )}',
+                if (enriched.estimatedTotalVolumes != null)
+                  '/ ${enriched.estimatedTotalVolumes}',
+              ].join(' · ')
+            : null;
         return Material(
           color: Theme.of(context).colorScheme.surfaceContainerLow,
           borderRadius: BorderRadius.circular(14),
@@ -252,9 +275,20 @@ class _BookQuickSearchSheetState extends State<_BookQuickSearchSheet> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          book['title'] ?? '',
+                          enriched.displayTitle,
                           style: const TextStyle(fontWeight: FontWeight.w600),
                         ),
+                        if (seriesLine != null && seriesLine.isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            seriesLine,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: _sub.color,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 4),
                         Text(
                           [

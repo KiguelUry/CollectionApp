@@ -17,7 +17,7 @@ import '../widgets/book_search_dialog.dart' show showBookSearch;
 import '../widgets/book_subcategory_picker.dart';
 import '../widgets/add_volume_to_series_sheet.dart';
 import '../widgets/isbn_scan_sheet.dart';
-import '../widgets/series_link_confirm_dialog.dart';
+import '../services/book_intelligence_service.dart';
 import '../widgets/volume_number_dialog.dart';
 
 /// Flux d'ajout de livres partagé (hub livres, détail série, etc.).
@@ -27,10 +27,14 @@ class BookItemAddCoordinator {
   final BuildContext context;
   final _seriesService = BookSeriesService();
 
-  Future<void> openSearch({BookSubcategory? subcategory}) async {
+  Future<void> openSearch({
+    BookSubcategory? subcategory,
+    String? initialQuery,
+  }) async {
     await showBookSearch(
       context,
       initialSub: subcategory ?? BookSubcategory.manga,
+      initialQuery: initialQuery,
       onBookSelected: (book, sub) {
         _prepareAdd(
           title: book['title']!,
@@ -397,44 +401,46 @@ class BookItemAddCoordinator {
               children: [
                 CircularProgressIndicator(),
                 SizedBox(width: 20),
-                Flexible(child: Text('Analyse de la série…')),
+                Flexible(child: Text('Préparation de la série…')),
               ],
             ),
           ),
         ),
       );
 
-      final estimated = await OpenLibraryService.estimateSeriesVolumeCount(
-        parsed.seriesName!,
+      final enriched = BookIntelligenceService.enrichSingle(
+        {
+          'title': title,
+          if (metadata?['series_title'] != null)
+            'series_title': metadata!['series_title']!.toString(),
+          if (metadata?['author'] != null)
+            'author': metadata!['author']!.toString(),
+        },
         subcategory,
       );
+      final estimated = enriched.estimatedTotalVolumes ??
+          await OpenLibraryService.estimateSeriesVolumeCount(
+            parsed.seriesName!,
+            subcategory,
+          );
 
       if (!context.mounted) return;
       Navigator.pop(context);
 
-      final link = await showSeriesLinkConfirmDialog(
-        context,
-        parsed: parsed,
-        estimatedVolumeCount: estimated,
+      final resolved = await _seriesService.resolveSeriesFromTitle(
+        title: title,
+        subcategory: subcategory,
+        estimatedTotalVolumes: estimated,
       );
-      if (link == null || !context.mounted) return;
-
-      if (link) {
-        final resolved = await _seriesService.resolveSeriesFromTitle(
-          title: title,
-          subcategory: subcategory,
-          estimatedTotalVolumes: estimated,
-        );
-        if (resolved != null) {
-          seriesId = resolved.seriesId;
-          volumeId = resolved.volumeId;
-          finalTitle = resolved.itemTitle;
-          if (imageUrl != null && imageUrl.isNotEmpty) {
-            await _seriesService.ensureSeriesCoverFromItem(
-              seriesId: resolved.seriesId,
-              imageUrl: imageUrl,
-            );
-          }
+      if (resolved != null) {
+        seriesId = resolved.seriesId;
+        volumeId = resolved.volumeId;
+        finalTitle = resolved.itemTitle;
+        if (imageUrl != null && imageUrl.isNotEmpty) {
+          await _seriesService.ensureSeriesCoverFromItem(
+            seriesId: resolved.seriesId,
+            imageUrl: imageUrl,
+          );
         }
       }
     }

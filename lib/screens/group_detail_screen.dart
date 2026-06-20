@@ -55,14 +55,8 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
   void initState() {
     super.initState();
     _group = widget.group;
-    _collectionFilters = CollectionListFilters(
-      ownershipView: CollectionOwnershipView.groups,
-      groupIds: {_group.id},
-    );
-    _wishlistFilters = CollectionListFilters(
-      ownershipView: CollectionOwnershipView.groups,
-      groupIds: {_group.id},
-    );
+    _collectionFilters = CollectionListFilters();
+    _wishlistFilters = CollectionListFilters();
     _scopeTabController = TabController(length: 2, vsync: this);
     _stream = Supabase.instance.client
         .from('collection_items')
@@ -274,7 +268,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
           searchController: searchController,
           locations: _locations,
           tags: _tags,
-          showScopeFilters: false,
+          showFocusFilter: false,
           showLocationFilter: !isWishlist &&
               _selectedCategory != CollectionCategory.boardgame,
           showTagFilter:

@@ -319,11 +319,94 @@ class BookSeriesService {
     }).eq('id', itemId);
   }
 
+  Future<List<BookSeries>> fetchAllRootSeries() async {
+    final rows = await _client
+        .from('book_series')
+        .select()
+        .eq('owner_id', _userId)
+        .filter('parent_series_id', 'is', null)
+        .order('name');
+    return List<Map<String, dynamic>>.from(rows)
+        .map(BookSeries.fromJson)
+        .toList();
+  }
+
+  Future<void> removeVolumeItem(String itemId) async {
+    await _client.from('collection_items').delete().eq('id', itemId);
+  }
+
+  Future<CollectionItem> addVolumeQuick({
+    required BookSeries series,
+    required BookVolume volume,
+    bool markAsRead = false,
+  }) async {
+    await ProfileService().ensureCurrentUserProfile();
+    final n = volume.volumeNumber.ceil();
+    final title = '${series.name} - Tome $n';
+    final row = await _client
+        .from('collection_items')
+        .insert({
+          'title': title,
+          'category': CollectionCategory.book.dbValue,
+          'subcategory': series.subcategory.dbValue,
+          'series_id': series.id,
+          'volume_id': volume.id,
+          'is_wishlist': false,
+          'is_read': markAsRead,
+          'quantity': 1,
+          'added_by': _userId,
+          'location_user_id': _userId,
+          'metadata': {
+            if (volume.metadata['cover_url'] != null)
+              'image_url': volume.metadata['cover_url'],
+          },
+        })
+        .select()
+        .single();
+    final coverUrl = volume.coverUrl ??
+        await OpenLibraryService.lookupVolumeCover(
+          series.name,
+          volume.volumeNumber,
+          series.subcategory,
+        );
+    if (coverUrl != null && coverUrl.isNotEmpty) {
+      await setVolumeCoverUrl(volume.id, coverUrl);
+    }
+    await ensureSeriesCoverFromItem(seriesId: series.id, imageUrl: coverUrl);
+    return CollectionItem.fromJson(row);
+  }
+
+  Future<void> toggleVolumeOwned({
+    required BookSeries series,
+    required BookVolumeSlot slot,
+    required bool owned,
+  }) async {
+    if (owned) {
+      if (slot.item == null) {
+        await addVolumeQuick(series: series, volume: slot.volume);
+      }
+      return;
+    }
+    final item = slot.item;
+    if (item != null && !item.isWishlist) {
+      await removeVolumeItem(item.id);
+    }
+  }
+
   Future<void> setItemRead(String itemId, bool isRead) async {
     await _client
         .from('collection_items')
         .update({'is_read': isRead})
         .eq('id', itemId);
+  }
+
+  Future<void> toggleVolumeRead({
+    required BookVolumeSlot slot,
+    required bool read,
+  }) async {
+    final item = slot.item;
+    if (item == null || item.isWishlist) return;
+    await setItemRead(item.id, read);
   }
 
   Future<BookSeries?> findSeriesByName(

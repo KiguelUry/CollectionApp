@@ -2,20 +2,16 @@ import 'package:flutter/material.dart';
 
 import '../utils/book_add_actions.dart';
 import '../utils/collection_grid_layout.dart';
-import '../models/book_author_group.dart';
 import '../models/book_series.dart';
 import '../models/book_subcategory.dart';
 import '../models/collection_item.dart';
 import '../services/book_series_service.dart';
+import '../constants/book_accent.dart';
 import '../widgets/app_app_bar.dart';
-import '../widgets/author_avatar.dart';
 import '../widgets/assign_book_series_sheet.dart';
 import '../widgets/book_series_tile.dart';
-import 'book_author_detail_screen.dart';
 import 'book_series_detail_screen.dart';
 import 'item_detail_screen.dart';
-
-enum _BookListView { series, authors }
 
 enum _SeriesSort { nameAz, ownedDesc }
 
@@ -36,16 +32,11 @@ class _BookSubcategorySeriesScreenState
   List<BookSeries> _series = [];
   final Map<String, BookSeriesStats> _stats = {};
   List<CollectionItem> _unassigned = [];
-  List<BookAuthorGroup> _authors = [];
-  _BookListView _view = _BookListView.series;
   _SeriesSort _seriesSort = _SeriesSort.nameAz;
 
   @override
   void initState() {
     super.initState();
-    _view = widget.subcategory == BookSubcategory.novel
-        ? _BookListView.authors
-        : _BookListView.series;
     _load();
   }
 
@@ -67,8 +58,6 @@ class _BookSubcategorySeriesScreenState
         );
       }
       final unassigned = await _service.fetchUnassignedBooks(widget.subcategory);
-      final allBooks = await _service.fetchAllBooksInSubcategory(widget.subcategory);
-      final authors = groupBooksByAuthor(allBooks);
       if (mounted) {
         setState(() {
           _series = series;
@@ -76,7 +65,6 @@ class _BookSubcategorySeriesScreenState
             ..clear()
             ..addAll(statsMap);
           _unassigned = unassigned;
-          _authors = authors;
           _loading = false;
         });
         _applySeriesSort();
@@ -119,6 +107,8 @@ class _BookSubcategorySeriesScreenState
     return Scaffold(
       appBar: AppAppBar(
         title: widget.subcategory.label,
+        backgroundColor: BookAccent.primary,
+        foregroundColor: Colors.white,
         actions: [
           PopupMenuButton<String>(
             icon: const Icon(Icons.sort),
@@ -152,81 +142,11 @@ class _BookSubcategorySeriesScreenState
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                  child: SegmentedButton<_BookListView>(
-                    segments: const [
-                      ButtonSegment(
-                        value: _BookListView.series,
-                        label: Text('Par série'),
-                        icon: Icon(Icons.auto_stories_outlined, size: 18),
-                      ),
-                      ButtonSegment(
-                        value: _BookListView.authors,
-                        label: Text('Par auteur'),
-                        icon: Icon(Icons.person_outline, size: 18),
-                      ),
-                    ],
-                    selected: {_view},
-                    onSelectionChanged: (s) =>
-                        setState(() => _view = s.first),
-                  ),
-                ),
-                Expanded(
-                  child: RefreshIndicator(
-                    onRefresh: _load,
-                    child: _view == _BookListView.authors
-                        ? _buildAuthorsList()
-                        : _buildSeriesList(),
-                  ),
-                ),
-              ],
+          : RefreshIndicator(
+              onRefresh: _load,
+              color: BookAccent.primary,
+              child: _buildSeriesList(),
             ),
-    );
-  }
-
-  Widget _buildAuthorsList() {
-    if (_authors.isEmpty) {
-      return ListView(
-        children: const [
-          SizedBox(height: 80),
-          Center(
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: Text(
-                'Aucun auteur repéré.\n'
-                'Ajoute des livres avec un auteur (recherche ou ISBN).',
-                textAlign: TextAlign.center,
-              ),
-            ),
-          ),
-        ],
-      );
-    }
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
-      itemCount: _authors.length,
-      itemBuilder: (context, i) {
-        final g = _authors[i];
-        return Card(
-          child: ListTile(
-            leading: AuthorAvatar(authorName: g.author, radius: 24),
-            title: Text(g.author),
-            subtitle: Text(
-              '${g.ownedCount} possédé(s) · ${g.totalCount} titre(s)',
-            ),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (ctx) => BookAuthorDetailScreen(group: g),
-              ),
-            ),
-          ),
-        );
-      },
     );
   }
 
@@ -263,6 +183,7 @@ class _BookSubcategorySeriesScreenState
                             return BookSeriesTile(
                               series: s,
                               stats: _stats[s.id] ?? const BookSeriesStats(),
+                              accent: BookAccent.primary,
                               onTap: () => _openSeries(s),
                             );
                           },

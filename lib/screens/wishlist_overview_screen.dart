@@ -5,6 +5,7 @@ import '../services/collection_stats_service.dart';
 import '../utils/wishlist_promote.dart';
 import '../widgets/bgg_network_image.dart';
 import '../widgets/app_app_bar.dart';
+import 'books_collection_screen.dart';
 import 'home_screen.dart';
 import 'item_detail_screen.dart';
 
@@ -170,7 +171,9 @@ class _WishlistOverviewScreenState extends State<WishlistOverviewScreen> {
                 onPressed: () => Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (ctx) => HomeScreen(category: category),
+                    builder: (ctx) => category == CollectionCategory.book
+                        ? const BooksCollectionScreen()
+                        : HomeScreen(category: category),
                   ),
                 ).then((_) => _load()),
                 child: const Text('Voir la catégorie'),

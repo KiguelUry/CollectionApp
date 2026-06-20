@@ -39,6 +39,8 @@ class CollectionItem {
   final String? seriesId;
   final String? volumeId;
   final bool isRead;
+  final bool isExpansion;
+  final String? parentGameId;
 
   CollectionItem({
     required this.id,
@@ -74,7 +76,14 @@ class CollectionItem {
     this.seriesId,
     this.volumeId,
     this.isRead = false,
+    this.isExpansion = false,
+    this.parentGameId,
   });
+
+  /// Nom du jeu de base (extensions orphelines).
+  String? get parentGameTitle =>
+      metadata?['expansion_of_title']?.toString() ??
+      metadata?['base_game_title']?.toString();
 
   bool get isGroupOwned => groupId != null;
 
@@ -128,6 +137,8 @@ class CollectionItem {
       createdAt = DateTime.tryParse(rawCreated);
     }
 
+    final metadata = CategoryMetadata.parse(json['metadata']);
+
     return CollectionItem(
       id: json['id'],
       title: json['title'],
@@ -135,7 +146,7 @@ class CollectionItem {
       subcategory: category == CollectionCategory.book
           ? (rawSub ?? (json['category'] == 'manga' ? 'manga' : null))
           : rawSub,
-      metadata: CategoryMetadata.parse(json['metadata']),
+      metadata: metadata,
       imageUrl: _resolveImageUrl(json),
       isWishlist: json['is_wishlist'] ?? false,
       isForSale: json['is_for_sale'] as bool? ?? false,
@@ -164,6 +175,9 @@ class CollectionItem {
       seriesId: json['series_id'] as String?,
       volumeId: json['volume_id'] as String?,
       isRead: json['is_read'] as bool? ?? false,
+      isExpansion: json['is_expansion'] as bool? ??
+          metadata?['bgg_is_expansion'] == true,
+      parentGameId: json['parent_game_id'] as String?,
     );
   }
 
@@ -219,6 +233,8 @@ class CollectionItem {
       'series_id': seriesId,
       'volume_id': volumeId,
       'is_read': isRead,
+      'is_expansion': isExpansion,
+      if (parentGameId != null) 'parent_game_id': parentGameId,
     };
   }
 
@@ -276,6 +292,9 @@ class CollectionItem {
     String? volumeId,
     bool? isRead,
     bool clearSeries = false,
+    bool? isExpansion,
+    String? parentGameId,
+    bool clearParentGame = false,
   }) {
     return CollectionItem(
       id: id,
@@ -313,6 +332,9 @@ class CollectionItem {
       seriesId: clearSeries ? null : (seriesId ?? this.seriesId),
       volumeId: clearSeries ? null : (volumeId ?? this.volumeId),
       isRead: isRead ?? this.isRead,
+      isExpansion: isExpansion ?? this.isExpansion,
+      parentGameId:
+          clearParentGame ? null : (parentGameId ?? this.parentGameId),
     );
   }
 

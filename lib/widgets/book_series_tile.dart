@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../constants/book_accent.dart';
 import '../models/book_series.dart';
 import 'collection_cover_image.dart';
 
@@ -7,12 +8,14 @@ class BookSeriesTile extends StatelessWidget {
   final BookSeries series;
   final BookSeriesStats stats;
   final VoidCallback onTap;
+  final Color accent;
 
   const BookSeriesTile({
     super.key,
     required this.series,
     required this.stats,
     required this.onTap,
+    this.accent = BookAccent.primary,
   });
 
   @override
@@ -72,18 +75,21 @@ class BookSeriesTile extends StatelessWidget {
                   _Chip(
                     icon: Icons.library_books_outlined,
                     label: 'Possédé ${stats.ownedLabel}',
-                    color: scheme.primaryContainer,
+                    color: accent.withValues(alpha: 0.15),
+                    iconColor: accent,
                   ),
                   _Chip(
-                    icon: Icons.menu_book_outlined,
+                    icon: Icons.visibility_rounded,
                     label: 'Lu ${stats.readLabel}',
-                    color: scheme.secondaryContainer,
+                    color: Colors.amber.withValues(alpha: 0.15),
+                    iconColor: Colors.amber.shade800,
                   ),
                   if (stats.ratingLabel != null)
                     _Chip(
                       icon: Icons.star_rounded,
                       label: stats.ratingLabel!,
                       color: scheme.tertiaryContainer,
+                      iconColor: scheme.onTertiaryContainer,
                     ),
                 ],
               ),
@@ -131,11 +137,13 @@ class _Chip extends StatelessWidget {
   final IconData icon;
   final String label;
   final Color color;
+  final Color iconColor;
 
   const _Chip({
     required this.icon,
     required this.label,
     required this.color,
+    required this.iconColor,
   });
 
   @override
@@ -149,9 +157,16 @@ class _Chip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14),
+          Icon(icon, size: 14, color: iconColor),
           const SizedBox(width: 4),
-          Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: iconColor,
+            ),
+          ),
         ],
       ),
     );

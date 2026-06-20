@@ -57,6 +57,8 @@ import '../widgets/watch_quick_search_sheet.dart';
 import '../utils/catalog_hit_metadata.dart';
 import '../widgets/book_subcategory_picker.dart';
 import '../widgets/catalog_search_sheet.dart';
+import 'book/book_collection_screen.dart';
+import 'book_wishlist_tab.dart';
 import 'item_detail_screen.dart';
 import 'media_artist_albums_screen.dart';
 
@@ -71,6 +73,8 @@ class HomeScreen extends StatefulWidget {
   final String? customTypeName;
   final LegoBuildKind? fixedLegoKind;
   final Map<String, String>? pendingCatalogHit;
+  /// Wishlist seule (évite la liste plate collection livres).
+  final bool bookWishlistOnly;
 
   const HomeScreen({
     super.key,
@@ -83,6 +87,7 @@ class HomeScreen extends StatefulWidget {
     this.customTypeName,
     this.fixedLegoKind,
     this.pendingCatalogHit,
+    this.bookWishlistOnly = false,
   });
 
   @override
@@ -111,6 +116,7 @@ class _HomeScreenState extends State<HomeScreen>
   List<StorageLocation> _locations = [];
   List<ItemTag> _tags = [];
   Map<String, String> _groupNamesById = {};
+  Set<String> _myGroupIds = {};
 
   @override
   void initState() {
@@ -157,7 +163,7 @@ class _HomeScreenState extends State<HomeScreen>
   List<Map<String, dynamic>> _filterAndScopeRows(
     List<Map<String, dynamic>> rows,
   ) {
-    var filtered = _onlyMyRows(rows);
+    var filtered = _scopeRows(rows);
 
     if (widget.customTypeId != null) {
       filtered = filtered
@@ -205,6 +211,7 @@ class _HomeScreenState extends State<HomeScreen>
     if (!mounted) return;
     setState(() {
       _itemRows = rows;
+      _enrichedItems = null;
       _itemsLoading = false;
     });
     _scheduleEnrich();
@@ -266,7 +273,9 @@ class _HomeScreenState extends State<HomeScreen>
           _locations = results[0] as List<StorageLocation>;
           _tags = results[1] as List<ItemTag>;
           _groupNamesById = {for (final g in groups) g.id: g.name};
+          _myGroupIds = groups.map((g) => g.id).toSet();
         });
+        _reloadItemsFromDb();
       }
     } catch (_) {}
   }
@@ -327,12 +336,55 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  List<Map<String, dynamic>> _onlyMyRows(List<Map<String, dynamic>> rows) {
+  List<Map<String, dynamic>> _scopeRows(List<Map<String, dynamic>> rows) {
     return rows.where((row) {
       final addedBy = row['added_by'] as String?;
       final locUser = row['location_user_id'] as String?;
-      return addedBy == _userId || locUser == _userId;
+      if (addedBy == _userId || locUser == _userId) return true;
+      final gid = row['group_id'] as String?;
+      return gid != null && _myGroupIds.contains(gid);
     }).toList();
+  }
+
+  Future<void> _confirmDeleteItem(CollectionItem item) async {
+    final isGroup = item.isGroupOwned;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(isGroup ? 'Retirer ?' : 'Supprimer ?'),
+        content: Text(
+          isGroup
+              ? '« ${item.title} » sera retiré de « ${item.groupName ?? 'ce groupe'} ».'
+              : '« ${item.title} » sera retiré de ta collection.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuler'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: Text(isGroup ? 'Retirer' : 'Supprimer'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+
+    await Supabase.instance.client
+        .from('collection_items')
+        .delete()
+        .eq('id', item.id);
+    CollectionRefresh.instance.bump();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          isGroup ? '« ${item.title} » retiré du groupe' : '« ${item.title} » supprimé',
+        ),
+      ),
+    );
   }
 
   void _onAddPressed() {
@@ -1026,6 +1078,20 @@ class _HomeScreenState extends State<HomeScreen>
 
   @override
   Widget build(BuildContext context) {
+    if (widget.category == CollectionCategory.book) {
+      if (widget.bookWishlistOnly) {
+        return Scaffold(
+          appBar: AppBar(
+            title: Text(widget.screenTitle ?? 'Wishlist Livres'),
+            backgroundColor: _accentColor,
+            foregroundColor: _onAccent,
+          ),
+          body: const BookWishlistTab(),
+        );
+      }
+      return const BookCollectionScreen();
+    }
+
     final title = widget.screenTitle ?? widget.category.label;
 
     return Scaffold(
@@ -1153,7 +1219,7 @@ class _HomeScreenState extends State<HomeScreen>
           searchController: _collectionSearch,
           onFiltersChanged: (f) => setState(() => _collectionFilters = f),
           emptyHint: 'Ta collection est vide ici.',
-          showScopeFilters: true,
+          showFocusFilter: true,
           showLocationFilter: widget.category != CollectionCategory.boardgame,
           showTagFilter: widget.category != CollectionCategory.boardgame,
         ),
@@ -1163,7 +1229,7 @@ class _HomeScreenState extends State<HomeScreen>
           searchController: _wishlistSearch,
           onFiltersChanged: (f) => setState(() => _wishlistFilters = f),
           emptyHint: 'Rien en wishlist pour cette catégorie.',
-          showScopeFilters: true,
+          showFocusFilter: true,
           showLocationFilter: widget.category != CollectionCategory.boardgame,
           showTagFilter: widget.category != CollectionCategory.boardgame,
           showWishlistSuggestions:
@@ -1179,29 +1245,16 @@ class _HomeScreenState extends State<HomeScreen>
     required TextEditingController searchController,
     required ValueChanged<CollectionListFilters> onFiltersChanged,
     required String emptyHint,
-    bool showScopeFilters = true,
+    bool showFocusFilter = true,
     bool showLocationFilter = true,
     bool showTagFilter = true,
     bool showWishlistSuggestions = false,
   }) {
     final filtered = filters.apply(items);
     final countLabel = _buildCountLabel(items, filtered);
-    final groupIdSet = items
-        .map((i) => i.groupId)
-        .whereType<String>()
-        .toSet();
-    final groupOptions = groupIdSet
+    final groupOptions = _groupNamesById.entries
         .map(
-          (id) => GroupFilterOption(
-            id: id,
-            label: _groupNamesById[id] ??
-                items
-                    .where((i) => i.groupId == id)
-                    .map((i) => i.groupName)
-                    .whereType<String>()
-                    .firstOrNull ??
-                'Groupe',
-          ),
+          (e) => GroupFilterOption(id: e.key, label: e.value),
         )
         .toList()
       ..sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
@@ -1259,7 +1312,7 @@ class _HomeScreenState extends State<HomeScreen>
           searchController: searchController,
           locations: _locations,
           tags: _tags,
-          showScopeFilters: showScopeFilters,
+          showFocusFilter: showFocusFilter,
           showLocationFilter: showLocationFilter,
           showTagFilter: showTagFilter,
           showBoardgameGenreFilter:
@@ -1416,10 +1469,12 @@ class _HomeScreenState extends State<HomeScreen>
             final item = entry.item;
 
             return CollectionItemTile(
+              key: ValueKey(item.id),
               item: item,
               category: widget.category,
               totalQuantity: entry.totalQuantity,
               showDuplicateBadge: entry.hasDuplicates,
+              onDelete: () => _confirmDeleteItem(item),
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -1498,9 +1553,11 @@ class _HomeScreenState extends State<HomeScreen>
         final entry = grouped[index];
         final item = entry.item;
         return CollectionItemListTile(
+          key: ValueKey(item.id),
           item: item,
           category: widget.category,
           totalQuantity: entry.totalQuantity,
+          onDelete: () => _confirmDeleteItem(item),
           onTap: () => Navigator.push(
             context,
             MaterialPageRoute(

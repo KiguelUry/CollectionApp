@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/bgg_expansion.dart';
 import '../models/collection_item.dart';
 import '../services/bgg_service.dart';
+import '../services/boardgame_expansion_service.dart';
 import '../services/collection_refresh.dart';
 import '../utils/boardgame_expansions.dart';
 import 'bgg_network_image.dart';
@@ -27,6 +27,7 @@ class BoardgameExpansionsSection extends StatefulWidget {
 }
 
 class _BoardgameExpansionsSectionState extends State<BoardgameExpansionsSection> {
+  final _expansionService = BoardgameExpansionService();
   List<BggExpansion>? _expansions;
   bool _loading = true;
   String? _error;
@@ -38,6 +39,7 @@ class _BoardgameExpansionsSectionState extends State<BoardgameExpansionsSection>
     super.initState();
     _owned = ownedExpansionBggIds(widget.item.metadata).toSet();
     _load();
+    _refreshOwnedFromDb();
   }
 
   @override
@@ -47,7 +49,16 @@ class _BoardgameExpansionsSectionState extends State<BoardgameExpansionsSection>
       _owned = ownedExpansionBggIds(widget.item.metadata).toSet();
       _showAll = false;
       _load();
+      _refreshOwnedFromDb();
     }
+  }
+
+  Future<void> _refreshOwnedFromDb() async {
+    final owned = await _expansionService.ownedExpansionBggIdsForBase(
+      widget.item,
+    );
+    if (!mounted) return;
+    setState(() => _owned = owned);
   }
 
   Future<void> _load() async {
@@ -84,6 +95,7 @@ class _BoardgameExpansionsSectionState extends State<BoardgameExpansionsSection>
   Future<void> _toggleOwned(BggExpansion exp, bool owned) async {
     if (widget.readOnly) return;
 
+    final previous = Set<String>.from(_owned);
     final next = Set<String>.from(_owned);
     if (owned) {
       next.add(exp.bggId);
@@ -93,18 +105,35 @@ class _BoardgameExpansionsSectionState extends State<BoardgameExpansionsSection>
 
     setState(() => _owned = next);
 
-    final meta = metadataWithOwnedExpansions(widget.item.metadata, next.toList());
     try {
-      await Supabase.instance.client
-          .from('collection_items')
-          .update({'metadata': meta})
-          .eq('id', widget.item.id);
+      if (owned) {
+        await _expansionService.linkExpansionToBase(
+          base: widget.item,
+          expansionBggId: exp.bggId,
+          title: exp.title,
+          imageUrl: exp.imageUrl,
+        );
+      } else {
+        await _expansionService.unlinkExpansionFromBase(
+          base: widget.item,
+          expansionBggId: exp.bggId,
+        );
+      }
+
+      final synced = await _expansionService.ownedExpansionBggIdsForBase(
+        widget.item,
+      );
+      final meta = metadataWithOwnedExpansions(
+        widget.item.metadata,
+        synced.toList(),
+      );
       if (!mounted) return;
       widget.onItemUpdated(widget.item.copyWith(metadata: meta));
+      setState(() => _owned = synced);
       CollectionRefresh.instance.bump();
     } catch (e) {
       if (!mounted) return;
-      setState(() => _owned = ownedExpansionBggIds(widget.item.metadata).toSet());
+      setState(() => _owned = previous);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Erreur : $e')),
       );

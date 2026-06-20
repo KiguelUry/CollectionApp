@@ -10,6 +10,7 @@ class CollectionItemListTile extends StatelessWidget {
   final CollectionCategory category;
   final int totalQuantity;
   final VoidCallback? onTap;
+  final VoidCallback? onDelete;
 
   const CollectionItemListTile({
     super.key,
@@ -17,6 +18,7 @@ class CollectionItemListTile extends StatelessWidget {
     required this.category,
     this.totalQuantity = 1,
     this.onTap,
+    this.onDelete,
   });
 
   @override
@@ -32,6 +34,7 @@ class CollectionItemListTile extends StatelessWidget {
             height: 52,
             child: item.imageUrl != null
                 ? BggNetworkImage(
+                    key: ValueKey('${item.id}:${item.imageUrl}'),
                     url: item.imageUrl!,
                     bookCover: category == CollectionCategory.book,
                   )
@@ -87,6 +90,13 @@ class CollectionItemListTile extends StatelessWidget {
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (onDelete != null)
+              IconButton(
+                icon: Icon(Icons.delete_outline, color: Colors.grey.shade600),
+                tooltip: 'Supprimer',
+                visualDensity: VisualDensity.compact,
+                onPressed: onDelete,
+              ),
             if (item.isGroupOwned)
               Padding(
                 padding: const EdgeInsets.only(right: 4),

@@ -1,11 +1,15 @@
 import '../models/collection_item.dart';
+import '../services/boardgame_expansion_service.dart';
 import 'boardgame_expansions.dart';
 
-/// Extension enregistrée sur le jeu de base → masquée de la grille principale.
+/// Extension liée à un parent → masquée de la grille principale.
 bool isBoardgameHiddenInGlobalCollection(
   CollectionItem item,
   List<CollectionItem> allBoardgames,
 ) {
+  if (BoardgameExpansionService.isHiddenInGlobalList(item)) return true;
+
+  // Legacy : extension cochée via metadata sur le jeu de base.
   final bggId = item.metadata?['bgg_id']?.toString();
   if (bggId == null || bggId.isEmpty) return false;
 
@@ -17,7 +21,5 @@ bool isBoardgameHiddenInGlobalCollection(
 }
 
 String? boardgameExpansionOfLabel(CollectionItem item) {
-  final title = item.metadata?['expansion_of_title']?.toString();
-  if (title != null && title.isNotEmpty) return title;
-  return null;
+  return BoardgameExpansionService.orphanExpansionLabel(item);
 }

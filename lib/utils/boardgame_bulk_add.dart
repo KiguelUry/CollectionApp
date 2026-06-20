@@ -7,6 +7,7 @@ import '../models/collection_item.dart';
 import '../services/bgg_service.dart';
 import '../services/profile_service.dart';
 import '../services/user_boardgame_collection_service.dart';
+import '../services/boardgame_expansion_service.dart';
 import '../services/collection_refresh.dart';
 import 'boardgame_cover.dart';
 import 'boardgame_expansion_flow.dart';
@@ -81,48 +82,36 @@ Future<bool> silentAddBoardgame(
     if (game.bggId.isNotEmpty && details != null) {
       final link = boardgameExpansionLinkFromDetails(details);
       if (link.isExpansion && link.baseBggId != null) {
-        final base = await findOwnedBaseBoardgame(link.baseBggId!);
+        final service = BoardgameExpansionService();
+        final base = await service.findBaseByBggId(link.baseBggId!);
         if (base != null) {
-          await attachExpansionToBaseItem(
-            baseItem: base,
+          await service.linkExpansionToBase(
+            base: base,
             expansionBggId: game.bggId,
+            title: game.title,
+            bggDetails: details,
+            imageUrl: game.imageUrl,
+            minPlayers: details['min_players'] as int?,
+            maxPlayers: details['max_players'] as int?,
+            playingTime: details['playing_time'] is int
+                ? details['playing_time'] as int
+                : null,
           );
           return true;
         }
-        final meta = <String, dynamic>{
-          'bgg_id': game.bggId,
-          'expansion_of_bgg_id': link.baseBggId!,
-          if (link.baseTitle != null) 'expansion_of_title': link.baseTitle!,
-        };
-        for (final key in ['year_published', 'min_age', 'bgg_categories']) {
-          final v = details[key];
-          if (v != null) meta[key] = v;
-        }
-        final item = CollectionItem(
-          id: '',
+        await service.insertOrphanExpansion(
           title: game.title.trim(),
-          category: CollectionCategory.boardgame,
-          metadata: meta,
-          imageUrl: boardgameStorageImageUrl(
-            details: details,
-            catalogUrl: game.imageUrl,
-          ),
-          isWishlist: false,
-          quantity: 1,
-          addedBy: userId,
+          expansionBggId: game.bggId,
+          baseBggId: link.baseBggId!,
+          baseTitle: link.baseTitle,
+          bggDetails: details,
+          imageUrl: game.imageUrl,
           minPlayers: details['min_players'] as int?,
           maxPlayers: details['max_players'] as int?,
           playingTime: details['playing_time'] is int
               ? details['playing_time'] as int
               : null,
         );
-        await client.from('collection_items').insert(
-              item.toInsertJson(
-                isWishlist: false,
-                locationUserId: userId,
-                addedBy: userId,
-              ),
-            );
         CollectionRefresh.instance.bump();
         return true;
       }
@@ -201,15 +190,37 @@ Future<bool> silentRemoveBoardgame({
   if (userId == null) return false;
 
   if (game.bggId.isNotEmpty) {
+    final service = BoardgameExpansionService();
     final rows = await Supabase.instance.client
         .from('collection_items')
-        .select('id, title, metadata')
+        .select('id, title, metadata, parent_game_id')
         .eq('category', CollectionCategory.boardgame.dbValue)
         .eq('is_wishlist', false)
         .or('added_by.eq.$userId,location_user_id.eq.$userId');
 
     for (final row in rows as List) {
       final meta = row['metadata'] as Map<String, dynamic>?;
+      if (meta?['bgg_id']?.toString() == game.bggId &&
+          row['parent_game_id'] != null) {
+        final parentId = row['parent_game_id'] as String;
+        final parentRows = await Supabase.instance.client
+            .from('collection_items')
+            .select('id, metadata')
+            .eq('id', parentId)
+            .maybeSingle();
+        if (parentRows != null) {
+          final parent = CollectionItem.fromJson(
+            Map<String, dynamic>.from(parentRows),
+          );
+          await service.unlinkExpansionFromBase(
+            base: parent,
+            expansionBggId: game.bggId,
+          );
+          CollectionRefresh.instance.bump();
+          return true;
+        }
+      }
+
       final owned = ownedExpansionBggIds(meta).toSet();
       if (!owned.contains(game.bggId)) continue;
       owned.remove(game.bggId);

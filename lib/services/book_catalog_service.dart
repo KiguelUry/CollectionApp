@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../models/book_subcategory.dart';
+import 'book_intelligence_service.dart';
 import 'google_books_service.dart';
 import 'open_library_service.dart';
 
@@ -74,7 +75,13 @@ class BookCatalogService {
           if (seen.add(key)) merged.add(b);
         }
       }
-      return merged.take(20).toList();
+      return BookIntelligenceService.enrichAndRank(
+        merged,
+        subcategory: subcategory,
+        query: query,
+      )
+          .map((e) => e.raw)
+          .toList();
     } catch (e) {
       if (kDebugMode) debugPrint('BookCatalogService.searchBooks: $e');
       return [];

@@ -1,24 +1,15 @@
 import 'package:flutter/material.dart';
 
+import '../constants/book_accent.dart';
 import '../coordinators/book_item_add_coordinator.dart';
-import '../utils/book_add_actions.dart';
-import '../utils/book_volume_cover.dart';
-import '../widgets/collection_cover_image.dart';
 import '../models/book_series.dart';
-import '../models/book_subcategory.dart';
 import '../models/book_volume.dart';
 import '../services/book_series_service.dart';
 import '../widgets/app_app_bar.dart';
-import '../widgets/create_book_series_dialog.dart';
-import '../widgets/mark_volumes_owned_sheet.dart';
-import 'book_series_overview_screen.dart';
-import 'item_detail_screen.dart';
-import 'novel_rating_matrix_screen.dart';
+import '../widgets/book_volume_cell.dart';
+import '../widgets/collection_cover_image.dart';
 
-enum _VolumeFilter { all, owned, missing, wishlist, read }
-
-enum _VolumeSort { numberAsc, numberDesc, ratingDesc, ratingAsc }
-
+/// Détail série : grille de tomes avec états Possédé × Lu.
 class BookSeriesDetailScreen extends StatefulWidget {
   final String seriesId;
 
@@ -33,15 +24,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   bool _loading = true;
   BookSeries? _series;
   BookSeriesStats? _stats;
-  List<BookVolume> _volumes = [];
   List<BookVolumeSlot> _slots = [];
-  List<BookSeries> _arcs = [];
-  String? _activeArcId;
-  _VolumeFilter _filter = _VolumeFilter.all;
-  _VolumeSort _sort = _VolumeSort.numberAsc;
-  String? _expandedVolumeId;
-  bool _multiSelectMode = false;
-  final Set<String> _selectedVolumeIds = {};
 
   @override
   void initState() {
@@ -55,19 +38,12 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
       final series = await _service.fetchSeriesById(widget.seriesId);
       if (series == null) throw Exception('Série introuvable');
 
-      final arcs = await _service.fetchSeries(
-        subcategory: series.subcategory,
-        parentSeriesId: series.id,
-      );
-
-      final targetId = _activeArcId ?? series.id;
-      final volumes = await _service.fetchVolumes(targetId);
-      final items = await _service.fetchSeriesItems(targetId);
-
+      final volumes = await _service.fetchVolumes(series.id);
+      final items = await _service.fetchSeriesItems(series.id);
       final stats = _service.computeStats(
         series: series,
         volumes: volumes,
-        items: await _service.fetchSeriesItems(series.id),
+        items: items,
       );
       final slots = _service.buildVolumeSlots(
         series: series,
@@ -78,13 +54,16 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
       if (mounted) {
         setState(() {
           _series = series;
-          _arcs = arcs;
           _stats = stats;
-          _volumes = volumes;
           _slots = slots;
           _loading = false;
         });
-        _enrichVolumeCovers(series, volumes);
+        _service.enrichMissingVolumeCovers(
+          series: series,
+          volumes: volumes,
+        ).then((_) {
+          if (mounted) _load();
+        });
       }
     } catch (e) {
       if (mounted) {
@@ -96,653 +75,321 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     }
   }
 
-  List<BookVolumeSlot> get _filteredSlots {
-    var list = List<BookVolumeSlot>.from(_slots);
-    switch (_filter) {
-      case _VolumeFilter.owned:
-        list = list.where((s) => s.status == BookVolumeStatus.owned).toList();
-      case _VolumeFilter.missing:
-        list = list.where((s) => s.status == BookVolumeStatus.missing).toList();
-      case _VolumeFilter.wishlist:
-        list =
-            list.where((s) => s.status == BookVolumeStatus.wishlist).toList();
-      case _VolumeFilter.read:
-        list = list
-            .where((s) => s.item != null && s.item!.isRead)
-            .toList();
-      case _VolumeFilter.all:
-        break;
-    }
-    list.sort((a, b) {
-      switch (_sort) {
-        case _VolumeSort.numberAsc:
-          return a.volume.sortIndex.compareTo(b.volume.sortIndex);
-        case _VolumeSort.numberDesc:
-          return b.volume.sortIndex.compareTo(a.volume.sortIndex);
-        case _VolumeSort.ratingDesc:
-          final ra = a.item?.rating ?? -1;
-          final rb = b.item?.rating ?? -1;
-          return rb.compareTo(ra);
-        case _VolumeSort.ratingAsc:
-          final ra = a.item?.rating ?? 99;
-          final rb = b.item?.rating ?? 99;
-          return ra.compareTo(rb);
-      }
-    });
-    return list;
-  }
-
-  Color _cellColor(BookVolumeSlot slot) {
-    return switch (slot.status) {
-      BookVolumeStatus.owned => Colors.green.shade600,
-      BookVolumeStatus.wishlist => Colors.orange.shade600,
-      BookVolumeStatus.missing => Colors.grey.shade400,
-    };
-  }
-
-  Future<void> _toggleSeriesWishlist() async {
-    final s = _series!;
-    await _service.setSeriesWishlist(s.id, !s.wishlistEntireSeries);
-    await _load();
-  }
-
-  bool _canBulkSelect(BookVolumeSlot slot) =>
-      slot.status == BookVolumeStatus.missing;
-
-  void _toggleMultiSelectMode() {
-    setState(() {
-      _multiSelectMode = !_multiSelectMode;
-      if (!_multiSelectMode) {
-        _selectedVolumeIds.clear();
-        _expandedVolumeId = null;
-      }
-    });
-  }
-
-  void _toggleVolumeSelection(String volumeId, {bool? value}) {
-    setState(() {
-      if (value == false || _selectedVolumeIds.contains(volumeId)) {
-        _selectedVolumeIds.remove(volumeId);
-      } else {
-        _selectedVolumeIds.add(volumeId);
-      }
-    });
-  }
-
-  void _selectAllMissingVisible() {
-    setState(() {
-      for (final slot in _filteredSlots) {
-        if (_canBulkSelect(slot)) {
-          _selectedVolumeIds.add(slot.volume.id);
-        }
-      }
-    });
-  }
-
-  Future<void> _addSelectedVolumes({bool markAsRead = false}) async {
-    final s = _series!;
-    final numbers = <int>[];
-    for (final slot in _slots) {
-      if (!_selectedVolumeIds.contains(slot.volume.id)) continue;
-      if (!_canBulkSelect(slot)) continue;
-      numbers.add(slot.volume.volumeNumber.ceil());
-    }
-    if (numbers.isEmpty) return;
-
-    final n = await _service.markVolumesOwnedNumbers(
-      series: s,
-      volumeNumbers: numbers,
-      markAsRead: markAsRead,
-    );
-    if (!mounted) return;
-    setState(() {
-      _selectedVolumeIds.clear();
-      _multiSelectMode = false;
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$n tome(s) ajouté(s) à la collection')),
-    );
-    await _load();
-  }
-
-  Future<void> _enrichVolumeCovers(
-    BookSeries series,
-    List<BookVolume> volumes,
-  ) async {
-    final updated = await _service.enrichMissingVolumeCovers(
+  Future<void> _toggleOwned(BookVolumeSlot slot) async {
+    final series = _series!;
+    final owned = slot.item != null && !slot.item!.isWishlist;
+    await _service.toggleVolumeOwned(
       series: series,
-      volumes: volumes,
+      slot: slot,
+      owned: !owned,
     );
-    if (updated > 0 && mounted) await _load();
+    await _load();
   }
 
-  Future<void> _markVolumesOwned() async {
-    final s = _series!;
-    final result = await showMarkVolumesOwnedSheet(
-      context,
-      seriesName: s.name,
-      maxVolume: s.expectedVolumeCount,
-    );
-    if (result == null) return;
-    final n = await _service.markVolumesOwned(
-      series: s,
-      fromVolume: result.from,
-      toVolume: result.to,
-      markAsRead: result.markAsRead,
-    );
+  Future<void> _toggleRead(BookVolumeSlot slot) async {
+    final item = slot.item;
+    if (item == null || item.isWishlist) return;
+    await _service.toggleVolumeRead(slot: slot, read: !item.isRead);
+    await _load();
+  }
+
+  Future<void> _quickAdd(BookVolumeSlot slot) async {
+    final series = _series!;
+    await _service.addVolumeQuick(series: series, volume: slot.volume);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$n tome(s) marqué(s) comme possédés')),
+        SnackBar(content: Text('Tome ${slot.volume.displayNumber} ajouté')),
       );
-      await _load();
     }
+    await _load();
+  }
+
+  Future<void> _addVolumeFromSearch() async {
+    final series = _series!;
+    await BookItemAddCoordinator(context).addVolumeFromCatalog(
+      seriesId: series.id,
+      seriesName: series.name,
+      subcategory: series.subcategory,
+      expectedVolumeCount: series.expectedVolumeCount,
+    );
+    await _load();
+  }
+
+  Future<void> _editExpectedCount() async {
+    final series = _series!;
+    final controller = TextEditingController(
+      text: '${series.expectedVolumeCount ?? _slots.length}',
+    );
+    final result = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Nombre de tomes'),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Total estimé',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final n = int.tryParse(controller.text.trim());
+              Navigator.pop(ctx, n);
+            },
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+    if (result == null || result < 1) return;
+    await _service.ensureVolumeSlots(series.id, result);
+    await _service.updateSeries(
+      series.copyWith(expectedVolumeCount: result),
+    );
+    await _load();
   }
 
   @override
   Widget build(BuildContext context) {
-    final series = _series;
-    if (_loading || series == null) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+    if (_loading && _series == null) {
+      return Scaffold(
+        appBar: AppAppBar(
+          title: 'Série',
+          backgroundColor: BookAccent.primary,
+          foregroundColor: Colors.white,
+        ),
+        body: const Center(child: CircularProgressIndicator()),
       );
     }
 
-    final stats = _stats ?? const BookSeriesStats();
+    final series = _series!;
+    final stats = _stats!;
+    final accent = BookAccent.primary;
+
     return Scaffold(
       appBar: AppAppBar(
         title: series.name,
+        backgroundColor: accent,
+        foregroundColor: Colors.white,
         actions: [
-          if (_multiSelectMode)
-            IconButton(
-              icon: const Icon(Icons.close),
-              tooltip: 'Quitter la sélection',
-              onPressed: _toggleMultiSelectMode,
-            ),
+          IconButton(
+            tooltip: 'Ajouter un tome',
+            icon: const Icon(Icons.add),
+            onPressed: _addVolumeFromSearch,
+          ),
           PopupMenuButton<String>(
-            icon: Icon(
-              series.wishlistEntireSeries
-                  ? Icons.favorite
-                  : Icons.more_vert,
-              color: series.wishlistEntireSeries ? Colors.red : null,
-            ),
-            tooltip: 'Actions série',
-            onSelected: (value) async {
-              switch (value) {
-                case 'add':
-                  await BookItemAddCoordinator(context).addVolumeFromCatalog(
-                    seriesId: series.id,
-                    seriesName: series.name,
-                    subcategory: series.subcategory,
-                    expectedVolumeCount: series.expectedVolumeCount,
-                  );
-                  await _load();
-                case 'select':
-                  _toggleMultiSelectMode();
-                case 'range':
-                  await _markVolumesOwned();
-                case 'wishlist':
-                  await _toggleSeriesWishlist();
-                case 'info':
-                  if (!context.mounted) return;
-                  await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (ctx) =>
-                          BookSeriesOverviewScreen(seriesId: series.id),
-                    ),
-                  );
-                  await _load();
-                case 'matrix':
-                  if (!context.mounted) return;
-                  await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (ctx) =>
-                          NovelRatingMatrixScreen(seriesId: series.id),
-                    ),
-                  );
-                  await _load();
-              }
+            onSelected: (v) async {
+              if (v == 'count') await _editExpectedCount();
+              if (v == 'delete') await _confirmDelete(series);
             },
             itemBuilder: (ctx) => [
               const PopupMenuItem(
-                value: 'add',
-                child: Row(
-                  children: [
-                    Icon(Icons.library_add_outlined),
-                    SizedBox(width: 12),
-                    Text('Ajouter un tome (recherche)'),
-                  ],
-                ),
-              ),
-              PopupMenuItem(
-                value: 'select',
-                child: Row(
-                  children: [
-                    Icon(
-                      _multiSelectMode
-                          ? Icons.checklist_rtl
-                          : Icons.checklist_outlined,
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      _multiSelectMode
-                          ? 'Quitter sélection multiple'
-                          : 'Sélection multiple',
-                    ),
-                  ],
-                ),
+                value: 'count',
+                child: Text('Ajuster le nombre de tomes'),
               ),
               const PopupMenuItem(
-                value: 'range',
-                child: Row(
-                  children: [
-                    Icon(Icons.playlist_add_check),
-                    SizedBox(width: 12),
-                    Text('Marquer une plage de tomes'),
-                  ],
-                ),
+                value: 'delete',
+                child: Text('Supprimer la série'),
               ),
-              PopupMenuItem(
-                value: 'wishlist',
+            ],
+          ),
+        ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: _load,
+        color: accent,
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(
-                      series.wishlistEntireSeries
-                          ? Icons.favorite
-                          : Icons.favorite_border,
-                      color: series.wishlistEntireSeries ? Colors.red : null,
+                    if (series.coverUrl != null && series.coverUrl!.isNotEmpty)
+                      CollectionCoverImage(
+                        url: series.coverUrl!,
+                        width: 72,
+                        height: 104,
+                        bookCover: true,
+                      )
+                    else
+                      Container(
+                        width: 72,
+                        height: 104,
+                        decoration: BoxDecoration(
+                          color: BookAccent.surface,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(
+                          series.subcategory.icon,
+                          color: accent,
+                          size: 32,
+                        ),
+                      ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            series.subcategory.label,
+                            style: TextStyle(
+                              color: accent,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            children: [
+                              _StatChip(
+                                icon: Icons.home_rounded,
+                                label: 'Possédé ${stats.ownedLabel}',
+                                color: accent,
+                              ),
+                              _StatChip(
+                                icon: Icons.visibility_rounded,
+                                label: 'Lu ${stats.readLabel}',
+                                color: Colors.amber.shade800,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Touche une icône maison ou œil pour basculer l\'état. '
+                            'Le + ajoute un tome manquant.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    const SizedBox(width: 12),
-                    Text(
-                      series.wishlistEntireSeries
-                          ? 'Retirer de la wishlist'
-                          : 'Wishlist série entière',
-                    ),
                   ],
                 ),
               ),
-              const PopupMenuItem(
-                value: 'info',
-                child: Row(
-                  children: [
-                    Icon(Icons.info_outline),
-                    SizedBox(width: 12),
-                    Text('Fiche série'),
-                  ],
-                ),
-              ),
-              if (series.subcategory == BookSubcategory.novel)
-                const PopupMenuItem(
-                  value: 'matrix',
-                  child: Row(
+            ),
+            if (_slots.isEmpty)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.grid_on_outlined),
-                      SizedBox(width: 12),
-                      Text('Matrice de notes'),
+                      Text(
+                        'Aucun tome défini',
+                        style: TextStyle(color: Colors.grey.shade600),
+                      ),
+                      const SizedBox(height: 12),
+                      FilledButton.icon(
+                        onPressed: _editExpectedCount,
+                        icon: const Icon(Icons.format_list_numbered),
+                        label: const Text('Définir les tomes'),
+                      ),
                     ],
                   ),
                 ),
-            ],
-          ),
-        ],
-      ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (series.coverUrl != null && series.coverUrl!.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 120,
-                  child: CollectionCoverImage(
-                    url: series.coverUrl!,
-                    height: 120,
-                    bookCover: true,
-                    largeSource: true,
-                    fit: BoxFit.cover,
+              )
+            else
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                sliver: SliverGrid(
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    mainAxisSpacing: 10,
+                    crossAxisSpacing: 10,
+                    childAspectRatio: 0.72,
+                  ),
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) {
+                      final slot = _slots[index];
+                      return BookVolumeCell(
+                        slot: slot,
+                        accent: accent,
+                        onToggleOwned: () => _toggleOwned(slot),
+                        onToggleRead: () => _toggleRead(slot),
+                        onQuickAdd: () => _quickAdd(slot),
+                      );
+                    },
+                    childCount: _slots.length,
                   ),
                 ),
               ),
-            ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: Wrap(
-              spacing: 8,
-              children: [
-                Chip(label: Text('Possédé ${stats.ownedLabel}')),
-                Chip(label: Text('Lu ${stats.readLabel}')),
-                if (stats.ratingLabel != null)
-                  Chip(
-                    avatar: const Icon(Icons.star, size: 16),
-                    label: Text('★ ${stats.ratingLabel}'),
-                  ),
-              ],
-            ),
-          ),
-          if (_arcs.isNotEmpty)
-            SizedBox(
-              height: 44,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                children: [
-                  ChoiceChip(
-                    label: const Text('Principal'),
-                    selected: _activeArcId == null,
-                    onSelected: (_) {
-                      setState(() => _activeArcId = null);
-                      _load();
-                    },
-                  ),
-                  for (final arc in _arcs)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 6),
-                      child: ChoiceChip(
-                        label: Text(arc.name),
-                        selected: _activeArcId == arc.id,
-                        onSelected: (_) {
-                          setState(() => _activeArcId = arc.id);
-                          _load();
-                        },
-                      ),
-                    ),
-                  ActionChip(
-                    label: const Text('+ Arc'),
-                    onPressed: () async {
-                      final r = await showCreateBookSeriesDialog(
-                        context,
-                        subcategory: series.subcategory,
-                        parentName: series.name,
-                      );
-                      if (r == null) return;
-                      await _service.createSeries(
-                        name: r.name,
-                        subcategory: series.subcategory,
-                        parentSeriesId: series.id,
-                        expectedVolumeCount: r.expectedVolumes,
-                      );
-                      await _load();
-                    },
-                  ),
-                ],
-              ),
-            ),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                _filterChip('Tous', _VolumeFilter.all),
-                _filterChip('Possédés', _VolumeFilter.owned),
-                _filterChip('Manquants', _VolumeFilter.missing),
-                _filterChip('Wishlist', _VolumeFilter.wishlist),
-                _filterChip('Lus', _VolumeFilter.read),
-                const SizedBox(width: 16),
-                PopupMenuButton<_VolumeSort>(
-                  initialValue: _sort,
-                  onSelected: (v) => setState(() => _sort = v),
-                  itemBuilder: (ctx) => const [
-                    PopupMenuItem(
-                      value: _VolumeSort.numberAsc,
-                      child: Text('N° croissant'),
-                    ),
-                    PopupMenuItem(
-                      value: _VolumeSort.numberDesc,
-                      child: Text('N° décroissant'),
-                    ),
-                    PopupMenuItem(
-                      value: _VolumeSort.ratingDesc,
-                      child: Text('Note ↓'),
-                    ),
-                    PopupMenuItem(
-                      value: _VolumeSort.ratingAsc,
-                      child: Text('Note ↑'),
-                    ),
-                  ],
-                  child: const Chip(
-                    avatar: Icon(Icons.sort, size: 18),
-                    label: Text('Tri'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: _volumes.isEmpty
-                ? Center(
-                    child: Text(
-                      'Aucun tome défini.\nDéfinis le nombre de tomes dans la fiche série.',
-                      textAlign: TextAlign.center,
-                    ),
-                  )
-                : ListView.builder(
-                    padding: EdgeInsets.fromLTRB(
-                      12,
-                      0,
-                      12,
-                      _multiSelectMode ? 120 : 88,
-                    ),
-                    itemCount: _filteredSlots.length,
-                    itemBuilder: (context, i) =>
-                        _buildVolumeTile(slot: _filteredSlots[i], series: series),
-                  ),
-          ),
-        ],
-      ),
-      bottomNavigationBar: _multiSelectMode
-          ? _buildMultiSelectBar(series)
-          : null,
-      floatingActionButton: _multiSelectMode
-          ? null
-          : FloatingActionButton(
-              onPressed: () => openBookAddFlow(
-                context,
-                subcategory: series.subcategory,
-              ).then((_) => _load()),
-              child: const Icon(Icons.add),
-            ),
-    );
-  }
-
-  Widget _buildVolumeTile({
-    required BookVolumeSlot slot,
-    required BookSeries series,
-  }) {
-    final expanded = !_multiSelectMode && _expandedVolumeId == slot.volume.id;
-    final selected = _selectedVolumeIds.contains(slot.volume.id);
-    final canSelect = _canBulkSelect(slot);
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      color: _multiSelectMode && selected
-          ? Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.35)
-          : null,
-      child: Column(
-        children: [
-          ListTile(
-            leading: VolumeLeading(
-              slot: slot,
-              fallbackColor: _cellColor(slot),
-            ),
-            title: Text(
-              slot.volume.label ?? 'Tome ${slot.volume.displayNumber}',
-            ),
-            subtitle: Text(_slotSubtitle(slot)),
-            trailing: _multiSelectMode
-                ? Checkbox(
-                    value: selected,
-                    onChanged: canSelect
-                        ? (v) => _toggleVolumeSelection(
-                              slot.volume.id,
-                              value: v == true,
-                            )
-                        : null,
-                  )
-                : Icon(
-                    expanded ? Icons.expand_less : Icons.expand_more,
-                  ),
-            onTap: () {
-              if (_multiSelectMode) {
-                if (canSelect) {
-                  _toggleVolumeSelection(slot.volume.id);
-                }
-                return;
-              }
-              setState(() {
-                _expandedVolumeId = expanded ? null : slot.volume.id;
-              });
-            },
-            onLongPress: _multiSelectMode || !canSelect
-                ? null
-                : () {
-                    setState(() {
-                      _multiSelectMode = true;
-                      _selectedVolumeIds.add(slot.volume.id);
-                    });
-                  },
-          ),
-          if (expanded) _buildExpanded(slot, series),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMultiSelectBar(BookSeries series) {
-    final count = _selectedVolumeIds.length;
-    return Material(
-      elevation: 8,
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Coche les tomes à ajouter, puis valide',
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  TextButton(
-                    onPressed: _selectAllMissingVisible,
-                    child: const Text('Tous manquants'),
-                  ),
-                  TextButton(
-                    onPressed: count == 0
-                        ? null
-                        : () => setState(() => _selectedVolumeIds.clear()),
-                    child: const Text('Aucun'),
-                  ),
-                  const Spacer(),
-                  FilledButton.icon(
-                    onPressed:
-                        count == 0 ? null : () => _addSelectedVolumes(),
-                    icon: const Icon(Icons.add),
-                    label: Text('Ajouter ($count)'),
-                  ),
-                ],
-              ),
-              TextButton.icon(
-                onPressed: count == 0
-                    ? null
-                    : () => _addSelectedVolumes(markAsRead: true),
-                icon: const Icon(Icons.menu_book_outlined, size: 18),
-                label: const Text('Ajouter et marquer lus'),
-              ),
-            ],
-          ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _filterChip(String label, _VolumeFilter f) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 6),
-      child: FilterChip(
-        label: Text(label),
-        selected: _filter == f,
-        onSelected: (_) => setState(() => _filter = f),
+  Future<void> _confirmDelete(BookSeries series) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Supprimer la série ?'),
+        content: Text(
+          '« ${series.name} » sera retirée. Les livres restent en collection '
+          'mais ne seront plus liés à cette série.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuler'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Supprimer'),
+          ),
+        ],
       ),
     );
+    if (ok != true || !mounted) return;
+    await _service.deleteSeries(series.id);
+    if (mounted) Navigator.pop(context);
   }
+}
 
-  String _slotSubtitle(BookVolumeSlot slot) {
-    return switch (slot.status) {
-      BookVolumeStatus.owned => slot.item?.isRead == true
-          ? 'Possédé · Lu'
-          : 'Possédé',
-      BookVolumeStatus.wishlist => 'Wishlist',
-      BookVolumeStatus.missing => 'Non possédé',
-    };
-  }
+class _StatChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
 
-  Widget _buildExpanded(
-    BookVolumeSlot slot,
-    BookSeries series,
-  ) {
-    final item = slot.item;
-    final cover = volumeCoverUrl(slot);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+  const _StatChip({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          if (cover != null)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: CollectionCoverImage(
-                url: cover,
-                height: 200,
-                bookCover: true,
-                largeSource: true,
-              ),
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: color,
             ),
-          if (item != null) ...[
-            const SizedBox(height: 8),
-            if (item.rating != null)
-              Text('Ma note : ${item.rating!.toStringAsFixed(1)} / 5'),
-            if (item.review != null && item.review!.isNotEmpty)
-              Text(item.review!, maxLines: 3, overflow: TextOverflow.ellipsis),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Lu'),
-              value: item.isRead,
-              onChanged: (v) async {
-                await _service.setItemRead(item.id, v);
-                await _load();
-              },
-            ),
-            FilledButton(
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (ctx) => ItemDetailScreen(item: item),
-                ),
-              ).then((_) => _load()),
-              child: const Text('Ouvrir la fiche'),
-            ),
-          ]           else
-            FilledButton.icon(
-              onPressed: () => BookItemAddCoordinator(context)
-                  .addToVolume(
-                    seriesId: _activeArcId ?? series.id,
-                    volumeId: slot.volume.id,
-                    seriesName: series.name,
-                    subcategory: series.subcategory,
-                    volumeNumber: slot.volume.volumeNumber,
-                    expectedVolumeCount: series.expectedVolumeCount,
-                  )
-                  .then((_) => _load()),
-              icon: const Icon(Icons.add),
-              label: const Text('Ajouter ce tome'),
-            ),
+          ),
         ],
       ),
     );

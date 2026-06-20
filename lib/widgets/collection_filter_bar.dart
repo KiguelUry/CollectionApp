@@ -19,7 +19,7 @@ class CollectionFilterBar extends StatelessWidget {
   final ValueChanged<CollectionListFilters> onChanged;
   final List<StorageLocation> locations;
   final List<ItemTag> tags;
-  final bool showScopeFilters;
+  final bool showFocusFilter;
   final bool showLocationFilter;
   final bool showTagFilter;
   final bool showBoardgameGenreFilter;
@@ -40,7 +40,7 @@ class CollectionFilterBar extends StatelessWidget {
     this.searchController,
     this.locations = const [],
     this.tags = const [],
-    this.showScopeFilters = true,
+    this.showFocusFilter = true,
     this.showLocationFilter = true,
     this.showTagFilter = true,
     this.showBoardgameGenreFilter = false,
@@ -95,6 +95,8 @@ class CollectionFilterBar extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
+                if (showFocusFilter)
+                  _focusMenuButton(context),
                 PopupMenuButton<CollectionSort>(
                   tooltip: 'Trier',
                   initialValue: filters.sort,
@@ -245,18 +247,95 @@ class CollectionFilterBar extends StatelessWidget {
                 ),
               ],
             ],
-            if (showScopeFilters) ...[
-              const SizedBox(height: 10),
-              _ownershipToggle(context),
-              if (filters.ownershipView == CollectionOwnershipView.groups) ...[
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: _groupPickerChip(context),
-                ),
-              ],
-            ],
           ],
+        ),
+      ),
+    );
+  }
+
+  bool get _focusIsActive =>
+      filters.ownershipView != CollectionOwnershipView.all ||
+      (filters.focusGroupId != null && filters.focusGroupId!.isNotEmpty);
+
+  String get _focusTooltip {
+    if (filters.ownershipView == CollectionOwnershipView.personal) {
+      return 'Focus : moi uniquement';
+    }
+    if (filters.focusGroupId != null) {
+      final name = groupOptions
+          .where((g) => g.id == filters.focusGroupId)
+          .map((g) => g.label)
+          .firstOrNull;
+      return 'Focus : ${name ?? 'groupe'}';
+    }
+    if (filters.ownershipView == CollectionOwnershipView.groups) {
+      return 'Focus : groupes';
+    }
+    return 'Focus : tout afficher';
+  }
+
+  Widget _focusMenuButton(BuildContext context) {
+    return PopupMenuButton<String>(
+      tooltip: _focusTooltip,
+      onSelected: (value) {
+        if (value == '__all__') {
+          onChanged(
+            filters.copyWith(
+              ownershipView: CollectionOwnershipView.all,
+              clearFocusGroup: true,
+              clearGroups: true,
+            ),
+          );
+        } else if (value == '__personal__') {
+          onChanged(
+            filters.copyWith(
+              ownershipView: CollectionOwnershipView.personal,
+              clearFocusGroup: true,
+              clearGroups: true,
+            ),
+          );
+        } else {
+          onChanged(
+            filters.copyWith(
+              ownershipView: CollectionOwnershipView.groups,
+              focusGroupId: value,
+              groupIds: {value},
+            ),
+          );
+        }
+      },
+      itemBuilder: (context) => [
+        CheckedPopupMenuItem(
+          value: '__all__',
+          checked: filters.ownershipView == CollectionOwnershipView.all,
+          child: const Text('Tout afficher'),
+        ),
+        CheckedPopupMenuItem(
+          value: '__personal__',
+          checked: filters.ownershipView == CollectionOwnershipView.personal,
+          child: const Text('Moi uniquement'),
+        ),
+        if (groupOptions.isNotEmpty) const PopupMenuDivider(),
+        ...groupOptions.map(
+          (g) => CheckedPopupMenuItem(
+            value: g.id,
+            checked: filters.focusGroupId == g.id,
+            child: Text(g.label),
+          ),
+        ),
+      ],
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Badge(
+          isLabelVisible: _focusIsActive,
+          backgroundColor: Theme.of(context).colorScheme.primary,
+          child: Icon(
+            Icons.groups_outlined,
+            size: 22,
+            color: _focusIsActive
+                ? Theme.of(context).colorScheme.primary
+                : Colors.grey.shade700,
+          ),
         ),
       ),
     );
@@ -627,81 +706,6 @@ class CollectionFilterBar extends StatelessWidget {
       filters.copyWith(
         boardgameGenres: selected,
         clearBoardgameGenre: selected.isEmpty,
-      ),
-    );
-  }
-
-  Widget _ownershipToggle(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      child: SegmentedButton<CollectionOwnershipView>(
-      showSelectedIcon: false,
-      segments: const [
-        ButtonSegment(
-          value: CollectionOwnershipView.personal,
-          icon: Icon(Icons.person_outline),
-          label: Text('Personnel'),
-        ),
-        ButtonSegment(
-          value: CollectionOwnershipView.groups,
-          icon: Icon(Icons.groups_outlined),
-          label: Text('Groupes'),
-        ),
-      ],
-      selected: {filters.ownershipView},
-      onSelectionChanged: (selection) => onChanged(
-        filters.copyWith(
-          ownershipView: selection.first,
-          clearGroups: selection.first != CollectionOwnershipView.groups,
-        ),
-      ),
-    ),
-    );
-  }
-
-  Widget _groupPickerChip(BuildContext context) {
-    final selectedCount = filters.groupIds.length;
-    final chipLabel = switch (selectedCount) {
-      0 => 'Groupes : tous',
-      1 => groupOptions
-              .where((g) => filters.groupIds.contains(g.id))
-              .map((g) => g.label)
-              .firstOrNull ??
-          '1 groupe',
-      _ => 'Groupes : $selectedCount sélectionné(s)',
-    };
-    return PopupMenuButton<String>(
-      tooltip: 'Choisir un ou plusieurs groupes',
-      onSelected: (id) {
-        final next = Set<String>.from(filters.groupIds);
-        if (id == '__all__') {
-          next.clear();
-        } else if (next.contains(id)) {
-          next.remove(id);
-        } else {
-          next.add(id);
-        }
-        onChanged(filters.copyWith(groupIds: next, clearGroups: next.isEmpty));
-      },
-      itemBuilder: (context) => [
-        const PopupMenuItem(
-          value: '__all__',
-          child: Text('Tous les groupes'),
-        ),
-        ...groupOptions.map(
-          (g) => CheckedPopupMenuItem(
-            value: g.id,
-            checked: filters.groupIds.contains(g.id),
-            child: Text(g.label),
-          ),
-        ),
-      ],
-      child: Chip(
-        avatar: const Icon(Icons.filter_list, size: 18),
-        label: Text(
-          chipLabel,
-          style: const TextStyle(fontSize: 12),
-        ),
       ),
     );
   }

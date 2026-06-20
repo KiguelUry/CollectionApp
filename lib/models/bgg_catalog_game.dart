@@ -1,7 +1,8 @@
 /// Jeu affiché dans les grilles catalogue BGG (découverte / recherche).
+import '../catalog/models/catalog_entry.dart';
 import '../services/user_boardgame_collection_service.dart';
 
-class BggCatalogGame {
+class BggCatalogGame implements CatalogEntry {
   final String bggId;
   final String title;
   final String? imageUrl;
@@ -26,6 +27,7 @@ class BggCatalogGame {
     this.addedAtMs,
   });
 
+  @override
   String get catalogKey => UserBoardgameCollectionService.catalogKeyForGame(
         bggId,
         title,

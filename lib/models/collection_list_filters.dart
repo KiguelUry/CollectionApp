@@ -21,6 +21,7 @@ enum CollectionScopeFilter {
 }
 
 enum CollectionOwnershipView {
+  all,
   personal,
   groups,
 }
@@ -45,6 +46,8 @@ class CollectionListFilters {
   /// Genres BGG (`boardgamecategory`), jeux de société uniquement.
   Set<String> boardgameGenres;
   CollectionOwnershipView ownershipView;
+  /// Groupe unique pour le filtre Focus (prioritaire sur [groupIds]).
+  String? focusGroupId;
   Set<String> groupIds;
   Set<String> cardRarities;
   Set<String> pokemonTypes;
@@ -60,7 +63,8 @@ class CollectionListFilters {
     this.tagId,
     this.holderKey,
     Set<String>? boardgameGenres,
-    this.ownershipView = CollectionOwnershipView.personal,
+    this.ownershipView = CollectionOwnershipView.all,
+    this.focusGroupId,
     Set<String>? groupIds,
     Set<String>? cardRarities,
     Set<String>? pokemonTypes,
@@ -78,6 +82,8 @@ class CollectionListFilters {
       locationId != null ||
       tagId != null ||
       holderKey != null ||
+      ownershipView != CollectionOwnershipView.all ||
+      focusGroupId != null ||
       groupIds.isNotEmpty ||
       boardgameGenres.isNotEmpty ||
       cardRarities.isNotEmpty ||
@@ -95,7 +101,9 @@ class CollectionListFilters {
     String? holderKey,
     Set<String>? boardgameGenres,
     CollectionOwnershipView? ownershipView,
+    String? focusGroupId,
     Set<String>? groupIds,
+    bool clearFocusGroup = false,
     Set<String>? cardRarities,
     Set<String>? pokemonTypes,
     Set<String>? cardSubcategories,
@@ -115,6 +123,8 @@ class CollectionListFilters {
       tagId: clearTag ? null : (tagId ?? this.tagId),
       holderKey: clearHolder ? null : (holderKey ?? this.holderKey),
       ownershipView: ownershipView ?? this.ownershipView,
+      focusGroupId:
+          clearFocusGroup ? null : (focusGroupId ?? this.focusGroupId),
       groupIds: clearGroups ? <String>{} : (groupIds ?? this.groupIds),
       boardgameGenres: clearBoardgameGenre
           ? <String>{}
@@ -193,9 +203,11 @@ class CollectionListFilters {
           .toList();
     }
 
-    if (ownershipView == CollectionOwnershipView.personal) {
+    if (focusGroupId != null && focusGroupId!.isNotEmpty) {
+      result = result.where((i) => i.groupId == focusGroupId).toList();
+    } else if (ownershipView == CollectionOwnershipView.personal) {
       result = result.where((i) => !i.isGroupOwned).toList();
-    } else {
+    } else if (ownershipView == CollectionOwnershipView.groups) {
       result = result.where((i) => i.isGroupOwned).toList();
       if (groupIds.isNotEmpty) {
         result = result.where((i) => groupIds.contains(i.groupId)).toList();

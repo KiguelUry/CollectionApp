@@ -9,12 +9,14 @@ Future<void> showBookSearch(
   required void Function(Map<String, String> book, BookSubcategory subcategory)
       onBookSelected,
   BookSubcategory initialSub = BookSubcategory.manga,
+  String? initialQuery,
   VoidCallback? onManualEntry,
 }) {
   return showBookQuickSearchSheet(
     context,
     onBookSelected: onBookSelected,
     initialSub: initialSub,
+    initialQuery: initialQuery,
     onManualEntry: onManualEntry,
   );
 }

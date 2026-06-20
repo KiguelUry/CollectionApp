@@ -17,6 +17,7 @@ class CollectionItemTile extends StatelessWidget {
   final bool showGroupBadge;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
+  final VoidCallback? onDelete;
   final FriendOverlapKind? overlapKind;
 
   const CollectionItemTile({
@@ -28,6 +29,7 @@ class CollectionItemTile extends StatelessWidget {
     this.showGroupBadge = true,
     this.onTap,
     this.onLongPress,
+    this.onDelete,
     this.overlapKind,
   });
 
@@ -67,8 +69,14 @@ class CollectionItemTile extends StatelessWidget {
               if (showDuplicateBadge && totalQuantity > 1)
                 Positioned(
                   top: 4,
-                  right: 4,
+                  right: onDelete != null ? 32 : 4,
                   child: _badge('×$totalQuantity', Colors.deepPurple),
+                ),
+              if (onDelete != null)
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: _quickDeleteButton(),
                 ),
               if (category == CollectionCategory.boardgame &&
                   ownedExpansionCount(item) > 0)
@@ -213,8 +221,14 @@ class CollectionItemTile extends StatelessWidget {
                 if (showDuplicateBadge && totalQuantity > 1)
                   Positioned(
                     top: 4,
-                    right: 4,
+                    right: onDelete != null ? 32 : 4,
                     child: _badge('×$totalQuantity', Colors.deepPurple),
+                  ),
+                if (onDelete != null)
+                  Positioned(
+                    top: 4,
+                    right: 4,
+                    child: _quickDeleteButton(),
                   ),
                 if (_overlapBadge != null) _overlapBadge!,
               ],
@@ -298,6 +312,25 @@ class CollectionItemTile extends StatelessWidget {
     return item.locationLabel;
   }
 
+  Widget _quickDeleteButton() {
+    return Material(
+      color: Colors.black.withValues(alpha: 0.5),
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onDelete,
+        borderRadius: BorderRadius.circular(8),
+        child: const Padding(
+          padding: EdgeInsets.all(4),
+          child: Icon(
+            Icons.delete_outline,
+            size: 15,
+            color: Colors.white,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _expansionBadge(int count) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
@@ -336,6 +369,7 @@ class CollectionItemTile extends StatelessWidget {
       final isCard = category == CollectionCategory.card;
       final isBoardgame = category == CollectionCategory.boardgame;
       image = BggNetworkImage(
+        key: ValueKey('${item.id}:${item.imageUrl}'),
         url: item.imageUrl!,
         fit: isCard ? BoxFit.contain : BoxFit.cover,
         bookCover: isBook,
