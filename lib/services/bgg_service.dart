@@ -679,15 +679,17 @@ class BggService {
 
     String? baseBggId;
     String? baseTitle;
-    for (final link in item.findAllElements('link')) {
-      if (link.getAttribute('type') != 'boardgameexpansion') continue;
-      if (link.getAttribute('inbound') == 'true') continue;
-      final linkId = link.getAttribute('id');
-      final linkTitle = link.getAttribute('value');
-      if (linkId != null && linkId.isNotEmpty) {
-        baseBggId = linkId;
-        baseTitle = linkTitle;
-        break;
+    if (isExpansion) {
+      for (final link in item.findAllElements('link')) {
+        if (link.getAttribute('type') != 'boardgameexpansion') continue;
+        if (link.getAttribute('inbound') != 'true') continue;
+        final linkId = link.getAttribute('id');
+        final linkTitle = link.getAttribute('value');
+        if (linkId != null && linkId.isNotEmpty) {
+          baseBggId = linkId;
+          baseTitle = linkTitle;
+          break;
+        }
       }
     }
 

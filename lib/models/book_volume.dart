@@ -30,6 +30,8 @@ class BookVolume {
     return url;
   }
 
+  bool get isRead => metadata['is_read'] == true;
+
   String get displayNumber {
     if (volumeNumber == volumeNumber.roundToDouble()) {
       return volumeNumber.toInt().toString();

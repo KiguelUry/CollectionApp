@@ -56,7 +56,7 @@ class _BookVolumeStatusSheetState extends State<_BookVolumeStatusSheet> {
   void _syncFromSlot() {
     final item = widget.slot.item;
     _owned = item != null && !item.isWishlist;
-    _read = _owned && (item?.isRead ?? false);
+    _read = (item?.isRead ?? false) || widget.slot.volume.isRead;
   }
 
   Future<void> _setOwned(bool value) async {
@@ -68,8 +68,10 @@ class _BookVolumeStatusSheetState extends State<_BookVolumeStatusSheet> {
         slot: widget.slot,
         owned: value,
       );
-      if (!value) _read = false;
       _owned = value;
+      if (!value && _read) {
+        await widget.service.setVolumeReadFlag(widget.slot.volume.id, true);
+      }
       if (mounted) setState(() => _busy = false);
       widget.onChanged?.call();
     } catch (e) {
@@ -83,23 +85,14 @@ class _BookVolumeStatusSheetState extends State<_BookVolumeStatusSheet> {
   }
 
   Future<void> _setRead(bool value) async {
-    if (_busy || !_owned) return;
+    if (_busy) return;
     setState(() => _busy = true);
     try {
-      if (widget.slot.item == null) {
-        await widget.service.addVolumeQuick(
-          series: widget.series,
-          volume: widget.slot.volume,
-          markAsRead: value,
-        );
-      } else {
-        await widget.service.toggleVolumeRead(
-          slot: widget.slot,
-          read: value,
-        );
-      }
+      await widget.service.toggleVolumeRead(
+        slot: widget.slot,
+        read: value,
+      );
       _read = value;
-      _owned = true;
       if (mounted) setState(() => _busy = false);
       widget.onChanged?.call();
     } catch (e) {
@@ -143,11 +136,9 @@ class _BookVolumeStatusSheetState extends State<_BookVolumeStatusSheet> {
             SwitchListTile(
               secondary: Icon(Icons.visibility_rounded, color: Colors.amber.shade800),
               title: const Text('Lu'),
-              subtitle: Text(
-                _owned ? 'Marquer comme lu' : 'Disponible si possédé',
-              ),
+              subtitle: const Text('Lu ou emprunté, même sans possession'),
               value: _read,
-              onChanged: _busy || !_owned ? null : _setRead,
+              onChanged: _busy ? null : _setRead,
             ),
             if (_busy)
               const Padding(

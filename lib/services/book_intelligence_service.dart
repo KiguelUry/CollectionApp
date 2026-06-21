@@ -1,5 +1,7 @@
 import '../models/book_subcategory.dart';
 import '../utils/book_title_parser.dart';
+import 'google_books_service.dart';
+import 'open_library_service.dart';
 
 enum BookSearchField { title, author, publisher }
 
@@ -95,6 +97,68 @@ abstract final class BookIntelligenceService {
     BookSubcategory subcategory,
   ) =>
       _enrich(hit, subcategory);
+
+  /// Requête catalogue pour un tome (ex. « Thorgal 1 »).
+  static String volumeSearchQuery(String seriesName, double volumeNumber) {
+    final name = seriesName.trim();
+    final vol = volumeNumber == volumeNumber.roundToDouble()
+        ? volumeNumber.toInt().toString()
+        : volumeNumber.toString();
+    return '$name $vol';
+  }
+
+  /// Couverture d'un tome via Google Books + Open Library (requête série + numéro).
+  static Future<String?> lookupVolumeCover({
+    required String seriesName,
+    required double volumeNumber,
+    required BookSubcategory subcategory,
+  }) async {
+    final query = volumeSearchQuery(seriesName, volumeNumber);
+    if (query.trim().length < 3) return null;
+
+    final merged = <Map<String, String>>[];
+    final seen = <String>{};
+    for (final list in [
+      await GoogleBooksService.search(query, maxResults: 12),
+      await OpenLibraryService.searchBooks(query, subcategory: subcategory),
+    ]) {
+      for (final hit in list) {
+        final title = hit['title']?.trim().toLowerCase() ?? '';
+        if (title.isEmpty || !seen.add(title)) continue;
+        merged.add(hit);
+      }
+    }
+
+    final ranked = enrichAndRank(
+      merged,
+      subcategory: subcategory,
+      filters: BookSearchFilters(titleQuery: query),
+    );
+
+    for (final hit in ranked) {
+      final img = hit.imageUrl;
+      if (img == null || img.isEmpty) continue;
+      final vol = hit.parsed.volumeNumber;
+      if (hit.parsed.hasSeries &&
+          hit.parsed.seriesName != null &&
+          BookTitleParser.seriesNamesMatch(hit.parsed.seriesName!, seriesName) &&
+          vol != null &&
+          (vol - volumeNumber).abs() < 0.01) {
+        return img;
+      }
+    }
+
+    for (final hit in ranked) {
+      final img = hit.imageUrl;
+      if (img != null && img.isNotEmpty) return img;
+    }
+
+    return OpenLibraryService.lookupVolumeCover(
+      seriesName,
+      volumeNumber,
+      subcategory,
+    );
+  }
 
   static bool _matchesFilters(EnrichedBookHit hit, BookSearchFilters filters) {
     final authorQ = filters.authorQuery.trim().toLowerCase();

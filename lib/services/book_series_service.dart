@@ -7,6 +7,7 @@ import '../models/collection_item.dart';
 import '../models/collection_category.dart';
 import '../models/novel_rating_matrix.dart';
 import '../utils/book_title_parser.dart';
+import 'book_intelligence_service.dart';
 import 'open_library_service.dart';
 import 'profile_service.dart';
 
@@ -180,7 +181,12 @@ class BookSeriesService {
     final owned = active.where((i) => !i.isWishlist).toList();
     final wishlistItems =
         active.where((i) => i.isWishlist).length;
-    final read = owned.where((i) => i.isRead).length;
+    final readFromOwned = owned.where((i) => i.isRead).length;
+    final ownedVolumeIds = owned.map((i) => i.volumeId).whereType<String>().toSet();
+    final readFromVolumes = volumes
+        .where((v) => v.isRead && !ownedVolumeIds.contains(v.id))
+        .length;
+    final read = readFromOwned + readFromVolumes;
 
     var totalSlots = series.expectedVolumeCount ?? 0;
     if (totalSlots < volumes.length) totalSlots = volumes.length;
@@ -256,6 +262,25 @@ class BookSeriesService {
     return slots;
   }
 
+  Future<void> setVolumeReadFlag(String volumeId, bool isRead) async {
+    final row = await _client
+        .from('book_volumes')
+        .select('metadata')
+        .eq('id', volumeId)
+        .maybeSingle();
+    if (row == null) return;
+    final meta = Map<String, dynamic>.from(row['metadata'] as Map? ?? {});
+    if (isRead) {
+      meta['is_read'] = true;
+    } else {
+      meta.remove('is_read');
+    }
+    await _client
+        .from('book_volumes')
+        .update({'metadata': meta})
+        .eq('id', volumeId);
+  }
+
   Future<void> setVolumeCoverUrl(String volumeId, String coverUrl) async {
     if (coverUrl.isEmpty) return;
     final row = await _client
@@ -284,10 +309,10 @@ class BookSeriesService {
       if (lookups >= maxLookups) break;
       if (vol.coverUrl != null && vol.coverUrl!.isNotEmpty) continue;
       lookups++;
-      final url = await OpenLibraryService.lookupVolumeCover(
-        series.name,
-        vol.volumeNumber,
-        series.subcategory,
+      final url = await BookIntelligenceService.lookupVolumeCover(
+        seriesName: series.name,
+        volumeNumber: vol.volumeNumber,
+        subcategory: series.subcategory,
       );
       if (url != null && url.isNotEmpty) {
         await setVolumeCoverUrl(vol.id, url);
@@ -343,6 +368,7 @@ class BookSeriesService {
     await ProfileService().ensureCurrentUserProfile();
     final n = volume.volumeNumber.ceil();
     final title = '${series.name} - Tome $n';
+    final read = markAsRead || volume.isRead;
     final row = await _client
         .from('collection_items')
         .insert({
@@ -352,7 +378,7 @@ class BookSeriesService {
           'series_id': series.id,
           'volume_id': volume.id,
           'is_wishlist': false,
-          'is_read': markAsRead,
+          'is_read': read,
           'quantity': 1,
           'added_by': _userId,
           'location_user_id': _userId,
@@ -363,6 +389,9 @@ class BookSeriesService {
         })
         .select()
         .single();
+    if (read) {
+      await setVolumeReadFlag(volume.id, false);
+    }
     final coverUrl = volume.coverUrl ??
         await OpenLibraryService.lookupVolumeCover(
           series.name,
@@ -389,6 +418,9 @@ class BookSeriesService {
     }
     final item = slot.item;
     if (item != null && !item.isWishlist) {
+      if (item.isRead) {
+        await setVolumeReadFlag(slot.volume.id, true);
+      }
       await removeVolumeItem(item.id);
     }
   }
@@ -405,8 +437,14 @@ class BookSeriesService {
     required bool read,
   }) async {
     final item = slot.item;
-    if (item == null || item.isWishlist) return;
-    await setItemRead(item.id, read);
+    if (item != null && !item.isWishlist) {
+      await setItemRead(item.id, read);
+      if (!read) {
+        await setVolumeReadFlag(slot.volume.id, false);
+      }
+      return;
+    }
+    await setVolumeReadFlag(slot.volume.id, read);
   }
 
   Future<BookSeries?> findSeriesByName(

@@ -21,7 +21,8 @@ class BookVolumeCell extends StatelessWidget {
   bool get _owned =>
       slot.item != null && !slot.item!.isWishlist;
 
-  bool get _read => _owned && slot.item!.isRead;
+  bool get _read =>
+      (slot.item?.isRead ?? false) || slot.volume.isRead;
 
   @override
   Widget build(BuildContext context) {

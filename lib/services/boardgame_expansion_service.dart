@@ -75,16 +75,28 @@ class BoardgameExpansionService {
     required CollectionItem base,
     required CollectionItem expansion,
   }) async {
-    if (expansion.id == base.id) return;
+    var resolvedBase = base;
+    var resolvedExpansion = expansion;
+    if (resolvedBase.isExpansion && !resolvedExpansion.isExpansion) {
+      resolvedBase = expansion;
+      resolvedExpansion = base;
+    }
+    if (resolvedBase.id == resolvedExpansion.id) return;
+    if (resolvedBase.isExpansion) return;
+
+    await _client.from('collection_items').update({
+      'is_expansion': false,
+      'parent_game_id': null,
+    }).eq('id', resolvedBase.id);
 
     await _client.from('collection_items').update({
       'is_expansion': true,
-      'parent_game_id': base.id,
-    }).eq('id', expansion.id);
+      'parent_game_id': resolvedBase.id,
+    }).eq('id', resolvedExpansion.id);
 
-    final expBggId = expansion.metadata?['bgg_id']?.toString();
+    final expBggId = resolvedExpansion.metadata?['bgg_id']?.toString();
     if (expBggId != null && expBggId.isNotEmpty) {
-      await syncLegacyOwnedIds(base);
+      await syncLegacyOwnedIds(resolvedBase);
     }
     CollectionRefresh.instance.bump();
   }
@@ -159,6 +171,15 @@ class BoardgameExpansionService {
   }) async {
     final userId = _userId;
     if (userId == null) throw StateError('Non connecté');
+
+    if (base.isExpansion) {
+      throw StateError('Le parent ne peut pas être une extension');
+    }
+
+    await _client.from('collection_items').update({
+      'is_expansion': false,
+      'parent_game_id': null,
+    }).eq('id', base.id);
 
     final existingChild = await _findChildByBggId(base.id, expansionBggId);
     if (existingChild != null) {

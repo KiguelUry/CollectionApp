@@ -23,6 +23,7 @@ class BookSeriesDetailScreen extends StatefulWidget {
 class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   final _service = BookSeriesService();
   bool _loading = true;
+  bool _volumesAscending = true;
   BookSeries? _series;
   BookSeriesStats? _stats;
   List<BookVolumeSlot> _slots = [];
@@ -74,6 +75,16 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         );
       }
     }
+  }
+
+  List<BookVolumeSlot> get _displaySlots {
+    final copy = List<BookVolumeSlot>.from(_slots);
+    copy.sort(
+      (a, b) => _volumesAscending
+          ? a.volume.volumeNumber.compareTo(b.volume.volumeNumber)
+          : b.volume.volumeNumber.compareTo(a.volume.volumeNumber),
+    );
+    return copy;
   }
 
   Future<void> _openVolumeSheet(BookVolumeSlot slot) async {
@@ -154,6 +165,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     final series = _series!;
     final stats = _stats!;
     final accent = BookAccent.primary;
+    final displaySlots = _displaySlots;
 
     return Scaffold(
       appBar: AppAppBar(
@@ -161,6 +173,19 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         backgroundColor: accent,
         foregroundColor: Colors.white,
         actions: [
+          if (_slots.length > 1)
+            IconButton(
+              tooltip: _volumesAscending
+                  ? 'Trier du plus récent au Tome 1'
+                  : 'Trier du Tome 1 au plus récent',
+              icon: Icon(
+                _volumesAscending
+                    ? Icons.arrow_downward_rounded
+                    : Icons.arrow_upward_rounded,
+              ),
+              onPressed: () =>
+                  setState(() => _volumesAscending = !_volumesAscending),
+            ),
           IconButton(
             tooltip: 'Ajouter un tome',
             icon: const Icon(Icons.add),
@@ -294,14 +319,14 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                   ),
                   delegate: SliverChildBuilderDelegate(
                     (context, index) {
-                      final slot = _slots[index];
+                      final slot = displaySlots[index];
                       return BookVolumeCell(
                         slot: slot,
                         accent: accent,
                         onTap: () => _openVolumeSheet(slot),
                       );
                     },
-                    childCount: _slots.length,
+                    childCount: displaySlots.length,
                   ),
                 ),
               ),

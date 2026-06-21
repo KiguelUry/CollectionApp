@@ -224,19 +224,21 @@ function parseThingItem(xml: string, id: string): Record<string, unknown> | null
 
   let baseBggId: string | undefined;
   let baseTitle: string | undefined;
-  const linkRe2 = /<link\b([^>]*)\/?>/gi;
-  let lm2: RegExpExecArray | null;
-  while ((lm2 = linkRe2.exec(inner)) !== null) {
-    const attrs = lm2[1];
-    const type = attrs.match(/\btype="([^"]*)"/i)?.[1];
-    if (type !== "boardgameexpansion") continue;
-    if (/inbound="true"/i.test(attrs)) continue;
-    const baseId = attrs.match(/\bid="(\d+)"/i)?.[1];
-    const baseName = attrs.match(/\bvalue="([^"]*)"/i)?.[1];
-    if (baseId) {
-      baseBggId = baseId;
-      baseTitle = baseName;
-      break;
+  if (isExpansion) {
+    const linkRe2 = /<link\b([^>]*)\/?>/gi;
+    let lm2: RegExpExecArray | null;
+    while ((lm2 = linkRe2.exec(inner)) !== null) {
+      const attrs = lm2[1];
+      const type = attrs.match(/\btype="([^"]*)"/i)?.[1];
+      if (type !== "boardgameexpansion") continue;
+      if (!/inbound="true"/i.test(attrs)) continue;
+      const baseId = attrs.match(/\bid="(\d+)"/i)?.[1];
+      const baseName = attrs.match(/\bvalue="([^"]*)"/i)?.[1];
+      if (baseId) {
+        baseBggId = baseId;
+        baseTitle = baseName;
+        break;
+      }
     }
   }
 

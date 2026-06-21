@@ -147,16 +147,26 @@ class _HomeScreenState extends State<HomeScreen>
   Future<void> _maybeReconcileExpansions() async {
     if (_expansionReconcileDone || !mounted) return;
     _expansionReconcileDone = true;
-    final result = await reconcileBoardgameExpansions();
+    final result = await repairAndReconcileBoardgameExpansions();
     if (!mounted || !result.changed) return;
+    final parts = <String>[];
+    if (result.metadataFixedCount > 0) {
+      parts.add(
+        '${result.metadataFixedCount} fiche${result.metadataFixedCount > 1 ? 's' : ''} BGG corrigée${result.metadataFixedCount > 1 ? 's' : ''}',
+      );
+    }
+    if (result.repairedCount > 0) {
+      parts.add(
+        '${result.repairedCount} lien${result.repairedCount > 1 ? 's' : ''} réparé${result.repairedCount > 1 ? 's' : ''}',
+      );
+    }
+    if (result.mergedCount > 0) {
+      parts.add(
+        '${result.mergedCount} extension${result.mergedCount > 1 ? 's' : ''} rattachée${result.mergedCount > 1 ? 's' : ''}',
+      );
+    }
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          result.mergedCount == 1
-              ? '1 extension rattachée à son jeu de base'
-              : '${result.mergedCount} extensions rattachées à leurs jeux de base',
-        ),
-      ),
+      SnackBar(content: Text(parts.join(' · '))),
     );
   }
 
