@@ -3,12 +3,45 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import '../config/app_env.dart';
+import '../config/supabase_public_config.dart';
 import '../models/tcg_set_info.dart';
 
 /// RiftScribe — Riftbound TCG (API publique, sans clé).
+/// Sur le web : proxy Supabase `riftscribe-proxy` (CORS).
 /// https://riftscribe.gg/api-docs
 class RiftscribeService {
   static const _base = 'https://riftscribe.gg';
+
+  static bool get _useWebProxy => kIsWeb;
+
+  static Map<String, String> get _jsonHeaders => {
+        'Accept': 'application/json',
+        if (_useWebProxy) ...{
+          'Authorization': 'Bearer ${AppEnv.supabaseAnonKey}',
+          'apikey': AppEnv.supabaseAnonKey,
+        },
+      };
+
+  static Uri _uri(String path, Map<String, String> query) {
+    if (_useWebProxy) {
+      final base = SupabasePublicConfig.url.replaceAll(RegExp(r'/+$'), '');
+      return Uri.parse('$base/functions/v1/riftscribe-proxy').replace(
+        queryParameters: {
+          'path': path,
+          ...query,
+          'apikey': AppEnv.supabaseAnonKey,
+        },
+      );
+    }
+    return Uri.parse('$_base$path').replace(queryParameters: query);
+  }
+
+  static Future<http.Response> _get(
+    String path,
+    Map<String, String> query,
+  ) =>
+      http.get(_uri(path, query), headers: _jsonHeaders);
 
   static const _setNames = <String, String>{
     'OGN': 'Origins',
@@ -81,11 +114,7 @@ class RiftscribeService {
 
   static Future<List<String>> _fetchSetIds() async {
     try {
-      final url = Uri.parse('$_base/api/cards/filters');
-      final response = await http.get(
-        url,
-        headers: {'Accept': 'application/json'},
-      );
+      final response = await _get('/api/cards/filters', {});
       if (response.statusCode != 200) return _setOrder;
 
       final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -161,18 +190,12 @@ class RiftscribeService {
     TcgSetInfo? setInfo,
   }) async {
     try {
-      final url = Uri.parse('$_base/api/cards').replace(
-        queryParameters: {
-          'set_id': setId.toUpperCase(),
-          'limit': '$limit',
-          'offset': '$offset',
-          'sort': 'collector_number',
-        },
-      );
-      final response = await http.get(
-        url,
-        headers: {'Accept': 'application/json'},
-      );
+      final response = await _get('/api/cards', {
+        'set_id': setId.toUpperCase(),
+        'limit': '$limit',
+        'offset': '$offset',
+        'sort': 'collector_number',
+      });
       if (response.statusCode != 200) return [];
 
       final body = jsonDecode(response.body);
@@ -202,13 +225,7 @@ class RiftscribeService {
     if (q.length < 2) return [];
 
     try {
-      final url = Uri.parse('$_base/api/cards/search').replace(
-        queryParameters: {'q': q, 'limit': '24'},
-      );
-      final response = await http.get(
-        url,
-        headers: {'Accept': 'application/json'},
-      );
+      final response = await _get('/api/cards/search', {'q': q, 'limit': '24'});
       if (response.statusCode != 200) {
         return _searchFallback(q);
       }
@@ -232,13 +249,7 @@ class RiftscribeService {
 
   static Future<List<Map<String, String>>> _searchFallback(String q) async {
     try {
-      final url = Uri.parse('$_base/api/cards').replace(
-        queryParameters: {'q': q, 'limit': '24'},
-      );
-      final response = await http.get(
-        url,
-        headers: {'Accept': 'application/json'},
-      );
+      final response = await _get('/api/cards', {'q': q, 'limit': '24'});
       if (response.statusCode != 200) return [];
 
       final body = jsonDecode(response.body);
