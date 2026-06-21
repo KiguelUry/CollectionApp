@@ -1,15 +1,19 @@
 /// Jeu affiché dans les grilles catalogue BGG (découverte / recherche).
+library;
 import '../catalog/models/catalog_entry.dart';
 import '../services/user_boardgame_collection_service.dart';
 
 class BggCatalogGame implements CatalogEntry {
   final String bggId;
+  @override
   final String title;
+  @override
   final String? imageUrl;
   final String? year;
   final String? bggRank;
   final String? hotRank;
   /// Sous-titre affiché (année, joueurs, raison sociale…).
+  @override
   final String? subtitle;
   final List<String> genres;
   /// Horodatage ms (feed amis) pour tri récent.

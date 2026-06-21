@@ -102,6 +102,30 @@ class _BookSubcategorySeriesScreenState
     ).then((_) => _load());
   }
 
+  Future<void> _confirmDeleteSeries(BookSeries series) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Supprimer la série ?'),
+        content: Text('« ${series.name} » sera retirée de ta liste.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuler'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await _service.deleteSeries(series.id);
+    _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -184,6 +208,7 @@ class _BookSubcategorySeriesScreenState
                               series: s,
                               stats: _stats[s.id] ?? const BookSeriesStats(),
                               accent: BookAccent.primary,
+                              onDelete: () => _confirmDeleteSeries(s),
                               onTap: () => _openSeries(s),
                             );
                           },

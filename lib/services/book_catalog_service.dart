@@ -35,6 +35,7 @@ class BookCatalogService {
   static Future<List<Map<String, String>>> searchBooks(
     String query, {
     required BookSubcategory subcategory,
+    BookSearchFilters filters = const BookSearchFilters(),
   }) async {
     try {
       final enhanced = _searchQueryForSubcategory(query, subcategory);
@@ -78,7 +79,11 @@ class BookCatalogService {
       return BookIntelligenceService.enrichAndRank(
         merged,
         subcategory: subcategory,
-        query: query,
+        filters: filters.titleQuery.isEmpty &&
+                filters.authorQuery.isEmpty &&
+                filters.publisherQuery.isEmpty
+            ? BookSearchFilters(titleQuery: query)
+            : filters,
       )
           .map((e) => e.raw)
           .toList();
@@ -121,6 +126,9 @@ class BookCatalogService {
       if ((book['author'] ?? '').isNotEmpty) 'author': book['author']!,
       if ((book['year'] ?? '').isNotEmpty) 'year': book['year']!,
       if ((book['isbn'] ?? '').isNotEmpty) 'isbn': book['isbn']!,
+      if ((book['publisher'] ?? '').isNotEmpty) 'publisher': book['publisher']!,
+      if ((book['author_photo_url'] ?? '').isNotEmpty)
+        'author_photo_url': book['author_photo_url']!,
       if ((book['google_books_id'] ?? '').isNotEmpty)
         'google_books_id': book['google_books_id']!,
       if ((book['series_title'] ?? '').isNotEmpty)
@@ -130,5 +138,26 @@ class BookCatalogService {
       if ((book['subtitle'] ?? '').isNotEmpty) 'subtitle': book['subtitle']!,
       if ((book['source'] ?? '').isNotEmpty) 'catalog_source': book['source']!,
     };
+  }
+
+  /// Enrichit les résultats avec photo auteur (Open Library).
+  static Future<List<Map<String, String>>> enrichAuthorPhotos(
+    List<Map<String, String>> books,
+  ) async {
+    final out = <Map<String, String>>[];
+    for (final book in books) {
+      final copy = Map<String, String>.from(book);
+      final author = copy['author']?.trim();
+      if (author != null &&
+          author.isNotEmpty &&
+          (copy['author_photo_url'] ?? '').isEmpty) {
+        final photo = await OpenLibraryService.lookupAuthorPhotoUrl(author);
+        if (photo != null && photo.isNotEmpty) {
+          copy['author_photo_url'] = photo;
+        }
+      }
+      out.add(copy);
+    }
+    return out;
   }
 }

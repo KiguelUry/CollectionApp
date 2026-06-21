@@ -16,8 +16,10 @@ class BoardgameExpansionService {
   /// Masqué de la collection globale si extension liée à un parent.
   static bool isHiddenInGlobalList(CollectionItem item) {
     if (item.category != CollectionCategory.boardgame) return false;
-    if (!item.isExpansion) return false;
-    return item.parentGameId != null && item.parentGameId!.isNotEmpty;
+    final hasParent =
+        item.parentGameId != null && item.parentGameId!.isNotEmpty;
+    if (!hasParent) return false;
+    return item.isExpansion || item.metadata?['bgg_is_expansion'] == true;
   }
 
   static String? orphanExpansionLabel(CollectionItem item) {
@@ -58,13 +60,14 @@ class BoardgameExpansionService {
         .eq('is_wishlist', false)
         .or('added_by.eq.$userId,location_user_id.eq.$userId');
 
+    CollectionItem? fallback;
     for (final row in rows as List) {
       final item = CollectionItem.fromJson(row as Map<String, dynamic>);
-      if (item.metadata?['bgg_id']?.toString() == expansionBggId) {
-        return item;
-      }
+      if (item.metadata?['bgg_id']?.toString() != expansionBggId) continue;
+      if (item.isExpansion) return item;
+      fallback ??= item;
     }
-    return null;
+    return fallback;
   }
 
   /// Lie une ligne extension existante au jeu de base (réconciliation).
@@ -112,7 +115,11 @@ class BoardgameExpansionService {
 
   /// IDs BGG des extensions liées (enfants + legacy metadata).
   Future<Set<String>> ownedExpansionBggIdsForBase(CollectionItem base) async {
+    final baseBggId = base.metadata?['bgg_id']?.toString();
     final owned = ownedExpansionBggIds(base.metadata).toSet();
+    if (baseBggId != null && baseBggId.isNotEmpty) {
+      owned.remove(baseBggId);
+    }
 
     final children = await _client
         .from('collection_items')
@@ -123,7 +130,9 @@ class BoardgameExpansionService {
     for (final row in children as List) {
       final meta = row['metadata'] as Map<String, dynamic>?;
       final id = meta?['bgg_id']?.toString();
-      if (id != null && id.isNotEmpty) owned.add(id);
+      if (id == null || id.isEmpty) continue;
+      if (baseBggId != null && id == baseBggId) continue;
+      owned.add(id);
     }
     return owned;
   }
@@ -284,9 +293,7 @@ class BoardgameExpansionService {
     }
 
     var base = await findBaseByBggId(baseBggId);
-    if (base == null) {
-      base = await _createBaseFromBgg(baseBggId, orphan);
-    }
+    base ??= await _createBaseFromBgg(baseBggId, orphan);
 
     final expBggId = orphan.metadata?['bgg_id']?.toString() ?? '';
     await _client.from('collection_items').update({

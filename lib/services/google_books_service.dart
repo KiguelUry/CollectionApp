@@ -116,6 +116,11 @@ class GoogleBooksService {
       result['subtitle'] = subtitle;
     }
 
+    final publisher = info['publisher'] as String?;
+    if (publisher != null && publisher.isNotEmpty) {
+      result['publisher'] = publisher;
+    }
+
     final seriesInfo = info['seriesInfo'] as Map<String, dynamic>?;
     if (seriesInfo != null) {
       final displayNum = seriesInfo['bookDisplayNumber']?.toString();

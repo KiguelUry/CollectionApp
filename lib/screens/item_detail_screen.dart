@@ -492,7 +492,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         ),
                       ),
                     if (ro) const SizedBox(height: 12),
-                    if (!ro && isBoardgame && expansionOf != null) ...[
+                    if (!ro && isBoardgame && _item.isExpansion && expansionOf != null) ...[
                       Card(
                         color: Colors.orange.shade50,
                         child: Padding(
@@ -501,7 +501,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               Text(
-                                'Extension de $expansionOf',
+                                'Extension pour $expansionOf',
                                 style: TextStyle(
                                   fontWeight: FontWeight.w700,
                                   color: Colors.orange.shade900,
@@ -522,10 +522,8 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                                     ),
                                   );
                                 },
-                                icon: const Icon(Icons.extension),
-                                label: const Text(
-                                  'Ajouter le jeu de base à la collection',
-                                ),
+                                icon: const Icon(Icons.link),
+                                label: const Text('Ajouter / lier le jeu de base'),
                               ),
                             ],
                           ),
@@ -635,7 +633,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       isBoardgame: isBoardgame,
                       metadataRows: metadataRows,
                     ),
-                    if (isBoardgame)
+                    if (isBoardgame && !_item.isExpansion)
                       BoardgameExpansionsSection(
                         item: _item,
                         readOnly: ro,

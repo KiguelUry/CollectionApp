@@ -5,27 +5,23 @@ import '../../models/book_volume.dart';
 
 /// Cellule visuelle d'un tome (Possédé × Lu).
 class BookVolumeCell extends StatelessWidget {
+  static const coverAspectRatio = 2 / 3;
+
   final BookVolumeSlot slot;
   final Color accent;
-  final VoidCallback? onToggleOwned;
-  final VoidCallback? onToggleRead;
-  final VoidCallback? onQuickAdd;
+  final VoidCallback? onTap;
 
   const BookVolumeCell({
     super.key,
     required this.slot,
     this.accent = BookAccent.primary,
-    this.onToggleOwned,
-    this.onToggleRead,
-    this.onQuickAdd,
+    this.onTap,
   });
 
   bool get _owned =>
       slot.item != null && !slot.item!.isWishlist;
 
   bool get _read => _owned && slot.item!.isRead;
-
-  bool get _missing => slot.item == null;
 
   @override
   Widget build(BuildContext context) {
@@ -37,7 +33,7 @@ class BookVolumeCell extends StatelessWidget {
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: _missing ? onQuickAdd : onToggleOwned,
+        onTap: onTap,
         child: Stack(
           children: [
             Padding(
@@ -45,14 +41,17 @@ class BookVolumeCell extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(
+                  AspectRatio(
+                    aspectRatio: coverAspectRatio,
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(8),
                       child: cover != null && cover.isNotEmpty
                           ? Image.network(
                               cover,
                               fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => _placeholder(n),
+                              width: double.infinity,
+                              height: double.infinity,
+                              errorBuilder: (_, _, _) => _placeholder(n),
                             )
                           : _placeholder(n),
                     ),
@@ -70,46 +69,24 @@ class BookVolumeCell extends StatelessWidget {
                 ],
               ),
             ),
-            if (!_missing) ...[
-              Positioned(
-                top: 4,
-                right: 4,
-                child: _StatusBadge(
-                  icon: Icons.home_rounded,
-                  active: _owned,
-                  activeColor: accent,
-                  onTap: onToggleOwned,
-                ),
+            Positioned(
+              top: 4,
+              right: 4,
+              child: _StatusBadge(
+                icon: Icons.home_rounded,
+                active: _owned,
+                activeColor: accent,
               ),
-              Positioned(
-                top: 4,
-                left: 4,
-                child: _StatusBadge(
-                  icon: Icons.visibility_rounded,
-                  active: _read,
-                  activeColor: Colors.amber.shade800,
-                  onTap: _owned ? onToggleRead : null,
-                ),
+            ),
+            Positioned(
+              top: 4,
+              left: 4,
+              child: _StatusBadge(
+                icon: Icons.visibility_rounded,
+                active: _read,
+                activeColor: Colors.amber.shade800,
               ),
-            ],
-            if (_missing && onQuickAdd != null)
-              Positioned(
-                bottom: 28,
-                right: 6,
-                child: Material(
-                  color: accent,
-                  shape: const CircleBorder(),
-                  elevation: 2,
-                  child: InkWell(
-                    customBorder: const CircleBorder(),
-                    onTap: onQuickAdd,
-                    child: const Padding(
-                      padding: EdgeInsets.all(6),
-                      child: Icon(Icons.add, size: 18, color: Colors.white),
-                    ),
-                  ),
-                ),
-              ),
+            ),
           ],
         ),
       ),
@@ -136,13 +113,11 @@ class _StatusBadge extends StatelessWidget {
   final IconData icon;
   final bool active;
   final Color activeColor;
-  final VoidCallback? onTap;
 
   const _StatusBadge({
     required this.icon,
     required this.active,
     required this.activeColor,
-    this.onTap,
   });
 
   @override
@@ -150,17 +125,9 @@ class _StatusBadge extends StatelessWidget {
     return Material(
       color: active ? activeColor : Colors.black26,
       shape: const CircleBorder(),
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(5),
-          child: Icon(
-            icon,
-            size: 14,
-            color: Colors.white,
-          ),
-        ),
+      child: Padding(
+        padding: const EdgeInsets.all(5),
+        child: Icon(icon, size: 14, color: Colors.white),
       ),
     );
   }

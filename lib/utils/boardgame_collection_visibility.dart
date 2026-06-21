@@ -9,12 +9,13 @@ bool isBoardgameHiddenInGlobalCollection(
 ) {
   if (BoardgameExpansionService.isHiddenInGlobalList(item)) return true;
 
-  // Legacy : extension cochée via metadata sur le jeu de base.
+  // Legacy : masquer si ce bgg_id est une extension cochée sur un jeu de BASE.
   final bggId = item.metadata?['bgg_id']?.toString();
   if (bggId == null || bggId.isEmpty) return false;
 
   for (final other in allBoardgames) {
     if (other.id == item.id) continue;
+    if (other.isExpansion) continue;
     if (ownedExpansionBggIds(other.metadata).contains(bggId)) return true;
   }
   return false;

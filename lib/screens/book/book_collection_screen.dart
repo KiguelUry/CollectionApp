@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
 
 import '../../constants/book_accent.dart';
-import '../../models/book_subcategory.dart';
 import '../../models/book_series.dart';
+import '../../models/book_subcategory.dart';
+import '../../models/collection_item.dart';
+import '../../models/collection_list_filters.dart';
 import '../../services/book_series_service.dart';
+import '../../services/group_service.dart';
 import '../../widgets/app_app_bar.dart';
 import '../../widgets/book_series_tile.dart';
+import '../../widgets/collection_filter_bar.dart' show GroupFilterOption;
+import '../../widgets/focus_filter_button.dart';
 import '../book_series_detail_screen.dart';
 
 /// Collection Livres regroupée par série / œuvre.
@@ -21,11 +26,14 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
   final _search = TextEditingController();
   bool _loading = true;
   BookSubcategory? _filterSub;
+  CollectionListFilters _focusFilters = CollectionListFilters();
+  Map<String, String> _groupNamesById = {};
   List<_SeriesEntry> _entries = [];
 
   @override
   void initState() {
     super.initState();
+    _loadGroups();
     _load();
   }
 
@@ -33,6 +41,17 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
   void dispose() {
     _search.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadGroups() async {
+    try {
+      final groups = await GroupService().fetchMyGroups();
+      if (mounted) {
+        setState(() {
+          _groupNamesById = {for (final g in groups) g.id: g.name};
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _load() async {
@@ -48,7 +67,7 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
           volumes: volumes,
           items: items,
         );
-        entries.add(_SeriesEntry(series: series, stats: stats));
+        entries.add(_SeriesEntry(series: series, stats: stats, items: items));
       }
       entries.sort(
         (a, b) => a.series.name.toLowerCase().compareTo(
@@ -71,15 +90,67 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
     }
   }
 
+  bool _seriesMatchesFocus(List<CollectionItem> items) {
+    if (_focusFilters.focusGroupId != null &&
+        _focusFilters.focusGroupId!.isNotEmpty) {
+      return items.any((i) => i.groupId == _focusFilters.focusGroupId);
+    }
+    if (_focusFilters.ownershipView == CollectionOwnershipView.personal) {
+      return items.isEmpty || items.any((i) => !i.isGroupOwned);
+    }
+    if (_focusFilters.ownershipView == CollectionOwnershipView.groups) {
+      return items.any((i) => i.isGroupOwned);
+    }
+    return true;
+  }
+
   List<_SeriesEntry> get _visible {
     final q = _search.text.trim().toLowerCase();
     return _entries.where((e) {
       if (_filterSub != null && e.series.subcategory != _filterSub) {
         return false;
       }
+      if (!_seriesMatchesFocus(e.items)) return false;
       if (q.isEmpty) return true;
       return e.series.name.toLowerCase().contains(q);
     }).toList();
+  }
+
+  List<GroupFilterOption> get _groupOptions => _groupNamesById.entries
+      .map((e) => GroupFilterOption(id: e.key, label: e.value))
+      .toList()
+    ..sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
+
+  Future<void> _confirmDeleteSeries(BookSeries series) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Supprimer la série ?'),
+        content: Text(
+          '« ${series.name} » sera retirée. Les livres restent en collection '
+          'mais ne seront plus liés à cette série.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuler'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await _service.deleteSeries(series.id);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('« ${series.name} » supprimée')),
+      );
+      _load();
+    }
   }
 
   @override
@@ -100,23 +171,35 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                child: TextField(
-                  controller: _search,
-                  onChanged: (_) => setState(() {}),
-                  decoration: InputDecoration(
-                    hintText: 'Filtrer une série…',
-                    isDense: true,
-                    prefixIcon: const Icon(Icons.search, size: 20),
-                    suffixIcon: _search.text.isNotEmpty
-                        ? IconButton(
-                            icon: const Icon(Icons.clear, size: 20),
-                            onPressed: () {
-                              _search.clear();
-                              setState(() {});
-                            },
-                          )
-                        : null,
-                  ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _search,
+                        onChanged: (_) => setState(() {}),
+                        decoration: InputDecoration(
+                          hintText: 'Filtrer une série…',
+                          isDense: true,
+                          prefixIcon: const Icon(Icons.search, size: 20),
+                          suffixIcon: _search.text.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear, size: 20),
+                                  onPressed: () {
+                                    _search.clear();
+                                    setState(() {});
+                                  },
+                                )
+                              : null,
+                        ),
+                      ),
+                    ),
+                    FocusFilterButton(
+                      filters: _focusFilters,
+                      groupOptions: _groupOptions,
+                      activeColor: BookAccent.primary,
+                      onChanged: (f) => setState(() => _focusFilters = f),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -185,6 +268,7 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
                         series: entry.series,
                         stats: entry.stats,
                         accent: BookAccent.primary,
+                        onDelete: () => _confirmDeleteSeries(entry.series),
                         onTap: () async {
                           await Navigator.push(
                             context,
@@ -212,6 +296,11 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
 class _SeriesEntry {
   final BookSeries series;
   final BookSeriesStats stats;
+  final List<CollectionItem> items;
 
-  const _SeriesEntry({required this.series, required this.stats});
+  const _SeriesEntry({
+    required this.series,
+    required this.stats,
+    required this.items,
+  });
 }

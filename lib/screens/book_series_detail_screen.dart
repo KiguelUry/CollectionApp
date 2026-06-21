@@ -7,6 +7,7 @@ import '../models/book_volume.dart';
 import '../services/book_series_service.dart';
 import '../widgets/app_app_bar.dart';
 import '../widgets/book_volume_cell.dart';
+import '../widgets/book_volume_status_sheet.dart';
 import '../widgets/collection_cover_image.dart';
 
 /// Détail série : grille de tomes avec états Possédé × Lu.
@@ -75,32 +76,15 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     }
   }
 
-  Future<void> _toggleOwned(BookVolumeSlot slot) async {
+  Future<void> _openVolumeSheet(BookVolumeSlot slot) async {
     final series = _series!;
-    final owned = slot.item != null && !slot.item!.isWishlist;
-    await _service.toggleVolumeOwned(
+    await showBookVolumeStatusSheet(
+      context,
       series: series,
       slot: slot,
-      owned: !owned,
+      service: _service,
+      onChanged: _load,
     );
-    await _load();
-  }
-
-  Future<void> _toggleRead(BookVolumeSlot slot) async {
-    final item = slot.item;
-    if (item == null || item.isWishlist) return;
-    await _service.toggleVolumeRead(slot: slot, read: !item.isRead);
-    await _load();
-  }
-
-  Future<void> _quickAdd(BookVolumeSlot slot) async {
-    final series = _series!;
-    await _service.addVolumeQuick(series: series, volume: slot.volume);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Tome ${slot.volume.displayNumber} ajouté')),
-      );
-    }
     await _load();
   }
 
@@ -264,8 +248,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            'Touche une icône maison ou œil pour basculer l\'état. '
-                            'Le + ajoute un tome manquant.',
+                            'Touche un tome pour gérer Possédé et Lu.',
                             style: TextStyle(
                               fontSize: 12,
                               color: Colors.grey.shade600,
@@ -303,11 +286,11 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                 sliver: SliverGrid(
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
+                  gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                    maxCrossAxisExtent: 140,
                     mainAxisSpacing: 10,
                     crossAxisSpacing: 10,
-                    childAspectRatio: 0.72,
+                    childAspectRatio: 0.58,
                   ),
                   delegate: SliverChildBuilderDelegate(
                     (context, index) {
@@ -315,9 +298,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                       return BookVolumeCell(
                         slot: slot,
                         accent: accent,
-                        onToggleOwned: () => _toggleOwned(slot),
-                        onToggleRead: () => _toggleRead(slot),
-                        onQuickAdd: () => _quickAdd(slot),
+                        onTap: () => _openVolumeSheet(slot),
                       );
                     },
                     childCount: _slots.length,

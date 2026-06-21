@@ -38,9 +38,9 @@ enum BookSubcategory {
       };
 
   Color get color => switch (this) {
-        BookSubcategory.manga => const Color(0xFF2E7D6B),
-        BookSubcategory.comic => const Color(0xFF3D8B7A),
-        BookSubcategory.novel => const Color(0xFF256B5C),
+        BookSubcategory.manga => const Color(0xFFD35400),
+        BookSubcategory.comic => const Color(0xFFE67E22),
+        BookSubcategory.novel => const Color(0xFFBA4A00),
         BookSubcategory.other => Colors.blueGrey,
       };
 

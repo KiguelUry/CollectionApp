@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../models/book_subcategory.dart';
-import 'book_quick_search_sheet.dart';
+import '../screens/book/book_catalog_grid_screen.dart';
 
-/// Recherche livre (bottom sheet).
+/// Recherche livre — grille catalogue visuelle.
 Future<void> showBookSearch(
   BuildContext context, {
   required void Function(Map<String, String> book, BookSubcategory subcategory)
@@ -12,11 +12,17 @@ Future<void> showBookSearch(
   String? initialQuery,
   VoidCallback? onManualEntry,
 }) {
-  return showBookQuickSearchSheet(
+  return Navigator.push<void>(
     context,
-    onBookSelected: onBookSelected,
-    initialSub: initialSub,
-    initialQuery: initialQuery,
-    onManualEntry: onManualEntry,
+    MaterialPageRoute(
+      builder: (ctx) => BookCatalogGridScreen(
+        initialSub: initialSub,
+        initialQuery: initialQuery,
+        onBookSelected: (book, sub) {
+          Navigator.pop(ctx);
+          onBookSelected(book, sub);
+        },
+      ),
+    ),
   );
 }

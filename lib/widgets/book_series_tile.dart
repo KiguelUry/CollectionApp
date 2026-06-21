@@ -9,6 +9,7 @@ class BookSeriesTile extends StatelessWidget {
   final BookSeriesStats stats;
   final VoidCallback onTap;
   final Color accent;
+  final VoidCallback? onDelete;
 
   const BookSeriesTile({
     super.key,
@@ -16,6 +17,7 @@ class BookSeriesTile extends StatelessWidget {
     required this.stats,
     required this.onTap,
     this.accent = BookAccent.primary,
+    this.onDelete,
   });
 
   @override
@@ -64,6 +66,18 @@ class BookSeriesTile extends StatelessWidget {
                         ],
                       ),
                     ),
+                    if (onDelete != null)
+                      IconButton(
+                        icon: Icon(Icons.delete_outline, color: Colors.red.shade400),
+                        tooltip: 'Supprimer la série',
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 32,
+                          minHeight: 32,
+                        ),
+                        onPressed: onDelete,
+                      ),
                   ],
                 ),
               ),

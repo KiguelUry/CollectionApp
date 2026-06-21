@@ -6,6 +6,7 @@ enum CardSubcategory {
   yugioh,
   onepiece,
   lorcana,
+  riftbound,
   topps,
   panini,
   other;
@@ -18,6 +19,7 @@ enum CardSubcategory {
         CardSubcategory.yugioh => 'Yu-Gi-Oh!',
         CardSubcategory.onepiece => 'One Piece',
         CardSubcategory.lorcana => 'Lorcana (Disney)',
+        CardSubcategory.riftbound => 'Riftbound',
         CardSubcategory.topps => 'Topps',
         CardSubcategory.panini => 'Panini',
         CardSubcategory.other => 'Autre',
@@ -29,6 +31,8 @@ enum CardSubcategory {
         CardSubcategory.yugioh => 'Par ère & extension (YGOProDeck)',
         CardSubcategory.onepiece => 'Par type de booster (OPTCG)',
         CardSubcategory.lorcana => 'Par chapitre (Lorcast)',
+        CardSubcategory.riftbound =>
+          'Saisie manuelle — pas de catalogue public fiable',
         CardSubcategory.topps => 'Saisie manuelle — pas de catalogue',
         CardSubcategory.panini => 'Albums & stickers',
         CardSubcategory.other => 'Saisie manuelle',
@@ -40,6 +44,7 @@ enum CardSubcategory {
         CardSubcategory.yugioh => Icons.auto_awesome,
         CardSubcategory.onepiece => Icons.sailing,
         CardSubcategory.lorcana => Icons.auto_awesome_motion,
+        CardSubcategory.riftbound => Icons.bolt,
         CardSubcategory.topps => Icons.sports_baseball_outlined,
         CardSubcategory.panini => Icons.collections_bookmark_outlined,
         CardSubcategory.other => Icons.style_outlined,
@@ -51,6 +56,7 @@ enum CardSubcategory {
         CardSubcategory.yugioh => Colors.indigo,
         CardSubcategory.onepiece => Colors.red.shade700,
         CardSubcategory.lorcana => Colors.lightBlue,
+        CardSubcategory.riftbound => const Color(0xFF6C3483),
         CardSubcategory.topps => Colors.blue,
         CardSubcategory.panini => Colors.orange,
         CardSubcategory.other => Colors.blueGrey,
@@ -62,6 +68,7 @@ enum CardSubcategory {
         CardSubcategory.yugioh,
         CardSubcategory.onepiece,
         CardSubcategory.lorcana,
+        CardSubcategory.riftbound,
         CardSubcategory.topps,
         CardSubcategory.panini,
         CardSubcategory.other,
@@ -86,6 +93,9 @@ enum CardSubcategory {
           true,
         _ => false,
       };
+
+  /// Flux 100 % manuel (saisie + photo perso).
+  bool get isManualOnly => !supportsCatalogSearch && !hasSetBrowser;
 
   static CardSubcategory fromDbValue(String? value) {
     if (value == null) return CardSubcategory.other;
