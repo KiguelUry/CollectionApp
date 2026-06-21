@@ -5,6 +5,7 @@ import '../models/tcg_set_info.dart';
 import 'lorcast_service.dart';
 import 'onepiece_tcg_service.dart';
 import 'pokemon_tcg_service.dart';
+import 'riftscribe_service.dart';
 import 'scryfall_service.dart';
 import 'ygoprodeck_service.dart';
 
@@ -18,6 +19,7 @@ class CardCatalogService {
         CardSubcategory.yugioh => 'YGOProDeck',
         CardSubcategory.onepiece => 'OPTCG API',
         CardSubcategory.lorcana => 'Lorcast',
+        CardSubcategory.riftbound => 'RiftScribe',
         _ => 'saisie manuelle',
       };
 
@@ -34,6 +36,7 @@ class CardCatalogService {
         CardSubcategory.yugioh => YgoprodeckService.search(query),
         CardSubcategory.onepiece => OnepieceTcgService.search(query),
         CardSubcategory.lorcana => LorcastService.search(query),
+        CardSubcategory.riftbound => RiftscribeService.search(query),
         _ => Future.value(<Map<String, String>>[]),
       };
     } catch (e, st) {
@@ -75,6 +78,8 @@ class CardCatalogService {
       if ((card['ygoprodeck_id'] ?? '').isNotEmpty)
         'ygoprodeck_id': card['ygoprodeck_id']!,
       if ((card['lorcast_id'] ?? '').isNotEmpty) 'lorcast_id': card['lorcast_id']!,
+      if ((card['riftscribe_id'] ?? '').isNotEmpty)
+        'riftscribe_id': card['riftscribe_id']!,
       if ((card['onepiece_card_id'] ?? '').isNotEmpty)
         'onepiece_card_id': card['onepiece_card_id']!,
       'card_universe': subcategory.dbValue,
@@ -104,6 +109,7 @@ class CardCatalogService {
       CardSubcategory.magic => ['scryfall_id'],
       CardSubcategory.yugioh => ['ygoprodeck_id'],
       CardSubcategory.lorcana => ['lorcast_id'],
+      CardSubcategory.riftbound => ['riftscribe_id'],
       CardSubcategory.onepiece => ['onepiece_card_id'],
       _ => ['catalog_id'],
     };

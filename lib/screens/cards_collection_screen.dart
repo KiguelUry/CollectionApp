@@ -6,6 +6,7 @@ import '../models/pokemon_card_lang.dart';
 import '../models/collection_category.dart';
 import '../services/lorcast_service.dart';
 import '../services/onepiece_tcg_service.dart';
+import '../services/riftscribe_service.dart';
 import '../services/scryfall_service.dart';
 import '../services/ygoprodeck_service.dart';
 import '../widgets/category_hub_header.dart';
@@ -121,6 +122,7 @@ class _CardsCollectionScreenState extends State<CardsCollectionScreen> {
       CardSubcategory.yugioh => YgoprodeckService.fetchBlocks,
       CardSubcategory.onepiece => OnepieceTcgService.fetchBlocks,
       CardSubcategory.lorcana => LorcastService.fetchBlocks,
+      CardSubcategory.riftbound => RiftscribeService.fetchBlocks,
       _ => null,
     };
     if (loadBlocks == null) {

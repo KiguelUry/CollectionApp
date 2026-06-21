@@ -50,6 +50,14 @@ int tcgRarityRank(String? rarity, CardSubcategory sub) {
     if (r == 'c' || r.startsWith('c ')) return 10;
   }
 
+  if (sub == CardSubcategory.riftbound) {
+    if (r.contains('showcase')) return 88;
+    if (r.contains('epic')) return 78;
+    if (r == 'rare' || r.startsWith('rare ')) return 45;
+    if (r.contains('uncommon')) return 30;
+    if (r.contains('common')) return 10;
+  }
+
   return 500;
 }
 

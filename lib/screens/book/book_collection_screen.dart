@@ -3,10 +3,12 @@ import 'package:flutter/material.dart';
 import '../../constants/book_accent.dart';
 import '../../models/book_series.dart';
 import '../../models/book_subcategory.dart';
+import '../../models/book_volume.dart';
 import '../../models/collection_item.dart';
 import '../../models/collection_list_filters.dart';
 import '../../services/book_series_service.dart';
 import '../../services/group_service.dart';
+import '../../utils/book_series_focus.dart';
 import '../../widgets/app_app_bar.dart';
 import '../../widgets/book_series_tile.dart';
 import '../../widgets/collection_filter_bar.dart' show GroupFilterOption;
@@ -67,7 +69,14 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
           volumes: volumes,
           items: items,
         );
-        entries.add(_SeriesEntry(series: series, stats: stats, items: items));
+        entries.add(
+          _SeriesEntry(
+            series: series,
+            volumes: volumes,
+            stats: stats,
+            items: items,
+          ),
+        );
       }
       entries.sort(
         (a, b) => a.series.name.toLowerCase().compareTo(
@@ -90,18 +99,14 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
     }
   }
 
-  bool _seriesMatchesFocus(List<CollectionItem> items) {
-    if (_focusFilters.focusGroupId != null &&
-        _focusFilters.focusGroupId!.isNotEmpty) {
-      return items.any((i) => i.groupId == _focusFilters.focusGroupId);
-    }
-    if (_focusFilters.ownershipView == CollectionOwnershipView.personal) {
-      return items.isEmpty || items.any((i) => !i.isGroupOwned);
-    }
-    if (_focusFilters.ownershipView == CollectionOwnershipView.groups) {
-      return items.any((i) => i.isGroupOwned);
-    }
-    return true;
+  BookSeriesStats _displayStats(_SeriesEntry entry) {
+    if (!BookSeriesFocus.scopeIsActive(_focusFilters)) return entry.stats;
+    final scoped = BookSeriesFocus.filterItems(entry.items, _focusFilters);
+    return _service.computeStats(
+      series: entry.series,
+      volumes: entry.volumes,
+      items: scoped,
+    );
   }
 
   List<_SeriesEntry> get _visible {
@@ -110,7 +115,9 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
       if (_filterSub != null && e.series.subcategory != _filterSub) {
         return false;
       }
-      if (!_seriesMatchesFocus(e.items)) return false;
+      if (!BookSeriesFocus.seriesMatchesFocus(e.items, _focusFilters)) {
+        return false;
+      }
       if (q.isEmpty) return true;
       return e.series.name.toLowerCase().contains(q);
     }).toList();
@@ -156,6 +163,8 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
   @override
   Widget build(BuildContext context) {
     final visible = _visible;
+    final focusActive = BookSeriesFocus.scopeIsActive(_focusFilters);
+
     return Scaffold(
       appBar: AppAppBar(
         title: 'Ma collection',
@@ -203,6 +212,19 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
                 ),
               ),
             ),
+            if (focusActive)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Text(
+                    'Compteurs filtrés selon le focus sélectionné.',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                ),
+              ),
             SliverToBoxAdapter(
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
@@ -244,7 +266,9 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
                     child: Text(
                       _entries.isEmpty
                           ? 'Aucune série pour l\'instant.\nRecherche un livre pour en créer une.'
-                          : 'Aucune série ne correspond.',
+                          : focusActive
+                              ? 'Aucune série ne correspond à ce focus.'
+                              : 'Aucune série ne correspond.',
                       textAlign: TextAlign.center,
                       style: TextStyle(color: Colors.grey.shade600),
                     ),
@@ -266,7 +290,7 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
                       final entry = visible[index];
                       return BookSeriesTile(
                         series: entry.series,
-                        stats: entry.stats,
+                        stats: _displayStats(entry),
                         accent: BookAccent.primary,
                         onDelete: () => _confirmDeleteSeries(entry.series),
                         onTap: () async {
@@ -295,11 +319,13 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
 
 class _SeriesEntry {
   final BookSeries series;
+  final List<BookVolume> volumes;
   final BookSeriesStats stats;
   final List<CollectionItem> items;
 
   const _SeriesEntry({
     required this.series,
+    required this.volumes,
     required this.stats,
     required this.items,
   });

@@ -31,8 +31,7 @@ enum CardSubcategory {
         CardSubcategory.yugioh => 'Par ère & extension (YGOProDeck)',
         CardSubcategory.onepiece => 'Par type de booster (OPTCG)',
         CardSubcategory.lorcana => 'Par chapitre (Lorcast)',
-        CardSubcategory.riftbound =>
-          'Saisie manuelle — pas de catalogue public fiable',
+        CardSubcategory.riftbound => 'Par extension (RiftScribe)',
         CardSubcategory.topps => 'Saisie manuelle — pas de catalogue',
         CardSubcategory.panini => 'Albums & stickers',
         CardSubcategory.other => 'Saisie manuelle',
@@ -79,7 +78,8 @@ enum CardSubcategory {
         CardSubcategory.magic ||
         CardSubcategory.yugioh ||
         CardSubcategory.onepiece ||
-        CardSubcategory.lorcana =>
+        CardSubcategory.lorcana ||
+        CardSubcategory.riftbound =>
           true,
         _ => false,
       };
@@ -89,7 +89,8 @@ enum CardSubcategory {
         CardSubcategory.magic ||
         CardSubcategory.yugioh ||
         CardSubcategory.onepiece ||
-        CardSubcategory.lorcana =>
+        CardSubcategory.lorcana ||
+        CardSubcategory.riftbound =>
           true,
         _ => false,
       };

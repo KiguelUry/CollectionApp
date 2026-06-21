@@ -16,6 +16,7 @@ class UserCardCollectionService {
         CardSubcategory.magic => ['scryfall_id'],
         CardSubcategory.yugioh => ['ygoprodeck_id'],
         CardSubcategory.lorcana => ['lorcast_id'],
+        CardSubcategory.riftbound => ['riftscribe_id'],
         CardSubcategory.onepiece => ['onepiece_card_id'],
         _ => ['catalog_id'],
       };

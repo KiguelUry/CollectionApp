@@ -5,6 +5,7 @@ import '../../models/tcg_set_info.dart';
 import '../../services/lorcast_service.dart';
 import '../../services/onepiece_tcg_service.dart';
 import '../../services/pokemon_tcg_service.dart';
+import '../../services/riftscribe_service.dart';
 import '../../services/scryfall_service.dart';
 import '../../services/ygoprodeck_service.dart';
 import '../../services/user_card_collection_service.dart';
@@ -213,6 +214,11 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
         OnepieceTcgService.fetchCardsInSet(widget.set.id),
       CardSubcategory.lorcana =>
         LorcastService.fetchCardsInSet(
+          widget.set.id,
+          setInfo: widget.set,
+        ),
+      CardSubcategory.riftbound =>
+        RiftscribeService.fetchCardsInSet(
           widget.set.id,
           setInfo: widget.set,
         ),

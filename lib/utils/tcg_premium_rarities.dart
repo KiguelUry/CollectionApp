@@ -34,6 +34,13 @@ List<String> premiumRarityTiers(CardSubcategory sub) {
         'Uncommon',
         'Common',
       ],
+    CardSubcategory.riftbound => const [
+        'Showcase',
+        'Epic',
+        'Rare',
+        'Uncommon',
+        'Common',
+      ],
     CardSubcategory.onepiece => const [
         'Secret Rare',
         'Super Rare',

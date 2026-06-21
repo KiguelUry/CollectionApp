@@ -9,6 +9,7 @@ const _directWebImageHosts = {
   'images.ygoprodeck.com',
   'assets.tcgdex.net',
   'cards.lorcast.io',
+  'cdn.riftscribe.gg',
   'www.optcgapi.com',
 };
 

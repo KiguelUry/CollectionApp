@@ -5,6 +5,7 @@ import '../../models/tcg_set_info.dart';
 import '../../services/lorcast_service.dart';
 import '../../services/onepiece_tcg_service.dart';
 import '../../services/pokemon_tcg_service.dart';
+import '../../services/riftscribe_service.dart';
 import '../../services/scryfall_service.dart';
 import '../../services/ygoprodeck_service.dart';
 import '../../utils/collection_grid_layout.dart';
@@ -55,6 +56,8 @@ class _TcgRarityGalleryScreenState extends State<TcgRarityGalleryScreen> {
       CardSubcategory.yugioh => YgoprodeckService.fetchCardsInSet(set.name),
       CardSubcategory.onepiece => OnepieceTcgService.fetchCardsInSet(set.id),
       CardSubcategory.lorcana => LorcastService.fetchCardsInSet(set.id),
+      CardSubcategory.riftbound =>
+        RiftscribeService.fetchCardsInSet(set.id, setInfo: set),
       _ => [],
     };
   }
