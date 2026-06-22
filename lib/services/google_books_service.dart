@@ -94,8 +94,12 @@ class GoogleBooksService {
     final year = published.length >= 4 ? published.substring(0, 4) : published;
 
     final links = info['imageLinks'] as Map<String, dynamic>?;
-    final imageUrl = (links?['thumbnail'] ?? links?['smallThumbnail'])?.toString() ?? '';
-    final imageHttps = imageUrl.replaceFirst('http://', 'https://');
+    final rawImage =
+        (links?['extraLarge'] ?? links?['large'] ?? links?['medium'] ??
+                links?['thumbnail'] ?? links?['smallThumbnail'])
+            ?.toString() ??
+            '';
+    final imageHttps = _hdGoogleCover(rawImage);
 
     String? isbn = isbnFallback;
     final ids = info['industryIdentifiers'] as List<dynamic>? ?? [];
@@ -173,5 +177,17 @@ class GoogleBooksService {
       }
     }
     return null;
+  }
+
+  static String _hdGoogleCover(String url) {
+    if (url.isEmpty) return '';
+    var out = url.replaceFirst('http://', 'https://');
+    out = out.replaceAll('&edge=curl', '');
+    if (out.contains('zoom=')) {
+      out = out.replaceAll(RegExp(r'zoom=\d'), 'zoom=0');
+    } else if (out.contains('books.google.com')) {
+      out = '$out&zoom=0';
+    }
+    return out;
   }
 }

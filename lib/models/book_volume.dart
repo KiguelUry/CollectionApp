@@ -36,8 +36,30 @@ class BookVolume {
 
   bool get isHorsSerie => metadata['is_hors_serie'] == true;
 
-  String? get volumeTitle =>
-      metadata['volume_title']?.toString() ?? label?.replaceFirst(RegExp(r'^Tome\s+'), '');
+  String? get volumeTitle {
+    final fromMeta = metadata['volume_title']?.toString().trim();
+    if (fromMeta != null && fromMeta.isNotEmpty && !_isGenericLabel(fromMeta)) {
+      return fromMeta;
+    }
+    final lbl = label?.trim();
+    if (lbl != null && lbl.isNotEmpty && !_isGenericLabel(lbl)) {
+      return lbl;
+    }
+    return null;
+  }
+
+  static bool _isGenericLabel(String value) {
+    final s = value.trim();
+    if (s.isEmpty) return true;
+    if (RegExp(r'^\d+$').hasMatch(s)) return true;
+    if (RegExp(r'^tome\s+\d+([.,]\d+)?$', caseSensitive: false).hasMatch(s)) {
+      return true;
+    }
+    if (RegExp(r'^t\.\s*\d+([.,]\d+)?$', caseSensitive: false).hasMatch(s)) {
+      return true;
+    }
+    return false;
+  }
 
   String? get description {
     final d = metadata['description']?.toString();
@@ -53,17 +75,17 @@ class BookVolume {
     return volumeNumber.toString();
   }
 
-  /// Libellé grille : « T.18 - Le Nom du Tome » ou titre hors-série.
+  /// Libellé grille : « T.X - Le Nom du Tome » ou « Tome X ».
   String get displayTitle {
     if (isHorsSerie) {
       final t = volumeTitle;
       return t != null && t.isNotEmpty ? t : 'Hors-série';
     }
     final title = volumeTitle;
-    if (title != null && title.isNotEmpty && !title.toLowerCase().startsWith('tome')) {
+    if (title != null && title.isNotEmpty) {
       return 'T.$displayNumber - $title';
     }
-    return 'T. $displayNumber';
+    return 'Tome $displayNumber';
   }
 
   BookVolume copyWithMetadata(Map<String, dynamic> patch) {

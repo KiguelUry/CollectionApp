@@ -9,7 +9,7 @@ import '../../widgets/app_app_bar.dart';
 import '../../widgets/catalog/catalog_item_tile.dart';
 import '../../widgets/ui/empty_state.dart';
 
-/// Grille visuelle de recherche livres (catalogue OL + Google Books).
+/// Grille visuelle de recherche livres (Google Books + iTunes).
 class BookCatalogGridScreen extends StatefulWidget {
   final BookSubcategory initialSub;
   final String? initialQuery;
@@ -198,9 +198,9 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
           child: Text(
-            'Open Library + Google Books · tri par popularité',
+            'Google Books + iTunes · couvertures HD',
             style: TextStyle(
               fontSize: 11,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -220,69 +220,65 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
         backgroundColor: _accent,
         foregroundColor: Colors.white,
       ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Flexible(
-            child: SingleChildScrollView(
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              child: _buildFilters(),
+      body: CustomScrollView(
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        slivers: [
+          SliverToBoxAdapter(child: _buildFilters()),
+          if (!_searched)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: EmptyState(
+                icon: Icons.auto_stories_outlined,
+                title: 'Catalogue visuel',
+                message: 'Ex. « Kagurabachi », « Dune », auteur « Herbert »…',
+                iconColor: _sub.color,
+              ),
+            )
+          else if (_loading && _hits.isEmpty)
+            const SliverFillRemaining(
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_hits.isEmpty)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: EmptyState(
+                icon: Icons.menu_book_outlined,
+                title: 'Aucun résultat',
+                message: 'Affine titre, auteur ou éditeur.',
+                iconColor: _sub.color,
+              ),
+            )
+          else
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 24),
+              sliver: SliverGrid(
+                gridDelegate: CollectionGridLayout.gridDelegate(
+                  context,
+                  mobileColumns: 3,
+                  childAspectRatio: 0.62,
+                  spacing: 12,
+                ),
+                delegate: SliverChildBuilderDelegate(
+                  (context, i) {
+                    final hit = _hits[i];
+                    return CatalogItemTile(
+                      name: hit.displayTitle,
+                      imageUrl: hit.imageUrl,
+                      accent: _accent,
+                      aspectRatio: 2 / 3,
+                      placeholderIcon: Icons.menu_book_rounded,
+                      highQualityImage: true,
+                      minimalStyle: true,
+                      onTap: () => _select(hit),
+                      onQuickAdd: () => _select(hit),
+                    );
+                  },
+                  childCount: _hits.length,
+                ),
+              ),
             ),
-          ),
-          Expanded(child: _buildBody()),
         ],
       ),
-    );
-  }
-
-  Widget _buildBody() {
-    if (!_searched) {
-      return EmptyState(
-        icon: Icons.auto_stories_outlined,
-        title: 'Catalogue visuel',
-        message: 'Ex. « Dune », auteur « Herbert », éditeur « Gallimard »…',
-        iconColor: _sub.color,
-      );
-    }
-    if (_loading && _hits.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (_hits.isEmpty) {
-      return EmptyState(
-        icon: Icons.menu_book_outlined,
-        title: 'Aucun résultat',
-        message: 'Affine titre, auteur ou éditeur.',
-        iconColor: _sub.color,
-      );
-    }
-    return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
-      gridDelegate: CollectionGridLayout.gridDelegate(
-        context,
-        mobileColumns: 3,
-        childAspectRatio: 0.52,
-        spacing: 10,
-      ),
-      itemCount: _hits.length,
-      itemBuilder: (context, i) {
-        final hit = _hits[i];
-        final subtitle = [
-          if (hit.author != null && hit.author!.isNotEmpty) hit.author,
-          if (hit.publisher != null && hit.publisher!.isNotEmpty) hit.publisher,
-          if ((hit.raw['year'] ?? '').isNotEmpty) hit.raw['year'],
-        ].whereType<String>().join(' · ');
-        return CatalogItemTile(
-          name: hit.displayTitle,
-          imageUrl: hit.imageUrl,
-          subtitle: subtitle,
-          accent: _accent,
-          aspectRatio: 2 / 3,
-          placeholderIcon: Icons.menu_book_rounded,
-          highQualityImage: true,
-          onTap: () => _select(hit),
-          onQuickAdd: () => _select(hit),
-        );
-      },
     );
   }
 }

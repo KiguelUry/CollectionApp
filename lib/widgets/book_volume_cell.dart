@@ -40,9 +40,9 @@ class BookVolumeCell extends StatelessWidget {
 
     return Material(
       color: _owned ? accent.withValues(alpha: 0.08) : Colors.grey.shade100,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(14),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         onTap: onCenterTap,
         onLongPress: onLongPress,
         child: Stack(
@@ -55,7 +55,7 @@ class BookVolumeCell extends StatelessWidget {
                   AspectRatio(
                     aspectRatio: coverAspectRatio,
                     child: ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(14),
                       child: cover != null && cover.isNotEmpty
                           ? CollectionCoverImage(
                               key: ValueKey('${slot.volume.id}-$cover-$coverEpoch'),

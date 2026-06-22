@@ -7,6 +7,7 @@ import '../models/book_subcategory.dart';
 import '../widgets/category_hub_header.dart';
 import '../widgets/category_type_hub.dart';
 import 'book/book_collection_screen.dart';
+import 'book/user_lists_hub_screen.dart';
 import 'book_subcategory_series_screen.dart';
 import 'book_wishlist_tab.dart';
 
@@ -88,6 +89,15 @@ class _BooksCollectionScreenState extends State<BooksCollectionScreen> {
     );
   }
 
+  void _openLists() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (ctx) => const UserListsHubScreen(),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -122,7 +132,7 @@ class _BooksCollectionScreenState extends State<BooksCollectionScreen> {
               showTitleInHero: false,
               heroWatermark: Icons.menu_book_rounded,
               subtitle:
-                  'Manga, BD, romans — une carte par série, checklist de tomes.',
+                  'Manga, BD, romans — couvertures épurées, listes perso.',
               featuredItem: CategoryTypeHubItem(
                 label: 'Ma collection',
                 description:
@@ -149,8 +159,15 @@ class _BooksCollectionScreenState extends State<BooksCollectionScreen> {
                     },
                   ),
                 CategoryTypeHubItem(
+                  label: 'Mes listes',
+                  description: 'Listes thématiques · style Letterboxd',
+                  icon: Icons.playlist_play_rounded,
+                  color: const Color(0xFF1B7F79),
+                  onTap: _openLists,
+                ),
+                CategoryTypeHubItem(
                   label: 'Recherche catalogue',
-                  description: 'Open Library + Google Books',
+                  description: 'Google Books + iTunes · couvertures HD',
                   icon: Icons.travel_explore,
                   color: BookAccent.light,
                   onTap: () => _openSearch(),

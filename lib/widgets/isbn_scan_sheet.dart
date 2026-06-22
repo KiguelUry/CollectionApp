@@ -133,7 +133,7 @@ class _IsbnScanSheetState extends State<_IsbnScanSheet> {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text(
-                          'Code introuvable (Open Library + Google Books)',
+                          'Code introuvable (Google Books + iTunes)',
                         ),
                       ),
                     );

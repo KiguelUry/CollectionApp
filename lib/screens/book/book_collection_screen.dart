@@ -420,6 +420,35 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
     );
   }
 
+  Future<void> _confirmDeleteBook(CollectionItem item) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Retirer ce livre ?'),
+        content: Text('« ${item.title} » sera supprimé de ta collection.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuler'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await _service.removeVolumeItem(item.id);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('« ${item.title} » retiré')),
+      );
+      _load();
+    }
+  }
+
   Widget _buildAllBooksSliver(bool focusActive) {
     final books = _visibleBooks;
     if (books.isEmpty) {
@@ -447,8 +476,8 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
         gridDelegate: CollectionGridLayout.gridDelegate(
           context,
           mobileColumns: 3,
-          childAspectRatio: 0.58,
-          spacing: 10,
+          childAspectRatio: 0.68,
+          spacing: 12,
         ),
         delegate: SliverChildBuilderDelegate(
           (context, index) {
@@ -456,7 +485,10 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
             return CollectionItemTile(
               item: item,
               category: CollectionCategory.book,
+              coverFirst: true,
+              showGroupBadge: false,
               onTap: () => _openBook(item),
+              onDelete: () => _confirmDeleteBook(item),
             );
           },
           childCount: books.length,

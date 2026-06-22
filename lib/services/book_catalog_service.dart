@@ -3,32 +3,43 @@ import 'package:flutter/foundation.dart';
 import '../models/book_subcategory.dart';
 import 'book_intelligence_service.dart';
 import 'google_books_service.dart';
+import 'itunes_books_service.dart';
 import 'open_library_service.dart';
 
-/// Catalogue livres unifié : Open Library puis Google Books en secours.
+/// Catalogue livres : Google Books + iTunes en priorité, Open Library en secours.
 class BookCatalogService {
   static const _defaultLang = 'fr';
 
-  /// Scan ISBN / saisie manuelle — chaîne OL → Google Books.
+  /// Scan ISBN — Google Books → iTunes → Open Library.
   static Future<Map<String, String>?> lookupByIsbn(String isbn) async {
     Map<String, String>? result;
 
     try {
-      result = await OpenLibraryService.lookupByIsbn(isbn);
+      result = await GoogleBooksService.lookupByIsbn(isbn);
     } catch (e) {
-      if (kDebugMode) debugPrint('OL ISBN: $e');
-      result = null;
+      if (kDebugMode) debugPrint('Google Books ISBN: $e');
     }
 
     if (result == null || (result['title'] ?? '').isEmpty) {
-      final google = await GoogleBooksService.lookupByIsbn(isbn);
-      if (google != null) {
-        result = _merge(result, google);
+      try {
+        result = await ItunesBooksService.lookupByIsbn(isbn);
+      } catch (e) {
+        if (kDebugMode) debugPrint('iTunes ISBN: $e');
+      }
+    }
+
+    if (result == null || (result['title'] ?? '').isEmpty) {
+      try {
+        result = await OpenLibraryService.lookupByIsbn(isbn);
+      } catch (e) {
+        if (kDebugMode) debugPrint('OL ISBN: $e');
       }
     } else {
-      // Enrichir série / couverture si Google a plus d'infos
-      final google = await GoogleBooksService.lookupByIsbn(isbn);
-      if (google != null) result = _merge(result, google);
+      // Enrichir couverture HD si iTunes ou OL complète
+      final itunes = await ItunesBooksService.lookupByIsbn(isbn);
+      if (itunes != null) result = _merge(result, itunes);
+      final ol = await OpenLibraryService.lookupByIsbn(isbn);
+      if (ol != null) result = _merge(result, ol);
     }
 
     return result;
@@ -68,48 +79,58 @@ class BookCatalogService {
     required bool frenchOnly,
   }) async {
     final enhanced = _searchQueryForSubcategory(query, subcategory, frenchOnly);
+
     List<Map<String, String>> google = [];
     try {
       google = await GoogleBooksService.search(
         enhanced,
-        maxResults: 20,
+        maxResults: 25,
         langRestrict: frenchOnly ? _defaultLang : null,
       );
     } catch (e) {
       if (kDebugMode) debugPrint('Google Books search: $e');
     }
 
-    List<Map<String, String>> ol = [];
+    List<Map<String, String>> itunes = [];
     try {
-      ol = await OpenLibraryService.searchBooks(
-        query,
-        subcategory: subcategory,
-        frenchOnly: frenchOnly,
-      );
+      itunes = await ItunesBooksService.search(enhanced);
     } catch (e) {
-      if (kDebugMode) debugPrint('Open Library search: $e');
+      if (kDebugMode) debugPrint('iTunes books search: $e');
     }
 
-    final primary = switch (subcategory) {
-      BookSubcategory.manga || BookSubcategory.comic => google,
-      _ => ol.length >= 5 ? ol : google,
-    };
-    final secondary = switch (subcategory) {
-      BookSubcategory.manga || BookSubcategory.comic => ol,
-      _ => ol.length >= 5 ? google : ol,
-    };
+    List<Map<String, String>> ol = [];
+    if (google.isEmpty && itunes.isEmpty) {
+      try {
+        ol = await OpenLibraryService.searchBooks(
+          query,
+          subcategory: subcategory,
+          frenchOnly: frenchOnly,
+        );
+      } catch (e) {
+        if (kDebugMode) debugPrint('Open Library search: $e');
+      }
+    }
 
     final seen = <String>{};
     final merged = <Map<String, String>>[];
-    for (final list in [primary, secondary]) {
+    for (final list in [google, itunes, ol]) {
       for (final b in list) {
         final title = b['title']?.trim();
         if (title == null || title.isEmpty) continue;
         if (frenchOnly && !_preferFrenchEdition(b)) continue;
         final key = title.toLowerCase();
-        if (seen.add(key)) merged.add(b);
+        if (!seen.contains(key)) {
+          seen.add(key);
+          merged.add(b);
+        } else {
+          final idx = merged.indexWhere(
+            (m) => (m['title'] ?? '').toLowerCase() == key,
+          );
+          if (idx >= 0) merged[idx] = _merge(merged[idx], b);
+        }
       }
     }
+
     return BookIntelligenceService.enrichAndRank(
       merged,
       subcategory: subcategory,
@@ -137,7 +158,6 @@ class BookCatalogService {
     };
   }
 
-  /// Priorise les éditions françaises (évite Harry Potter en polonais, etc.).
   static bool _preferFrenchEdition(Map<String, String> hit) {
     final lang = (hit['language'] ?? hit['lang'] ?? '').toLowerCase();
     if (lang.isEmpty) return true;
@@ -157,14 +177,23 @@ class BookCatalogService {
         out[e.key] = e.value;
       }
     }
-    if ((out['image_url'] ?? '').isEmpty && (extra['image_url'] ?? '').isNotEmpty) {
-      out['image_url'] = extra['image_url']!;
+    final baseImg = out['image_url'] ?? '';
+    final extraImg = extra['image_url'] ?? '';
+    if (extraImg.isNotEmpty &&
+        (_imageScore(extraImg) > _imageScore(baseImg))) {
+      out['image_url'] = extraImg;
     }
     out['source'] = extra['source'] ?? out['source'] ?? 'merged';
     return out;
   }
 
-  /// Métadonnées Supabase à partir d'un résultat catalogue.
+  static int _imageScore(String url) {
+    if (url.isEmpty) return 0;
+    if (url.contains('600x600') || url.contains('zoom=0')) return 3;
+    if (url.contains('itunes') || url.contains('google')) return 2;
+    return 1;
+  }
+
   static Map<String, dynamic> metadataFromLookup(Map<String, String> book) {
     return {
       if ((book['author'] ?? '').isNotEmpty) 'author': book['author']!,
@@ -175,6 +204,7 @@ class BookCatalogService {
         'author_photo_url': book['author_photo_url']!,
       if ((book['google_books_id'] ?? '').isNotEmpty)
         'google_books_id': book['google_books_id']!,
+      if ((book['itunes_id'] ?? '').isNotEmpty) 'itunes_id': book['itunes_id']!,
       if ((book['series_title'] ?? '').isNotEmpty)
         'series_title': book['series_title']!,
       if ((book['series_volume'] ?? '').isNotEmpty)
@@ -184,7 +214,7 @@ class BookCatalogService {
     };
   }
 
-  /// Enrichit les résultats avec photo auteur (Open Library).
+  /// Enrichit les résultats avec photo auteur (Open Library, secours).
   static Future<List<Map<String, String>>> enrichAuthorPhotos(
     List<Map<String, String>> books,
   ) async {

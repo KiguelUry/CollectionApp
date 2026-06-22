@@ -19,6 +19,7 @@ class CollectionItemTile extends StatelessWidget {
   final VoidCallback? onLongPress;
   final VoidCallback? onDelete;
   final FriendOverlapKind? overlapKind;
+  final bool coverFirst;
 
   const CollectionItemTile({
     super.key,
@@ -31,6 +32,7 @@ class CollectionItemTile extends StatelessWidget {
     this.onLongPress,
     this.onDelete,
     this.overlapKind,
+    this.coverFirst = false,
   });
 
   bool get _isGrayed => item.isSold;
@@ -52,17 +54,19 @@ class CollectionItemTile extends StatelessWidget {
             children: [
               Container(
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(coverFirst ? 16 : 12),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.08),
-                        blurRadius: 6,
-                        offset: const Offset(0, 3),
+                        color: Colors.black.withValues(
+                          alpha: coverFirst ? 0.14 : 0.08,
+                        ),
+                        blurRadius: coverFirst ? 12 : 6,
+                        offset: Offset(0, coverFirst ? 5 : 3),
                       ),
                     ],
                   ),
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(coverFirst ? 16 : 12),
                     child: _buildImage(),
                   ),
                 ),
@@ -138,20 +142,21 @@ class CollectionItemTile extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(height: 6),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              item.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 11,
-                color: _isGrayed ? Colors.grey : null,
+        if (!coverFirst) const SizedBox(height: 6),
+        if (!coverFirst)
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                item.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 11,
+                  color: _isGrayed ? Colors.grey : null,
+                ),
               ),
-            ),
               if (_subtitleLine != null)
                 Text(
                   _subtitleLine!,
@@ -172,8 +177,23 @@ class CollectionItemTile extends StatelessWidget {
                     fontSize: 9,
                   ),
                 ),
-          ],
-        ),
+            ],
+          )
+        else
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              item.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 10,
+                color: _isGrayed ? Colors.grey : null,
+              ),
+            ),
+          ),
       ],
     );
 
