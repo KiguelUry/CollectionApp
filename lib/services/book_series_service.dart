@@ -155,6 +155,96 @@ class BookSeriesService {
         .toList();
   }
 
+  Future<BookSeries> findOrCreateStandaloneSeries({
+    required String bookTitle,
+    required BookSubcategory subcategory,
+    String? coverUrl,
+  }) async {
+    final name = bookTitle.trim();
+    if (name.isEmpty) throw ArgumentError('Titre requis');
+
+    final existing = await findSeriesByName(name, subcategory);
+    if (existing != null) {
+      await ensureVolumeSlots(existing.id, 1);
+      if (coverUrl != null &&
+          coverUrl.isNotEmpty &&
+          (existing.coverUrl == null || existing.coverUrl!.isEmpty)) {
+        await updateSeries(existing.copyWith(coverUrl: coverUrl));
+      }
+      if (!existing.isStandalone) {
+        final meta = Map<String, dynamic>.from(existing.metadata);
+        meta['is_standalone'] = true;
+        await updateSeries(existing.copyWith(metadata: meta));
+      }
+      return (await fetchSeriesById(existing.id)) ?? existing;
+    }
+
+    final series = await createSeries(
+      name: name,
+      subcategory: subcategory,
+      expectedVolumeCount: 1,
+      coverUrl: coverUrl,
+    );
+    await updateSeries(
+      series.copyWith(
+        metadata: {...series.metadata, 'is_standalone': true},
+      ),
+    );
+    return (await fetchSeriesById(series.id)) ?? series;
+  }
+
+  Future<({String seriesId, String volumeId})> resolveStandaloneBook({
+    required String bookTitle,
+    required BookSubcategory subcategory,
+    String? coverUrl,
+  }) async {
+    final series = await findOrCreateStandaloneSeries(
+      bookTitle: bookTitle,
+      subcategory: subcategory,
+      coverUrl: coverUrl,
+    );
+    final vol = await getOrCreateVolume(series.id, 1);
+    if (coverUrl != null && coverUrl.isNotEmpty) {
+      await setVolumeCoverUrl(vol.id, coverUrl);
+    }
+    return (seriesId: series.id, volumeId: vol.id);
+  }
+
+  /// Rattache les livres orphelins à une série à volume unique.
+  Future<int> ensureStandaloneSeriesForUnassigned() async {
+    var migrated = 0;
+    for (final sub in BookSubcategory.values) {
+      final unassigned = await fetchUnassignedBooks(sub);
+      for (final item in unassigned) {
+        final resolved = await resolveStandaloneBook(
+          bookTitle: item.title,
+          subcategory: sub,
+          coverUrl: item.imageUrl,
+        );
+        await linkItemToVolume(
+          itemId: item.id,
+          seriesId: resolved.seriesId,
+          volumeId: resolved.volumeId,
+        );
+        migrated++;
+      }
+    }
+    return migrated;
+  }
+
+  Future<List<CollectionItem>> fetchAllBooks() async {
+    final rows = await _client
+        .from('collection_items')
+        .select()
+        .eq('category', 'book');
+
+    return List<Map<String, dynamic>>.from(rows)
+        .map(CollectionItem.fromJson)
+        .where((i) =>
+            i.addedBy == _userId || i.locationUserId == _userId)
+        .toList();
+  }
+
   Future<List<CollectionItem>> fetchUnassignedBooks(
     BookSubcategory subcategory,
   ) async {

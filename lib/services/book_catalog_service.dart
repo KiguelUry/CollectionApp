@@ -40,73 +40,100 @@ class BookCatalogService {
     BookSearchFilters filters = const BookSearchFilters(),
   }) async {
     try {
-      final enhanced = _searchQueryForSubcategory(query, subcategory);
-      List<Map<String, String>> google = [];
-      try {
-        google = await GoogleBooksService.search(
-          enhanced,
-          maxResults: 20,
-          langRestrict: _defaultLang,
-        );
-      } catch (e) {
-        if (kDebugMode) debugPrint('Google Books search: $e');
-      }
-
-      List<Map<String, String>> ol = [];
-      try {
-        ol = await OpenLibraryService.searchBooks(
+      var merged = await _searchMerged(
+        query,
+        subcategory: subcategory,
+        filters: filters,
+        frenchOnly: true,
+      );
+      if (merged.isEmpty) {
+        merged = await _searchMerged(
           query,
           subcategory: subcategory,
+          filters: filters,
+          frenchOnly: false,
         );
-      } catch (e) {
-        if (kDebugMode) debugPrint('Open Library search: $e');
       }
-
-      // Manga / BD : Google Books en premier (meilleur pour « One Piece », etc.)
-      final primary = switch (subcategory) {
-        BookSubcategory.manga || BookSubcategory.comic => google,
-        _ => ol.length >= 5 ? ol : google,
-      };
-      final secondary = switch (subcategory) {
-        BookSubcategory.manga || BookSubcategory.comic => ol,
-        _ => ol.length >= 5 ? google : ol,
-      };
-
-      final seen = <String>{};
-      final merged = <Map<String, String>>[];
-      for (final list in [primary, secondary]) {
-        for (final b in list) {
-          final title = b['title']?.trim();
-          if (title == null || title.isEmpty) continue;
-          if (!_preferFrenchEdition(b)) continue;
-          final key = title.toLowerCase();
-          if (seen.add(key)) merged.add(b);
-        }
-      }
-      return BookIntelligenceService.enrichAndRank(
-        merged,
-        subcategory: subcategory,
-        filters: filters.titleQuery.isEmpty &&
-                filters.authorQuery.isEmpty &&
-                filters.publisherQuery.isEmpty
-            ? BookSearchFilters(titleQuery: query)
-            : filters,
-      )
-          .map((e) => e.raw)
-          .toList();
+      return merged;
     } catch (e) {
       if (kDebugMode) debugPrint('BookCatalogService.searchBooks: $e');
       return [];
     }
   }
 
-  static String _searchQueryForSubcategory(String query, BookSubcategory sub) {
+  static Future<List<Map<String, String>>> _searchMerged(
+    String query, {
+    required BookSubcategory subcategory,
+    required BookSearchFilters filters,
+    required bool frenchOnly,
+  }) async {
+    final enhanced = _searchQueryForSubcategory(query, subcategory, frenchOnly);
+    List<Map<String, String>> google = [];
+    try {
+      google = await GoogleBooksService.search(
+        enhanced,
+        maxResults: 20,
+        langRestrict: frenchOnly ? _defaultLang : null,
+      );
+    } catch (e) {
+      if (kDebugMode) debugPrint('Google Books search: $e');
+    }
+
+    List<Map<String, String>> ol = [];
+    try {
+      ol = await OpenLibraryService.searchBooks(
+        query,
+        subcategory: subcategory,
+        frenchOnly: frenchOnly,
+      );
+    } catch (e) {
+      if (kDebugMode) debugPrint('Open Library search: $e');
+    }
+
+    final primary = switch (subcategory) {
+      BookSubcategory.manga || BookSubcategory.comic => google,
+      _ => ol.length >= 5 ? ol : google,
+    };
+    final secondary = switch (subcategory) {
+      BookSubcategory.manga || BookSubcategory.comic => ol,
+      _ => ol.length >= 5 ? google : ol,
+    };
+
+    final seen = <String>{};
+    final merged = <Map<String, String>>[];
+    for (final list in [primary, secondary]) {
+      for (final b in list) {
+        final title = b['title']?.trim();
+        if (title == null || title.isEmpty) continue;
+        if (frenchOnly && !_preferFrenchEdition(b)) continue;
+        final key = title.toLowerCase();
+        if (seen.add(key)) merged.add(b);
+      }
+    }
+    return BookIntelligenceService.enrichAndRank(
+      merged,
+      subcategory: subcategory,
+      filters: filters.titleQuery.isEmpty &&
+              filters.authorQuery.isEmpty &&
+              filters.publisherQuery.isEmpty
+          ? BookSearchFilters(titleQuery: query)
+          : filters,
+    )
+        .map((e) => e.raw)
+        .toList();
+  }
+
+  static String _searchQueryForSubcategory(
+    String query,
+    BookSubcategory sub,
+    bool frenchOnly,
+  ) {
     final q = query.trim();
     return switch (sub) {
       BookSubcategory.manga => '$q manga',
       BookSubcategory.comic => '$q bande dessinée',
-      BookSubcategory.novel => '$q lang:fr',
-      _ => '$q lang:fr',
+      BookSubcategory.novel => frenchOnly ? '$q lang:fr' : q,
+      _ => frenchOnly ? '$q lang:fr' : q,
     };
   }
 

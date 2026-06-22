@@ -43,4 +43,10 @@ abstract final class BookSeriesFocus {
 
     return filterItems(items, filters).isNotEmpty;
   }
+
+  static bool itemMatchesFocus(
+    CollectionItem item,
+    CollectionListFilters filters,
+  ) =>
+      filterItems([item], filters).isNotEmpty;
 }

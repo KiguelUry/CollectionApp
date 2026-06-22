@@ -7,11 +7,13 @@ import 'collection_cover_image.dart';
 class AuthorAvatar extends StatefulWidget {
   final String authorName;
   final double radius;
+  final String? photoUrl;
 
   const AuthorAvatar({
     super.key,
     required this.authorName,
     this.radius = 24,
+    this.photoUrl,
   });
 
   @override
@@ -25,20 +27,35 @@ class _AuthorAvatarState extends State<AuthorAvatar> {
   @override
   void initState() {
     super.initState();
-    _load();
+    if (widget.photoUrl != null && widget.photoUrl!.isNotEmpty) {
+      _photoUrl = widget.photoUrl;
+      _loading = false;
+    } else {
+      _load();
+    }
   }
 
   @override
   void didUpdateWidget(covariant AuthorAvatar oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.authorName != widget.authorName) {
-      _photoUrl = null;
-      _loading = true;
-      _load();
+    if (oldWidget.authorName != widget.authorName ||
+        oldWidget.photoUrl != widget.photoUrl) {
+      _photoUrl = widget.photoUrl;
+      _loading = widget.photoUrl == null || widget.photoUrl!.isEmpty;
+      if (_loading) _load();
     }
   }
 
   Future<void> _load() async {
+    if (widget.photoUrl != null && widget.photoUrl!.isNotEmpty) {
+      if (mounted) {
+        setState(() {
+          _photoUrl = widget.photoUrl;
+          _loading = false;
+        });
+      }
+      return;
+    }
     final url = await OpenLibraryService.lookupAuthorPhotoUrl(widget.authorName);
     if (mounted) {
       setState(() {

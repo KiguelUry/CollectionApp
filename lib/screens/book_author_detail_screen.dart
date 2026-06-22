@@ -30,7 +30,7 @@ class BookAuthorDetailScreen extends StatelessWidget {
               padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
-                  AuthorAvatar(authorName: group.author, radius: 36),
+                  AuthorAvatar(authorName: group.author, photoUrl: group.photoUrl, radius: 36),
                   const SizedBox(width: 16),
                   Expanded(
                     child: Column(

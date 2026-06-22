@@ -443,6 +443,15 @@ class BookItemAddCoordinator {
           );
         }
       }
+    } else if (context.mounted) {
+      final resolved = await _seriesService.resolveStandaloneBook(
+        bookTitle: title,
+        subcategory: subcategory,
+        coverUrl: imageUrl,
+      );
+      seriesId = resolved.seriesId;
+      volumeId = resolved.volumeId;
+      finalTitle = title;
     }
 
     if (!context.mounted) return;

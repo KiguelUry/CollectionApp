@@ -17,6 +17,7 @@ class OpenLibraryService {
   static Future<List<Map<String, String>>> searchBooks(
     String query, {
     required BookSubcategory subcategory,
+    bool frenchOnly = true,
   }) async {
     final trimmed = query.trim();
     if (trimmed.length < 2) return [];
@@ -25,10 +26,10 @@ class OpenLibraryService {
       final params = {
         ...subcategory.openLibraryQueryParams(trimmed),
         'limit': '40',
-        'language': 'fre',
         'fields':
             'key,title,author_name,first_publish_year,cover_i,ratings_average,ratings_count,subject,language',
       };
+      if (frenchOnly) params['language'] = 'fre';
       final url = Uri.https('openlibrary.org', '/search.json', params);
       final response = await http.get(url);
 

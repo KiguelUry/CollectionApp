@@ -3,10 +3,12 @@ import 'collection_item.dart';
 class BookAuthorGroup {
   final String author;
   final List<CollectionItem> items;
+  final String? photoUrl;
 
   const BookAuthorGroup({
     required this.author,
     required this.items,
+    this.photoUrl,
   });
 
   int get ownedCount =>
@@ -26,10 +28,21 @@ List<BookAuthorGroup> groupBooksByAuthor(List<CollectionItem> items) {
   }
   final groups = map.entries
       .map(
-        (e) => BookAuthorGroup(
-          author: e.key,
-          items: e.value,
-        ),
+        (e) {
+          String? photo;
+          for (final item in e.value) {
+            final url = item.metadata?['author_photo_url']?.toString();
+            if (url != null && url.isNotEmpty) {
+              photo = url;
+              break;
+            }
+          }
+          return BookAuthorGroup(
+            author: e.key,
+            items: e.value,
+            photoUrl: photo,
+          );
+        },
       )
       .toList();
   groups.sort((a, b) => a.author.compareTo(b.author));

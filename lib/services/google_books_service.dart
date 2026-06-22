@@ -43,18 +43,21 @@ class GoogleBooksService {
   static Future<List<Map<String, String>>> search(
     String query, {
     int maxResults = 20,
-    String langRestrict = 'fr',
+    String? langRestrict = 'fr',
   }) async {
     final q = query.trim();
     if (q.length < 2) return [];
 
     try {
-      final url = _volumesUri({
+      final params = <String, String>{
         'q': q,
         'maxResults': '$maxResults',
-        'langRestrict': langRestrict,
         'orderBy': 'relevance',
-      });
+      };
+      if (langRestrict != null && langRestrict.isNotEmpty) {
+        params['langRestrict'] = langRestrict;
+      }
+      final url = _volumesUri(params);
       final response = await http.get(url);
       if (response.statusCode != 200) return [];
 

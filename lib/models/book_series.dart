@@ -36,6 +36,8 @@ class BookSeries {
 
   bool get isSubArc => parentSeriesId != null;
 
+  bool get isStandalone => metadata['is_standalone'] == true;
+
   NovelRatingMatrix get novelMatrix =>
       NovelRatingMatrix.fromMetadata(metadata);
 

@@ -107,9 +107,114 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
     Navigator.pop(context, (hit.raw, _sub));
   }
 
+  Widget _buildFilters() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: SizedBox(
+            height: 40,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                for (final s in BookSubcategory.values)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: FilterChip(
+                      label: Text(s.label, style: const TextStyle(fontSize: 12)),
+                      selected: _sub == s,
+                      selectedColor: BookAccent.surface,
+                      onSelected: (_) {
+                        setState(() => _sub = s);
+                        if (_searched) _search();
+                      },
+                      avatar: Icon(s.icon, size: 16, color: s.color),
+                      showCheckmark: false,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _titleController,
+                  textInputAction: TextInputAction.search,
+                  onSubmitted: (_) => _search(),
+                  decoration: const InputDecoration(
+                    hintText: 'Titre',
+                    isDense: true,
+                    prefixIcon: Icon(Icons.menu_book_outlined, size: 20),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton.filled(
+                onPressed: _loading ? null : _search,
+                icon: _loading
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.search),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _authorController,
+                  decoration: const InputDecoration(
+                    hintText: 'Auteur',
+                    isDense: true,
+                    prefixIcon: Icon(Icons.person_outline, size: 20),
+                  ),
+                  onSubmitted: (_) => _search(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: _publisherController,
+                  decoration: const InputDecoration(
+                    hintText: 'Éditeur',
+                    isDense: true,
+                    prefixIcon: Icon(Icons.business_outlined, size: 20),
+                  ),
+                  onSubmitted: (_) => _search(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+          child: Text(
+            'Open Library + Google Books · tri par popularité',
+            style: TextStyle(
+              fontSize: 11,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       appBar: AppAppBar(
         title: 'Recherche livres',
         backgroundColor: _accent,
@@ -118,100 +223,10 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: SizedBox(
-              height: 40,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                children: [
-                  for (final s in BookSubcategory.values)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: FilterChip(
-                        label: Text(s.label, style: const TextStyle(fontSize: 12)),
-                        selected: _sub == s,
-                        selectedColor: BookAccent.surface,
-                        onSelected: (_) {
-                          setState(() => _sub = s);
-                          if (_searched) _search();
-                        },
-                        avatar: Icon(s.icon, size: 16, color: s.color),
-                        showCheckmark: false,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _titleController,
-                    textInputAction: TextInputAction.search,
-                    onSubmitted: (_) => _search(),
-                    decoration: const InputDecoration(
-                      hintText: 'Titre',
-                      isDense: true,
-                      prefixIcon: Icon(Icons.menu_book_outlined, size: 20),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton.filled(
-                  onPressed: _loading ? null : _search,
-                  icon: _loading
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.search),
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _authorController,
-                    decoration: const InputDecoration(
-                      hintText: 'Auteur',
-                      isDense: true,
-                      prefixIcon: Icon(Icons.person_outline, size: 20),
-                    ),
-                    onSubmitted: (_) => _search(),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: _publisherController,
-                    decoration: const InputDecoration(
-                      hintText: 'Éditeur',
-                      isDense: true,
-                      prefixIcon: Icon(Icons.business_outlined, size: 20),
-                    ),
-                    onSubmitted: (_) => _search(),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
-            child: Text(
-              'Open Library + Google Books · tri par popularité',
-              style: TextStyle(
-                fontSize: 11,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
+          Flexible(
+            child: SingleChildScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              child: _buildFilters(),
             ),
           ),
           Expanded(child: _buildBody()),
