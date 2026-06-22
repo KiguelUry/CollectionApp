@@ -38,7 +38,7 @@ enum BookSubcategory {
       };
 
   Color get color => switch (this) {
-        BookSubcategory.manga => const Color(0xFFD35400),
+        BookSubcategory.manga => const Color(0xFF00A896),
         BookSubcategory.comic => const Color(0xFFE67E22),
         BookSubcategory.novel => const Color(0xFFBA4A00),
         BookSubcategory.other => Colors.blueGrey,
@@ -67,8 +67,9 @@ enum BookSubcategory {
       BookSubcategory.novel => {
           'q': '$q -subject:comics -subject:manga',
           'subject': 'fiction',
+          'language': 'fre',
         },
-      BookSubcategory.other => {'q': q},
+      BookSubcategory.other => {'q': q, 'language': 'fre'},
     };
   }
 

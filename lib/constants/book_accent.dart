@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-/// Terracotta / ambre chaleureux — accent global Livres.
+/// Turquoise / teal moderne — accent global Livres.
 abstract final class BookAccent {
-  static const Color primary = Color(0xFFD35400);
-  static const Color light = Color(0xFFE67E22);
-  static const Color surface = Color(0xFFFDEBD0);
+  static const Color primary = Color(0xFF00A896);
+  static const Color light = Color(0xFF02C39A);
+  static const Color surface = Color(0xFFE0F7F4);
 }

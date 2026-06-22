@@ -119,7 +119,7 @@ abstract final class BookIntelligenceService {
     final merged = <Map<String, String>>[];
     final seen = <String>{};
     for (final list in [
-      await GoogleBooksService.search(query, maxResults: 12),
+      await GoogleBooksService.search(query, maxResults: 12, langRestrict: 'fr'),
       await OpenLibraryService.searchBooks(query, subcategory: subcategory),
     ]) {
       for (final hit in list) {

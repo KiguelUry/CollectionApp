@@ -49,7 +49,7 @@ Future<List<CollectionItem>> _loadUserBoardgames() async {
 }
 
 bool _looksLikeExpansion(CollectionItem item) =>
-    item.isExpansion || item.metadata?['bgg_is_expansion'] == true;
+    BoardgameExpansionService.itemActsAsExpansion(item);
 
 String? _itemBggId(CollectionItem item) {
   final id = item.metadata?['bgg_id']?.toString();

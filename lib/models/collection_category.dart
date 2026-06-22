@@ -63,7 +63,7 @@ enum CollectionCategory {
 
   Color get color => switch (this) {
         CollectionCategory.boardgame => Colors.orange,
-        CollectionCategory.book => const Color(0xFFD35400),
+        CollectionCategory.book => const Color(0xFF00A896),
         CollectionCategory.card => const Color(0xFFE65100),
         CollectionCategory.car => Colors.blue,
         CollectionCategory.stamp => Colors.brown,

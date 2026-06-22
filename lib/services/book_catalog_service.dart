@@ -7,6 +7,8 @@ import 'open_library_service.dart';
 
 /// Catalogue livres unifié : Open Library puis Google Books en secours.
 class BookCatalogService {
+  static const _defaultLang = 'fr';
+
   /// Scan ISBN / saisie manuelle — chaîne OL → Google Books.
   static Future<Map<String, String>?> lookupByIsbn(String isbn) async {
     Map<String, String>? result;
@@ -41,7 +43,11 @@ class BookCatalogService {
       final enhanced = _searchQueryForSubcategory(query, subcategory);
       List<Map<String, String>> google = [];
       try {
-        google = await GoogleBooksService.search(enhanced, maxResults: 20);
+        google = await GoogleBooksService.search(
+          enhanced,
+          maxResults: 20,
+          langRestrict: _defaultLang,
+        );
       } catch (e) {
         if (kDebugMode) debugPrint('Google Books search: $e');
       }
@@ -72,6 +78,7 @@ class BookCatalogService {
         for (final b in list) {
           final title = b['title']?.trim();
           if (title == null || title.isEmpty) continue;
+          if (!_preferFrenchEdition(b)) continue;
           final key = title.toLowerCase();
           if (seen.add(key)) merged.add(b);
         }
@@ -98,8 +105,18 @@ class BookCatalogService {
     return switch (sub) {
       BookSubcategory.manga => '$q manga',
       BookSubcategory.comic => '$q bande dessinée',
-      _ => q,
+      BookSubcategory.novel => '$q lang:fr',
+      _ => '$q lang:fr',
     };
+  }
+
+  /// Priorise les éditions françaises (évite Harry Potter en polonais, etc.).
+  static bool _preferFrenchEdition(Map<String, String> hit) {
+    final lang = (hit['language'] ?? hit['lang'] ?? '').toLowerCase();
+    if (lang.isEmpty) return true;
+    if (lang.contains('fr') || lang == 'fre' || lang == 'french') return true;
+    if (lang.contains('en') || lang == 'eng') return false;
+    return true;
   }
 
   static Map<String, String> _merge(

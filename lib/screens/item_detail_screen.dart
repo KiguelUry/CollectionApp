@@ -22,6 +22,7 @@ import '../widgets/star_rating_bar.dart';
 import '../widgets/assign_book_series_sheet.dart';
 import '../widgets/item_tags_editor.dart';
 import '../widgets/boardgame_expansions_section.dart';
+import '../services/boardgame_expansion_service.dart';
 import '../utils/boardgame_display.dart';
 import '../utils/boardgame_collection_visibility.dart';
 import '../utils/boardgame_expansion_flow.dart';
@@ -445,9 +446,9 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                               url: _item.imageUrl!,
                               height: 280,
                               bookCover: isBook,
-                              boxedCover: isBook || isCard,
+                              boxedCover: isBook || isBoardgame || isCard,
                               largeSource: true,
-                              fit: isCard ? BoxFit.contain : BoxFit.cover,
+                              fit: BoxFit.contain,
                             ),
                           )
                         : Container(color: _item.category.color),
@@ -633,7 +634,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       isBoardgame: isBoardgame,
                       metadataRows: metadataRows,
                     ),
-                    if (isBoardgame && !_item.isExpansion)
+                    if (isBoardgame && BoardgameExpansionService.itemActsAsBase(_item))
                       BoardgameExpansionsSection(
                         item: _item,
                         readOnly: ro,

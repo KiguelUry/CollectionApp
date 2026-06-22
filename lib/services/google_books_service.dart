@@ -43,12 +43,18 @@ class GoogleBooksService {
   static Future<List<Map<String, String>>> search(
     String query, {
     int maxResults = 20,
+    String langRestrict = 'fr',
   }) async {
     final q = query.trim();
     if (q.length < 2) return [];
 
     try {
-      final url = _volumesUri({'q': q, 'maxResults': '$maxResults'});
+      final url = _volumesUri({
+        'q': q,
+        'maxResults': '$maxResults',
+        'langRestrict': langRestrict,
+        'orderBy': 'relevance',
+      });
       final response = await http.get(url);
       if (response.statusCode != 200) return [];
 
@@ -119,6 +125,13 @@ class GoogleBooksService {
     final publisher = info['publisher'] as String?;
     if (publisher != null && publisher.isNotEmpty) {
       result['publisher'] = publisher;
+    }
+
+    final langs = (info['language'] as List<dynamic>?)
+        ?.map((e) => e.toString())
+        .join(',');
+    if (langs != null && langs.isNotEmpty) {
+      result['language'] = langs;
     }
 
     final seriesInfo = info['seriesInfo'] as Map<String, dynamic>?;

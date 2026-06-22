@@ -32,11 +32,49 @@ class BookVolume {
 
   bool get isRead => metadata['is_read'] == true;
 
+  bool get isManualPlaceholder => metadata['is_manual_placeholder'] == true;
+
+  bool get isHorsSerie => metadata['is_hors_serie'] == true;
+
+  String? get volumeTitle =>
+      metadata['volume_title']?.toString() ?? label?.replaceFirst(RegExp(r'^Tome\s+'), '');
+
+  String? get description {
+    final d = metadata['description']?.toString();
+    if (d == null || d.trim().isEmpty) return null;
+    return d.trim();
+  }
+
   String get displayNumber {
+    if (isHorsSerie) return 'HS';
     if (volumeNumber == volumeNumber.roundToDouble()) {
       return volumeNumber.toInt().toString();
     }
     return volumeNumber.toString();
+  }
+
+  /// Libellé grille : « T.18 - Le Nom du Tome » ou titre hors-série.
+  String get displayTitle {
+    if (isHorsSerie) {
+      final t = volumeTitle;
+      return t != null && t.isNotEmpty ? t : 'Hors-série';
+    }
+    final title = volumeTitle;
+    if (title != null && title.isNotEmpty && !title.toLowerCase().startsWith('tome')) {
+      return 'T.$displayNumber - $title';
+    }
+    return 'T. $displayNumber';
+  }
+
+  BookVolume copyWithMetadata(Map<String, dynamic> patch) {
+    return BookVolume(
+      id: id,
+      seriesId: seriesId,
+      volumeNumber: volumeNumber,
+      label: label,
+      sortIndex: sortIndex,
+      metadata: {...metadata, ...patch},
+    );
   }
 
   factory BookVolume.fromJson(Map<String, dynamic> json) {

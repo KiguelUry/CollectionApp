@@ -70,19 +70,60 @@ class BoardgameExpansionService {
     return fallback;
   }
 
+  /// Extension liée à un parent (enfant) — jamais parent d'autres extensions.
+  static bool itemActsAsExpansion(CollectionItem item) {
+    if (item.parentGameId != null && item.parentGameId!.isNotEmpty) return true;
+    if (item.isExpansion) return true;
+    if (item.metadata?['bgg_is_expansion'] == true) return true;
+    final bggId = item.metadata?['bgg_id']?.toString();
+    final baseBggId = item.metadata?['base_game_bgg_id']?.toString() ??
+        item.metadata?['expansion_of_bgg_id']?.toString();
+    if (baseBggId != null &&
+        baseBggId.isNotEmpty &&
+        baseBggId != bggId) {
+      return true;
+    }
+    return false;
+  }
+
+  /// Jeu de base — parent possible, jamais enfant d'une extension.
+  static bool itemActsAsBase(CollectionItem item) =>
+      !itemActsAsExpansion(item);
+
+  /// Résout le couple parent/enfant (base = parent, expansion = enfant).
+  static ({CollectionItem base, CollectionItem expansion}) resolveLinkPair(
+    CollectionItem a,
+    CollectionItem b,
+  ) {
+    final aExp = itemActsAsExpansion(a);
+    final bExp = itemActsAsExpansion(b);
+    if (aExp && !bExp) return (base: b, expansion: a);
+    if (bExp && !aExp) return (base: a, expansion: b);
+
+    final aBgg = a.metadata?['bgg_id']?.toString();
+    final bBgg = b.metadata?['bgg_id']?.toString();
+    final aBaseRef = a.metadata?['base_game_bgg_id']?.toString();
+    final bBaseRef = b.metadata?['base_game_bgg_id']?.toString();
+    if (aBaseRef != null && aBaseRef == bBgg) return (base: b, expansion: a);
+    if (bBaseRef != null && bBaseRef == aBgg) return (base: a, expansion: b);
+
+    if (a.parentGameId == b.id) return (base: b, expansion: a);
+    if (b.parentGameId == a.id) return (base: a, expansion: b);
+
+    return (base: a, expansion: b);
+  }
+
   /// Lie une ligne extension existante au jeu de base (réconciliation).
   Future<void> linkExistingItemToBase({
     required CollectionItem base,
     required CollectionItem expansion,
   }) async {
-    var resolvedBase = base;
-    var resolvedExpansion = expansion;
-    if (resolvedBase.isExpansion && !resolvedExpansion.isExpansion) {
-      resolvedBase = expansion;
-      resolvedExpansion = base;
-    }
+    final pair = resolveLinkPair(base, expansion);
+    final resolvedBase = pair.base;
+    final resolvedExpansion = pair.expansion;
+
     if (resolvedBase.id == resolvedExpansion.id) return;
-    if (resolvedBase.isExpansion) return;
+    if (itemActsAsExpansion(resolvedBase)) return;
 
     await _client.from('collection_items').update({
       'is_expansion': false,
@@ -172,7 +213,7 @@ class BoardgameExpansionService {
     final userId = _userId;
     if (userId == null) throw StateError('Non connecté');
 
-    if (base.isExpansion) {
+    if (base.isExpansion || itemActsAsExpansion(base)) {
       throw StateError('Le parent ne peut pas être une extension');
     }
 

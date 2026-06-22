@@ -6,9 +6,12 @@ import '../models/book_series.dart';
 import '../models/book_volume.dart';
 import '../services/book_series_service.dart';
 import '../widgets/app_app_bar.dart';
+import '../widgets/book_manual_volume_dialog.dart';
+import '../widgets/book_volume_add_cell.dart';
 import '../widgets/book_volume_cell.dart';
-import '../widgets/book_volume_status_sheet.dart';
+import '../widgets/book_volume_detail_sheet.dart';
 import '../widgets/collection_cover_image.dart';
+import '../widgets/cover_preview_sheet.dart';
 
 /// Détail série : grille de tomes avec états Possédé × Lu.
 class BookSeriesDetailScreen extends StatefulWidget {
@@ -24,6 +27,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   final _service = BookSeriesService();
   bool _loading = true;
   bool _volumesAscending = true;
+  int _coverEpoch = 0;
   BookSeries? _series;
   BookSeriesStats? _stats;
   List<BookVolumeSlot> _slots = [];
@@ -34,11 +38,13 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     _load();
   }
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
+  Future<void> _load({bool silent = false}) async {
+    if (!silent) setState(() => _loading = true);
     try {
       final series = await _service.fetchSeriesById(widget.seriesId);
       if (series == null) throw Exception('Série introuvable');
+
+      final fusionMsg = await _service.fuseManualPlaceholders(series: series);
 
       final volumes = await _service.fetchVolumes(series.id);
       final items = await _service.fetchSeriesItems(series.id);
@@ -53,19 +59,27 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         items: items,
       );
 
-      if (mounted) {
-        setState(() {
-          _series = series;
-          _stats = stats;
-          _slots = slots;
-          _loading = false;
-        });
-        _service.enrichMissingVolumeCovers(
-          series: series,
-          volumes: volumes,
-        ).then((_) {
-          if (mounted) _load();
-        });
+      if (!mounted) return;
+      setState(() {
+        _series = series;
+        _stats = stats;
+        _slots = slots;
+        _loading = false;
+        _coverEpoch++;
+      });
+
+      if (fusionMsg != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(fusionMsg)),
+        );
+      }
+
+      final updated = await _service.enrichMissingVolumeCovers(
+        series: series,
+        volumes: volumes,
+      );
+      if (updated > 0 && mounted) {
+        await _load(silent: true);
       }
     } catch (e) {
       if (mounted) {
@@ -79,24 +93,87 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
 
   List<BookVolumeSlot> get _displaySlots {
     final copy = List<BookVolumeSlot>.from(_slots);
-    copy.sort(
-      (a, b) => _volumesAscending
-          ? a.volume.volumeNumber.compareTo(b.volume.volumeNumber)
-          : b.volume.volumeNumber.compareTo(a.volume.volumeNumber),
-    );
+    copy.sort((a, b) {
+      final sa = a.volume.sortIndex;
+      final sb = b.volume.sortIndex;
+      if (_volumesAscending) {
+        return sa.compareTo(sb);
+      }
+      return sb.compareTo(sa);
+    });
     return copy;
   }
 
   Future<void> _openVolumeSheet(BookVolumeSlot slot) async {
     final series = _series!;
-    await showBookVolumeStatusSheet(
+    await showBookVolumeDetailSheet(
       context,
       series: series,
       slot: slot,
       service: _service,
-      onChanged: _load,
+      onChanged: () => _load(silent: true),
     );
-    await _load();
+    await _load(silent: true);
+  }
+
+  Future<void> _toggleOwned(BookVolumeSlot slot) async {
+    final series = _series!;
+    final owned = slot.item != null && !slot.item!.isWishlist;
+    final next = !owned;
+    await _service.toggleVolumeOwned(
+      series: series,
+      slot: slot,
+      owned: next,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          next
+              ? '${slot.volume.displayTitle} marqué comme Possédé !'
+              : '${slot.volume.displayTitle} retiré de ta collection.',
+        ),
+      ),
+    );
+    await _load(silent: true);
+  }
+
+  Future<void> _toggleRead(BookVolumeSlot slot) async {
+    final read = (slot.item?.isRead ?? false) || slot.volume.isRead;
+    final next = !read;
+    await _service.toggleVolumeRead(slot: slot, read: next);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          next
+              ? '${slot.volume.displayTitle} marqué comme Lu !'
+              : '${slot.volume.displayTitle} marqué comme non lu.',
+        ),
+      ),
+    );
+    await _load(silent: true);
+  }
+
+  Future<void> _previewCover(BookVolumeSlot slot) async {
+    final cover = slot.volume.coverUrl;
+    if (cover == null || cover.isEmpty) return;
+    await showCoverPreview(
+      context,
+      imageUrl: cover,
+      title: slot.volume.displayTitle,
+      bookCover: true,
+    );
+  }
+
+  Future<void> _addManualVolume() async {
+    final series = _series!;
+    final ok = await showBookManualVolumeDialog(
+      context,
+      series: series,
+      service: _service,
+    );
+    if (ok == true) await _load();
   }
 
   Future<void> _addVolumeFromSearch() async {
@@ -166,6 +243,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     final stats = _stats!;
     final accent = BookAccent.primary;
     final displaySlots = _displaySlots;
+    final gridCount = displaySlots.length + 1;
 
     return Scaffold(
       appBar: AppAppBar(
@@ -187,8 +265,8 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                   setState(() => _volumesAscending = !_volumesAscending),
             ),
           IconButton(
-            tooltip: 'Ajouter un tome',
-            icon: const Icon(Icons.add),
+            tooltip: 'Rechercher un tome',
+            icon: const Icon(Icons.search),
             onPressed: _addVolumeFromSearch,
           ),
           PopupMenuButton<String>(
@@ -223,6 +301,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                   children: [
                     if (series.coverUrl != null && series.coverUrl!.isNotEmpty)
                       CollectionCoverImage(
+                        key: ValueKey('series-${series.coverUrl}-$_coverEpoch'),
                         url: series.coverUrl!,
                         width: 72,
                         height: 104,
@@ -273,7 +352,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            'Touche un tome pour gérer Possédé et Lu.',
+                            'Icônes : bascule rapide · Carte : détail · Appui long : couverture HD.',
                             style: TextStyle(
                               fontSize: 12,
                               color: Colors.grey.shade600,
@@ -303,6 +382,12 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                         icon: const Icon(Icons.format_list_numbered),
                         label: const Text('Définir les tomes'),
                       ),
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: _addManualVolume,
+                        icon: const Icon(Icons.add),
+                        label: const Text('Ajouter manuellement'),
+                      ),
                     ],
                   ),
                 ),
@@ -315,18 +400,28 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                     maxCrossAxisExtent: 140,
                     mainAxisSpacing: 10,
                     crossAxisSpacing: 10,
-                    childAspectRatio: 0.58,
+                    childAspectRatio: 0.52,
                   ),
                   delegate: SliverChildBuilderDelegate(
                     (context, index) {
+                      if (index == displaySlots.length) {
+                        return BookVolumeAddCell(
+                          accent: accent,
+                          onTap: _addManualVolume,
+                        );
+                      }
                       final slot = displaySlots[index];
                       return BookVolumeCell(
                         slot: slot,
                         accent: accent,
-                        onTap: () => _openVolumeSheet(slot),
+                        coverEpoch: _coverEpoch,
+                        onCenterTap: () => _openVolumeSheet(slot),
+                        onLongPress: () => _previewCover(slot),
+                        onOwnedTap: () => _toggleOwned(slot),
+                        onReadTap: () => _toggleRead(slot),
                       );
                     },
-                    childCount: displaySlots.length,
+                    childCount: gridCount,
                   ),
                 ),
               ),

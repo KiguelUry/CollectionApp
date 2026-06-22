@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../constants/book_accent.dart';
 import '../../models/book_volume.dart';
+import '../../widgets/collection_cover_image.dart';
 
 /// Cellule visuelle d'un tome (Possédé × Lu).
 class BookVolumeCell extends StatelessWidget {
@@ -9,13 +10,21 @@ class BookVolumeCell extends StatelessWidget {
 
   final BookVolumeSlot slot;
   final Color accent;
-  final VoidCallback? onTap;
+  final int coverEpoch;
+  final VoidCallback? onCenterTap;
+  final VoidCallback? onLongPress;
+  final Future<void> Function()? onOwnedTap;
+  final Future<void> Function()? onReadTap;
 
   const BookVolumeCell({
     super.key,
     required this.slot,
     this.accent = BookAccent.primary,
-    this.onTap,
+    this.coverEpoch = 0,
+    this.onCenterTap,
+    this.onLongPress,
+    this.onOwnedTap,
+    this.onReadTap,
   });
 
   bool get _owned =>
@@ -26,15 +35,16 @@ class BookVolumeCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final n = slot.volume.displayNumber;
     final cover = slot.volume.coverUrl;
+    final title = slot.volume.displayTitle;
 
     return Material(
       color: _owned ? accent.withValues(alpha: 0.08) : Colors.grey.shade100,
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
+        onTap: onCenterTap,
+        onLongPress: onLongPress,
         child: Stack(
           children: [
             Padding(
@@ -47,23 +57,26 @@ class BookVolumeCell extends StatelessWidget {
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(8),
                       child: cover != null && cover.isNotEmpty
-                          ? Image.network(
-                              cover,
+                          ? CollectionCoverImage(
+                              key: ValueKey('${slot.volume.id}-$cover-$coverEpoch'),
+                              url: cover,
+                              bookCover: true,
+                              largeSource: true,
                               fit: BoxFit.cover,
-                              width: double.infinity,
-                              height: double.infinity,
-                              errorBuilder: (_, _, _) => _placeholder(n),
                             )
-                          : _placeholder(n),
+                          : _placeholder(slot.volume.displayNumber),
                     ),
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'T. $n',
+                    title,
                     textAlign: TextAlign.center,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
-                      fontSize: 12,
+                      fontSize: 11,
+                      height: 1.2,
                       color: _owned ? accent : Colors.grey.shade700,
                     ),
                   ),
@@ -71,23 +84,35 @@ class BookVolumeCell extends StatelessWidget {
               ),
             ),
             Positioned(
-              top: 4,
-              right: 4,
+              top: 2,
+              right: 2,
               child: _StatusBadge(
                 icon: Icons.home_rounded,
                 active: _owned,
                 activeColor: accent,
+                onTap: onOwnedTap,
               ),
             ),
             Positioned(
-              top: 4,
-              left: 4,
+              top: 2,
+              left: 2,
               child: _StatusBadge(
                 icon: Icons.visibility_rounded,
                 active: _read,
                 activeColor: Colors.amber.shade800,
+                onTap: onReadTap,
               ),
             ),
+            if (slot.volume.isManualPlaceholder)
+              Positioned(
+                bottom: 4,
+                right: 4,
+                child: Icon(
+                  Icons.schedule_rounded,
+                  size: 14,
+                  color: accent.withValues(alpha: 0.8),
+                ),
+              ),
           ],
         ),
       ),
@@ -114,11 +139,13 @@ class _StatusBadge extends StatelessWidget {
   final IconData icon;
   final bool active;
   final Color activeColor;
+  final Future<void> Function()? onTap;
 
   const _StatusBadge({
     required this.icon,
     required this.active,
     required this.activeColor,
+    this.onTap,
   });
 
   @override
@@ -126,9 +153,17 @@ class _StatusBadge extends StatelessWidget {
     return Material(
       color: active ? activeColor : Colors.black26,
       shape: const CircleBorder(),
-      child: Padding(
-        padding: const EdgeInsets.all(5),
-        child: Icon(icon, size: 14, color: Colors.white),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap == null
+            ? null
+            : () async {
+                await onTap!();
+              },
+        child: Padding(
+          padding: const EdgeInsets.all(5),
+          child: Icon(icon, size: 14, color: Colors.white),
+        ),
       ),
     );
   }

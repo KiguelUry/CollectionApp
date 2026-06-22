@@ -25,6 +25,7 @@ class OpenLibraryService {
       final params = {
         ...subcategory.openLibraryQueryParams(trimmed),
         'limit': '40',
+        'language': 'fre',
         'fields':
             'key,title,author_name,first_publish_year,cover_i,ratings_average,ratings_count,subject,language',
       };
@@ -62,6 +63,8 @@ class OpenLibraryService {
           'image_url': imageUrl,
           if (ratingAvg != null) 'rating_avg': ratingAvg.toStringAsFixed(1),
           'rating_count': ratingCount.toString(),
+          if (doc['language'] != null)
+            'language': (doc['language'] as List).map((e) => e.toString()).join(','),
         });
       }
 

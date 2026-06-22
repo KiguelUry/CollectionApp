@@ -307,6 +307,9 @@ class BookSeriesService {
     var lookups = 0;
     for (final vol in volumes) {
       if (lookups >= maxLookups) break;
+      if (vol.isHorsSerie && vol.coverUrl != null && vol.coverUrl!.isNotEmpty) {
+        continue;
+      }
       if (vol.coverUrl != null && vol.coverUrl!.isNotEmpty) continue;
       lookups++;
       final url = await BookIntelligenceService.lookupVolumeCover(
@@ -367,7 +370,10 @@ class BookSeriesService {
   }) async {
     await ProfileService().ensureCurrentUserProfile();
     final n = volume.volumeNumber.ceil();
-    final title = '${series.name} - Tome $n';
+    final customTitle = volume.volumeTitle;
+    final title = customTitle != null && customTitle.isNotEmpty
+        ? '${series.name} — $customTitle'
+        : '${series.name} - Tome $n';
     final read = markAsRead || volume.isRead;
     final row = await _client
         .from('collection_items')
@@ -672,5 +678,145 @@ class BookSeriesService {
     meta['total_value_new'] = totalNew;
     meta['total_value_used'] = totalUsed;
     await updateSeries(series.copyWith(metadata: meta));
+  }
+
+  Future<double> _nextHorsSerieNumber(String seriesId) async {
+    final volumes = await fetchVolumes(seriesId);
+    final hors = volumes
+        .where((v) => v.isHorsSerie)
+        .map((v) => v.volumeNumber)
+        .toList();
+    if (hors.isEmpty) return -1;
+    return hors.reduce((a, b) => a < b ? a : b) - 1;
+  }
+
+  Future<void> updateVolumeMetadata(
+    String volumeId,
+    Map<String, dynamic> patch,
+  ) async {
+    final row = await _client
+        .from('book_volumes')
+        .select('metadata, label')
+        .eq('id', volumeId)
+        .maybeSingle();
+    if (row == null) return;
+    final meta = Map<String, dynamic>.from(row['metadata'] as Map? ?? {});
+    meta.addAll(patch);
+    final updates = <String, dynamic>{'metadata': meta};
+    final title = patch['volume_title']?.toString();
+    if (title != null && title.isNotEmpty) {
+      updates['label'] = title;
+    }
+    await _client.from('book_volumes').update(updates).eq('id', volumeId);
+  }
+
+  /// Crée un tome manuel (hors-série ou placeholder futur).
+  Future<BookVolume> createManualVolume({
+    required BookSeries series,
+    String? volumeNumberText,
+    required String title,
+    String? description,
+    String? coverUrl,
+    bool owned = false,
+    bool read = false,
+  }) async {
+    final trimmedTitle = title.trim();
+    if (trimmedTitle.isEmpty) throw ArgumentError('Titre requis');
+
+    final isHorsSerie =
+        volumeNumberText == null || volumeNumberText.trim().isEmpty;
+    late final double volumeNumber;
+    late final double sortIndex;
+    late final String label;
+
+    if (isHorsSerie) {
+      volumeNumber = await _nextHorsSerieNumber(series.id);
+      sortIndex = 10000 + volumeNumber.abs();
+      label = trimmedTitle;
+    } else {
+      volumeNumber = double.parse(volumeNumberText.trim().replaceAll(',', '.'));
+      sortIndex = volumeNumber;
+      label = 'Tome ${volumeNumber.round()}';
+    }
+
+    final existing = await fetchVolumes(series.id);
+    if (!isHorsSerie) {
+      final dup = existing.where(
+        (v) =>
+            !v.isHorsSerie &&
+            (v.volumeNumber - volumeNumber).abs() < 0.01 &&
+            !v.isManualPlaceholder,
+      );
+      if (dup.isNotEmpty) {
+        throw StateError('Le tome ${volumeNumber.round()} existe déjà');
+      }
+    }
+
+    final meta = <String, dynamic>{
+      'volume_title': trimmedTitle,
+      if (description != null && description.trim().isNotEmpty)
+        'description': description.trim(),
+      if (isHorsSerie) 'is_hors_serie': true,
+      if (!isHorsSerie) 'is_manual_placeholder': true,
+      if (coverUrl != null && coverUrl.isNotEmpty) 'cover_url': coverUrl,
+      if (read) 'is_read': true,
+    };
+
+    final row = await _client
+        .from('book_volumes')
+        .insert({
+          'series_id': series.id,
+          'volume_number': volumeNumber,
+          'sort_index': sortIndex,
+          'label': label,
+          'metadata': meta,
+        })
+        .select()
+        .single();
+
+    final volume = BookVolume.fromJson(row);
+    if (!isHorsSerie && volumeNumber > (series.expectedVolumeCount ?? 0)) {
+      await updateSeries(
+        series.copyWith(expectedVolumeCount: volumeNumber.ceil()),
+      );
+    }
+    if (owned) {
+      await addVolumeQuick(
+        series: series,
+        volume: volume,
+        markAsRead: read,
+      );
+    }
+    return volume;
+  }
+
+  /// Fusionne les placeholders quand le catalogue officiel les reconnaît.
+  Future<String?> fuseManualPlaceholders({required BookSeries series}) async {
+    final volumes = await fetchVolumes(series.id);
+    final placeholders = volumes.where((v) => v.isManualPlaceholder).toList();
+    if (placeholders.isEmpty) return null;
+
+    for (final ph in placeholders) {
+      final cover = await BookIntelligenceService.lookupVolumeCover(
+        seriesName: series.name,
+        volumeNumber: ph.volumeNumber,
+        subcategory: series.subcategory,
+      );
+      if (cover == null || cover.isEmpty) continue;
+
+      final meta = Map<String, dynamic>.from(ph.metadata);
+      meta
+        ..remove('is_manual_placeholder')
+        ..['cover_url'] = cover;
+
+      await _client.from('book_volumes').update({
+        'metadata': meta,
+        if (ph.volumeTitle != null) 'label': ph.volumeTitle,
+      }).eq('id', ph.id);
+
+      return 'Hé, on dirait qu\'un nouveau tome officiel est sorti ! '
+          'Ton exemplaire (T.${ph.displayNumber}) a été fusionné.';
+    }
+    return null;
   }
 }
