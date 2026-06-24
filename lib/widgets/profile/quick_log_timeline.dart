@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../models/collection_category.dart';
-import '../services/quick_log_service.dart';
-import 'collection_cover_image.dart';
+import '../../models/collection_category.dart';
+import '../../services/quick_log_service.dart';
+import '../collection_cover_image.dart';
 
 String _formatLogDate(DateTime dt) {
   const months = [

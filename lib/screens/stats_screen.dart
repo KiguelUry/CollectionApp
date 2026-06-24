@@ -6,6 +6,7 @@ import '../services/collection_stats_service.dart';
 import '../widgets/app_app_bar.dart';
 import '../services/recommendation_service.dart';
 import '../widgets/recommendations_banner.dart';
+import '../widgets/share_collection_sheet.dart';
 
 /// Statistiques et export de la collection.
 class StatsScreen extends StatefulWidget {

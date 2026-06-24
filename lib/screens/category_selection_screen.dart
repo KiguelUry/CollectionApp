@@ -4,6 +4,7 @@ import '../models/collection_category.dart';
 import '../models/collection_summary.dart';
 import '../services/collection_stats_service.dart';
 import '../services/recommendation_service.dart';
+import '../widgets/collapsible_collection_overview.dart';
 import '../widgets/recommendations_banner.dart';
 import '../widgets/main_drawer.dart';
 import '../models/user_collection_type.dart';
