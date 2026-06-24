@@ -36,6 +36,7 @@ dependencies:
   flutter_animate: ^4.5.0
   flutter_dotenv: ^5.2.1
   image_picker: ^1.1.2
+  image: ^4.5.4
   sensors_plus: ^6.1.1
   share_plus: ^10.1.4
   path_provider: ^2.1.5
