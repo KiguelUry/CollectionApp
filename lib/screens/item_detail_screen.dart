@@ -22,6 +22,8 @@ import '../widgets/star_rating_bar.dart';
 import '../widgets/assign_book_series_sheet.dart';
 import '../widgets/item_tags_editor.dart';
 import '../widgets/boardgame_expansions_section.dart';
+import '../widgets/group_rules_panel.dart';
+import '../widgets/profile_avatar.dart';
 import '../services/boardgame_expansion_service.dart';
 import '../utils/boardgame_display.dart';
 import '../utils/boardgame_collection_visibility.dart';
@@ -103,6 +105,13 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
   Future<void> _loadGroups() async {
     _groups = await GroupService().fetchMyGroups();
     if (mounted) setState(() {});
+  }
+
+  Color _groupAccent() {
+    final gid = _item.groupId;
+    if (gid == null) return Theme.of(context).colorScheme.primary;
+    final group = _groups.where((g) => g.id == gid).firstOrNull;
+    return ProfileAvatar.colorFromHex(group?.accentColor);
   }
 
   Future<void> _reloadItem() async {
@@ -1090,15 +1099,23 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      TextField(
-                        controller: _personalRulesController,
-                        readOnly: ro,
-                        maxLines: 5,
-                        decoration: const InputDecoration(
-                          labelText: 'Règles personnalisées',
-                          border: OutlineInputBorder(),
+                      if (_item.groupId != null)
+                        GroupRulesPanel(
+                          groupId: _item.groupId!,
+                          itemId: _item.id,
+                          itemTitle: _item.title,
+                          accent: _groupAccent(),
+                        )
+                      else
+                        TextField(
+                          controller: _personalRulesController,
+                          readOnly: ro,
+                          maxLines: 5,
+                          decoration: const InputDecoration(
+                            labelText: 'Règles personnalisées',
+                            border: OutlineInputBorder(),
+                          ),
                         ),
-                      ),
                     ] else ...[
                       const Divider(height: 32),
                       _buildSectionTitle('Notes'),

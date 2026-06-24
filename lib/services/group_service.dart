@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/collection_group.dart';
+import 'profile_service.dart';
 
 class GroupService {
   final _client = Supabase.instance.client;
@@ -44,10 +45,15 @@ class GroupService {
 
   Future<CollectionGroup> createGroup(String name) async {
     final userId = _userId!;
+    await ProfileService().ensureCurrentUserProfile();
+
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) throw ArgumentError('Nom de groupe requis');
+
     final row = await _client
         .from('groups')
         .insert({
-          'name': name.trim(),
+          'name': trimmed,
           'created_by': userId,
           'icon_key': 'groups',
           'accent_color': '#673AB7',
@@ -55,10 +61,19 @@ class GroupService {
         .select()
         .single();
     final group = CollectionGroup.fromJson(Map<String, dynamic>.from(row));
-    await _client.from('group_members').insert({
-      'group_id': group.id,
-      'profile_id': userId,
-    });
+
+    try {
+      await _client.from('group_members').insert({
+        'group_id': group.id,
+        'profile_id': userId,
+      });
+    } catch (e) {
+      try {
+        await _client.from('groups').delete().eq('id', group.id);
+      } catch (_) {}
+      rethrow;
+    }
+
     return group;
   }
 

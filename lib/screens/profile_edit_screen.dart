@@ -3,8 +3,8 @@ import '../models/collection_item.dart';
 import '../models/user_profile.dart';
 import '../services/profile_service.dart';
 import '../services/showcase_service.dart';
+import '../widgets/profile/favorites_showcase.dart';
 import '../widgets/profile/trophy_picker_sheet.dart';
-import '../widgets/profile/trophy_tree.dart';
 import '../widgets/profile_avatar.dart';
 
 class ProfileEditScreen extends StatefulWidget {
@@ -243,6 +243,22 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         title: const Text('Mon profil'),
         backgroundColor: accent,
         foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            onPressed: _saving ? null : _save,
+            tooltip: 'Enregistrer',
+            icon: _saving
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.check_rounded),
+          ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -353,26 +369,12 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                     }).toList(),
                   ),
                   const SizedBox(height: 28),
-                  Text(
-                    'Mon arbre à trophées',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '6 coups de cœur sur les branches — visible par tes amis.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-                  ),
-                  const SizedBox(height: 12),
                   if (_savingTrophies)
                     const Padding(
                       padding: EdgeInsets.all(8),
                       child: LinearProgressIndicator(),
                     ),
-                  TrophyTree(
+                  FavoritesShowcase(
                     slots: _trophySlots,
                     accentColor: accent,
                     editable: true,
@@ -461,20 +463,6 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                     ),
                   ),
                   const SizedBox(height: 24),
-                  FilledButton.icon(
-                    onPressed: _saving ? null : _save,
-                    icon: _saving
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Icon(Icons.save),
-                    label: Text(_saving ? 'Enregistrement…' : 'Enregistrer'),
-                  ),
                 ],
               ),
             ),

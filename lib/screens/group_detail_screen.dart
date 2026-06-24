@@ -21,6 +21,7 @@ import '../widgets/group_badge.dart';
 import '../widgets/profile_avatar.dart';
 import '../widgets/group_members_sheet.dart';
 import '../widgets/group_stats_banner.dart';
+import '../widgets/group_wanted_board.dart';
 import 'group_edit_screen.dart';
 import 'item_detail_screen.dart';
 
@@ -57,7 +58,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
     _group = widget.group;
     _collectionFilters = CollectionListFilters();
     _wishlistFilters = CollectionListFilters();
-    _scopeTabController = TabController(length: 2, vsync: this);
+    _scopeTabController = TabController(length: 3, vsync: this);
     _stream = Supabase.instance.client
         .from('collection_items')
         .stream(primaryKey: ['id'])
@@ -104,7 +105,20 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
     final canEdit = _groupService.canEdit(_group);
 
     return Scaffold(
+      extendBodyBehindAppBar: false,
       appBar: AppBar(
+        flexibleSpace: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                accent,
+                accent.withValues(alpha: 0.78),
+              ],
+            ),
+          ),
+        ),
         title: Row(
           children: [
             GroupBadge.fromGroup(
@@ -114,11 +128,18 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
               iconKey: _group.iconKey,
               radius: 18,
             ),
-            const SizedBox(width: 12),
-            Expanded(child: Text(_group.name)),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                _group.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
           ],
         ),
-        backgroundColor: accent,
+        backgroundColor: Colors.transparent,
         foregroundColor: Colors.white,
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
@@ -163,6 +184,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
           tabs: const [
             Tab(text: 'Collection'),
             Tab(text: 'Wishlist'),
+            Tab(text: 'Mur'),
           ],
         ),
       ),
@@ -218,6 +240,10 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                           onFiltersChanged: (f) =>
                               setState(() => _wishlistFilters = f),
                           emptyHint: 'Rien en wishlist pour ce groupe.',
+                        ),
+                        GroupWantedBoard(
+                          groupId: _group.id,
+                          accent: accent,
                         ),
                       ],
                     ),

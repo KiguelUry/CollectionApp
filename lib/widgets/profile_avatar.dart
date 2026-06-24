@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'profile/retro_avatar.dart';
+
 /// Avatar utilisateur (photo ou initiale sur fond coloré).
 class ProfileAvatar extends StatelessWidget {
   final String? avatarUrl;
@@ -40,19 +42,19 @@ class ProfileAvatar extends StatelessWidget {
           child: Image.network(
             avatarUrl!,
             fit: BoxFit.cover,
-            errorBuilder: (_, _, _) => _initialCircle(accent, initial),
+            errorBuilder: (_, _, _) => RetroAvatar(
+              seed: fallbackInitial,
+              initial: initial,
+              accent: accent,
+              radius: radius,
+            ),
             loadingBuilder: (context, child, progress) {
               if (progress == null) return child;
-              return _initialCircle(
-                accent,
-                initial,
-                child: const Center(
-                  child: SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                ),
+              return RetroAvatar(
+                seed: fallbackInitial,
+                initial: initial,
+                accent: accent,
+                radius: radius,
               );
             },
           ),
@@ -60,22 +62,11 @@ class ProfileAvatar extends StatelessWidget {
       );
     }
 
-    return _initialCircle(accent, initial);
-  }
-
-  Widget _initialCircle(Color accent, String initial, {Widget? child}) {
-    return CircleAvatar(
+    return RetroAvatar(
+      seed: fallbackInitial,
+      initial: initial,
+      accent: accent,
       radius: radius,
-      backgroundColor: accent,
-      child: child ??
-          Text(
-            initial,
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: radius * 0.85,
-            ),
-          ),
     );
   }
 }

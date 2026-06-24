@@ -21,6 +21,7 @@ class MainDrawer extends StatefulWidget {
 class _MainDrawerState extends State<MainDrawer> {
   UserProfile? _profile;
   bool _loadingProfile = true;
+  int _itemCount = 0;
 
   @override
   void initState() {
@@ -30,10 +31,20 @@ class _MainDrawerState extends State<MainDrawer> {
 
   Future<void> _loadProfile() async {
     try {
+      final userId = Supabase.instance.client.auth.currentUser?.id;
       final p = await ProfileService().fetchCurrentProfile();
+      var count = 0;
+      if (userId != null) {
+        final rows = await Supabase.instance.client
+            .from('collection_items')
+            .select('id')
+            .or('added_by.eq.$userId,location_user_id.eq.$userId');
+        count = (rows as List).length;
+      }
       if (mounted) {
         setState(() {
           _profile = p;
+          _itemCount = count;
           _loadingProfile = false;
         });
       }
@@ -64,17 +75,15 @@ class _MainDrawerState extends State<MainDrawer> {
     required VoidCallback onTap,
   }) {
     return ListTile(
-      dense: true,
-      visualDensity: VisualDensity.compact,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
       leading: Icon(icon, size: 22),
-      title: Text(label),
+      title: Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
       onTap: onTap,
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final user = Supabase.instance.client.auth.currentUser;
     final accent = ProfileAvatar.colorFromHex(_profile?.accentColor);
     final username = _profile?.username ?? 'Ma collection';
 
@@ -86,50 +95,78 @@ class _MainDrawerState extends State<MainDrawer> {
               child: ListView(
                 padding: EdgeInsets.zero,
                 children: [
-                  UserAccountsDrawerHeader(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [accent, accent.withValues(alpha: 0.75)],
+                  Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: _openProfile,
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.fromLTRB(20, 28, 20, 24),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              accent,
+                              accent.withValues(alpha: 0.72),
+                            ],
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            _loadingProfile
+                                ? const CircleAvatar(
+                                    radius: 40,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : ProfileAvatar(
+                                    avatarUrl: _profile?.avatarUrl,
+                                    accentColorHex: _profile?.accentColor,
+                                    fallbackInitial: username,
+                                    radius: 40,
+                                  ),
+                            const SizedBox(height: 14),
+                            Text(
+                              username,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 20,
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              '🚀 $_itemCount objet${_itemCount > 1 ? 's' : ''} collectionné${_itemCount > 1 ? 's' : ''}',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.9),
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                    currentAccountPicture: _loadingProfile
-                        ? const CircleAvatar(
-                            child: SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                          )
-                        : ProfileAvatar(
-                            avatarUrl: _profile?.avatarUrl,
-                            accentColorHex: _profile?.accentColor,
-                            fallbackInitial: username,
-                            radius: 36,
-                          ),
-                    accountName: Text(
-                      username,
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    accountEmail: Text(
-                      user?.email ?? 'Non connecté',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    onDetailsPressed: _openProfile,
                   ),
+                  const SizedBox(height: 8),
                   _item(
-                    icon: Icons.grid_view_outlined,
+                    icon: Icons.grid_view_rounded,
                     label: 'Collections',
                     onTap: () =>
                         Navigator.pushReplacementNamed(context, '/categories'),
                   ),
                   _item(
-                    icon: Icons.bar_chart_outlined,
+                    icon: Icons.bar_chart_rounded,
                     label: 'Statistiques',
                     onTap: () => _closeAndPush(const StatsScreen()),
                   ),
                   _item(
-                    icon: Icons.ios_share,
+                    icon: Icons.ios_share_rounded,
                     label: 'Partager',
                     onTap: () {
                       Navigator.pop(context);
@@ -137,18 +174,18 @@ class _MainDrawerState extends State<MainDrawer> {
                     },
                   ),
                   _item(
-                    icon: Icons.handshake_outlined,
+                    icon: Icons.handshake_rounded,
                     label: 'Prêts',
                     onTap: () => _closeAndPush(const LoansScreen()),
                   ),
                   _item(
-                    icon: Icons.copy_all_outlined,
+                    icon: Icons.copy_all_rounded,
                     label: 'Doubles & ventes',
                     onTap: () => _closeAndPush(const InventoryManageScreen()),
                   ),
-                  const Divider(height: 1),
+                  const Divider(height: 20),
                   _item(
-                    icon: Icons.people_outline,
+                    icon: Icons.people_rounded,
                     label: 'Amis',
                     onTap: () {
                       Navigator.pop(context);
@@ -156,7 +193,7 @@ class _MainDrawerState extends State<MainDrawer> {
                     },
                   ),
                   _item(
-                    icon: Icons.groups_outlined,
+                    icon: Icons.groups_rounded,
                     label: 'Groupes',
                     onTap: () {
                       Navigator.pop(context);
@@ -164,7 +201,7 @@ class _MainDrawerState extends State<MainDrawer> {
                     },
                   ),
                   _item(
-                    icon: Icons.settings_outlined,
+                    icon: Icons.settings_rounded,
                     label: 'Paramètres',
                     onTap: () {
                       Navigator.pop(context);
@@ -176,8 +213,8 @@ class _MainDrawerState extends State<MainDrawer> {
             ),
             const Divider(height: 1),
             ListTile(
-              dense: true,
-              leading: const Icon(Icons.logout, color: Colors.red, size: 22),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+              leading: const Icon(Icons.logout_rounded, color: Colors.red),
               title: const Text(
                 'Déconnexion',
                 style: TextStyle(color: Colors.red),

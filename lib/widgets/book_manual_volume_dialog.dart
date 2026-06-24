@@ -154,7 +154,7 @@ class _BookManualVolumeDialogState extends State<_BookManualVolumeDialog> {
               contentPadding: EdgeInsets.zero,
               title: const Text('Possédé'),
               value: _owned,
-              activeColor: BookAccent.primary,
+              activeThumbColor: BookAccent.primary,
               onChanged: _busy ? null : (v) => setState(() => _owned = v),
             ),
             SwitchListTile(

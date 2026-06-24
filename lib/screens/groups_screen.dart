@@ -62,10 +62,21 @@ class _GroupsScreenState extends State<GroupsScreen> {
       ),
     );
     if (name == null || name.isEmpty) return;
-    final group = await _groupService.createGroup(name);
-    if (!mounted) return;
-    await _openEdit(group);
-    await _load();
+    try {
+      final group = await _groupService.createGroup(name);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Groupe « ${group.name} » créé')),
+      );
+      await _openEdit(group);
+      await _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Impossible de créer le groupe : $e')),
+        );
+      }
+    }
   }
 
   Future<void> _openEdit(CollectionGroup group) async {

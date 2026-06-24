@@ -4,7 +4,6 @@ import '../models/bgg_expansion.dart';
 import '../models/collection_item.dart';
 import '../services/bgg_service.dart';
 import '../services/boardgame_expansion_service.dart';
-import '../services/collection_refresh.dart';
 import '../utils/boardgame_expansions.dart';
 import 'bgg_network_image.dart';
 
@@ -33,6 +32,8 @@ class _BoardgameExpansionsSectionState extends State<BoardgameExpansionsSection>
   String? _error;
   late Set<String> _owned;
   bool _showAll = false;
+  bool _syncing = false;
+  final Set<String> _pendingUncheck = {};
 
   @override
   void initState() {
@@ -46,19 +47,30 @@ class _BoardgameExpansionsSectionState extends State<BoardgameExpansionsSection>
   void didUpdateWidget(BoardgameExpansionsSection oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.item.id != widget.item.id) {
+      _pendingUncheck.clear();
       _owned = ownedExpansionBggIds(widget.item.metadata).toSet();
       _showAll = false;
       _load();
       _refreshOwnedFromDb();
+      return;
+    }
+    if (_syncing) return;
+    final fromMeta = ownedExpansionBggIds(widget.item.metadata).toSet()
+      ..removeAll(_pendingUncheck);
+    if (fromMeta.length != _owned.length ||
+        fromMeta.any((id) => !_owned.contains(id))) {
+      setState(() => _owned = fromMeta);
     }
   }
 
   Future<void> _refreshOwnedFromDb() async {
+    if (_syncing) return;
     final owned = await _expansionService.ownedExpansionBggIdsForBase(
       widget.item,
     );
-    if (!mounted) return;
-    setState(() => _owned = owned);
+    if (!mounted || _syncing) return;
+    final next = owned.where((id) => !_pendingUncheck.contains(id)).toSet();
+    setState(() => _owned = next);
   }
 
   Future<void> _load() async {
@@ -104,9 +116,12 @@ class _BoardgameExpansionsSectionState extends State<BoardgameExpansionsSection>
     }
 
     setState(() => _owned = next);
+    _syncing = true;
+    if (!owned) _pendingUncheck.add(exp.bggId);
 
     try {
       if (owned) {
+        _pendingUncheck.remove(exp.bggId);
         await _expansionService.linkExpansionToBase(
           base: widget.item,
           expansionBggId: exp.bggId,
@@ -123,20 +138,23 @@ class _BoardgameExpansionsSectionState extends State<BoardgameExpansionsSection>
       final synced = await _expansionService.ownedExpansionBggIdsForBase(
         widget.item,
       );
+      _pendingUncheck.remove(exp.bggId);
       final meta = metadataWithOwnedExpansions(
         widget.item.metadata,
         synced.toList(),
       );
       if (!mounted) return;
       widget.onItemUpdated(widget.item.copyWith(metadata: meta));
-      setState(() => _owned = synced);
-      CollectionRefresh.instance.bump();
+      setState(() => _owned = synced.toSet());
     } catch (e) {
       if (!mounted) return;
+      _pendingUncheck.remove(exp.bggId);
       setState(() => _owned = previous);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Erreur : $e')),
       );
+    } finally {
+      _syncing = false;
     }
   }
 

@@ -52,7 +52,30 @@ class CollectionItemTile extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              Container(
+              if (category == CollectionCategory.boardgame)
+                AspectRatio(
+                  aspectRatio: 1,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(coverFirst ? 16 : 12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(
+                            alpha: coverFirst ? 0.14 : 0.08,
+                          ),
+                          blurRadius: coverFirst ? 12 : 6,
+                          offset: Offset(0, coverFirst ? 5 : 3),
+                        ),
+                      ],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(coverFirst ? 16 : 12),
+                      child: _buildImage(),
+                    ),
+                  ),
+                )
+              else
+                Container(
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(coverFirst ? 16 : 12),
                     boxShadow: [

@@ -142,10 +142,23 @@ Future<bool> _refreshExpansionMetadataFromBgg(
   return changed;
 }
 
+bool _sessionReconcileDone = false;
+
+/// Réinitialise le garde-fou (tests uniquement).
+void resetBoardgameExpansionReconcileSession() {
+  _sessionReconcileDone = false;
+}
+
 /// Réparation automatique des liens inversés / metadata BGG erronée, puis rattachement.
+/// Une seule exécution par session applicative pour éviter les boucles de refresh.
 Future<BoardgameExpansionReconcileResult> repairAndReconcileBoardgameExpansions({
   int maxBggLookups = 24,
 }) async {
+  if (_sessionReconcileDone) {
+    return const BoardgameExpansionReconcileResult();
+  }
+  _sessionReconcileDone = true;
+
   final client = Supabase.instance.client;
   if (client.auth.currentUser?.id == null) {
     return const BoardgameExpansionReconcileResult();
