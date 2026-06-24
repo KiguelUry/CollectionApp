@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../services/group_community_service.dart';
-import '../collection_cover_image.dart';
+import 'collection_cover_image.dart';
 
 class GroupWantedBoard extends StatefulWidget {
   final String groupId;
