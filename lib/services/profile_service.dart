@@ -153,9 +153,7 @@ class ProfileService {
 
     final picked = await _picker.pickImage(
       source: ImageSource.gallery,
-      maxWidth: 1200,
-      maxHeight: 1200,
-      imageQuality: 92,
+      imageQuality: 100,
     );
     if (picked == null) {
       throw Exception('Aucune image sélectionnée');

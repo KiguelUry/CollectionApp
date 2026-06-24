@@ -12,6 +12,8 @@ enum CollectionCategory {
   watch,
   videogame,
   movie,
+  wildlife,
+  restaurant,
   custom;
 
   String get dbValue => name;
@@ -28,6 +30,8 @@ enum CollectionCategory {
         CollectionCategory.watch => 'Montres',
         CollectionCategory.videogame => 'Jeux vidéo',
         CollectionCategory.movie => 'Films (physique)',
+        CollectionCategory.wildlife => 'Animaux observés',
+        CollectionCategory.restaurant => 'Restaurants',
         CollectionCategory.custom => 'Collection perso',
       };
 
@@ -43,6 +47,8 @@ enum CollectionCategory {
         CollectionCategory.watch => 'Montres & bracelets',
         CollectionCategory.videogame => 'Jeux console & PC',
         CollectionCategory.movie => 'Blu-ray, DVD, coffrets',
+        CollectionCategory.wildlife => 'Carnet Pokédex · iNaturalist',
+        CollectionCategory.restaurant => 'Journal culinaire & carte',
         CollectionCategory.custom => 'Type personnalisé',
       };
 
@@ -58,6 +64,8 @@ enum CollectionCategory {
         CollectionCategory.watch => Icons.watch,
         CollectionCategory.videogame => Icons.sports_esports,
         CollectionCategory.movie => Icons.movie,
+        CollectionCategory.wildlife => Icons.pets,
+        CollectionCategory.restaurant => Icons.restaurant,
         CollectionCategory.custom => Icons.folder_special_outlined,
       };
 
@@ -73,6 +81,8 @@ enum CollectionCategory {
         CollectionCategory.watch => Colors.blueGrey,
         CollectionCategory.videogame => Colors.green,
         CollectionCategory.movie => Colors.pink,
+        CollectionCategory.wildlife => const Color(0xFF2E7D32),
+        CollectionCategory.restaurant => const Color(0xFFD84315),
         CollectionCategory.custom => Colors.blueGrey,
       };
 
@@ -89,7 +99,9 @@ enum CollectionCategory {
         CollectionCategory.lego ||
         CollectionCategory.watch ||
         CollectionCategory.videogame ||
-        CollectionCategory.movie =>
+        CollectionCategory.movie ||
+        CollectionCategory.wildlife ||
+        CollectionCategory.restaurant =>
           true,
         _ => false,
       };
@@ -131,6 +143,8 @@ enum CollectionCategory {
       CollectionCategory.watch => ('montre', 'montres'),
       CollectionCategory.videogame => ('jeu vidéo', 'jeux vidéo'),
         CollectionCategory.movie => ('film', 'films'),
+        CollectionCategory.wildlife => ('espèce', 'espèces'),
+        CollectionCategory.restaurant => ('resto', 'restos'),
         CollectionCategory.custom => ('objet', 'objets'),
       };
     if (total == 1) return '1 ${unit.$1}';

@@ -1,5 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../utils/supabase_embeds.dart';
+
 /// Journal Quick Log — sessions datées par l'utilisateur.
 class QuickLogService {
   final _client = Supabase.instance.client;
@@ -12,7 +14,7 @@ class QuickLogService {
     try {
       final rows = await _client
           .from('user_quick_logs')
-          .select('*, collection_items(title, image_url, category)')
+          .select('*, ${SupabaseEmbeds.quickLogItem}')
           .eq('user_id', id)
           .order('logged_at', ascending: false)
           .limit(limit);

@@ -8,12 +8,14 @@ class CategoryHubHeader extends StatelessWidget {
   final String title;
   final Color accentColor;
   final TabBar? tabBar;
+  final List<Widget>? trailingActions;
 
   const CategoryHubHeader({
     super.key,
     required this.title,
     required this.accentColor,
     this.tabBar,
+    this.trailingActions,
   });
 
   @override
@@ -56,6 +58,7 @@ class CategoryHubHeader extends StatelessWidget {
                       icon: Icon(Icons.grid_view_rounded, color: onAccent),
                       onPressed: () => AppNavigation.openCollections(context),
                     ),
+                  ...?trailingActions,
                 ],
               ),
             ),

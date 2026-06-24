@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/settings_service.dart';
 import '../widgets/app_app_bar.dart';
+import 'category_manage_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -36,6 +37,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
       appBar: const AppAppBar(title: 'Paramètres'),
       body: ListView(
         children: [
+          const _SectionHeader('Collections'),
+          ListTile(
+            leading: const Icon(Icons.tune),
+            title: const Text('Gérer les catégories'),
+            subtitle: const Text('Masquer ou supprimer des collections du hub'),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const CategoryManageScreen(),
+              ),
+            ),
+          ),
           const _SectionHeader('Apparence'),
           SwitchListTile(
             title: const Text('Mode sombre'),

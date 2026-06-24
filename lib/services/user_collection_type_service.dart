@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/collection_category.dart';
 import '../models/user_collection_type.dart';
 
 class UserCollectionTypeService {
@@ -35,5 +36,15 @@ class UserCollectionTypeService {
 
   Future<void> delete(String id) async {
     await _client.from('user_collection_types').delete().eq('id', id);
+  }
+
+  /// Supprime le type et tous les objets `custom` associés.
+  Future<void> deleteWithCleanup(String id) async {
+    await _client
+        .from('collection_items')
+        .delete()
+        .eq('category', CollectionCategory.custom.dbValue)
+        .eq('subcategory', id);
+    await delete(id);
   }
 }

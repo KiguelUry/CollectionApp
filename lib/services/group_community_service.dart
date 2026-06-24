@@ -1,5 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../utils/supabase_embeds.dart';
+
 class GroupRuleEntry {
   final String id;
   final String groupId;
@@ -187,7 +189,7 @@ class GroupCommunityService {
     try {
       final rows = await _client
           .from('group_wanted_posts')
-          .select('*, profiles(username)')
+          .select('*, ${SupabaseEmbeds.groupWantedAuthorProfile}')
           .eq('group_id', groupId)
           .order('created_at', ascending: false)
           .limit(50);

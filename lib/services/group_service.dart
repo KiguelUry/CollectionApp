@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/collection_group.dart';
+import '../utils/supabase_embeds.dart';
 import 'profile_service.dart';
 
 class GroupService {
@@ -159,7 +160,7 @@ class GroupService {
     final rows = await _client
         .from('group_members')
         .select(
-          'profile_id, profiles(username, avatar_url, accent_color)',
+          'profile_id, ${SupabaseEmbeds.groupMemberProfile}',
         )
         .eq('group_id', groupId);
     return List<Map<String, dynamic>>.from(rows);

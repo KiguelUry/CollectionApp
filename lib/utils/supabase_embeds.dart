@@ -30,4 +30,13 @@ abstract final class SupabaseEmbeds {
   /// Prêts actifs.
   static const collectionItemWithLoan =
       '*, $locationsLabel, $groupsName, loaned_to:$loanedToProfile';
+
+  static const groupWantedAuthorProfile =
+      'profiles!group_wanted_posts_author_id_fkey(username)';
+
+  static const groupMemberProfile =
+      'profiles!group_members_profile_id_fkey(username, avatar_url, accent_color)';
+
+  static const quickLogItem =
+      'collection_items!user_quick_logs_item_id_fkey(title, image_url, category)';
 }

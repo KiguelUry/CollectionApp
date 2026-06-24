@@ -3,12 +3,12 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_category.dart';
 import '../models/collection_summary.dart';
 import '../services/collection_stats_service.dart';
+import '../services/category_hub_preferences.dart';
 import '../services/recommendation_service.dart';
 import '../widgets/collapsible_collection_overview.dart';
 import '../widgets/recommendations_banner.dart';
 import '../widgets/main_drawer.dart';
 import '../models/user_collection_type.dart';
-import '../services/user_collection_type_service.dart';
 import '../utils/collection_grid_layout.dart';
 import '../widgets/create_custom_collection_dialog.dart';
 import 'books_collection_screen.dart';
@@ -26,6 +26,9 @@ import '../theme/app_theme.dart';
 import '../utils/app_haptics.dart';
 import '../utils/category_hub_order.dart';
 import '../utils/collection_item_scope.dart';
+import '../utils/hub_category_visibility.dart';
+import 'wildlife/wildlife_collection_screen.dart';
+import 'restaurant/restaurant_collection_screen.dart';
 
 class CategorySelectionScreen extends StatefulWidget {
   const CategorySelectionScreen({super.key});
@@ -68,20 +71,12 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
   Future<void> _load() async {
     setState(() => _loadingCounts = true);
 
-    final counts = {
-      for (final c in CollectionCategory.menuValues) c: 0,
-    };
-    final groupCounts = {
-      for (final c in CollectionCategory.menuValues) c: 0,
-    };
-    final wishCounts = {
-      for (final c in CollectionCategory.menuValues) c: 0,
-    };
+    await CategoryHubPreferences.instance.load();
+    final counts = emptyCategoryCounts();
+    final groupCounts = emptyCategoryCounts();
+    final wishCounts = emptyCategoryCounts();
     final customCounts = <String, int>{};
-    var customTypes = <UserCollectionType>[];
-    var orderedTiles = <HubTileEntry>[
-      ...CollectionCategory.menuValues.map(HubTileEntry.category),
-    ];
+    var orderedTiles = <HubTileEntry>[];
     CollectionSummary summary = const CollectionSummary();
     var recommendationsList = <Recommendation>[];
     String? loadError;
@@ -142,12 +137,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
         recommendationsList = await _recommendations.generate(limit: 6);
       } catch (_) {}
 
-      try {
-        customTypes = await UserCollectionTypeService().fetchMine();
-      } catch (_) {}
-
-      orderedTiles =
-          await CategoryHubOrder.loadOrderedTiles(customTypes);
+      orderedTiles = await loadVisibleHubTiles();
     } catch (e) {
       loadError = e.toString();
     }
@@ -195,6 +185,8 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
           CollectionCategory.watch => const WatchCollectionScreen(),
           CollectionCategory.videogame => const VideogameCollectionScreen(),
           CollectionCategory.movie => const MovieCollectionScreen(),
+          CollectionCategory.wildlife => const WildlifeCollectionScreen(),
+          CollectionCategory.restaurant => const RestaurantCollectionScreen(),
           _ => HomeScreen(category: category),
         },
       ),

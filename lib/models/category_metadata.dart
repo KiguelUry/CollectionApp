@@ -170,6 +170,12 @@ class CategoryMetadata {
         final year = item.metadata?['year']?.toString();
         if (year != null && year.isNotEmpty) return year;
         return 'Blu-ray / DVD';
+      case CollectionCategory.wildlife:
+        return item.metadata?['scientific_name']?.toString();
+      case CollectionCategory.restaurant:
+        final addr = item.metadata?['address']?.toString();
+        if (addr != null && addr.isNotEmpty) return addr;
+        return item.metadata?['city']?.toString();
       case CollectionCategory.custom:
         return item.metadata?['custom_type_name']?.toString();
       default:

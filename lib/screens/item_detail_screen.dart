@@ -28,6 +28,7 @@ import '../widgets/discogs_market_value_card.dart';
 import '../widgets/friend_ratings_panel.dart';
 import '../widgets/group_rules_panel.dart';
 import '../widgets/profile_avatar.dart';
+import '../widgets/restaurant_visits_panel.dart';
 import '../services/boardgame_expansion_service.dart';
 import '../utils/boardgame_display.dart';
 import '../utils/boardgame_collection_visibility.dart';
@@ -980,6 +981,11 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         artist: _item.metadata?['artist']?.toString(),
                         albumTitle: _item.title,
                       ),
+                    ],
+                    if (_item.category == CollectionCategory.restaurant &&
+                        !ro) ...[
+                      const Divider(height: 32),
+                      RestaurantVisitsPanel(item: _item),
                     ],
                     if (!ro && !_item.isGroupOwned) ...[
                     const Divider(height: 32),
