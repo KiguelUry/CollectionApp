@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/group_community_service.dart';
 import 'markdown_rules_editor.dart';
@@ -27,6 +28,7 @@ class _GroupRulesPanelState extends State<GroupRulesPanel> {
   final _service = GroupCommunityService();
   bool _loading = true;
   List<GroupRuleEntry> _rules = [];
+  String get _userId => Supabase.instance.client.auth.currentUser!.id;
 
   @override
   void initState() {
@@ -51,12 +53,53 @@ class _GroupRulesPanelState extends State<GroupRulesPanel> {
   Future<void> _addRule() async {
     final titleController = TextEditingController(text: 'Notre variante');
     final bodyController = TextEditingController();
-    final ok = await showDialog<bool>(
+    final ok = await _openRuleDialog(
+      title: 'Ajouter une variante',
+      titleController: titleController,
+      bodyController: bodyController,
+    );
+    if (ok != true) return;
+    final body = bodyController.text.trim();
+    if (body.isEmpty) return;
+    await _service.addRule(
+      groupId: widget.groupId,
+      itemId: widget.itemId,
+      title: titleController.text.trim(),
+      body: body,
+    );
+    _load();
+  }
+
+  Future<void> _editRule(GroupRuleEntry rule) async {
+    final titleController = TextEditingController(text: rule.title);
+    final bodyController = TextEditingController(text: rule.body);
+    final ok = await _openRuleDialog(
+      title: 'Modifier la variante',
+      titleController: titleController,
+      bodyController: bodyController,
+    );
+    if (ok != true) return;
+    final body = bodyController.text.trim();
+    if (body.isEmpty) return;
+    await _service.updateRule(
+      ruleId: rule.id,
+      title: titleController.text.trim(),
+      body: body,
+    );
+    _load();
+  }
+
+  Future<bool?> _openRuleDialog({
+    required String title,
+    required TextEditingController titleController,
+    required TextEditingController bodyController,
+  }) {
+    return showDialog<bool>(
       context: context,
       builder: (ctx) {
         final bottom = MediaQuery.viewInsetsOf(ctx).bottom;
         return AlertDialog(
-          title: const Text('Ajouter une variante'),
+          title: Text(title),
           contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
           content: SizedBox(
             width: double.maxFinite,
@@ -85,22 +128,12 @@ class _GroupRulesPanelState extends State<GroupRulesPanel> {
             ),
             FilledButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Publier'),
+              child: const Text('Enregistrer'),
             ),
           ],
         );
       },
     );
-    if (ok != true) return;
-    final body = bodyController.text.trim();
-    if (body.isEmpty) return;
-    await _service.addRule(
-      groupId: widget.groupId,
-      itemId: widget.itemId,
-      title: titleController.text.trim(),
-      body: body,
-    );
-    _load();
   }
 
   Future<void> _toggleVote(GroupRuleEntry rule) async {
@@ -174,6 +207,13 @@ class _GroupRulesPanelState extends State<GroupRulesPanel> {
                             style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
                         ),
+                        if (rule.authorId == _userId)
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            tooltip: 'Modifier',
+                            onPressed: () => _editRule(rule),
+                            icon: const Icon(Icons.edit_outlined, size: 20),
+                          ),
                         IconButton(
                           visualDensity: VisualDensity.compact,
                           onPressed: () => _toggleVote(rule),

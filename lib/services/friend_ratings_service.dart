@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/collection_item.dart';
+import '../utils/supabase_embeds.dart';
 import 'friend_service.dart';
 
 /// Note et avis laissés par les amis sur le même objet (catalogue).
@@ -50,7 +51,10 @@ class FriendRatingsService {
 
     final rows = await _client
         .from('collection_items')
-        .select('title, rating, review, metadata, category, added_by, profiles(username, avatar_url)')
+        .select(
+          'title, rating, review, metadata, category, added_by, '
+          '${SupabaseEmbeds.addedByProfile}',
+        )
         .inFilter('added_by', friendIds)
         .not('rating', 'is', null);
 

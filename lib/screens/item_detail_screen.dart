@@ -9,6 +9,7 @@ import '../models/collection_group.dart';
 import '../models/collection_item.dart';
 import '../models/item_condition.dart';
 import '../services/group_service.dart';
+import '../utils/supabase_embeds.dart';
 import '../services/item_group_service.dart';
 import '../services/loan_service.dart';
 import '../services/collection_refresh.dart';
@@ -131,12 +132,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
   Future<void> _reloadItem() async {
     final row = await Supabase.instance.client
         .from('collection_items')
-        .select(
-          '*, locations(label), groups(name), '
-          'location_holder:profiles!location_user_id(username), '
-          'loaned_to:profiles!loaned_to_id(username), '
-          'collection_item_tags(item_tags(id, label, color))',
-        )
+        .select(SupabaseEmbeds.collectionItemDetail)
         .eq('id', _item.id)
         .single();
     if (mounted) {
@@ -981,6 +977,8 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       DiscogsMarketValueCard(
                         releaseId:
                             _item.metadata?['discogs_release_id']?.toString(),
+                        artist: _item.metadata?['artist']?.toString(),
+                        albumTitle: _item.title,
                       ),
                     ],
                     if (!ro && !_item.isGroupOwned) ...[

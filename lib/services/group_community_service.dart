@@ -227,4 +227,19 @@ class GroupCommunityService {
       'claimed_at': null,
     }).eq('id', postId);
   }
+
+  Future<void> updateRule({
+    required String ruleId,
+    required String title,
+    required String body,
+  }) async {
+    await _client
+        .from('group_rule_entries')
+        .update({
+          'title': title.trim(),
+          'body': body.trim(),
+        })
+        .eq('id', ruleId)
+        .eq('author_id', _userId);
+  }
 }

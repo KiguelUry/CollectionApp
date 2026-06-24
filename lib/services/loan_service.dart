@@ -1,13 +1,12 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/collection_item.dart';
-import '../utils/collection_item_scope.dart';
+import '../utils/supabase_embeds.dart';
 
 class LoanService {
   final _client = Supabase.instance.client;
 
-  static const _select =
-      '*, locations(label), groups(name), loaned_to:profiles!loaned_to_id(username)';
+  static const _select = SupabaseEmbeds.collectionItemWithLoan;
 
   /// Objets actuellement prêtés (par toi).
   Future<List<CollectionItem>> fetchActiveLoans() async {

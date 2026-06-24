@@ -2,13 +2,12 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/collection_item.dart';
 import '../utils/collection_grid_grouper.dart';
-import '../utils/collection_item_scope.dart';
+import '../utils/supabase_embeds.dart';
 
 class InventoryService {
   final _client = Supabase.instance.client;
 
-  static const _select =
-      '*, locations(label), groups(name)';
+  static const _select = SupabaseEmbeds.collectionItem;
 
   Future<List<CollectionItem>> _fetchAll() async {
     final userId = CollectionItemScope.currentUserId;

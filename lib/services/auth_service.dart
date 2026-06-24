@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'profile_cache_service.dart';
 import 'profile_service.dart';
 
 class AuthService {
@@ -34,11 +35,14 @@ class AuthService {
   Future<void> signIn(String email, String password) async {
     await _supabase.auth.signInWithPassword(email: email, password: password);
     await _profiles.ensureCurrentUserProfile();
+    await ProfileCacheService.instance.hydrate();
+    await ProfileCacheService.instance.refresh();
   }
 
   // Déconnexion
   Future<void> signOut() async {
     await _supabase.auth.signOut();
+    await ProfileCacheService.instance.clear();
   }
 
   /// Envoie un e-mail de réinitialisation (lien Supabase Auth).

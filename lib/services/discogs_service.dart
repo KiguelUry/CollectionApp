@@ -156,7 +156,45 @@ class DiscogsService {
       final response = await http.get(url, headers: _headers);
       if (response.statusCode != 200) return null;
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return _parseMarketStats(response.body);
+    } catch (e) {
+      if (kDebugMode) debugPrint('Discogs market stats: $e');
+      return null;
+    }
+  }
+
+  /// ID exact puis recherche artiste + titre si besoin.
+  static Future<DiscogsMarketStats?> fetchMarketStatsWithFallback({
+    int? releaseId,
+    String? artist,
+    String? title,
+  }) async {
+    if (releaseId != null) {
+      final direct = await fetchMarketStats(releaseId);
+      if (direct != null) return direct;
+    }
+
+    final parts = <String>[
+      if (artist != null && artist.trim().isNotEmpty) artist.trim(),
+      if (title != null && title.trim().isNotEmpty) title.trim(),
+    ];
+    if (parts.isEmpty) return null;
+
+    final results = await searchReleases(parts.join(' '), limit: 5);
+    for (final hit in results) {
+      final id = int.tryParse(hit['discogs_release_id'] ?? '');
+      if (id == null) continue;
+      final stats = await fetchMarketStats(id);
+      if (stats != null) {
+        return stats.copyWith(fromFallbackSearch: true);
+      }
+    }
+    return null;
+  }
+
+  static DiscogsMarketStats? _parseMarketStats(String body) {
+    try {
+      final data = jsonDecode(body) as Map<String, dynamic>;
       double? parsePrice(dynamic v) {
         if (v == null) return null;
         if (v is num) return v.toDouble();
@@ -174,8 +212,7 @@ class DiscogsService {
         highest: highest,
         currency: data['currency'] as String? ?? 'EUR',
       );
-    } catch (e) {
-      if (kDebugMode) debugPrint('Discogs market stats: $e');
+    } catch (_) {
       return null;
     }
   }
@@ -186,13 +223,25 @@ class DiscogsMarketStats {
   final double? median;
   final double? highest;
   final String currency;
+  final bool fromFallbackSearch;
 
   const DiscogsMarketStats({
     this.lowest,
     this.median,
     this.highest,
     this.currency = 'EUR',
+    this.fromFallbackSearch = false,
   });
+
+  DiscogsMarketStats copyWith({bool? fromFallbackSearch}) {
+    return DiscogsMarketStats(
+      lowest: lowest,
+      median: median,
+      highest: highest,
+      currency: currency,
+      fromFallbackSearch: fromFallbackSearch ?? this.fromFallbackSearch,
+    );
+  }
 
   String format(double? v) =>
       v == null ? '—' : '${v.toStringAsFixed(2)} $currency';

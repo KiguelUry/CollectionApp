@@ -183,7 +183,7 @@ class CollectionStatsService {
     final rows = await CollectionItemScope.personal(
       _client
           .from('collection_items')
-          .select('metadata, quantity')
+          .select('title, metadata, quantity')
           .eq('category', CollectionCategory.media.dbValue)
           .eq('is_wishlist', false)
           .eq('is_sold', false)
@@ -198,9 +198,15 @@ class CollectionStatsService {
       final releaseId = int.tryParse(
         '${meta['discogs_release_id'] ?? ''}',
       );
-      if (releaseId == null) continue;
+      final artist = meta['artist']?.toString();
+      final title =
+          meta['title']?.toString() ?? row['title']?.toString();
 
-      final stats = await DiscogsService.fetchMarketStats(releaseId);
+      final stats = await DiscogsService.fetchMarketStatsWithFallback(
+        releaseId: releaseId,
+        artist: artist,
+        title: title,
+      );
       final median = stats?.median ?? stats?.lowest;
       if (median == null) continue;
 

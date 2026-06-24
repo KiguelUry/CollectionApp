@@ -20,42 +20,94 @@ class MarkdownRulesEditor extends StatefulWidget {
 
 class _MarkdownRulesEditorState extends State<MarkdownRulesEditor> {
   bool _preview = false;
+  final _focusNode = FocusNode();
+  TextSelection _lastSelection = const TextSelection.collapsed(offset: 0);
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_trackSelection);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_trackSelection);
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _trackSelection() {
+    final sel = widget.controller.selection;
+    if (sel.isValid && sel.start >= 0) {
+      _lastSelection = sel;
+    }
+  }
+
+  TextSelection _effectiveSelection() {
+    final sel = widget.controller.selection;
+    if (sel.isValid && sel.start >= 0) return sel;
+    return _lastSelection;
+  }
+
+  void _applyEdit(TextEditingValue value) {
+    widget.controller.value = value;
+    _lastSelection = value.selection;
+    setState(() {});
+  }
 
   void _wrapSelection(String before, String after) {
+    _focusNode.requestFocus();
     final text = widget.controller.text;
-    final sel = widget.controller.selection;
-    final start = sel.start.clamp(0, text.length);
-    final end = sel.end.clamp(0, text.length);
+    final sel = _effectiveSelection();
+    var start = sel.start.clamp(0, text.length);
+    var end = sel.end.clamp(0, text.length);
+    if (start > end) {
+      final t = start;
+      start = end;
+      end = t;
+    }
     final selected = text.substring(start, end);
-    final wrapped = '$before$selected$after';
-    widget.controller.value = TextEditingValue(
-      text: text.replaceRange(start, end, wrapped),
-      selection: TextSelection.collapsed(offset: start + wrapped.length),
+    final insert = selected.isEmpty ? 'texte' : selected;
+    final wrapped = '$before$insert$after';
+    _applyEdit(
+      TextEditingValue(
+        text: text.replaceRange(start, end, wrapped),
+        selection: TextSelection(
+          baseOffset: start + before.length,
+          extentOffset: start + before.length + insert.length,
+        ),
+      ),
     );
   }
 
   void _prefixLines(String prefix) {
+    _focusNode.requestFocus();
     final text = widget.controller.text;
-    final sel = widget.controller.selection;
+    final sel = _effectiveSelection();
     final start = sel.start.clamp(0, text.length);
     final lineStart = text.lastIndexOf('\n', start - 1) + 1;
     final lineEnd = text.indexOf('\n', start);
     final end = lineEnd == -1 ? text.length : lineEnd;
     final line = text.substring(lineStart, end);
     if (line.startsWith(prefix)) return;
-    widget.controller.value = TextEditingValue(
-      text: text.replaceRange(lineStart, end, '$prefix$line'),
-      selection: sel,
+    _applyEdit(
+      TextEditingValue(
+        text: text.replaceRange(lineStart, end, '$prefix$line'),
+        selection: sel,
+      ),
     );
   }
 
   void _insertSection(String title) {
+    _focusNode.requestFocus();
     final block = '\n## $title\n\n';
     final text = widget.controller.text;
-    final offset = widget.controller.selection.baseOffset;
-    widget.controller.value = TextEditingValue(
-      text: text.replaceRange(offset, offset, block),
-      selection: TextSelection.collapsed(offset: offset + block.length),
+    final offset = _effectiveSelection().baseOffset.clamp(0, text.length);
+    _applyEdit(
+      TextEditingValue(
+        text: text.replaceRange(offset, offset, block),
+        selection: TextSelection.collapsed(offset: offset + block.length),
+      ),
     );
   }
 
@@ -139,8 +191,11 @@ class _MarkdownRulesEditorState extends State<MarkdownRulesEditor> {
         else
           TextField(
             controller: widget.controller,
+            focusNode: _focusNode,
             minLines: widget.minLines,
             maxLines: 12,
+            onTap: _trackSelection,
+            onChanged: (_) => _trackSelection(),
             decoration: InputDecoration(
               hintText: widget.hint ??
                   '## Objectif\n\n- Règle 1\n- **Mise en gras**',

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'profile_cache_service.dart';
 import 'profile_service.dart';
 
 /// Préférences locales (thème, notifications, confidentialité affichée).
@@ -39,6 +40,7 @@ class SettingsService extends ChangeNotifier {
         _prefs!.getBool(_keyShareWishlist) ?? true;
     _loaded = true;
     notifyListeners();
+    await ProfileCacheService.instance.hydrate();
     _syncPrivacyFromProfile();
   }
 

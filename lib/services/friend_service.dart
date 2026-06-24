@@ -2,7 +2,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
-import '../utils/collection_item_filters.dart';
+import '../utils/supabase_embeds.dart';
 import '../utils/search_relevance.dart';
 
 class FriendService {
@@ -328,7 +328,7 @@ class FriendService {
 
     final row = await _client
         .from('collection_items')
-        .select('*, locations(label), groups(name)')
+        .select(SupabaseEmbeds.collectionItem)
         .eq('id', itemId)
         .maybeSingle();
     if (row == null) return null;
@@ -346,7 +346,7 @@ class FriendService {
 
     final rows = await _client
         .from('collection_items')
-        .select('*, locations(label), groups(name)')
+        .select(SupabaseEmbeds.collectionItem)
         .or(
           'added_by.eq.$friendProfileId,location_user_id.eq.$friendProfileId',
         )
@@ -372,7 +372,7 @@ class FriendService {
 
     final rows = await _client
         .from('collection_items')
-        .select('*, locations(label), groups(name)')
+        .select(SupabaseEmbeds.collectionItem)
         .or(
           'added_by.eq.$friendProfileId,location_user_id.eq.$friendProfileId',
         )
@@ -406,7 +406,7 @@ class FriendService {
 
     final rows = await _client
         .from('collection_items')
-        .select('*, locations(label), groups(name)')
+        .select(SupabaseEmbeds.collectionItem)
         .or(
           'added_by.eq.$friendProfileId,location_user_id.eq.$friendProfileId',
         )

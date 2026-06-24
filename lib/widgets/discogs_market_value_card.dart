@@ -5,8 +5,15 @@ import '../services/discogs_service.dart';
 /// Bloc « Valeur du Marché » Discogs pour vinyles / CD.
 class DiscogsMarketValueCard extends StatefulWidget {
   final String? releaseId;
+  final String? artist;
+  final String? albumTitle;
 
-  const DiscogsMarketValueCard({super.key, required this.releaseId});
+  const DiscogsMarketValueCard({
+    super.key,
+    required this.releaseId,
+    this.artist,
+    this.albumTitle,
+  });
 
   @override
   State<DiscogsMarketValueCard> createState() => _DiscogsMarketValueCardState();
@@ -25,12 +32,15 @@ class _DiscogsMarketValueCardState extends State<DiscogsMarketValueCard> {
   @override
   void didUpdateWidget(covariant DiscogsMarketValueCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.releaseId != widget.releaseId) _load();
+    if (oldWidget.releaseId != widget.releaseId ||
+        oldWidget.artist != widget.artist ||
+        oldWidget.albumTitle != widget.albumTitle) {
+      _load();
+    }
   }
 
   Future<void> _load() async {
-    final id = int.tryParse(widget.releaseId ?? '');
-    if (id == null || !DiscogsService.isConfigured) {
+    if (!DiscogsService.isConfigured) {
       setState(() {
         _stats = null;
         _loading = false;
@@ -38,7 +48,12 @@ class _DiscogsMarketValueCardState extends State<DiscogsMarketValueCard> {
       return;
     }
     setState(() => _loading = true);
-    final stats = await DiscogsService.fetchMarketStats(id);
+    final id = int.tryParse(widget.releaseId ?? '');
+    final stats = await DiscogsService.fetchMarketStatsWithFallback(
+      releaseId: id,
+      artist: widget.artist,
+      title: widget.albumTitle,
+    );
     if (mounted) {
       setState(() {
         _stats = stats;
@@ -50,8 +65,10 @@ class _DiscogsMarketValueCardState extends State<DiscogsMarketValueCard> {
   @override
   Widget build(BuildContext context) {
     if (!DiscogsService.isConfigured) return const SizedBox.shrink();
-    final releaseId = widget.releaseId;
-    if (releaseId == null || releaseId.isEmpty) return const SizedBox.shrink();
+    final hasQuery = (widget.releaseId?.isNotEmpty ?? false) ||
+        (widget.artist?.isNotEmpty ?? false) ||
+        (widget.albumTitle?.isNotEmpty ?? false);
+    if (!hasQuery) return const SizedBox.shrink();
 
     final theme = Theme.of(context);
     final accent = Colors.teal.shade700;
@@ -92,7 +109,7 @@ class _DiscogsMarketValueCardState extends State<DiscogsMarketValueCard> {
                 'Pas de données marché pour ce pressage.',
                 style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
               )
-            else
+            else ...[
               Row(
                 children: [
                   _priceCell('Min', _stats!.format(_stats!.lowest), accent),
@@ -100,6 +117,14 @@ class _DiscogsMarketValueCardState extends State<DiscogsMarketValueCard> {
                   _priceCell('Max', _stats!.format(_stats!.highest), accent),
                 ],
               ),
+              if (_stats!.fromFallbackSearch) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Estimation via une édition proche (artiste / titre).',
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                ),
+              ],
+            ],
           ],
         ),
       ),

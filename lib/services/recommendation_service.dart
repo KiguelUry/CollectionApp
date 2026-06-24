@@ -4,6 +4,7 @@ import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../utils/collection_item_filters.dart';
 import '../utils/collection_item_scope.dart';
+import '../utils/supabase_embeds.dart';
 import 'friend_ratings_service.dart';
 import 'friend_service.dart';
 
@@ -55,7 +56,8 @@ class RecommendationService {
     final friendRows = await _client
         .from('collection_items')
         .select(
-          'title, category, rating, review, metadata, added_by, profiles(username)',
+          'title, category, rating, review, metadata, added_by, '
+          '${SupabaseEmbeds.addedByProfileUsername}',
         )
         .inFilter('added_by', friendIds)
         .gte('rating', 4)

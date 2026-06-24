@@ -8,7 +8,9 @@ import '../widgets/avatar_crop_sheet.dart';
 import '../models/collection_item.dart';
 import '../models/user_profile.dart';
 import '../utils/collection_item_filters.dart';
+import '../utils/supabase_embeds.dart';
 import 'activity_service.dart';
+import 'profile_cache_service.dart';
 
 class ProfileService {
   final _client = Supabase.instance.client;
@@ -90,7 +92,9 @@ class ProfileService {
   Future<UserProfile> fetchCurrentProfile() async {
     final id = _userId;
     if (id == null) throw Exception('Non connecté');
-    return UserProfile.fromJson(await _fetchProfileRowSafe(id));
+    final profile = UserProfile.fromJson(await _fetchProfileRowSafe(id));
+    await ProfileCacheService.instance.apply(profile);
+    return profile;
   }
 
   Future<UserProfile> fetchProfile(String profileId) async {
@@ -134,6 +138,12 @@ class ProfileService {
         .single();
 
     return UserProfile.fromJson(Map<String, dynamic>.from(row));
+  }
+
+  Future<UserProfile> updateProfileAndCache(UserProfile profile) async {
+    final saved = await updateProfile(profile);
+    await ProfileCacheService.instance.apply(saved);
+    return saved;
   }
 
   /// Choisit une image (galerie), recadre et l'envoie dans Storage.
@@ -212,7 +222,7 @@ class ProfileService {
 
     final rows = await _client
         .from('collection_items')
-        .select('*, locations(label), groups(name)')
+        .select(SupabaseEmbeds.collectionItem)
         .inFilter('id', itemIds);
 
     final byId = <String, CollectionItem>{};
@@ -233,7 +243,7 @@ class ProfileService {
 
     final rows = await _client
         .from('collection_items')
-        .select('*, locations(label), groups(name)')
+        .select(SupabaseEmbeds.collectionItem)
         .or('added_by.eq.$id,location_user_id.eq.$id')
         .eq('is_wishlist', false)
         .order('title')

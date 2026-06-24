@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/collection_item.dart';
 import '../models/user_profile.dart';
+import '../services/profile_cache_service.dart';
 import '../services/profile_service.dart';
 import '../services/showcase_service.dart';
 import '../services/quick_log_service.dart';
@@ -84,9 +85,10 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     try {
       final url = await _service.pickAndUploadAvatar(cropContext: context);
       final updated = _profile!.copyWith(avatarUrl: url);
-      final saved = await _service.updateProfile(updated);
+      final saved = await _service.updateProfileAndCache(updated);
       if (mounted) {
         setState(() => _profile = saved);
+        await ProfileCacheService.instance.apply(saved);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Photo mise à jour')),
         );
@@ -285,9 +287,10 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         accentColor: _accentColor,
         clearBio: _bioController.text.trim().isEmpty,
       );
-      final saved = await _service.updateProfile(updated);
+      final saved = await _service.updateProfileAndCache(updated);
       if (mounted) {
         setState(() => _profile = saved);
+        await ProfileCacheService.instance.apply(saved);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Profil enregistré')),
         );
@@ -342,9 +345,11 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                       alignment: Alignment.bottomRight,
                       children: [
                         ProfileAvatar(
+                          key: ValueKey(_profile?.avatarUrl ?? _accentColor),
                           avatarUrl: _profile?.avatarUrl,
                           accentColorHex: _accentColor,
-                          fallbackInitial: _profile?.username ?? '?',
+                          fallbackInitial:
+                              _profile?.username ?? _usernameController.text,
                           radius: 52,
                         ),
                         if (_uploadingAvatar)

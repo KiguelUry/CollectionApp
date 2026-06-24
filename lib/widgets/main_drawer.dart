@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import '../models/user_profile.dart';
 import '../screens/login_screen.dart';
 import '../screens/profile_edit_screen.dart';
 import '../screens/inventory_manage_screen.dart';
 import '../screens/loans_screen.dart';
 import '../screens/stats_screen.dart';
 import '../services/auth_service.dart';
-import '../services/profile_service.dart';
+import '../services/profile_cache_service.dart';
 import 'profile_avatar.dart';
 import 'share_collection_sheet.dart';
 
@@ -19,38 +17,25 @@ class MainDrawer extends StatefulWidget {
 }
 
 class _MainDrawerState extends State<MainDrawer> {
-  UserProfile? _profile;
-  bool _loadingProfile = true;
-  int _itemCount = 0;
+  final _cache = ProfileCacheService.instance;
 
   @override
   void initState() {
     super.initState();
-    _loadProfile();
+    _cache.addListener(_onCacheChanged);
+    if (_cache.profile == null) {
+      _cache.refresh();
+    }
   }
 
-  Future<void> _loadProfile() async {
-    try {
-      final userId = Supabase.instance.client.auth.currentUser?.id;
-      final p = await ProfileService().fetchCurrentProfile();
-      var count = 0;
-      if (userId != null) {
-        final rows = await Supabase.instance.client
-            .from('collection_items')
-            .select('id')
-            .or('added_by.eq.$userId,location_user_id.eq.$userId');
-        count = (rows as List).length;
-      }
-      if (mounted) {
-        setState(() {
-          _profile = p;
-          _itemCount = count;
-          _loadingProfile = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() => _loadingProfile = false);
-    }
+  @override
+  void dispose() {
+    _cache.removeListener(_onCacheChanged);
+    super.dispose();
+  }
+
+  void _onCacheChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _openProfile() async {
@@ -58,7 +43,9 @@ class _MainDrawerState extends State<MainDrawer> {
       context,
       MaterialPageRoute(builder: (_) => const ProfileEditScreen()),
     );
-    if (changed == true) _loadProfile();
+    if (changed == true) {
+      await _cache.refresh();
+    }
   }
 
   void _closeAndPush(Widget screen) {
@@ -84,8 +71,14 @@ class _MainDrawerState extends State<MainDrawer> {
 
   @override
   Widget build(BuildContext context) {
-    final accent = ProfileAvatar.colorFromHex(_profile?.accentColor);
-    final username = _profile?.username ?? 'Ma collection';
+    final profile = _cache.profile;
+    final accent = ProfileAvatar.colorFromHex(
+      profile?.accentColor,
+      fallback: Colors.grey.shade700,
+    );
+    final username = profile?.username ?? 'Ma collection';
+    final itemCount = _cache.itemCount;
+    final showPlaceholder = profile == null && !_cache.hydrated;
 
     return Drawer(
       child: SafeArea(
@@ -114,20 +107,22 @@ class _MainDrawerState extends State<MainDrawer> {
                         ),
                         child: Column(
                           children: [
-                            _loadingProfile
-                                ? const CircleAvatar(
-                                    radius: 40,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : ProfileAvatar(
-                                    avatarUrl: _profile?.avatarUrl,
-                                    accentColorHex: _profile?.accentColor,
-                                    fallbackInitial: username,
-                                    radius: 40,
-                                  ),
+                            if (showPlaceholder)
+                              const CircleAvatar(
+                                radius: 40,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            else
+                              ProfileAvatar(
+                                key: ValueKey(profile?.avatarUrl ?? username),
+                                avatarUrl: profile?.avatarUrl,
+                                accentColorHex: profile?.accentColor,
+                                fallbackInitial: username,
+                                radius: 40,
+                              ),
                             const SizedBox(height: 14),
                             Text(
                               username,
@@ -142,7 +137,7 @@ class _MainDrawerState extends State<MainDrawer> {
                             ),
                             const SizedBox(height: 6),
                             Text(
-                              '🚀 $_itemCount objet${_itemCount > 1 ? 's' : ''} collectionné${_itemCount > 1 ? 's' : ''}',
+                              '🚀 $itemCount objet${itemCount > 1 ? 's' : ''} collectionné${itemCount > 1 ? 's' : ''}',
                               style: TextStyle(
                                 color: Colors.white.withValues(alpha: 0.9),
                                 fontSize: 13,
