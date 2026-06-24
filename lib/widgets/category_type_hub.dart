@@ -45,7 +45,10 @@ class CategoryTypeHub extends StatelessWidget {
         SliverToBoxAdapter(
           child: Container(
             width: double.infinity,
-            decoration: AppTheme.heroGradient(accent),
+            decoration: AppTheme.heroGradient(
+              accent,
+              brightness: Theme.of(context).brightness,
+            ),
             child: Stack(
               children: [
                 if (heroWatermark != null)

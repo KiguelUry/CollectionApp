@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/category_stat.dart';
+import '../services/discogs_service.dart';
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../models/collection_summary.dart';
@@ -170,5 +171,42 @@ class CollectionStatsService {
     });
 
     return items.take(limit).toList();
+  }
+
+  /// Valeur marché Discogs estimée (médiane × quantité) pour la collection musicale.
+  Future<double> fetchMusicMarketValueEstimate() async {
+    if (!DiscogsService.isConfigured) return 0;
+
+    final userId = CollectionItemScope.currentUserId;
+    if (userId == null) return 0;
+
+    final rows = await CollectionItemScope.personal(
+      _client
+          .from('collection_items')
+          .select('metadata, quantity')
+          .eq('category', CollectionCategory.media.dbValue)
+          .eq('is_wishlist', false)
+          .eq('is_sold', false)
+          .eq('is_for_sale', false),
+      userId: userId,
+    );
+
+    var total = 0.0;
+    for (final row in rows as List) {
+      final meta = row['metadata'];
+      if (meta is! Map) continue;
+      final releaseId = int.tryParse(
+        '${meta['discogs_release_id'] ?? ''}',
+      );
+      if (releaseId == null) continue;
+
+      final stats = await DiscogsService.fetchMarketStats(releaseId);
+      final median = stats?.median ?? stats?.lowest;
+      if (median == null) continue;
+
+      final qty = (row['quantity'] as int?) ?? 1;
+      total += median * qty;
+    }
+    return total;
   }
 }

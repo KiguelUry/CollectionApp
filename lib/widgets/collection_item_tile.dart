@@ -412,7 +412,7 @@ class CollectionItemTile extends StatelessWidget {
       final isCard = category == CollectionCategory.card;
       final isBoardgame = category == CollectionCategory.boardgame;
       image = BggNetworkImage(
-        key: ValueKey('${item.id}:${item.imageUrl}'),
+        key: ValueKey(item.id),
         url: item.imageUrl!,
         fit: isCard ? BoxFit.contain : BoxFit.cover,
         bookCover: isBook,

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../services/group_community_service.dart';
+import 'markdown_rules_editor.dart';
 
 /// Règles collectives d'un jeu au sein d'un groupe (wiki + votes).
 class GroupRulesPanel extends StatefulWidget {
@@ -51,36 +53,43 @@ class _GroupRulesPanelState extends State<GroupRulesPanel> {
     final bodyController = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Ajouter une variante'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: titleController,
-              decoration: const InputDecoration(labelText: 'Titre'),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: bodyController,
-              decoration: const InputDecoration(
-                labelText: 'Règles / résumé',
+      builder: (ctx) {
+        final bottom = MediaQuery.viewInsetsOf(ctx).bottom;
+        return AlertDialog(
+          title: const Text('Ajouter une variante'),
+          contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              padding: EdgeInsets.only(bottom: bottom + 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: titleController,
+                    decoration: const InputDecoration(labelText: 'Titre'),
+                  ),
+                  const SizedBox(height: 12),
+                  MarkdownRulesEditor(
+                    controller: bodyController,
+                    hint: '## Objectif\n\n- Règle 1',
+                  ),
+                ],
               ),
-              maxLines: 5,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Annuler'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Publier'),
             ),
           ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Annuler'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Publier'),
-          ),
-        ],
-      ),
+        );
+      },
     );
     if (ok != true) return;
     final body = bodyController.text.trim();
@@ -153,7 +162,11 @@ class _GroupRulesPanelState extends State<GroupRulesPanel> {
                         if (rule == _rules.first)
                           Padding(
                             padding: const EdgeInsets.only(right: 6),
-                            child: Icon(Icons.push_pin, size: 16, color: widget.accent),
+                            child: Icon(
+                              Icons.push_pin,
+                              size: 16,
+                              color: widget.accent,
+                            ),
                           ),
                         Expanded(
                           child: Text(
@@ -176,7 +189,12 @@ class _GroupRulesPanelState extends State<GroupRulesPanel> {
                       ],
                     ),
                     const SizedBox(height: 6),
-                    Text(rule.body),
+                    MarkdownBody(
+                      data: rule.body,
+                      styleSheet: MarkdownStyleSheet.fromTheme(
+                        Theme.of(context),
+                      ),
+                    ),
                   ],
                 ),
               ),

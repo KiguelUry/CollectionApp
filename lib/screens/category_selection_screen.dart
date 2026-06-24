@@ -3,7 +3,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_category.dart';
 import '../models/collection_summary.dart';
 import '../services/collection_stats_service.dart';
-import '../widgets/collapsible_collection_overview.dart';
+import '../services/recommendation_service.dart';
+import '../widgets/recommendations_banner.dart';
 import '../widgets/main_drawer.dart';
 import '../models/user_collection_type.dart';
 import '../services/user_collection_type_service.dart';
@@ -35,6 +36,7 @@ class CategorySelectionScreen extends StatefulWidget {
 
 class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
   final _statsService = CollectionStatsService();
+  final _recommendations = RecommendationService();
   Map<CollectionCategory, int> _counts = {};
   Map<CollectionCategory, int> _groupCounts = {};
   Map<CollectionCategory, int> _wishlistCounts = {};
@@ -42,6 +44,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
   CollectionSummary _summary = const CollectionSummary();
   bool _loadingCounts = true;
   List<HubTileEntry> _orderedTiles = [];
+  List<Recommendation> _recommendationsList = [];
 
   @override
   void initState() {
@@ -79,6 +82,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
       ...CollectionCategory.menuValues.map(HubTileEntry.category),
     ];
     CollectionSummary summary = const CollectionSummary();
+    var recommendationsList = <Recommendation>[];
     String? loadError;
 
     try {
@@ -134,6 +138,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
 
       try {
         summary = await _statsService.fetchSummary();
+        recommendationsList = await _recommendations.generate(limit: 6);
       } catch (_) {}
 
       try {
@@ -154,6 +159,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
         _customCounts = customCounts;
         _orderedTiles = orderedTiles;
         _summary = summary;
+        _recommendationsList = recommendationsList;
         _loadingCounts = false;
       });
       if (loadError != null) {
@@ -327,7 +333,10 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
           Container(
             width: double.infinity,
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
-            decoration: AppTheme.heroGradient(scheme.primary),
+            decoration: AppTheme.heroGradient(
+              scheme.primary,
+              brightness: Theme.of(context).brightness,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -368,6 +377,11 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
               ],
             ),
           ),
+          if (!_loadingCounts && _recommendationsList.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: RecommendationsBanner(items: _recommendationsList),
+            ),
           Expanded(
             child: _loadingCounts
                 ? const Center(child: CircularProgressIndicator())

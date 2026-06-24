@@ -1,8 +1,10 @@
 import 'dart:typed_data';
 
+import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../widgets/avatar_crop_sheet.dart';
 import '../models/collection_item.dart';
 import '../models/user_profile.dart';
 import '../utils/collection_item_filters.dart';
@@ -134,22 +136,29 @@ class ProfileService {
     return UserProfile.fromJson(Map<String, dynamic>.from(row));
   }
 
-  /// Choisit une image (galerie) et l'envoie dans Storage `avatars/{userId}/avatar.jpg`.
-  Future<String> pickAndUploadAvatar() async {
+  /// Choisit une image (galerie), recadre et l'envoie dans Storage.
+  Future<String> pickAndUploadAvatar({BuildContext? cropContext}) async {
     final id = _userId;
     if (id == null) throw Exception('Non connecté');
 
     final picked = await _picker.pickImage(
       source: ImageSource.gallery,
-      maxWidth: 512,
-      maxHeight: 512,
-      imageQuality: 85,
+      maxWidth: 1200,
+      maxHeight: 1200,
+      imageQuality: 92,
     );
     if (picked == null) {
       throw Exception('Aucune image sélectionnée');
     }
 
-    final bytes = await picked.readAsBytes();
+    var bytes = await picked.readAsBytes();
+    if (cropContext != null && cropContext.mounted) {
+      final cropped = await AvatarCropSheet.show(cropContext, bytes);
+      if (cropped == null) {
+        throw Exception('Recadrage annulé');
+      }
+      bytes = cropped;
+    }
     return uploadAvatarBytes(bytes);
   }
 

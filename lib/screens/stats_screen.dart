@@ -4,7 +4,8 @@ import '../models/collection_item.dart';
 import '../models/collection_summary.dart';
 import '../services/collection_stats_service.dart';
 import '../widgets/app_app_bar.dart';
-import '../widgets/share_collection_sheet.dart';
+import '../services/recommendation_service.dart';
+import '../widgets/recommendations_banner.dart';
 
 /// Statistiques et export de la collection.
 class StatsScreen extends StatefulWidget {
@@ -20,6 +21,8 @@ class _StatsScreenState extends State<StatsScreen> {
   CollectionSummary _summary = const CollectionSummary();
   List<CategoryStat> _byCategory = [];
   List<CollectionItem> _topItems = [];
+  double _musicMarketValue = 0;
+  List<Recommendation> _recommendations = [];
   bool _loading = true;
 
   @override
@@ -35,10 +38,14 @@ class _StatsScreenState extends State<StatsScreen> {
         _stats.fetchSummary(),
         _stats.fetchCategoryStats(),
         _stats.fetchTopValuedItems(),
+        _stats.fetchMusicMarketValueEstimate(),
+        RecommendationService().generate(limit: 5),
       ]);
       _summary = results[0] as CollectionSummary;
       _byCategory = results[1] as List<CategoryStat>;
       _topItems = results[2] as List<CollectionItem>;
+      _musicMarketValue = results[3] as double;
+      _recommendations = results[4] as List<Recommendation>;
     } catch (_) {
       _byCategory = [];
       _topItems = [];
@@ -89,11 +96,20 @@ class _StatsScreenState extends State<StatsScreen> {
                                 ? '${_summary.pricedItemCount} fiche(s) avec prix d\'achat'
                                 : 'Renseigne des prix d\'achat sur tes fiches',
                           ),
+                          if (_musicMarketValue > 0)
+                            _metricRow(
+                              'Collection musicale (Argus Discogs)',
+                              '${_musicMarketValue.toStringAsFixed(2)} €',
+                              subtitle: 'Estimation médiane marché vinyles / CD',
+                            ),
                         ],
                       ),
                     ),
                   ),
                   const SizedBox(height: 12),
+                  if (_recommendations.isNotEmpty)
+                    RecommendationsBanner(items: _recommendations),
+                  if (_recommendations.isNotEmpty) const SizedBox(height: 12),
                   FilledButton.icon(
                     onPressed: () => showShareCollectionSheet(context),
                     icon: const Icon(Icons.ios_share),

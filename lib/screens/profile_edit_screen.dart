@@ -3,7 +3,9 @@ import '../models/collection_item.dart';
 import '../models/user_profile.dart';
 import '../services/profile_service.dart';
 import '../services/showcase_service.dart';
+import '../services/quick_log_service.dart';
 import '../widgets/profile/favorites_showcase.dart';
+import '../widgets/profile/quick_log_timeline.dart';
 import '../widgets/profile/trophy_picker_sheet.dart';
 import '../widgets/profile_avatar.dart';
 
@@ -17,6 +19,7 @@ class ProfileEditScreen extends StatefulWidget {
 class _ProfileEditScreenState extends State<ProfileEditScreen> {
   final _service = ProfileService();
   final _showcase = ShowcaseService();
+  final _quickLog = QuickLogService();
   final _usernameController = TextEditingController();
   final _bioController = TextEditingController();
 
@@ -28,6 +31,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   bool _savingTrophies = false;
   final List<String?> _trophySlotIds = List.filled(6, null);
   final List<CollectionItem?> _trophySlots = List.filled(6, null);
+  List<QuickLogEntry> _quickLogs = [];
 
   @override
   void initState() {
@@ -52,6 +56,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         _trophySlotIds[i] = i < ids.length ? ids[i] : null;
       }
       final trophies = await _service.fetchFavoriteItems(ids);
+      final logs = await _quickLog.fetchMyLogs();
       if (!mounted) return;
       setState(() {
         _profile = p;
@@ -61,6 +66,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         for (var i = 0; i < 6; i++) {
           _trophySlots[i] = i < trophies.length ? trophies[i] : null;
         }
+        _quickLogs = logs;
         _loading = false;
       });
     } catch (e) {
@@ -76,7 +82,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   Future<void> _changeAvatar() async {
     setState(() => _uploadingAvatar = true);
     try {
-      final url = await _service.pickAndUploadAvatar();
+      final url = await _service.pickAndUploadAvatar(cropContext: context);
       final updated = _profile!.copyWith(avatarUrl: url);
       final saved = await _service.updateProfile(updated);
       if (mounted) {
@@ -114,6 +120,70 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       }
     } finally {
       if (mounted) setState(() => _uploadingAvatar = false);
+    }
+  }
+
+  Future<void> _addQuickLog() async {
+    final noteController = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final bottom = MediaQuery.viewInsetsOf(ctx).bottom;
+        return AlertDialog(
+          title: const Text('Quick Log'),
+          content: SingleChildScrollView(
+            padding: EdgeInsets.only(bottom: bottom),
+            child: TextField(
+              controller: noteController,
+              autofocus: true,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'Qu\'as-tu fait ?',
+                hintText: 'ex: Tome 1 de Kagurabachi lu ce soir',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Annuler'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Enregistrer'),
+            ),
+          ],
+        );
+      },
+    );
+    if (ok != true) return;
+    final note = noteController.text.trim();
+    if (note.isEmpty) return;
+    try {
+      await _quickLog.addLog(note: note);
+      _quickLogs = await _quickLog.fetchMyLogs();
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteQuickLog(QuickLogEntry entry) async {
+    try {
+      await _quickLog.deleteLog(entry.id);
+      _quickLogs = await _quickLog.fetchMyLogs();
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e')),
+        );
+      }
     }
   }
 
@@ -379,6 +449,12 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                     accentColor: accent,
                     editable: true,
                     onSlotTap: _onTrophySlotTap,
+                  ),
+                  const SizedBox(height: 24),
+                  QuickLogTimeline(
+                    entries: _quickLogs,
+                    onAdd: _addQuickLog,
+                    onDelete: _deleteQuickLog,
                   ),
                   const SizedBox(height: 24),
                   Card(

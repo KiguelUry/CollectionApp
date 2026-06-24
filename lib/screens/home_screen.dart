@@ -221,7 +221,6 @@ class _HomeScreenState extends State<HomeScreen>
     if (!mounted) return;
     setState(() {
       _itemRows = rows;
-      _enrichedItems = null;
       _itemsLoading = false;
     });
     _scheduleEnrich();

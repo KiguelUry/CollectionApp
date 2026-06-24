@@ -7,6 +7,7 @@ import '../utils/collection_grid_grouper.dart';
 import '../utils/collection_grid_layout.dart';
 import '../utils/collection_item_filters.dart';
 import '../services/group_service.dart';
+import '../services/item_group_service.dart';
 import '../models/collection_list_filters.dart';
 import '../models/collection_view_mode.dart';
 import '../models/item_tag.dart';
@@ -37,6 +38,7 @@ class GroupDetailScreen extends StatefulWidget {
 class _GroupDetailScreenState extends State<GroupDetailScreen>
     with TickerProviderStateMixin {
   final _groupService = GroupService();
+  final _itemGroupService = ItemGroupService();
   final _tagService = TagService();
   final _collectionSearch = TextEditingController();
   final _wishlistSearch = TextEditingController();
@@ -51,6 +53,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
   bool _categorySynced = false;
   List<StorageLocation> _locations = [];
   List<ItemTag> _tags = [];
+  Set<String> _junctionItemIds = {};
 
   @override
   void initState() {
@@ -64,6 +67,31 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
         .stream(primaryKey: ['id'])
         .eq('group_id', _group.id);
     _loadFilterData();
+    _loadJunctionItemIds();
+  }
+
+  Future<void> _loadJunctionItemIds() async {
+    final ids = await _itemGroupService.fetchItemIdsForGroup(_group.id);
+    if (mounted) setState(() => _junctionItemIds = ids);
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchExtraJunctionRows(
+    Iterable<String> streamIds,
+  ) async {
+    final streamSet = streamIds.toSet();
+    final extra = _junctionItemIds
+        .where((id) => !streamSet.contains(id))
+        .toList();
+    if (extra.isEmpty) return [];
+    try {
+      final rows = await Supabase.instance.client
+          .from('collection_items')
+          .select()
+          .inFilter('id', extra);
+      return List<Map<String, dynamic>>.from(rows);
+    } catch (_) {
+      return [];
+    }
   }
 
   @override
@@ -119,26 +147,34 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
             ),
           ),
         ),
-        title: Row(
-          children: [
-            GroupBadge.fromGroup(
-              name: _group.name,
-              avatarUrl: _group.avatarUrl,
-              accentColor: _group.accentColor,
-              iconKey: _group.iconKey,
-              radius: 18,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                _group.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w700),
+        title: LayoutBuilder(
+          builder: (context, constraints) {
+            return SizedBox(
+              width: constraints.maxWidth,
+              child: Row(
+                children: [
+                  GroupBadge.fromGroup(
+                    name: _group.name,
+                    avatarUrl: _group.avatarUrl,
+                    accentColor: _group.accentColor,
+                    iconKey: _group.iconKey,
+                    radius: 16,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _group.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
               ),
-            ),
-          ],
+            );
+          },
         ),
+        titleSpacing: 0,
         backgroundColor: Colors.transparent,
         foregroundColor: Colors.white,
         iconTheme: const IconThemeData(color: Colors.white),
@@ -152,29 +188,62 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
               groupName: _group.name,
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.grid_view_rounded),
-            tooltip: 'Collections',
-            onPressed: () => AppNavigation.openCollections(context),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            tooltip: 'Actions',
+            onSelected: (value) {
+              switch (value) {
+                case 'collections':
+                  AppNavigation.openCollections(context);
+                case 'view':
+                  setState(() {
+                    _viewMode = _viewMode == CollectionViewMode.grid
+                        ? CollectionViewMode.list
+                        : CollectionViewMode.grid;
+                  });
+                case 'edit':
+                  _openEdit();
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'collections',
+                child: ListTile(
+                  leading: const Icon(Icons.grid_view_rounded),
+                  title: const Text('Collections'),
+                  contentPadding: EdgeInsets.zero,
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+              PopupMenuItem(
+                value: 'view',
+                child: ListTile(
+                  leading: Icon(
+                    _viewMode == CollectionViewMode.grid
+                        ? Icons.view_list
+                        : Icons.grid_view,
+                  ),
+                  title: Text(
+                    _viewMode == CollectionViewMode.grid
+                        ? 'Vue liste'
+                        : 'Vue grille',
+                  ),
+                  contentPadding: EdgeInsets.zero,
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+              if (canEdit)
+                const PopupMenuItem(
+                  value: 'edit',
+                  child: ListTile(
+                    leading: Icon(Icons.palette_outlined),
+                    title: Text('Personnaliser'),
+                    contentPadding: EdgeInsets.zero,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+            ],
           ),
-          IconButton(
-            icon: Icon(
-              _viewMode == CollectionViewMode.grid
-                  ? Icons.view_list
-                  : Icons.grid_view,
-            ),
-            onPressed: () => setState(() {
-              _viewMode = _viewMode == CollectionViewMode.grid
-                  ? CollectionViewMode.list
-                  : CollectionViewMode.grid;
-            }),
-          ),
-          if (canEdit)
-            IconButton(
-              icon: const Icon(Icons.palette_outlined),
-              tooltip: 'Personnaliser',
-              onPressed: _openEdit,
-            ),
         ],
         bottom: TabBar(
           controller: _scopeTabController,
@@ -198,57 +267,68 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
             return const Center(child: CircularProgressIndicator());
           }
 
-          return FutureBuilder<List<CollectionItem>>(
-            future: _tagService.enrichItems(
-              snapshot.data!
-                  .map((j) => CollectionItem.fromJson(j))
-                  .toList(),
+          return FutureBuilder<List<Map<String, dynamic>>>(
+            future: _fetchExtraJunctionRows(
+              snapshot.data!.map((r) => r['id'] as String),
             ),
-            builder: (context, enriched) {
-              final all = enriched.data ?? [];
-              final collection = all
-                  .where((i) => !i.isWishlist && isActiveCollectionItem(i))
-                  .toList();
-              final wishlist = all.where((i) => i.isWishlist).toList();
-              _pickInitialCategory(collection);
+            builder: (context, extraSnap) {
+              final mergedRows = [
+                ...snapshot.data!,
+                ...?extraSnap.data,
+              ];
+              return FutureBuilder<List<CollectionItem>>(
+                future: _tagService.enrichItems(
+                  mergedRows
+                      .map((j) => CollectionItem.fromJson(j))
+                      .toList(),
+                ),
+                builder: (context, enriched) {
+                  final all = enriched.data ?? [];
+                  final collection = all
+                      .where((i) => !i.isWishlist && isActiveCollectionItem(i))
+                      .toList();
+                  final wishlist = all.where((i) => i.isWishlist).toList();
+                  _pickInitialCategory(collection);
 
-              return Column(
-                children: [
-                  GroupStatsBanner(
-                    collectionItems: collection,
-                    wishlistItems: wishlist,
-                    accent: accent,
-                  ),
-                  Expanded(
-                    child: TabBarView(
-                      controller: _scopeTabController,
-                      children: [
-                        _buildScopePane(
-                          items: collection,
-                          isWishlist: false,
-                          filters: _collectionFilters,
-                          searchController: _collectionSearch,
-                          onFiltersChanged: (f) =>
-                              setState(() => _collectionFilters = f),
-                          emptyHint: 'Aucun objet partagé dans ce groupe.',
+                  return Column(
+                    children: [
+                      GroupStatsBanner(
+                        collectionItems: collection,
+                        wishlistItems: wishlist,
+                        accent: accent,
+                      ),
+                      Expanded(
+                        child: TabBarView(
+                          controller: _scopeTabController,
+                          children: [
+                            _buildScopePane(
+                              items: collection,
+                              isWishlist: false,
+                              filters: _collectionFilters,
+                              searchController: _collectionSearch,
+                              onFiltersChanged: (f) =>
+                                  setState(() => _collectionFilters = f),
+                              emptyHint: 'Aucun objet partagé dans ce groupe.',
+                            ),
+                            _buildScopePane(
+                              items: wishlist,
+                              isWishlist: true,
+                              filters: _wishlistFilters,
+                              searchController: _wishlistSearch,
+                              onFiltersChanged: (f) =>
+                                  setState(() => _wishlistFilters = f),
+                              emptyHint: 'Rien en wishlist pour ce groupe.',
+                            ),
+                            GroupWantedBoard(
+                              groupId: _group.id,
+                              accent: accent,
+                            ),
+                          ],
                         ),
-                        _buildScopePane(
-                          items: wishlist,
-                          isWishlist: true,
-                          filters: _wishlistFilters,
-                          searchController: _wishlistSearch,
-                          onFiltersChanged: (f) =>
-                              setState(() => _wishlistFilters = f),
-                          emptyHint: 'Rien en wishlist pour ce groupe.',
-                        ),
-                        GroupWantedBoard(
-                          groupId: _group.id,
-                          accent: accent,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+                      ),
+                    ],
+                  );
+                },
               );
             },
           );

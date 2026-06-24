@@ -4,7 +4,7 @@ import '../../models/collection_category.dart';
 import '../../models/collection_item.dart';
 import '../collection_cover_image.dart';
 
-/// Vitrine horizontale de favoris (style Letterboxd).
+/// Vitrine fixe 3×2 (style Letterboxd / podium).
 class FavoritesShowcase extends StatelessWidget {
   final List<CollectionItem?> slots;
   final Color accentColor;
@@ -19,9 +19,7 @@ class FavoritesShowcase extends StatelessWidget {
     this.onSlotTap,
   });
 
-  static const _coverWidth = 88.0;
-  static const _coverHeight = 132.0;
-  static const _radius = 16.0;
+  static const _radius = 14.0;
 
   @override
   Widget build(BuildContext context) {
@@ -29,6 +27,7 @@ class FavoritesShowcase extends StatelessWidget {
       6,
       (i) => i < slots.length ? slots[i] : null,
     );
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
       decoration: BoxDecoration(
@@ -36,12 +35,17 @@ class FavoritesShowcase extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            accentColor.withValues(alpha: 0.18),
-            Colors.white.withValues(alpha: 0.55),
-          ],
+          colors: isDark
+              ? [
+                  accentColor.withValues(alpha: 0.22),
+                  const Color(0xFF1A1A22),
+                ]
+              : [
+                  accentColor.withValues(alpha: 0.18),
+                  Colors.white.withValues(alpha: 0.55),
+                ],
         ),
-        border: Border.all(color: accentColor.withValues(alpha: 0.2)),
+        border: Border.all(color: accentColor.withValues(alpha: 0.25)),
         boxShadow: [
           BoxShadow(
             color: accentColor.withValues(alpha: 0.12),
@@ -68,24 +72,47 @@ class FavoritesShowcase extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 'Tes 6 coups de cœur — visibles par tes amis.',
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isDark ? Colors.grey.shade400 : Colors.grey.shade700,
+                ),
               ),
               const SizedBox(height: 14),
-              SizedBox(
-                height: _coverHeight + 8,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: 6,
-                  separatorBuilder: (_, _) => const SizedBox(width: 12),
-                  itemBuilder: (context, index) {
-                    final item = items[index];
-                    return _FavoriteSlot(
-                      item: item,
-                      editable: editable,
-                      onTap: editable ? () => onSlotTap?.call(index) : null,
-                    );
-                  },
-                ),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  const gap = 10.0;
+                  const rows = 2;
+                  const cols = 3;
+                  final cellW = (constraints.maxWidth - gap * (cols - 1)) / cols;
+                  final cellH = cellW * 1.45;
+                  return Column(
+                    children: [
+                      for (var row = 0; row < rows; row++) ...[
+                        if (row > 0) const SizedBox(height: gap),
+                        Row(
+                          children: [
+                            for (var col = 0; col < cols; col++) ...[
+                              if (col > 0) const SizedBox(width: gap),
+                              Expanded(
+                                child: SizedBox(
+                                  height: cellH,
+                                  child: _FavoriteSlot(
+                                    item: items[row * cols + col],
+                                    editable: editable,
+                                    radius: _radius,
+                                    onTap: editable
+                                        ? () => onSlotTap?.call(row * cols + col)
+                                        : null,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ],
+                    ],
+                  );
+                },
               ),
             ],
           ),
@@ -98,20 +125,21 @@ class FavoritesShowcase extends StatelessWidget {
 class _FavoriteSlot extends StatelessWidget {
   final CollectionItem? item;
   final bool editable;
+  final double radius;
   final VoidCallback? onTap;
 
   const _FavoriteSlot({
     required this.item,
     required this.editable,
+    required this.radius,
     this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final child = Container(
-      width: FavoritesShowcase._coverWidth,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(FavoritesShowcase._radius),
+        borderRadius: BorderRadius.circular(radius),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.14),
@@ -121,25 +149,27 @@ class _FavoriteSlot extends StatelessWidget {
         ],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(FavoritesShowcase._radius),
+        borderRadius: BorderRadius.circular(radius),
         child: item != null &&
                 item!.imageUrl != null &&
                 item!.imageUrl!.isNotEmpty
-            ? CollectionCoverImage(
-                url: item!.imageUrl!,
-                width: FavoritesShowcase._coverWidth,
-                height: FavoritesShowcase._coverHeight,
-                bookCover: item!.category == CollectionCategory.book,
-                fit: BoxFit.cover,
+            ? LayoutBuilder(
+                builder: (context, c) => CollectionCoverImage(
+                  url: item!.imageUrl!,
+                  width: c.maxWidth,
+                  height: c.maxHeight,
+                  bookCover: item!.category == CollectionCategory.book,
+                  fit: BoxFit.cover,
+                ),
               )
-            : Container(
-                width: FavoritesShowcase._coverWidth,
-                height: FavoritesShowcase._coverHeight,
+            : ColoredBox(
                 color: Colors.grey.shade200,
-                child: Icon(
-                  editable ? Icons.add_rounded : Icons.star_outline,
-                  color: Colors.grey.shade500,
-                  size: 32,
+                child: Center(
+                  child: Icon(
+                    editable ? Icons.add_rounded : Icons.star_outline,
+                    color: Colors.grey.shade500,
+                    size: 28,
+                  ),
                 ),
               ),
       ),
@@ -150,7 +180,7 @@ class _FavoriteSlot extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(FavoritesShowcase._radius),
+        borderRadius: BorderRadius.circular(radius),
         child: child,
       ),
     );

@@ -97,10 +97,18 @@ abstract final class AppTheme {
   }
 
   static ThemeData get dark {
+    const midnight = Color(0xFF121212);
+    const deepBlack = Color(0xFF0A0A0C);
+
     final scheme = ColorScheme.fromSeed(
       seedColor: seed,
       brightness: Brightness.dark,
-      surface: const Color(0xFF121218),
+      surface: midnight,
+    ).copyWith(
+      surface: midnight,
+      surfaceContainerLow: const Color(0xFF1A1A1F),
+      surfaceContainerHigh: const Color(0xFF242429),
+      outlineVariant: const Color(0xFF3A3A42),
     );
 
     final textTheme = _textTheme(ThemeData.dark().textTheme, scheme.onSurface);
@@ -110,7 +118,7 @@ abstract final class AppTheme {
       colorScheme: scheme,
       textTheme: textTheme,
       primaryTextTheme: textTheme,
-      scaffoldBackgroundColor: const Color(0xFF0E0E12),
+      scaffoldBackgroundColor: deepBlack,
       appBarTheme: AppBarTheme(
         centerTitle: false,
         elevation: 0,
@@ -178,14 +186,30 @@ abstract final class AppTheme {
     );
   }
 
-  static BoxDecoration heroGradient(Color accent) => BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            accent.withValues(alpha: 0.12),
-            surfaceTint,
-          ],
-        ),
-      );
+  static BoxDecoration heroGradient(Color accent, {Brightness? brightness}) {
+    final isDark = brightness == Brightness.dark;
+    return BoxDecoration(
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: isDark
+            ? [
+                accent.withValues(alpha: 0.28),
+                const Color(0xFF121212),
+              ]
+            : [
+                accent.withValues(alpha: 0.12),
+                surfaceTint,
+              ],
+      ),
+    );
+  }
+
+  /// Liseré accent catégorie (mode sombre).
+  static BoxDecoration categoryAccentBorder(Color accent, {double radius = 20}) {
+    return BoxDecoration(
+      borderRadius: BorderRadius.circular(radius),
+      border: Border.all(color: accent.withValues(alpha: 0.45), width: 1.2),
+    );
+  }
 }

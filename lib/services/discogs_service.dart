@@ -144,4 +144,56 @@ class DiscogsService {
       'source': 'discogs',
     };
   }
+
+  /// Prix marché Discogs (min / médian / max) pour un release.
+  static Future<DiscogsMarketStats?> fetchMarketStats(int releaseId) async {
+    if (!isConfigured) return null;
+    try {
+      final url = Uri.https(
+        'api.discogs.com',
+        '/marketplace/stats/$releaseId',
+      );
+      final response = await http.get(url, headers: _headers);
+      if (response.statusCode != 200) return null;
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      double? parsePrice(dynamic v) {
+        if (v == null) return null;
+        if (v is num) return v.toDouble();
+        return double.tryParse('$v');
+      }
+
+      final lowest = parsePrice(data['lowest_price']);
+      final median = parsePrice(data['median_price']);
+      final highest = parsePrice(data['highest_price']);
+      if (lowest == null && median == null && highest == null) return null;
+
+      return DiscogsMarketStats(
+        lowest: lowest,
+        median: median,
+        highest: highest,
+        currency: data['currency'] as String? ?? 'EUR',
+      );
+    } catch (e) {
+      if (kDebugMode) debugPrint('Discogs market stats: $e');
+      return null;
+    }
+  }
+}
+
+class DiscogsMarketStats {
+  final double? lowest;
+  final double? median;
+  final double? highest;
+  final String currency;
+
+  const DiscogsMarketStats({
+    this.lowest,
+    this.median,
+    this.highest,
+    this.currency = 'EUR',
+  });
+
+  String format(double? v) =>
+      v == null ? '—' : '${v.toStringAsFixed(2)} $currency';
 }

@@ -102,8 +102,8 @@ class CollectionCoverImage extends StatelessWidget {
         memCacheHeight: cacheH,
         maxWidthDiskCache: cacheW,
         maxHeightDiskCache: cacheH,
-        fadeInDuration: const Duration(milliseconds: 120),
-        fadeOutDuration: const Duration(milliseconds: 80),
+        fadeInDuration: Duration.zero,
+        fadeOutDuration: Duration.zero,
         placeholder: (_, _) => _fallback(
           child: Center(
             child: SizedBox(

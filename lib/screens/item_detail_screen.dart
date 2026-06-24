@@ -9,6 +9,7 @@ import '../models/collection_group.dart';
 import '../models/collection_item.dart';
 import '../models/item_condition.dart';
 import '../services/group_service.dart';
+import '../services/item_group_service.dart';
 import '../services/loan_service.dart';
 import '../services/collection_refresh.dart';
 import '../widgets/app_app_bar.dart';
@@ -22,6 +23,8 @@ import '../widgets/star_rating_bar.dart';
 import '../widgets/assign_book_series_sheet.dart';
 import '../widgets/item_tags_editor.dart';
 import '../widgets/boardgame_expansions_section.dart';
+import '../widgets/discogs_market_value_card.dart';
+import '../widgets/friend_ratings_panel.dart';
 import '../widgets/group_rules_panel.dart';
 import '../widgets/profile_avatar.dart';
 import '../services/boardgame_expansion_service.dart';
@@ -55,6 +58,7 @@ class ItemDetailScreen extends StatefulWidget {
 
 class _ItemDetailScreenState extends State<ItemDetailScreen> {
   final _loanService = LoanService();
+  final _itemGroupService = ItemGroupService();
   late CollectionItem _item;
   late final TextEditingController _reviewController;
   late final TextEditingController _priceController;
@@ -88,8 +92,18 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       _gamesPlayedController.addListener(_scheduleSave);
       _personalRulesController.addListener(_scheduleSave);
       _loadGroups();
+      _loadGroupMembership();
       _reloadItem();
     }
+  }
+
+  Future<void> _loadGroupMembership() async {
+    final ids = await _itemGroupService.fetchGroupIdsForItem(_item.id);
+    if (!mounted || ids.isEmpty) return;
+    setState(() {
+      _selectedGroupIds = ids.toSet();
+      _syncGroupSelectionFromItem();
+    });
   }
 
   @override
@@ -172,7 +186,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
 
   Map<String, dynamic> _metadataWithGroups(List<String> groupIds) {
     final meta = Map<String, dynamic>.from(_item.metadata ?? {});
-    if (groupIds.length > 1) {
+    if (groupIds.isNotEmpty) {
       meta['group_ids'] = groupIds;
     } else {
       meta.remove('group_ids');
@@ -239,7 +253,9 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
           .from('collection_items')
           .update(_item.toUpdateJson())
           .eq('id', _item.id);
+      await _itemGroupService.syncItemGroups(_item.id, groupIds);
       await _reloadItem();
+      CollectionRefresh.instance.bump();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -955,6 +971,18 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         border: OutlineInputBorder(),
                       ),
                     ),
+                    if (!ro) ...[
+                      const SizedBox(height: 16),
+                      FriendRatingsPanel(item: _item),
+                    ],
+                    if (_item.category == CollectionCategory.media &&
+                        !isWishlist) ...[
+                      const SizedBox(height: 16),
+                      DiscogsMarketValueCard(
+                        releaseId:
+                            _item.metadata?['discogs_release_id']?.toString(),
+                      ),
+                    ],
                     if (!ro && !_item.isGroupOwned) ...[
                     const Divider(height: 32),
                     _buildSectionTitle('Prêt'),
