@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/collection_item.dart';
+import '../utils/collection_item_scope.dart';
 import '../utils/supabase_embeds.dart';
 
 class LoanService {

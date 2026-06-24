@@ -2,6 +2,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
+import '../utils/collection_item_filters.dart';
 import '../utils/supabase_embeds.dart';
 import '../utils/search_relevance.dart';
 
