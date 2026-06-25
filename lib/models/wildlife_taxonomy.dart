@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../services/inaturalist_service.dart';
-
 /// Les 5 règnes du vivant (niveau 1 du Pokédex).
 enum WildlifeRealm {
   animalia,
@@ -51,6 +49,58 @@ enum WildlifeRealm {
       if (r.dbValue == value) return r;
     }
     return WildlifeRealm.animalia;
+  }
+}
+
+/// Groupes animaux (sous le règne Animalia).
+enum WildlifeKingdom {
+  mammal,
+  bird,
+  fish,
+  reptileAmphibian,
+  insect,
+  other;
+
+  String get dbValue => switch (this) {
+        WildlifeKingdom.mammal => 'mammal',
+        WildlifeKingdom.bird => 'bird',
+        WildlifeKingdom.fish => 'fish',
+        WildlifeKingdom.reptileAmphibian => 'reptile_amphibian',
+        WildlifeKingdom.insect => 'insect',
+        WildlifeKingdom.other => 'other',
+      };
+
+  String get label => switch (this) {
+        WildlifeKingdom.mammal => 'Mammifères',
+        WildlifeKingdom.bird => 'Oiseaux',
+        WildlifeKingdom.fish => 'Poissons',
+        WildlifeKingdom.reptileAmphibian => 'Reptiles & amphibiens',
+        WildlifeKingdom.insect => 'Insectes',
+        WildlifeKingdom.other => 'Autres',
+      };
+
+  static WildlifeKingdom fromIconic(String iconic) {
+    final k = iconic.toLowerCase();
+    if (k.contains('mammal')) return WildlifeKingdom.mammal;
+    if (k.contains('aves') || k.contains('bird')) return WildlifeKingdom.bird;
+    if (k.contains('actinopterygii') || k.contains('fish')) {
+      return WildlifeKingdom.fish;
+    }
+    if (k.contains('reptile') || k.contains('amphib')) {
+      return WildlifeKingdom.reptileAmphibian;
+    }
+    if (k.contains('insect') || k.contains('arach')) {
+      return WildlifeKingdom.insect;
+    }
+    return WildlifeKingdom.other;
+  }
+
+  static WildlifeKingdom? fromDb(String? value) {
+    if (value == null) return null;
+    for (final k in WildlifeKingdom.values) {
+      if (k.dbValue == value) return k;
+    }
+    return null;
   }
 }
 
