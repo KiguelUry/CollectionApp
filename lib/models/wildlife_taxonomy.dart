@@ -2,6 +2,58 @@ import 'package:flutter/material.dart';
 
 import '../services/inaturalist_service.dart';
 
+/// Les 5 règnes du vivant (niveau 1 du Pokédex).
+enum WildlifeRealm {
+  animalia,
+  plantae,
+  fungi,
+  protista,
+  monera;
+
+  String get dbValue => name;
+
+  String get label => switch (this) {
+        WildlifeRealm.animalia => 'Animal',
+        WildlifeRealm.plantae => 'Végétal',
+        WildlifeRealm.fungi => 'Champignon',
+        WildlifeRealm.protista => 'Protiste',
+        WildlifeRealm.monera => 'Monère',
+      };
+
+  String get subtitle => switch (this) {
+        WildlifeRealm.animalia =>
+          'Multicellulaires, hétérotrophes, mobiles',
+        WildlifeRealm.plantae => 'Photosynthèse, plantes',
+        WildlifeRealm.fungi => 'Décomposeurs, champignons & levures',
+        WildlifeRealm.protista => 'Eucaryotes unicellulaires simples',
+        WildlifeRealm.monera => 'Bactéries & archées (microscopique)',
+      };
+
+  IconData get icon => switch (this) {
+        WildlifeRealm.animalia => Icons.pets,
+        WildlifeRealm.plantae => Icons.local_florist,
+        WildlifeRealm.fungi => Icons.spa,
+        WildlifeRealm.protista => Icons.bubble_chart,
+        WildlifeRealm.monera => Icons.biotech,
+      };
+
+  Color get color => switch (this) {
+        WildlifeRealm.animalia => const Color(0xFF39FF14),
+        WildlifeRealm.plantae => const Color(0xFF66BB6A),
+        WildlifeRealm.fungi => const Color(0xFF8D6E63),
+        WildlifeRealm.protista => const Color(0xFF26C6DA),
+        WildlifeRealm.monera => const Color(0xFFAB47BC),
+      };
+
+  static WildlifeRealm fromDb(String? value) {
+    if (value == null) return WildlifeRealm.animalia;
+    for (final r in WildlifeRealm.values) {
+      if (r.dbValue == value) return r;
+    }
+    return WildlifeRealm.animalia;
+  }
+}
+
 /// Tuile de navigation taxonomique (famille, groupe de genres…).
 class WildlifeTaxonNode {
   final String id;
@@ -21,6 +73,63 @@ class WildlifeTaxonNode {
 abstract final class WildlifeTaxonomy {
   static const otherFamilyId = 'other';
   static const otherGenusGroupId = 'other';
+  static const featuredLimit = 10;
+
+  /// Familles affichées en vedette (10) + tuile « Autre… ».
+  static List<WildlifeTaxonNode> featuredFamilies(WildlifeKingdom kingdom) {
+    final all =
+        familiesFor(kingdom).where((n) => n.id != otherFamilyId).toList();
+    final out = all.take(featuredLimit).toList();
+    out.add(
+      const WildlifeTaxonNode(
+        id: otherFamilyId,
+        label: 'Autre…',
+        icon: Icons.apps,
+        color: Color(0xFFB0BEC5),
+      ),
+    );
+    return out;
+  }
+
+  /// Familles supplémentaires accessibles via « Autre… ».
+  static List<WildlifeTaxonNode> extraFamilies(WildlifeKingdom kingdom) {
+    final all =
+        familiesFor(kingdom).where((n) => n.id != otherFamilyId).toList();
+    if (all.length <= featuredLimit) return [];
+    return all.skip(featuredLimit).toList();
+  }
+
+  static List<WildlifeTaxonNode> featuredGenusGroups(String familyId) {
+    final all =
+        genusGroupsFor(familyId).where((n) => n.id != otherGenusGroupId).toList();
+    final out = all.take(featuredLimit).toList();
+    if (all.length > featuredLimit || out.isEmpty) {
+      out.add(
+        const WildlifeTaxonNode(
+          id: otherGenusGroupId,
+          label: 'Autre…',
+          icon: Icons.apps,
+          color: Color(0xFFB0BEC5),
+        ),
+      );
+    } else if (!out.any((n) => n.id == otherGenusGroupId)) {
+      out.add(
+        const WildlifeTaxonNode(
+          id: otherGenusGroupId,
+          label: 'Autre…',
+          icon: Icons.apps,
+        ),
+      );
+    }
+    return out;
+  }
+
+  static List<WildlifeTaxonNode> extraGenusGroups(String familyId) {
+    final all =
+        genusGroupsFor(familyId).where((n) => n.id != otherGenusGroupId).toList();
+    if (all.length <= featuredLimit) return [];
+    return all.skip(featuredLimit).toList();
+  }
 
   static List<WildlifeTaxonNode> familiesFor(WildlifeKingdom kingdom) {
     return switch (kingdom) {
@@ -54,6 +163,48 @@ abstract final class WildlifeTaxonomy {
             label: 'Cervidés',
             icon: Icons.park,
             color: Color(0xFF66BB6A),
+          ),
+          WildlifeTaxonNode(
+            id: 'equidae',
+            label: 'Équidés',
+            icon: Icons.directions_run,
+            color: Color(0xFF8D6E63),
+          ),
+          WildlifeTaxonNode(
+            id: 'bovidae',
+            label: 'Bovidés',
+            icon: Icons.agriculture,
+            color: Color(0xFFA1887F),
+          ),
+          WildlifeTaxonNode(
+            id: 'primates',
+            label: 'Primates',
+            icon: Icons.face,
+            color: Color(0xFF795548),
+          ),
+          WildlifeTaxonNode(
+            id: 'rodentia',
+            label: 'Rongeurs',
+            icon: Icons.cruelty_free,
+            color: Color(0xFFBCAAA4),
+          ),
+          WildlifeTaxonNode(
+            id: 'chiroptera',
+            label: 'Chauves-souris',
+            icon: Icons.nightlight,
+            color: Color(0xFF5C6BC0),
+          ),
+          WildlifeTaxonNode(
+            id: 'lagomorpha',
+            label: 'Lagomorphes',
+            icon: Icons.egg,
+            color: Color(0xFFFFCC80),
+          ),
+          WildlifeTaxonNode(
+            id: 'suidae',
+            label: 'Suidés',
+            icon: Icons.grass,
+            color: Color(0xFFFFAB91),
           ),
           WildlifeTaxonNode(
             id: otherFamilyId,
@@ -173,6 +324,18 @@ abstract final class WildlifeTaxonomy {
             label: 'Grands félins',
             icon: Icons.shield_moon,
             color: Color(0xFFFF6F00),
+          ),
+          WildlifeTaxonNode(
+            id: 'lynxes',
+            label: 'Lynx & caracals',
+            icon: Icons.filter_hdr,
+            color: Color(0xFFFF8A65),
+          ),
+          WildlifeTaxonNode(
+            id: 'wild_cats',
+            label: 'Félins sauvages',
+            icon: Icons.forest,
+            color: Color(0xFFD84315),
           ),
           WildlifeTaxonNode(
             id: otherGenusGroupId,
@@ -335,6 +498,7 @@ abstract final class WildlifeTaxonomy {
     final genusGroupId = genusGroupIdFromINat(familyId, genusName);
 
     return {
+      'wildlife_realm': WildlifeRealm.animalia.dbValue,
       'wildlife_kingdom': kingdom.dbValue,
       'wildlife_family': familyId,
       'wildlife_genus_group': genusGroupId,

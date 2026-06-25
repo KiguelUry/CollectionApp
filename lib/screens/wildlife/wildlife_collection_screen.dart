@@ -4,19 +4,20 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../models/collection_category.dart';
 import '../../models/collection_item.dart';
+import '../../models/wildlife_catalog.dart';
 import '../../models/wildlife_taxonomy.dart';
 import '../../services/inaturalist_service.dart';
 import '../../services/profile_service.dart';
 import '../../theme/wildlife_pokedex_theme.dart';
 import '../../widgets/collection_cover_image.dart';
 import '../../widgets/wildlife/inat_search_dialog.dart';
-import '../../widgets/wildlife/pokedex_completion_ring.dart';
+import '../../widgets/wildlife/pokedex_stats_panel.dart';
 import 'wildlife_map_screen.dart';
 import 'wildlife_species_screen.dart';
 
-enum _PokedexLevel { kingdom, family, genusGroup, species }
+enum _PokedexLevel { realm, animalGroup, family, genusGroup, species }
 
-/// Console Pokédex immersive — navigation taxonomique à 4 niveaux.
+/// Console Pokédex — 5 règnes, groupes animaux, familles vedettes + Autre, stats terrain.
 class WildlifeCollectionScreen extends StatefulWidget {
   const WildlifeCollectionScreen({super.key});
 
@@ -30,15 +31,18 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
   bool _loading = true;
   bool _entered = false;
 
-  WildlifeKingdom? _kingdom;
+  WildlifeRealm? _realm;
+  WildlifeKingdom? _animalGroup;
   String? _familyId;
   String? _genusGroupId;
 
   _PokedexLevel get _level {
     if (_genusGroupId != null) return _PokedexLevel.species;
     if (_familyId != null) return _PokedexLevel.genusGroup;
-    if (_kingdom != null) return _PokedexLevel.family;
-    return _PokedexLevel.kingdom;
+    if (_animalGroup != null) return _PokedexLevel.family;
+    if (_realm == WildlifeRealm.animalia) return _PokedexLevel.animalGroup;
+    if (_realm != null) return _PokedexLevel.species;
+    return _PokedexLevel.realm;
   }
 
   @override
@@ -73,8 +77,17 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
 
   List<CollectionItem> get _scopedItems {
     Iterable<CollectionItem> list = _items;
-    if (_kingdom != null) {
-      final k = _kingdom!.dbValue;
+    if (_realm != null) {
+      final r = _realm!.dbValue;
+      list = list.where(
+        (i) =>
+            WildlifeRealm.fromDb(i.metadata?['wildlife_realm'] as String?)
+                .dbValue ==
+            r,
+      );
+    }
+    if (_animalGroup != null) {
+      final k = _animalGroup!.dbValue;
       list = list.where((i) => i.metadata?['wildlife_kingdom'] == k);
     }
     if (_familyId != null) {
@@ -94,30 +107,34 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
     return list.toList();
   }
 
-  double get _completion {
-    if (_items.isEmpty) return 0;
-    final withObs = _items.where((i) => (i.gamesPlayed ?? 0) > 0).length;
-    return withObs / _items.length;
-  }
+  PokedexStats get _stats => PokedexStats.fromItems(_items);
 
-  int _countForKingdom(WildlifeKingdom k) =>
-      _items.where((i) => i.metadata?['wildlife_kingdom'] == k.dbValue).length;
+  int _countRealm(WildlifeRealm r) => _items
+      .where(
+        (i) =>
+            WildlifeRealm.fromDb(i.metadata?['wildlife_realm'] as String?) ==
+            r,
+      )
+      .length;
+
+  int _countAnimalGroup(WildlifeKingdom k) => _items
+      .where((i) => i.metadata?['wildlife_kingdom'] == k.dbValue)
+      .length;
 
   int _countForFamily(String familyId) {
-    if (_kingdom == null) return 0;
+    if (_animalGroup == null) return 0;
     return _items
         .where((i) =>
-            i.metadata?['wildlife_kingdom'] == _kingdom!.dbValue &&
-            (i.metadata?['wildlife_family'] as String? ?? 'other') ==
-                familyId)
+            i.metadata?['wildlife_kingdom'] == _animalGroup!.dbValue &&
+            (i.metadata?['wildlife_family'] as String? ?? 'other') == familyId)
         .length;
   }
 
   int _countForGenusGroup(String groupId) {
-    if (_kingdom == null || _familyId == null) return 0;
+    if (_animalGroup == null || _familyId == null) return 0;
     return _items
         .where((i) =>
-            i.metadata?['wildlife_kingdom'] == _kingdom!.dbValue &&
+            i.metadata?['wildlife_kingdom'] == _animalGroup!.dbValue &&
             (i.metadata?['wildlife_family'] as String? ?? 'other') ==
                 _familyId &&
             (i.metadata?['wildlife_genus_group'] as String? ?? 'other') ==
@@ -129,15 +146,98 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
     setState(() {
       switch (_level) {
         case _PokedexLevel.species:
-          _genusGroupId = null;
+          if (_realm != WildlifeRealm.animalia) {
+            _realm = null;
+          } else {
+            _genusGroupId = null;
+          }
         case _PokedexLevel.genusGroup:
           _familyId = null;
         case _PokedexLevel.family:
-          _kingdom = null;
-        case _PokedexLevel.kingdom:
+          _animalGroup = null;
+        case _PokedexLevel.animalGroup:
+          _realm = null;
+        case _PokedexLevel.realm:
           break;
       }
     });
+  }
+
+  Future<void> _pickExtraTaxon({
+    required String title,
+    required List<WildlifeTaxonNode> options,
+    required void Function(String id) onPick,
+  }) async {
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: WildlifePokedexTheme.panel,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: WildlifePokedexTheme.neon,
+                ),
+              ),
+            ),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: options
+                    .map(
+                      (n) => ListTile(
+                        leading: Icon(n.icon, color: n.color),
+                        title: Text(
+                          n.label,
+                          style: const TextStyle(color: WildlifePokedexTheme.text),
+                        ),
+                        onTap: () => Navigator.pop(ctx, n.id),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (picked != null) onPick(picked);
+  }
+
+  void _onFamilyTap(String id) {
+    if (id == WildlifeTaxonomy.otherFamilyId && _animalGroup != null) {
+      final extras = WildlifeTaxonomy.extraFamilies(_animalGroup!);
+      if (extras.isEmpty) return;
+      _pickExtraTaxon(
+        title: 'Choisir une famille',
+        options: extras,
+        onPick: (picked) => setState(() => _familyId = picked),
+      );
+    } else {
+      setState(() => _familyId = id);
+    }
+  }
+
+  void _onGenusTap(String id) {
+    if (id == WildlifeTaxonomy.otherGenusGroupId && _familyId != null) {
+      final extras = WildlifeTaxonomy.extraGenusGroups(_familyId!);
+      if (extras.isEmpty) {
+        setState(() => _genusGroupId = id);
+        return;
+      }
+      _pickExtraTaxon(
+        title: 'Choisir un groupe',
+        options: extras,
+        onPick: (picked) => setState(() => _genusGroupId = picked),
+      );
+    } else {
+      setState(() => _genusGroupId = id);
+    }
   }
 
   Future<void> _addSpecies() async {
@@ -170,20 +270,19 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
   }
 
   String get _levelTitle => switch (_level) {
-        _PokedexLevel.kingdom => 'Choisis ton Règne',
-        _PokedexLevel.family => 'Familles · ${_kingdom!.label}',
+        _PokedexLevel.realm => 'Les 5 règnes du vivant',
+        _PokedexLevel.animalGroup => 'Groupes · Règne animal',
+        _PokedexLevel.family => 'Familles · ${_animalGroup!.label}',
         _PokedexLevel.genusGroup =>
-          WildlifeTaxonomy.familyLabel(_familyId, _kingdom!) ?? 'Famille',
-        _PokedexLevel.species =>
-          WildlifeTaxonomy.genusGroupLabel(_familyId!, _genusGroupId!) ??
-              'Espèces',
+          WildlifeTaxonomy.familyLabel(_familyId, _animalGroup!) ?? 'Famille',
+        _PokedexLevel.species => _genusGroupId != null && _familyId != null
+            ? (WildlifeTaxonomy.genusGroupLabel(_familyId!, _genusGroupId!) ??
+                'Espèces')
+            : '${_realm?.label ?? 'Règne'} · observations',
       };
 
   @override
   Widget build(BuildContext context) {
-    final observed =
-        _items.where((i) => (i.gamesPlayed ?? 0) > 0).length;
-
     return Scaffold(
       backgroundColor: WildlifePokedexTheme.bg,
       body: DecoratedBox(
@@ -192,8 +291,8 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _buildHeader(observed),
-              if (_level != _PokedexLevel.kingdom) _buildBreadcrumb(),
+              _buildHeader(),
+              if (_level != _PokedexLevel.realm) _buildBreadcrumb(),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
                 child: Text(
@@ -230,19 +329,22 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
     );
   }
 
-  Widget _buildHeader(int observed) {
+  Widget _buildHeader() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 8, 12, 0),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (_level != _PokedexLevel.kingdom)
+          if (_level != _PokedexLevel.realm)
             IconButton(
-              icon: const Icon(Icons.arrow_back_ios_new, color: WildlifePokedexTheme.neon),
+              icon: const Icon(Icons.arrow_back_ios_new,
+                  color: WildlifePokedexTheme.neon),
               onPressed: _popLevel,
             )
           else if (Navigator.canPop(context))
             IconButton(
-              icon: const Icon(Icons.arrow_back_ios_new, color: WildlifePokedexTheme.neon),
+              icon: const Icon(Icons.arrow_back_ios_new,
+                  color: WildlifePokedexTheme.neon),
               onPressed: () => Navigator.maybePop(context),
             ),
           Expanded(
@@ -258,17 +360,10 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
                     color: WildlifePokedexTheme.accent,
                   ),
                 ),
-                Text(
-                  '${_items.length} espèce${_items.length > 1 ? 's' : ''} enregistrée${_items.length > 1 ? 's' : ''}',
-                  style: WildlifePokedexTheme.breadcrumbStyle(),
-                ),
+                const SizedBox(height: 8),
+                PokedexStatsPanel(stats: _stats),
               ],
             ),
-          ),
-          PokedexCompletionRing(
-            progress: _completion,
-            speciesCount: _items.length,
-            observedCount: observed,
           ),
           IconButton(
             tooltip: 'Carte sauvage',
@@ -282,15 +377,17 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
       ),
     )
         .animate(target: _entered ? 1 : 0)
-        .fadeIn(duration: 500.ms)
-        .scale(begin: const Offset(0.96, 0.96), end: const Offset(1, 1));
+        .fadeIn(duration: 500.ms);
   }
 
   Widget _buildBreadcrumb() {
     final parts = <String>[];
-    if (_kingdom != null) parts.add(_kingdom!.label);
-    if (_familyId != null) {
-      parts.add(WildlifeTaxonomy.familyLabel(_familyId, _kingdom!) ?? '…');
+    if (_realm != null) parts.add(_realm!.label);
+    if (_animalGroup != null) parts.add(_animalGroup!.label);
+    if (_familyId != null && _animalGroup != null) {
+      parts.add(
+        WildlifeTaxonomy.familyLabel(_familyId, _animalGroup!) ?? '…',
+      );
     }
     if (_genusGroupId != null && _familyId != null) {
       parts.add(
@@ -305,23 +402,51 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
 
   Widget _buildLevelContent() {
     return switch (_level) {
-      _PokedexLevel.kingdom => _kingdomGrid(),
+      _PokedexLevel.realm => _realmGrid(),
+      _PokedexLevel.animalGroup => _animalGroupGrid(),
       _PokedexLevel.family => _taxonGrid(
-          WildlifeTaxonomy.familiesFor(_kingdom!),
+          WildlifeTaxonomy.featuredFamilies(_animalGroup!),
           _countForFamily,
-          (id) => setState(() => _familyId = id),
+          _onFamilyTap,
         ),
       _PokedexLevel.genusGroup => _taxonGrid(
-          WildlifeTaxonomy.genusGroupsFor(_familyId!),
+          WildlifeTaxonomy.featuredGenusGroups(_familyId!),
           _countForGenusGroup,
-          (id) => setState(() => _genusGroupId = id),
+          _onGenusTap,
         ),
-      _PokedexLevel.species => _speciesGrid(),
+      _PokedexLevel.species => _speciesContent(),
     };
   }
 
-  Widget _kingdomGrid() {
-    final kingdoms =
+  Widget _realmGrid() {
+    return GridView.builder(
+      padding: const EdgeInsets.all(16),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        childAspectRatio: 0.95,
+        crossAxisSpacing: 14,
+        mainAxisSpacing: 14,
+      ),
+      itemCount: WildlifeRealm.values.length,
+      itemBuilder: (context, i) {
+        final r = WildlifeRealm.values[i];
+        return _TaxonTile(
+          label: r.label,
+          subtitle: r.subtitle,
+          count: _countRealm(r),
+          countLabel: 'fiches',
+          icon: r.icon,
+          color: r.color,
+          delayMs: i * 60,
+          entered: _entered,
+          onTap: () => setState(() => _realm = r),
+        );
+      },
+    );
+  }
+
+  Widget _animalGroupGrid() {
+    final groups =
         WildlifeKingdom.values.where((k) => k != WildlifeKingdom.other);
     return GridView.builder(
       padding: const EdgeInsets.all(16),
@@ -331,18 +456,18 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
         crossAxisSpacing: 14,
         mainAxisSpacing: 14,
       ),
-      itemCount: kingdoms.length,
+      itemCount: groups.length,
       itemBuilder: (context, i) {
-        final k = kingdoms.elementAt(i);
-        final count = _countForKingdom(k);
+        final k = groups.elementAt(i);
         return _TaxonTile(
           label: k.label,
-          count: count,
-          icon: _kingdomIcon(k),
+          count: _countAnimalGroup(k),
+          countLabel: 'espèces',
+          icon: _animalIcon(k),
           color: WildlifePokedexTheme.neon,
-          delayMs: i * 60,
+          delayMs: i * 50,
           entered: _entered,
-          onTap: () => setState(() => _kingdom = k),
+          onTap: () => setState(() => _animalGroup = k),
         );
       },
     );
@@ -367,6 +492,7 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
         return _TaxonTile(
           label: n.label,
           count: countFor(n.id),
+          countLabel: 'espèces',
           icon: n.icon,
           color: n.color,
           delayMs: i * 50,
@@ -377,129 +503,241 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
     );
   }
 
-  Widget _speciesGrid() {
+  Widget _speciesContent() {
     final list = _scopedItems;
-    if (list.isEmpty) {
-      return Center(
-        child: Text(
-          'Aucune espèce ici — scanne ton premier spécimen !',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: WildlifePokedexTheme.text.withValues(alpha: 0.65),
-          ),
-        ),
-      );
-    }
-    return GridView.builder(
+    final catalog = _genusGroupId != null
+        ? WildlifeCatalog.featuredForGenusGroup(_genusGroupId!)
+        : const <WildlifeCatalogEntry>[];
+
+    return ListView(
       padding: const EdgeInsets.all(16),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        childAspectRatio: 0.72,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-      ),
-      itemCount: list.length,
-      itemBuilder: (context, i) {
-        final item = list[i];
-        final unlocked = (item.gamesPlayed ?? 0) > 0;
-        return GestureDetector(
-          onTap: () async {
-            await Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => WildlifeSpeciesScreen(item: item),
-              ),
-            );
-            _load();
-          },
-          child: Container(
-            decoration: WildlifePokedexTheme.tileDecoration(
-              glow: unlocked ? WildlifePokedexTheme.neon : WildlifePokedexTheme.panel,
+      children: [
+        if (catalog.isNotEmpty) ...[
+          Text(
+            'ESPÈCES CONNUES',
+            style: WildlifePokedexTheme.titleStyle(context).copyWith(fontSize: 14),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 168,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: catalog.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              itemBuilder: (context, i) => _catalogCard(catalog[i]),
             ),
-            clipBehavior: Clip.antiAlias,
+          ),
+          const SizedBox(height: 20),
+        ],
+        Text(
+          'TES OBSERVATIONS',
+          style: WildlifePokedexTheme.titleStyle(context).copyWith(fontSize: 14),
+        ),
+        const SizedBox(height: 10),
+        if (list.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: WildlifePokedexTheme.tileDecoration(),
+            child: Text(
+              'Aucune espèce ici — scanne un spécimen avec iNaturalist !',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: WildlifePokedexTheme.text.withValues(alpha: 0.65),
+              ),
+            ),
+          )
+        else
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              childAspectRatio: 0.72,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+            ),
+            itemCount: list.length,
+            itemBuilder: (context, i) => _speciesCard(list[i], i),
+          ),
+      ],
+    );
+  }
+
+  Widget _catalogCard(WildlifeCatalogEntry entry) {
+    return GestureDetector(
+      onTap: () => showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: WildlifePokedexTheme.panel,
+          title: Text(entry.label,
+              style: const TextStyle(color: WildlifePokedexTheme.neon)),
+          content: SingleChildScrollView(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      if (item.imageUrl != null)
-                        ColorFiltered(
-                          colorFilter: unlocked
-                              ? const ColorFilter.mode(
-                                  Colors.transparent,
-                                  BlendMode.dst,
-                                )
-                              : const ColorFilter.matrix([
-                                  0.2126, 0.7152, 0.0722, 0, 0,
-                                  0.2126, 0.7152, 0.0722, 0, 0,
-                                  0.2126, 0.7152, 0.0722, 0, 0,
-                                  0, 0, 0, 1, 0,
-                                ]),
-                          child: CollectionCoverImage(
-                            url: item.imageUrl!,
-                            fit: BoxFit.cover,
-                          ),
-                        )
-                      else
-                        ColoredBox(
-                          color: WildlifePokedexTheme.neonDim.withValues(alpha: 0.3),
-                          child: const Icon(Icons.pets, size: 48, color: WildlifePokedexTheme.neon),
-                        ),
-                      if (!unlocked)
-                        Container(
-                          color: Colors.black38,
-                          alignment: Alignment.center,
-                          child: const Icon(Icons.lock_outline, color: Colors.white70, size: 32),
-                        ),
-                    ],
+                if (entry.imageUrl != null)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.network(
+                      entry.imageUrl!,
+                      height: 120,
+                      width: 200,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const SizedBox(height: 0),
+                    ),
                   ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(10),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        item.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                          color: WildlifePokedexTheme.text,
-                        ),
-                      ),
-                      Text(
-                        unlocked
-                            ? '${item.gamesPlayed} obs.'
-                            : 'Non observé',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: unlocked
-                              ? WildlifePokedexTheme.neon
-                              : WildlifePokedexTheme.text.withValues(alpha: 0.5),
-                        ),
-                      ),
-                    ],
+                const SizedBox(height: 12),
+                Text(
+                  entry.description,
+                  style: TextStyle(
+                    color: WildlifePokedexTheme.text.withValues(alpha: 0.9),
                   ),
                 ),
               ],
             ),
           ),
-        )
-            .animate(target: _entered ? 1 : 0)
-            .fadeIn(delay: Duration(milliseconds: i * 40))
-            .scale(
-              begin: const Offset(0.92, 0.92),
-              end: const Offset(1, 1),
-              delay: Duration(milliseconds: i * 40),
-            );
-      },
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Fermer'),
+            ),
+          ],
+        ),
+      ),
+      child: Container(
+        width: 140,
+        decoration: WildlifePokedexTheme.tileDecoration(
+          glow: WildlifePokedexTheme.accent,
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: entry.imageUrl != null
+                  ? Image.network(
+                      entry.imageUrl!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const Icon(Icons.pets, size: 40),
+                    )
+                  : ColoredBox(
+                      color: WildlifePokedexTheme.panel,
+                      child: Icon(
+                        Icons.menu_book,
+                        color: WildlifePokedexTheme.text.withValues(alpha: 0.4),
+                      ),
+                    ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(8),
+              child: Text(
+                entry.label,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: WildlifePokedexTheme.text,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
-  IconData _kingdomIcon(WildlifeKingdom k) => switch (k) {
+  Widget _speciesCard(CollectionItem item, int index) {
+    final unlocked = (item.gamesPlayed ?? 0) > 0;
+    return GestureDetector(
+      onTap: () async {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => WildlifeSpeciesScreen(item: item)),
+        );
+        _load();
+      },
+      child: Container(
+        decoration: WildlifePokedexTheme.tileDecoration(
+          glow: unlocked ? WildlifePokedexTheme.neon : WildlifePokedexTheme.panel,
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (item.imageUrl != null)
+                    ColorFiltered(
+                      colorFilter: unlocked
+                          ? const ColorFilter.mode(
+                              Colors.transparent, BlendMode.dst)
+                          : const ColorFilter.matrix([
+                              0.2126, 0.7152, 0.0722, 0, 0,
+                              0.2126, 0.7152, 0.0722, 0, 0,
+                              0.2126, 0.7152, 0.0722, 0, 0,
+                              0, 0, 0, 1, 0,
+                            ]),
+                      child: CollectionCoverImage(
+                        url: item.imageUrl!,
+                        fit: BoxFit.cover,
+                      ),
+                    )
+                  else
+                    ColoredBox(
+                      color: WildlifePokedexTheme.neonDim.withValues(alpha: 0.3),
+                      child: const Icon(Icons.pets, size: 48,
+                          color: WildlifePokedexTheme.neon),
+                    ),
+                  if (!unlocked)
+                    Container(
+                      color: Colors.black38,
+                      alignment: Alignment.center,
+                      child: const Icon(Icons.lock_outline,
+                          color: Colors.white70, size: 32),
+                    ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      color: WildlifePokedexTheme.text,
+                    ),
+                  ),
+                  Text(
+                    unlocked
+                        ? '${item.gamesPlayed} observation${(item.gamesPlayed ?? 0) > 1 ? 's' : ''}'
+                        : 'Pas encore observé',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: unlocked
+                          ? WildlifePokedexTheme.neon
+                          : WildlifePokedexTheme.text.withValues(alpha: 0.5),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    )
+        .animate(target: _entered ? 1 : 0)
+        .fadeIn(delay: Duration(milliseconds: index * 40));
+  }
+
+  IconData _animalIcon(WildlifeKingdom k) => switch (k) {
         WildlifeKingdom.mammal => Icons.pets,
         WildlifeKingdom.bird => Icons.flutter_dash,
         WildlifeKingdom.fish => Icons.water,
@@ -511,7 +749,9 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
 
 class _TaxonTile extends StatelessWidget {
   final String label;
+  final String? subtitle;
   final int count;
+  final String countLabel;
   final IconData icon;
   final Color color;
   final int delayMs;
@@ -520,7 +760,9 @@ class _TaxonTile extends StatelessWidget {
 
   const _TaxonTile({
     required this.label,
+    this.subtitle,
     required this.count,
+    required this.countLabel,
     required this.icon,
     required this.color,
     required this.delayMs,
@@ -554,9 +796,21 @@ class _TaxonTile extends StatelessWidget {
                     fontSize: 15,
                   ),
                 ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: WildlifePokedexTheme.text.withValues(alpha: 0.55),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 4),
                 Text(
-                  '$count espèce${count > 1 ? 's' : ''}',
+                  '$count $countLabel',
                   style: TextStyle(
                     fontSize: 11,
                     color: color.withValues(alpha: 0.9),

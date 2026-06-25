@@ -27,6 +27,18 @@ alter table public.collection_items
   add constraint collection_items_added_by_fkey
   foreign key (added_by) references public.profiles (id) on delete set null;
 
+-- FK prêt (embed loaned_to:profiles!collection_items_loaned_to_id_fkey)
+alter table public.collection_items
+  drop constraint if exists collection_items_loaned_to_id_fkey;
+
+alter table public.collection_items
+  add constraint collection_items_loaned_to_id_fkey
+  foreign key (loaned_to_id) references public.profiles (id) on delete set null;
+
+comment on constraint collection_items_loaned_to_id_fkey
+  on public.collection_items is
+  'Prêt ami — embed PostgREST : profiles!collection_items_loaned_to_id_fkey';
+
 -- Étend la contrainte de catégorie (23514) : animal + restaurant (+ wildlife legacy)
 alter table public.collection_items
   drop constraint if exists collection_items_category_check;
