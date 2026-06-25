@@ -16,7 +16,11 @@ enum CollectionCategory {
   restaurant,
   custom;
 
-  String get dbValue => name;
+  /// Valeur stockée en base (`animal` pour la catégorie Nature / Pokédex).
+  String get dbValue => switch (this) {
+        CollectionCategory.wildlife => 'animal',
+        _ => name,
+      };
 
   String get label => switch (this) {
         CollectionCategory.boardgame => 'Jeux de société',
@@ -81,7 +85,7 @@ enum CollectionCategory {
         CollectionCategory.watch => Colors.blueGrey,
         CollectionCategory.videogame => Colors.green,
         CollectionCategory.movie => Colors.pink,
-        CollectionCategory.wildlife => const Color(0xFF2E7D32),
+        CollectionCategory.wildlife => const Color(0xFF39FF14),
         CollectionCategory.restaurant => const Color(0xFFD84315),
         CollectionCategory.custom => Colors.blueGrey,
       };
@@ -108,6 +112,9 @@ enum CollectionCategory {
 
   static CollectionCategory fromDbValue(String value) {
     if (value == 'manga') return CollectionCategory.book;
+    if (value == 'wildlife' || value == 'animal') {
+      return CollectionCategory.wildlife;
+    }
 
     return CollectionCategory.values.firstWhere(
       (c) => c.dbValue == value,

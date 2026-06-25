@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../models/collection_item.dart';
 import '../../models/wildlife_observation.dart';
 import '../../services/wildlife_service.dart';
+import '../../theme/wildlife_pokedex_theme.dart';
 import '../../widgets/collection_cover_image.dart';
 
 class WildlifeSpeciesScreen extends StatefulWidget {
@@ -31,6 +32,7 @@ class _WildlifeSpeciesScreenState extends State<WildlifeSpeciesScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     _observations = await _service.fetchForItem(widget.item.id);
+    _observations.sort((a, b) => b.observedAt.compareTo(a.observedAt));
     if (mounted) setState(() => _loading = false);
   }
 
@@ -43,7 +45,11 @@ class _WildlifeSpeciesScreenState extends State<WildlifeSpeciesScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setLocal) => AlertDialog(
-          title: const Text('Nouvelle observation'),
+          backgroundColor: WildlifePokedexTheme.panel,
+          title: const Text(
+            'Nouvelle session',
+            style: TextStyle(color: WildlifePokedexTheme.neon),
+          ),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -52,7 +58,7 @@ class _WildlifeSpeciesScreenState extends State<WildlifeSpeciesScreen> {
                   controller: placeController,
                   decoration: const InputDecoration(
                     labelText: 'Lieu',
-                    hintText: 'Parc national, jardin…',
+                    hintText: 'Parc, sentier, jardin…',
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -61,7 +67,7 @@ class _WildlifeSpeciesScreenState extends State<WildlifeSpeciesScreen> {
                   maxLines: 3,
                   decoration: const InputDecoration(
                     labelText: 'Note',
-                    hintText: 'Vu ici, pris en photo là…',
+                    hintText: 'Comportement, météo…',
                   ),
                 ),
                 SwitchListTile(
@@ -80,7 +86,11 @@ class _WildlifeSpeciesScreenState extends State<WildlifeSpeciesScreen> {
             ),
             FilledButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Enregistrer'),
+              style: FilledButton.styleFrom(
+                backgroundColor: WildlifePokedexTheme.neon,
+                foregroundColor: Colors.black,
+              ),
+              child: const Text('Capturer'),
             ),
           ],
         ),
@@ -100,7 +110,11 @@ class _WildlifeSpeciesScreenState extends State<WildlifeSpeciesScreen> {
 
     String? photoUrl;
     try {
-      final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
+      final picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 95,
+        requestFullMetadata: true,
+      );
       if (picked != null) {
         final bytes = await picked.readAsBytes();
         final path =
@@ -138,79 +152,218 @@ class _WildlifeSpeciesScreenState extends State<WildlifeSpeciesScreen> {
     final meta = widget.item.metadata ?? {};
     final desc = meta['description'] as String?;
     final scientific = meta['scientific_name'] as String?;
+    final unlocked = _observations.isNotEmpty;
 
     return Scaffold(
-      appBar: AppBar(title: Text(widget.item.title)),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          if (widget.item.imageUrl != null)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: CollectionCoverImage(
-                url: widget.item.imageUrl!,
-                height: 200,
-                width: double.infinity,
-                fit: BoxFit.cover,
-              ),
-            ),
-          const SizedBox(height: 12),
-          if (scientific != null)
-            Text(
-              scientific,
-              style: TextStyle(
-                fontStyle: FontStyle.italic,
-                color: Colors.grey.shade700,
-              ),
-            ),
-          if (desc != null && desc.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(desc),
-          ],
-          const Divider(height: 32),
-          Row(
-            children: [
-              Text(
-                'Observations',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-              const Spacer(),
-              FilledButton.tonalIcon(
-                onPressed: _addObservation,
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('Session'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          if (_loading)
-            const Center(child: CircularProgressIndicator())
-          else if (_observations.isEmpty)
-            Text(
-              'Aucune observation pour l\'instant.',
-              style: TextStyle(color: Colors.grey.shade600),
-            )
-          else
-            ..._observations.map(
-              (o) => Card(
-                child: ListTile(
-                  leading: o.photoUrl != null
-                      ? Image.network(o.photoUrl!, width: 48, height: 48,
-                          fit: BoxFit.cover)
-                      : const Icon(Icons.place_outlined),
-                  title: Text(o.placeLabel ?? 'Observation'),
-                  subtitle: Text(
-                    [
-                      '${o.observedAt.day}/${o.observedAt.month}/${o.observedAt.year}',
-                      if (o.note != null) o.note!,
-                    ].join(' · '),
-                    maxLines: 3,
+      backgroundColor: WildlifePokedexTheme.bg,
+      body: DecoratedBox(
+        decoration: WildlifePokedexTheme.screenDecoration(),
+        child: CustomScrollView(
+          slivers: [
+            SliverAppBar(
+              expandedHeight: 220,
+              pinned: true,
+              backgroundColor: WildlifePokedexTheme.panel,
+              foregroundColor: WildlifePokedexTheme.neon,
+              flexibleSpace: FlexibleSpaceBar(
+                title: Text(
+                  widget.item.title,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w900,
+                    shadows: [Shadow(blurRadius: 8, color: Colors.black54)],
                   ),
+                ),
+                background: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (widget.item.imageUrl != null)
+                      CollectionCoverImage(
+                        url: widget.item.imageUrl!,
+                        fit: BoxFit.cover,
+                      )
+                    else
+                      ColoredBox(
+                        color: WildlifePokedexTheme.neonDim.withValues(alpha: 0.4),
+                      ),
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.transparent,
+                            WildlifePokedexTheme.bg.withValues(alpha: 0.85),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (scientific != null)
+                      Text(
+                        scientific,
+                        style: TextStyle(
+                          fontStyle: FontStyle.italic,
+                          color: WildlifePokedexTheme.text.withValues(alpha: 0.75),
+                        ),
+                      ),
+                    if (desc != null && desc.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        desc,
+                        style: TextStyle(
+                          color: WildlifePokedexTheme.text.withValues(alpha: 0.9),
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+                    Row(
+                      children: [
+                        Icon(
+                          unlocked ? Icons.verified : Icons.lock_outline,
+                          color: unlocked
+                              ? WildlifePokedexTheme.neon
+                              : WildlifePokedexTheme.text.withValues(alpha: 0.4),
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          unlocked ? 'ESPÈCE DÉBLOQUÉE' : 'EN ATTENTE D\'OBSERVATION',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1,
+                            fontSize: 12,
+                            color: unlocked
+                                ? WildlifePokedexTheme.neon
+                                : WildlifePokedexTheme.text.withValues(alpha: 0.5),
+                          ),
+                        ),
+                        const Spacer(),
+                        FilledButton.tonalIcon(
+                          onPressed: _addObservation,
+                          style: FilledButton.styleFrom(
+                            backgroundColor:
+                                WildlifePokedexTheme.neon.withValues(alpha: 0.15),
+                            foregroundColor: WildlifePokedexTheme.neon,
+                          ),
+                          icon: const Icon(Icons.add_a_photo, size: 18),
+                          label: const Text('Session'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'GALERIE TERRAIN',
+                      style: WildlifePokedexTheme.titleStyle(context).copyWith(fontSize: 16),
+                    ),
+                    const SizedBox(height: 12),
+                    if (_loading)
+                      const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(24),
+                          child: CircularProgressIndicator(
+                            color: WildlifePokedexTheme.neon,
+                          ),
+                        ),
+                      )
+                    else if (_observations.isEmpty)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(20),
+                        decoration: WildlifePokedexTheme.tileDecoration(),
+                        child: Text(
+                          'Aucune photo terrain — pars à l\'aventure !',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: WildlifePokedexTheme.text.withValues(alpha: 0.6),
+                          ),
+                        ),
+                      )
+                    else
+                      ..._observations.map(_observationCard),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _observationCard(WildlifeObservation o) {
+    final date =
+        '${o.observedAt.day.toString().padLeft(2, '0')}/'
+        '${o.observedAt.month.toString().padLeft(2, '0')}/'
+        '${o.observedAt.year}';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      decoration: WildlifePokedexTheme.tileDecoration(
+        glow: WildlifePokedexTheme.accent,
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (o.photoUrl != null)
+            AspectRatio(
+              aspectRatio: 16 / 10,
+              child: Image.network(o.photoUrl!, fit: BoxFit.cover),
+            )
+          else
+            Container(
+              height: 120,
+              color: WildlifePokedexTheme.panel,
+              alignment: Alignment.center,
+              child: Icon(
+                Icons.landscape,
+                size: 48,
+                color: WildlifePokedexTheme.text.withValues(alpha: 0.3),
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  o.seenAtLabel,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                    color: WildlifePokedexTheme.accent,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  date,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: WildlifePokedexTheme.text.withValues(alpha: 0.55),
+                  ),
+                ),
+                if (o.note != null && o.note!.trim().isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    o.note!,
+                    style: TextStyle(
+                      color: WildlifePokedexTheme.text.withValues(alpha: 0.85),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ],
       ),
     );

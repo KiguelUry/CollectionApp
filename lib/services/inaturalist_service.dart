@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import '../models/wildlife_taxonomy.dart';
+
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
@@ -66,6 +68,8 @@ class WildlifeTaxonHit {
   final String? imageUrl;
   final String kingdom;
   final String iconicTaxon;
+  final String? familyName;
+  final String? genusName;
 
   const WildlifeTaxonHit({
     required this.id,
@@ -75,6 +79,8 @@ class WildlifeTaxonHit {
     this.imageUrl,
     this.kingdom = '',
     this.iconicTaxon = '',
+    this.familyName,
+    this.genusName,
   });
 
   String get displayTitle => commonName?.isNotEmpty == true ? commonName! : name;
@@ -84,6 +90,17 @@ class WildlifeTaxonHit {
   factory WildlifeTaxonHit.fromJson(Map<String, dynamic> json) {
     final defaultPhoto = json['default_photo'] as Map<String, dynamic>?;
     final wiki = json['wikipedia_summary'] as String?;
+    final ancestors = json['ancestors'] as List<dynamic>? ?? [];
+    String? family;
+    String? genus;
+    for (final raw in ancestors) {
+      if (raw is! Map) continue;
+      final rank = (raw['rank'] as String?)?.toLowerCase();
+      final n = raw['name'] as String?;
+      if (n == null) continue;
+      if (rank == 'family') family = n;
+      if (rank == 'genus') genus = n;
+    }
     return WildlifeTaxonHit(
       id: json['id'] as int? ?? 0,
       name: json['name'] as String? ?? '',
@@ -93,17 +110,28 @@ class WildlifeTaxonHit {
           defaultPhoto?['url'] as String?,
       kingdom: json['kingdom'] as String? ?? '',
       iconicTaxon: json['iconic_taxon_name'] as String? ?? '',
+      familyName: family,
+      genusName: genus,
     );
   }
 
-  Map<String, dynamic> toItemMetadata() => {
-        'inaturalist_id': id,
-        'scientific_name': name,
-        if (commonName != null) 'common_name': commonName,
-        'wildlife_kingdom': kingdomFilter,
-        if (wikipediaSummary != null) 'description': wikipediaSummary,
-        'source': 'inaturalist',
-      };
+  Map<String, dynamic> toItemMetadata() {
+    final kingdom = WildlifeKingdom.fromIconic(iconicTaxon);
+    final taxonomy = WildlifeTaxonomy.buildTaxonomyMetadata(
+      kingdom: kingdom,
+      familyName: familyName,
+      genus: genusName,
+      scientificName: name,
+    );
+    return {
+      'inaturalist_id': id,
+      'scientific_name': name,
+      if (commonName != null) 'common_name': commonName,
+      ...taxonomy,
+      if (wikipediaSummary != null) 'description': wikipediaSummary,
+      'source': 'inaturalist',
+    };
+  }
 }
 
 enum WildlifeKingdom {

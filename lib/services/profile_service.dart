@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../widgets/avatar_crop_sheet.dart';
 import '../models/collection_item.dart';
 import '../models/user_profile.dart';
+import '../utils/picked_image_bytes.dart';
 import '../utils/collection_item_filters.dart';
 import '../utils/supabase_embeds.dart';
 import 'activity_service.dart';
@@ -154,12 +155,13 @@ class ProfileService {
     final picked = await _picker.pickImage(
       source: ImageSource.gallery,
       imageQuality: 100,
+      requestFullMetadata: true,
     );
     if (picked == null) {
       throw Exception('Aucune image sélectionnée');
     }
 
-    var bytes = await picked.readAsBytes();
+    Uint8List bytes = await readPickedImageBytes(picked);
     if (cropContext != null && cropContext.mounted) {
       final cropped = await AvatarCropSheet.show(cropContext, bytes);
       if (cropped == null) {

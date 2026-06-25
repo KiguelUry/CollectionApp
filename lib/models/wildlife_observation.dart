@@ -23,6 +23,16 @@ class WildlifeObservation {
 
   bool get hasLocation => latitude != null && longitude != null;
 
+  /// Titre galerie : « Vu à [Lieu] » ou coordonnées GPS.
+  String get seenAtLabel {
+    final place = placeLabel?.trim();
+    if (place != null && place.isNotEmpty) return 'Vu à $place';
+    if (hasLocation) {
+      return 'Vu à ${latitude!.toStringAsFixed(4)}, ${longitude!.toStringAsFixed(4)}';
+    }
+    return 'Observation';
+  }
+
   factory WildlifeObservation.fromJson(Map<String, dynamic> json) {
     return WildlifeObservation(
       id: json['id'] as String,
