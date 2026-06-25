@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
-import '../models/collection_category.dart';import '../models/user_collection_type.dart';
+import '../models/collection_category.dart';
+import '../models/user_collection_type.dart';
 import '../services/category_hub_preferences.dart';
 import '../services/user_collection_type_service.dart';
 import '../widgets/app_app_bar.dart';
+import '../widgets/create_custom_collection_dialog.dart';
 
 class CategoryManageScreen extends StatefulWidget {
   const CategoryManageScreen({super.key});
@@ -33,7 +35,12 @@ class _CategoryManageScreenState extends State<CategoryManageScreen> {
 
   Future<void> _toggleCategory(CollectionCategory cat, bool visible) async {
     await _prefs.setVisible(cat, visible);
-    setState(() {});
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _addCustom() async {
+    final created = await showCreateCustomCollectionDialog(context);
+    if (created != null) await _load();
   }
 
   Future<void> _deleteCustom(UserCollectionType type) async {
@@ -78,7 +85,12 @@ class _CategoryManageScreenState extends State<CategoryManageScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const AppAppBar(title: 'Gérer les catégories'),
+      appBar: const AppAppBar(title: 'Gestion des collections'),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _addCustom,
+        icon: const Icon(Icons.add),
+        label: const Text('Nouvelle collection'),
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(

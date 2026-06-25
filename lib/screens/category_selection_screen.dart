@@ -1,16 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_category.dart';
-import '../models/collection_summary.dart';
-import '../services/collection_stats_service.dart';
 import '../services/category_hub_preferences.dart';
 import '../services/recommendation_service.dart';
-import '../widgets/collapsible_collection_overview.dart';
 import '../widgets/recommendations_banner.dart';
 import '../widgets/main_drawer.dart';
 import '../models/user_collection_type.dart';
 import '../utils/collection_grid_layout.dart';
-import '../widgets/create_custom_collection_dialog.dart';
 import 'books_collection_screen.dart';
 import 'boardgame/boardgames_collection_screen.dart';
 import 'cards_collection_screen.dart';
@@ -21,12 +17,12 @@ import 'movie_collection_screen.dart';
 import 'stats_screen.dart';
 import 'videogame_collection_screen.dart';
 import 'watch_collection_screen.dart';
-import 'wishlist_overview_screen.dart';
 import '../theme/app_theme.dart';
 import '../utils/app_haptics.dart';
 import '../utils/category_hub_order.dart';
 import '../utils/collection_item_scope.dart';
 import '../utils/hub_category_visibility.dart';
+import 'category_manage_screen.dart';
 import 'wildlife/wildlife_collection_screen.dart';
 import 'restaurant/restaurant_collection_screen.dart';
 
@@ -39,13 +35,11 @@ class CategorySelectionScreen extends StatefulWidget {
 }
 
 class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
-  final _statsService = CollectionStatsService();
   final _recommendations = RecommendationService();
   Map<CollectionCategory, int> _counts = {};
   Map<CollectionCategory, int> _groupCounts = {};
   Map<CollectionCategory, int> _wishlistCounts = {};
   Map<String, int> _customCounts = {};
-  CollectionSummary _summary = const CollectionSummary();
   bool _loadingCounts = true;
   List<HubTileEntry> _orderedTiles = [];
   List<Recommendation> _recommendationsList = [];
@@ -77,7 +71,6 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     final wishCounts = emptyCategoryCounts();
     final customCounts = <String, int>{};
     var orderedTiles = <HubTileEntry>[];
-    CollectionSummary summary = const CollectionSummary();
     var recommendationsList = <Recommendation>[];
     String? loadError;
 
@@ -133,7 +126,6 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
       }
 
       try {
-        summary = await _statsService.fetchSummary();
         recommendationsList = await _recommendations.generate(limit: 6);
       } catch (_) {}
 
@@ -149,7 +141,6 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
         _wishlistCounts = wishCounts;
         _customCounts = customCounts;
         _orderedTiles = orderedTiles;
-        _summary = summary;
         _recommendationsList = recommendationsList;
         _loadingCounts = false;
       });
@@ -209,11 +200,12 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     ).then((_) => _load());
   }
 
-  Future<void> _createCustomType() async {
-    final created = await showCreateCustomCollectionDialog(context);
-    if (created == null || !mounted) return;
-    _openCustomType(created);
-    _load();
+  Future<void> _openManageCollections() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const CategoryManageScreen()),
+    );
+    if (mounted) _load();
   }
 
   int get _gridItemCount => _orderedTiles.length + 1;
@@ -275,15 +267,8 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     }
     return _AnimatedCategoryCard(
       index: index,
-      child: _buildAddCustomCard(),
+      child: _buildManageCollectionsCard(),
     );
-  }
-
-  void _openWishlist() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (ctx) => const WishlistOverviewScreen()),
-    ).then((_) => _load());
   }
 
   void _openStats() {
@@ -359,14 +344,6 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
                     color: Colors.grey.shade600,
                   ),
                 ),
-                if (!_loadingCounts) ...[
-                  const SizedBox(height: 10),
-                  CollapsibleCollectionOverview(
-                    summary: _summary,
-                    onWishlistTap: _openWishlist,
-                    onStatsTap: _openStats,
-                  ),
-                ],
               ],
             ),
           ),
@@ -507,18 +484,18 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     );
   }
 
-  Widget _buildAddCustomCard() {
+  Widget _buildManageCollectionsCard() {
     return InkWell(
-      onTap: _createCustomType,
+      onTap: _openManageCollections,
       borderRadius: BorderRadius.circular(20),
       child: Card(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.add_circle_outline, size: 40, color: Colors.grey.shade600),
+            Icon(Icons.tune, size: 40, color: Colors.grey.shade700),
             const SizedBox(height: 12),
             Text(
-              'Nouvelle collection',
+              'Gestion des collections',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontWeight: FontWeight.bold,
@@ -528,7 +505,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               child: Text(
-                'Type perso si absent de la liste',
+                'Masquer, ajouter ou supprimer',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
               ),

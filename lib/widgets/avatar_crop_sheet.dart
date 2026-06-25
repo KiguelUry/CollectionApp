@@ -2,9 +2,10 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:image/image.dart' as img;
 
-/// Recadrage avatar : zone carrée zoomable + masque circulaire (pas de ClipOval sur le viewer).
+/// Recadrage avatar — capture WYSIWYG de la zone affichée (zoom + pan).
 class AvatarCropSheet extends StatefulWidget {
   final Uint8List imageBytes;
 
@@ -27,6 +28,7 @@ class _AvatarCropSheetState extends State<AvatarCropSheet> {
   static const _viewSize = 300.0;
 
   final _transform = TransformationController();
+  final _captureKey = GlobalKey();
   bool _processing = false;
   ui.Image? _previewImage;
 
@@ -49,48 +51,23 @@ class _AvatarCropSheetState extends State<AvatarCropSheet> {
     if (mounted) setState(() => _previewImage = frame.image);
   }
 
-  Future<Uint8List?> _crop() async {
-    setState(() => _processing = true);
-    try {
-      final decoded = img.decodeImage(widget.imageBytes);
-      if (decoded == null) return null;
+  Future<Uint8List?> _captureCrop() async {
+    final boundary = _captureKey.currentContext?.findRenderObject()
+        as RenderRepaintBoundary?;
+    if (boundary == null) return null;
 
-      final matrix = _transform.value;
-      final scale = matrix.getMaxScaleOnAxis();
-      final tx = matrix.getTranslation().x;
-      final ty = matrix.getTranslation().y;
+    final captured = await boundary.toImage(pixelRatio: 2);
+    final byteData =
+        await captured.toByteData(format: ui.ImageByteFormat.png);
+    captured.dispose();
+    if (byteData == null) return null;
 
-      final imgW = decoded.width.toDouble();
-      final imgH = decoded.height.toDouble();
-      final baseScale = _viewSize / imgW < _viewSize / imgH
-          ? _viewSize / imgW
-          : _viewSize / imgH;
-      final totalScale = baseScale * scale;
+    final pngBytes = byteData.buffer.asUint8List();
+    final decoded = img.decodeImage(pngBytes);
+    if (decoded == null) return pngBytes;
 
-      final displayedW = imgW * totalScale;
-      final displayedH = imgH * totalScale;
-      final offsetX = (_viewSize - displayedW) / 2 + tx;
-      final offsetY = (_viewSize - displayedH) / 2 + ty;
-
-      const cropD = _viewSize;
-      final srcLeft = (-offsetX / totalScale).clamp(0.0, imgW - 1);
-      final srcTop = (-offsetY / totalScale).clamp(0.0, imgH - 1);
-      final srcSize = (cropD / totalScale).clamp(1.0, imgW - srcLeft);
-      final srcSizeY = (cropD / totalScale).clamp(1.0, imgH - srcTop);
-      final side = srcSize < srcSizeY ? srcSize : srcSizeY;
-
-      final cropped = img.copyCrop(
-        decoded,
-        x: srcLeft.round(),
-        y: srcTop.round(),
-        width: side.round(),
-        height: side.round(),
-      );
-      final resized = img.copyResize(cropped, width: 512, height: 512);
-      return Uint8List.fromList(img.encodeJpg(resized, quality: 90));
-    } finally {
-      if (mounted) setState(() => _processing = false);
-    }
+    final resized = img.copyResize(decoded, width: 512, height: 512);
+    return Uint8List.fromList(img.encodeJpg(resized, quality: 92));
   }
 
   @override
@@ -122,22 +99,29 @@ class _AvatarCropSheetState extends State<AvatarCropSheet> {
             width: _viewSize,
             height: _viewSize,
             child: Stack(
-              clipBehavior: Clip.none,
+              clipBehavior: Clip.hardEdge,
               children: [
                 if (_previewImage != null)
-                  InteractiveViewer(
-                    transformationController: _transform,
-                    minScale: 1,
-                    maxScale: 5,
-                    panEnabled: true,
-                    scaleEnabled: true,
-                    boundaryMargin: const EdgeInsets.all(120),
+                  RepaintBoundary(
+                    key: _captureKey,
                     child: SizedBox(
                       width: _viewSize,
                       height: _viewSize,
-                      child: CustomPaint(
-                        painter: _ImagePainter(_previewImage!),
-                        size: const Size(_viewSize, _viewSize),
+                      child: InteractiveViewer(
+                        transformationController: _transform,
+                        minScale: 1,
+                        maxScale: 5,
+                        panEnabled: true,
+                        scaleEnabled: true,
+                        boundaryMargin: const EdgeInsets.all(80),
+                        child: SizedBox(
+                          width: _viewSize,
+                          height: _viewSize,
+                          child: CustomPaint(
+                            painter: _ImagePainter(_previewImage!),
+                            size: const Size(_viewSize, _viewSize),
+                          ),
+                        ),
                       ),
                     ),
                   )
@@ -167,8 +151,15 @@ class _AvatarCropSheetState extends State<AvatarCropSheet> {
                   onPressed: _processing
                       ? null
                       : () async {
-                          final bytes = await _crop();
-                          if (context.mounted) Navigator.pop(context, bytes);
+                          setState(() => _processing = true);
+                          try {
+                            final bytes = await _captureCrop();
+                            if (context.mounted) {
+                              Navigator.pop(context, bytes);
+                            }
+                          } finally {
+                            if (mounted) setState(() => _processing = false);
+                          }
                         },
                   child: _processing
                       ? const SizedBox(

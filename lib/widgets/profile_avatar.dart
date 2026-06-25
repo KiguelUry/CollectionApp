@@ -41,6 +41,7 @@ class ProfileAvatar extends StatelessWidget {
           height: radius * 2,
           child: Image.network(
             avatarUrl!,
+            key: ValueKey(avatarUrl),
             fit: BoxFit.cover,
             errorBuilder: (_, _, _) => RetroAvatar(
               seed: fallbackInitial,

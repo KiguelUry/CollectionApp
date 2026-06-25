@@ -39,19 +39,34 @@ class _StatsScreenState extends State<StatsScreen> {
         _stats.fetchSummary(),
         _stats.fetchCategoryStats(),
         _stats.fetchTopValuedItems(),
-        _stats.fetchMusicMarketValueEstimate(),
-        RecommendationService().generate(limit: 5),
       ]);
-      _summary = results[0] as CollectionSummary;
-      _byCategory = results[1] as List<CategoryStat>;
-      _topItems = results[2] as List<CollectionItem>;
-      _musicMarketValue = results[3] as double;
-      _recommendations = results[4] as List<Recommendation>;
+      if (mounted) {
+        setState(() {
+          _summary = results[0] as CollectionSummary;
+          _byCategory = results[1] as List<CategoryStat>;
+          _topItems = results[2] as List<CollectionItem>;
+          _loading = false;
+        });
+      }
     } catch (_) {
-      _byCategory = [];
-      _topItems = [];
+      if (mounted) setState(() => _loading = false);
     }
-    if (mounted) setState(() => _loading = false);
+    _loadExtras();
+  }
+
+  Future<void> _loadExtras() async {
+    try {
+      final music = await _stats
+          .fetchMusicMarketValueEstimate()
+          .timeout(const Duration(seconds: 20));
+      if (mounted) setState(() => _musicMarketValue = music);
+    } catch (_) {}
+    try {
+      final recs = await RecommendationService()
+          .generate(limit: 5)
+          .timeout(const Duration(seconds: 12));
+      if (mounted) setState(() => _recommendations = recs);
+    } catch (_) {}
   }
 
   @override
