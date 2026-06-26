@@ -88,13 +88,13 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       final url = await _service.pickAndUploadAvatar(cropContext: context);
       final updated = _profile!.copyWith(avatarUrl: url);
       final saved = await _service.updateProfileAndCache(updated);
-      if (mounted) {
-        setState(() => _profile = saved);
-        await ProfileCacheService.instance.apply(saved);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Photo mise à jour')),
-        );
-      }
+      if (!mounted) return;
+      setState(() => _profile = saved);
+      await ProfileCacheService.instance.apply(saved);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Photo mise à jour')),
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -301,14 +301,14 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         clearBio: _bioController.text.trim().isEmpty,
       );
       final saved = await _service.updateProfileAndCache(updated);
-      if (mounted) {
-        setState(() => _profile = saved);
-        await ProfileCacheService.instance.apply(saved);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Profil enregistré')),
-        );
-        Navigator.pop(context, true);
-      }
+      if (!mounted) return;
+      setState(() => _profile = saved);
+      await ProfileCacheService.instance.apply(saved);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Profil enregistré')),
+      );
+      Navigator.pop(context, true);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -508,25 +508,23 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                                   try {
                                     await _showcase.setPublic(v);
                                     await _load();
-                                    if (mounted) {
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                            v
-                                                ? 'Vitrine activée — partage le lien depuis le menu Partager'
-                                                : 'Vitrine désactivée',
-                                          ),
+                                    if (!context.mounted) return;
+                                    ScaffoldMessenger.of(context)
+                                        .showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          v
+                                              ? 'Vitrine activée — partage le lien depuis le menu Partager'
+                                              : 'Vitrine désactivée',
                                         ),
-                                      );
-                                    }
+                                      ),
+                                    );
                                   } catch (e) {
-                                    if (mounted) {
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                        SnackBar(content: Text('$e')),
-                                      );
-                                    }
+                                    if (!context.mounted) return;
+                                    ScaffoldMessenger.of(context)
+                                        .showSnackBar(
+                                      SnackBar(content: Text('$e')),
+                                    );
                                   }
                                 },
                         ),
@@ -546,23 +544,21 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                                 try {
                                   await _showcase.regenerateToken();
                                   await _load();
-                                  if (mounted) {
-                                    ScaffoldMessenger.of(context)
-                                        .showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                          'Nouveau lien généré (l\'ancien ne fonctionne plus)',
-                                        ),
+                                  if (!context.mounted) return;
+                                  ScaffoldMessenger.of(context)
+                                      .showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Nouveau lien généré (l\'ancien ne fonctionne plus)',
                                       ),
-                                    );
-                                  }
+                                    ),
+                                  );
                                 } catch (e) {
-                                  if (mounted) {
-                                    ScaffoldMessenger.of(context)
-                                        .showSnackBar(
-                                      SnackBar(content: Text('$e')),
-                                    );
-                                  }
+                                  if (!context.mounted) return;
+                                  ScaffoldMessenger.of(context)
+                                      .showSnackBar(
+                                    SnackBar(content: Text('$e')),
+                                  );
                                 }
                               },
                               child: const Text('Renouveler'),

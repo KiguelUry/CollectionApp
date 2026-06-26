@@ -34,6 +34,9 @@ abstract final class SupabaseEmbeds {
   static const groupWantedAuthorProfile =
       'profiles!group_wanted_posts_author_id_fkey(username)';
 
+  static const groupRuleAuthorProfile =
+      'profiles!group_rule_entries_author_id_fkey(username)';
+
   static const groupMemberProfile =
       'profiles!group_members_profile_id_fkey(username, avatar_url, accent_color)';
 

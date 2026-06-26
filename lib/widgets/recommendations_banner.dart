@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../models/collection_category.dart';
 import '../services/recommendation_service.dart';
 
 /// Bloc de recommandations intelligentes.

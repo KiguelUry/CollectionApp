@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../models/collection_category.dart';
-import '../../services/boardgame_discovery_service.dart';
 import '../../widgets/category_hub_header.dart';
 import '../../widgets/category_type_hub.dart';
 import '../home_screen.dart';

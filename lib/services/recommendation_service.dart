@@ -85,7 +85,7 @@ class RecommendationService {
         Recommendation(
           title: item.title,
           category: item.category,
-          reason: '$username adore cet objet (${stars}★)',
+          reason: '$username adore cet objet ($stars★)',
           friendUsername: username,
           friendRating: stars,
           catalogKey: key,

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../models/wildlife_taxonomy.dart';
 import '../../services/wildlife_service.dart';
 import '../../theme/wildlife_pokedex_theme.dart';
 import '../../widgets/profile_avatar.dart';
@@ -83,7 +82,7 @@ class _WildlifeFriendsCompareSheetState
                 child: ListView.separated(
                   shrinkWrap: true,
                   itemCount: _stats.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  separatorBuilder: (_, _) => const SizedBox(height: 10),
                   itemBuilder: (context, i) {
                     final s = _stats[i];
                     return Container(

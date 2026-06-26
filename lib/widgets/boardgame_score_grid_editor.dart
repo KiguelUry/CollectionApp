@@ -82,18 +82,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
   @override
   void didUpdateWidget(BoardgameScoreGridEditor oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.useTeams && !widget.useTeams) {
-      for (final c in _teamControllers) {
-        c.clear();
-      }
-      for (final c in _definedTeamControllers) {
-        c.dispose();
-      }
-      _definedTeamControllers.clear();
-      _teamColorIndices.clear();
-      _teamScoreMode = TeamScoreMode.divided;
-      _newPlayerColorIndex = null;
-    }
+    // Conserver équipes / couleurs en mémoire — pas de reset destructif.
   }
 
   @override
@@ -132,6 +121,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
         .map((n) => TextEditingController(text: n))
         .toList();
     _teamColorIndices.clear();
+    _teamColorIndices.addAll(grid.teamColorMap);
     for (var i = 0; i < _teamControllers.length; i++) {
       final team = _teamControllers[i].text.trim();
       final ci = _playerColorIndices[i];
@@ -261,6 +251,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
       rounds: rounds,
       teams: teams,
       playerColors: List<int?>.from(_playerColorIndices),
+      teamColorMap: Map<String, int>.from(_teamColorIndices),
       teamScoreMode: _teamScoreMode,
     );
   }
@@ -665,14 +656,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
               contentPadding: EdgeInsets.zero,
               title: const Text('Équipes'),
               value: widget.useTeams,
-              onChanged: (v) {
-                if (!v) {
-                  for (final c in _teamControllers) {
-                    c.clear();
-                  }
-                }
-                widget.onTeamsChanged!(v);
-              },
+              onChanged: (v) => widget.onTeamsChanged!(v),
             ),
             const SizedBox(height: 16),
           ],
@@ -719,6 +703,14 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                           : scheme.surfaceContainerHighest,
                     ),
                     label: Text(name),
+                    onPressed: widget.enabled
+                        ? () {
+                            setState(() {
+                              _newTeamController.text = name;
+                              _newPlayerColorIndex = ci;
+                            });
+                          }
+                        : null,
                     onDeleted: () => _removeDefinedTeam(i),
                   );
                 }),
@@ -1070,7 +1062,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                       !sharedTeams &&
                       colCount > 0)
                     _teamTotalRow(grid, teamTotals, labelW, scheme),
-                  if (colCount > 0 && !_hideTotals)
+                  if (colCount > 0)
                     _stretchRow([
                       _cornerLabel(
                         widget.winCondition ==
@@ -1091,11 +1083,12 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                             (a, i) => a + _colWidth(i),
                           );
                           final total = teamTotals[team] ?? 0;
-                          final isWinner = indices.any(winners.contains) &&
+                          final isWinner = !_hideTotals &&
+                              indices.any(winners.contains) &&
                               widget.winCondition !=
                                   BoardgameWinCondition.cooperative;
                           return _totalCell(
-                            '$total',
+                            _hideTotals ? '?' : '$total',
                             w,
                             scheme,
                             isWinner: isWinner,
@@ -1106,7 +1099,9 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                           final hasName =
                               _playerControllers[i].text.trim().isNotEmpty;
                           String text = '—';
-                          if (hasName && grid.hasScores) {
+                          if (_hideTotals && hasName && grid.hasScores) {
+                            text = '?';
+                          } else if (hasName && grid.hasScores) {
                             if (widget.useTeams &&
                                 widget.winCondition !=
                                     BoardgameWinCondition.cooperative) {
@@ -1118,7 +1113,8 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                               text = '${i < totals.length ? totals[i] : 0}';
                             }
                           }
-                          final isWinner = winners.contains(i) &&
+                          final isWinner = !_hideTotals &&
+                              winners.contains(i) &&
                               widget.winCondition !=
                                   BoardgameWinCondition.cooperative;
                           return _totalCell(
@@ -1214,7 +1210,8 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
           key: ValueKey('round_$row'),
           controller: _roundLabelControllers[row],
           style: const TextStyle(fontSize: 11),
-          maxLines: 3,
+          minLines: 1,
+          maxLines: 1,
           decoration: InputDecoration(
             isDense: true,
             hintText: 'Tour ${row + 1}',

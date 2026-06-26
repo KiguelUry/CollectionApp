@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../constants/book_accent.dart';
-import '../../models/collection_category.dart';
 import '../../models/collection_item.dart';
 import '../../models/user_list.dart';
 import '../../services/user_list_service.dart';

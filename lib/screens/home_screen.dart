@@ -909,6 +909,7 @@ class _HomeScreenState extends State<HomeScreen>
         subcategory: resolvedSub,
         groupId: options.groupId,
       );
+      if (!mounted) return;
       var message = '« $title » ajouté';
       if (existing != null) {
         final newQty =
@@ -949,6 +950,7 @@ class _HomeScreenState extends State<HomeScreen>
         if (widget.category == CollectionCategory.boardgame &&
             bggId != null &&
             !options.isWishlist) {
+          if (!mounted) return;
           final expansionMsg = await insertBoardgameWithExpansionRules(
             context: context,
             title: title,
@@ -1028,10 +1030,12 @@ class _HomeScreenState extends State<HomeScreen>
       CollectionRefresh.instance.bump();
 
       if (!mounted) return;
+      if (!dialogContext.mounted) return;
       Navigator.pop(dialogContext);
-      if (closesTwoDialogs && Navigator.canPop(context)) {
+      if (closesTwoDialogs && context.mounted && Navigator.canPop(context)) {
         Navigator.pop(context);
       }
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message)),
       );

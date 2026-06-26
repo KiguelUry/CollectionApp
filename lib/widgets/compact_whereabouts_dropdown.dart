@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_group.dart';
 import '../services/friend_service.dart';
 import '../services/group_service.dart';
+import '../utils/holder_label_utils.dart';
 
 /// « Chez ? » compact — membres uniques, saisie manuelle, défaut « Chez moi ».
 class CompactWhereaboutsDropdown extends StatefulWidget {
@@ -52,17 +53,25 @@ class _CompactWhereaboutsDropdownState
   final _friendService = FriendService();
 
   List<_MemberOption> _options = [];
-  bool _loading = true;
+  bool _initialLoading = true;
   bool _defaultApplied = false;
   late TextEditingController _manualController;
   bool _manualMode = false;
 
+  bool get _isManualHolder =>
+      widget.locationUserId == null &&
+      widget.holderLabel != null &&
+      widget.holderLabel!.trim().isNotEmpty;
+
   @override
   void initState() {
     super.initState();
-    _manualMode = widget.holderLabel != null &&
-        widget.holderLabel!.trim().isNotEmpty &&
-        widget.locationUserId == null;
+    _syncManualStateFromWidget();
+    _load(initial: true);
+  }
+
+  void _syncManualStateFromWidget() {
+    _manualMode = _isManualHolder;
     _manualController = TextEditingController(
       text: _manualMode
           ? widget.holderLabel!
@@ -70,30 +79,38 @@ class _CompactWhereaboutsDropdownState
               .replaceFirst(RegExp(r'^Chez\s+', caseSensitive: false), '')
           : '',
     );
-    _load();
   }
 
   @override
   void didUpdateWidget(CompactWhereaboutsDropdown oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.selectedGroupIds != widget.selectedGroupIds ||
-        oldWidget.groups != widget.groups) {
-      _load();
+    final groupsChanged = !_setEquals(
+      oldWidget.selectedGroupIds,
+      widget.selectedGroupIds,
+    );
+    if (groupsChanged) {
+      _load(initial: false);
     }
     if (oldWidget.holderLabel != widget.holderLabel ||
         oldWidget.locationUserId != widget.locationUserId) {
-      final manual = widget.holderLabel != null &&
-          widget.holderLabel!.trim().isNotEmpty &&
-          widget.locationUserId == null;
-      if (manual != _manualMode) {
-        _manualMode = manual;
-        if (manual) {
-          _manualController.text = widget.holderLabel!
-              .trim()
-              .replaceFirst(RegExp(r'^Chez\s+', caseSensitive: false), '');
+      final manual = _isManualHolder;
+      if (manual) {
+        _manualMode = true;
+        final stripped = widget.holderLabel!
+            .trim()
+            .replaceFirst(RegExp(r'^Chez\s+', caseSensitive: false), '');
+        if (_manualController.text != stripped) {
+          _manualController.text = stripped;
         }
+      } else if (_manualMode && widget.locationUserId != null) {
+        _manualMode = false;
       }
     }
+  }
+
+  static bool _setEquals(Set<String> a, Set<String> b) {
+    if (a.length != b.length) return false;
+    return a.containsAll(b);
   }
 
   @override
@@ -103,8 +120,8 @@ class _CompactWhereaboutsDropdownState
   }
 
   void _applyDefaultIfNeeded() {
-    if (widget.readOnly || _defaultApplied) return;
-    if (widget.locationUserId != null || widget.holderLabel != null) return;
+    if (widget.readOnly || _defaultApplied || _isManualHolder) return;
+    if (widget.locationUserId != null) return;
     final me = Supabase.instance.client.auth.currentUser?.id;
     if (me == null) return;
     _defaultApplied = true;
@@ -117,8 +134,10 @@ class _CompactWhereaboutsDropdownState
     });
   }
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
+  Future<void> _load({required bool initial}) async {
+    if (initial) {
+      setState(() => _initialLoading = true);
+    }
     final me = Supabase.instance.client.auth.currentUser?.id;
     final seenUserIds = <String>{};
     final opts = <_MemberOption>[];
@@ -190,24 +209,15 @@ class _CompactWhereaboutsDropdownState
     if (!mounted) return;
     setState(() {
       _options = opts;
-      _loading = false;
+      _initialLoading = false;
     });
-    _applyDefaultIfNeeded();
+    if (initial) _applyDefaultIfNeeded();
   }
 
   String? get _dropdownValue {
-    if (_manualMode) return 'manual';
+    if (_manualMode || _isManualHolder) return 'manual';
     final uid = widget.locationUserId;
-    if (uid == null) {
-      final me = Supabase.instance.client.auth.currentUser?.id;
-      if (me != null) {
-        final meValue = 'user:$me';
-        final matches =
-            _options.where((o) => !o.isHeader && o.value == meValue).length;
-        if (matches == 1) return meValue;
-      }
-      return null;
-    }
+    if (uid == null) return null;
     final v = 'user:$uid';
     final matches = _options.where((o) => !o.isHeader && o.value == v).length;
     if (matches == 1) return v;
@@ -234,15 +244,40 @@ class _CompactWhereaboutsDropdownState
     }
   }
 
-  void _submitManual() {
+  Future<void> _submitManual() async {
     final t = _manualController.text.trim();
     if (t.isEmpty) return;
-    widget.onChanged(holderLabel: t, manualHolder: true);
+
+    final preview = formatManualHolderLabel(t);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Confirmer le lieu'),
+        content: Text(
+          'Afficher comme :\n\n$preview',
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Modifier'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Valider'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    setState(() => _manualMode = true);
+    widget.onChanged(holderLabel: preview, manualHolder: true);
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
+    if (_initialLoading) {
       return const SizedBox(
         height: 48,
         child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
@@ -257,35 +292,43 @@ class _CompactWhereaboutsDropdownState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        DropdownButtonFormField<String>(
-          value: validValue ? value : null,
-          decoration: const InputDecoration(
+        InputDecorator(
+          decoration: InputDecoration(
             labelText: 'Chez qui ?',
             isDense: true,
+            helperText: _isManualHolder && !_manualMode
+                ? widget.holderLabel
+                : null,
           ),
-          items: _options.map((o) {
-            if (o.isHeader) {
-              return DropdownMenuItem<String>(
-                value: o.value,
-                enabled: false,
-                child: Text(
-                  o.label,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                ),
-              );
-            }
-            return DropdownMenuItem<String>(
-              value: o.value,
-              child: Text(o.label),
-            );
-          }).toList(),
-          onChanged: widget.readOnly ? null : _onDropdownChanged,
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              isExpanded: true,
+              value: validValue ? value : null,
+              items: _options.map((o) {
+                if (o.isHeader) {
+                  return DropdownMenuItem<String>(
+                    value: o.value,
+                    enabled: false,
+                    child: Text(
+                      o.label,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
+                  );
+                }
+                return DropdownMenuItem<String>(
+                  value: o.value,
+                  child: Text(o.label),
+                );
+              }).toList(),
+              onChanged: widget.readOnly ? null : _onDropdownChanged,
+            ),
+          ),
         ),
-        if (_manualMode && !widget.readOnly) ...[
+        if ((_manualMode || _isManualHolder) && !widget.readOnly) ...[
           const SizedBox(height: 8),
           Row(
             children: [

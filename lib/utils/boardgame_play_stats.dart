@@ -53,6 +53,35 @@ class BoardgameDuoHighlight {
   String get label => '$playerA & $playerB';
 }
 
+/// Vue globale : joueurs × parties chronologiques.
+class BoardgameGlobalMatrix {
+  final List<String> players;
+  final List<String> sessionLabels;
+  final List<int> sessionIndices;
+  final Map<String, List<int?>> scoresByPlayer;
+  /// sessionIndex → player → médaille (1=or, 2=argent, 3=bronze).
+  final Map<int, Map<String, int>> medalsBySession;
+
+  const BoardgameGlobalMatrix({
+    required this.players,
+    required this.sessionLabels,
+    required this.sessionIndices,
+    required this.scoresByPlayer,
+    required this.medalsBySession,
+  });
+
+  int? medalFor(String player, int sessionIndex) =>
+      medalsBySession[sessionIndex]?[player];
+}
+
+/// Emplacement podium (gère les ex-aequo).
+class BoardgamePodiumSlot {
+  final int rank;
+  final List<BoardgameWinHighlight> players;
+
+  const BoardgamePodiumSlot({required this.rank, required this.players});
+}
+
 /// Ligne matricielle : joueur + parties + valeurs étendues (scores, etc.).
 class BoardgameMatrixRow {
   final String player;
@@ -97,6 +126,8 @@ class BoardgameRankingStats {
   final List<BoardgameMatrixRow> scoreMatrixRows;
   final List<BoardgameMatrixRow> averageMatrixRows;
   final List<BoardgameMatrixRow> winsMatrixRows;
+  final BoardgameGlobalMatrix globalMatrix;
+  final List<BoardgamePodiumSlot> podiumSlots;
 
   const BoardgameRankingStats({
     required this.winPodium,
@@ -109,6 +140,8 @@ class BoardgameRankingStats {
     required this.scoreMatrixRows,
     required this.averageMatrixRows,
     required this.winsMatrixRows,
+    required this.globalMatrix,
+    required this.podiumSlots,
   });
 
   BoardgamePlayAggregateStats get legacySummary => BoardgamePlayAggregateStats(
@@ -208,7 +241,9 @@ class BoardgameRankingStats {
           ),
         )
         .toList()
-      ..sort((a, b) => b.wins.compareTo(a.wins));
+      ..sort(_comparePodium);
+
+    final podiumSlots = _buildPodiumSlots(podium);
 
     final averages = scoreCounts.entries
         .map(
@@ -238,6 +273,7 @@ class BoardgameRankingStats {
     final scoreMatrix = _buildScoreMatrix(scoresByPlayer, gamesPlayed);
     final averageMatrix = _buildAverageMatrix(averages, gamesPlayed);
     final winsMatrix = _buildWinsMatrix(podium, lastCounts, gamesPlayed);
+    final globalMatrix = _buildGlobalMatrix(sessions, gamesPlayed);
 
     return BoardgameRankingStats(
       winPodium: podium,
@@ -251,6 +287,113 @@ class BoardgameRankingStats {
       scoreMatrixRows: scoreMatrix,
       averageMatrixRows: averageMatrix,
       winsMatrixRows: winsMatrix,
+      globalMatrix: globalMatrix,
+      podiumSlots: podiumSlots,
+    );
+  }
+
+  static int _comparePodium(BoardgameWinHighlight a, BoardgameWinHighlight b) {
+    final w = b.wins.compareTo(a.wins);
+    if (w != 0) return w;
+    return a.gamesPlayed.compareTo(b.gamesPlayed);
+  }
+
+  static List<BoardgamePodiumSlot> _buildPodiumSlots(
+    List<BoardgameWinHighlight> sorted,
+  ) {
+    if (sorted.isEmpty) return [];
+    final slots = <BoardgamePodiumSlot>[];
+    var i = 0;
+    var nextRank = 1;
+
+    while (i < sorted.length && nextRank <= 3) {
+      final group = <BoardgameWinHighlight>[sorted[i]];
+      i++;
+      while (i < sorted.length &&
+          sorted[i].wins == group.first.wins &&
+          sorted[i].gamesPlayed == group.first.gamesPlayed) {
+        group.add(sorted[i]);
+        i++;
+      }
+      slots.add(BoardgamePodiumSlot(rank: nextRank, players: group));
+      if (nextRank == 1 && group.length > 1) {
+        nextRank = 3;
+      } else {
+        nextRank++;
+      }
+    }
+    return slots;
+  }
+
+  static BoardgameGlobalMatrix _buildGlobalMatrix(
+    List<BoardgamePlaySession> sessions,
+    Map<String, int> gamesPlayed,
+  ) {
+    final indexed = List.generate(sessions.length, (i) => (i, sessions[i]));
+    indexed.sort((a, b) => a.$2.date.compareTo(b.$2.date));
+
+    final sessionIndices = <int>[];
+    final sessionLabels = <String>[];
+    final players = <String>{};
+    final scoresByPlayer = <String, List<int?>>{};
+    final medalsBySession = <int, Map<String, int>>{};
+
+    for (var col = 0; col < indexed.length; col++) {
+      final (sessionIdx, session) = indexed[col];
+      sessionIndices.add(sessionIdx);
+      sessionLabels.add('Partie ${col + 1}');
+
+      final grid = session.scoreGrid;
+      final sessionScores = <String, int>{};
+
+      if (session.trackScores && grid != null && grid.hasScores) {
+        final totals = grid.columnTotals();
+        for (var i = 0; i < grid.players.length; i++) {
+          final name = grid.players[i].trim();
+          if (name.isEmpty || !grid.columnHasScores(i)) continue;
+          players.add(name);
+          sessionScores[name] = i < totals.length ? totals[i] : 0;
+        }
+      } else {
+        for (final p in _sessionParticipants(session)) {
+          players.add(p);
+        }
+      }
+
+      final sortedScores = sessionScores.entries.toList()
+        ..sort((a, b) => b.value.compareTo(a.value));
+      final medals = <String, int>{};
+      for (var r = 0; r < sortedScores.length && r < 3; r++) {
+        medals[sortedScores[r].key] = r + 1;
+      }
+      medalsBySession[sessionIdx] = medals;
+
+      for (final entry in sessionScores.entries) {
+        players.add(entry.key);
+        scoresByPlayer.putIfAbsent(
+          entry.key,
+          () => List.filled(indexed.length, null),
+        );
+        scoresByPlayer[entry.key]![col] = entry.value;
+      }
+    }
+
+    final playerList = players.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+
+    for (final name in playerList) {
+      scoresByPlayer.putIfAbsent(
+        name,
+        () => List.filled(indexed.length, null),
+      );
+    }
+
+    return BoardgameGlobalMatrix(
+      players: playerList,
+      sessionLabels: sessionLabels,
+      sessionIndices: sessionIndices,
+      scoresByPlayer: scoresByPlayer,
+      medalsBySession: medalsBySession,
     );
   }
 

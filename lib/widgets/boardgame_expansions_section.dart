@@ -111,17 +111,20 @@ class _BoardgameExpansionsSectionState extends State<BoardgameExpansionsSection>
     final next = Set<String>.from(_owned);
     if (owned) {
       next.add(exp.bggId);
+      _pendingUncheck.remove(exp.bggId);
     } else {
       next.remove(exp.bggId);
+      _pendingUncheck.add(exp.bggId);
     }
 
-    setState(() => _owned = next);
+    setState(() {
+      _owned = next;
+      if (!owned) _showAll = true;
+    });
     _syncing = true;
-    if (!owned) _pendingUncheck.add(exp.bggId);
 
     try {
       if (owned) {
-        _pendingUncheck.remove(exp.bggId);
         await _expansionService.linkExpansionToBase(
           base: widget.item,
           expansionBggId: exp.bggId,
@@ -301,14 +304,17 @@ class _ExpansionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final ownedBg = scheme.tertiaryContainer.withValues(alpha: 0.55);
+    final ownedBorder = scheme.tertiary.withValues(alpha: 0.45);
+    final ownedText = scheme.onTertiaryContainer;
+
     return Material(
-      color: owned ? Colors.green.shade50 : Theme.of(context).colorScheme.surfaceContainerLowest,
+      color: owned ? ownedBg : scheme.surfaceContainerLowest,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(
-          color: owned
-              ? Colors.green.shade200
-              : accent.withValues(alpha: 0.16),
+          color: owned ? ownedBorder : accent.withValues(alpha: 0.16),
         ),
       ),
       child: InkWell(
@@ -341,9 +347,10 @@ class _ExpansionRow extends StatelessWidget {
                   expansion.title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: 14,
+                    color: owned ? ownedText : scheme.onSurface,
                   ),
                 ),
               ),
@@ -352,11 +359,12 @@ class _ExpansionRow extends StatelessWidget {
                   visualDensity: VisualDensity.compact,
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   value: owned,
-                  activeColor: Colors.green.shade700,
+                  activeColor: scheme.tertiary,
+                  checkColor: scheme.onTertiary,
                   onChanged: (v) => onToggle(v ?? false),
                 )
               else if (owned)
-                Icon(Icons.check_circle, color: Colors.green.shade700, size: 20),
+                Icon(Icons.check_circle, color: scheme.tertiary, size: 20),
             ],
           ),
         ),

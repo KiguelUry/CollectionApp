@@ -540,14 +540,26 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
               style: Theme.of(context).textTheme.labelLarge,
             ),
             const SizedBox(height: 4),
-            ...BoardgameWinCondition.values.map(
-              (c) => RadioListTile<BoardgameWinCondition>(
-                contentPadding: EdgeInsets.zero,
-                title: Text(c.label, style: const TextStyle(fontSize: 14)),
-                value: c,
-                groupValue: _winCondition,
-                onChanged: (v) => setState(() => _winCondition = v!),
-              ),
+            SegmentedButton<BoardgameWinCondition>(
+              segments: BoardgameWinCondition.values
+                  .map(
+                    (c) => ButtonSegment(
+                      value: c,
+                      label: Text(
+                        switch (c) {
+                          BoardgameWinCondition.highest => 'Max',
+                          BoardgameWinCondition.lowest => 'Min',
+                          BoardgameWinCondition.cooperative => 'Coop',
+                        },
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  )
+                  .toList(),
+              selected: {_winCondition},
+              onSelectionChanged: (selection) {
+                setState(() => _winCondition = selection.first);
+              },
             ),
             const SizedBox(height: 8),
             if (_winCondition == BoardgameWinCondition.cooperative) ...[

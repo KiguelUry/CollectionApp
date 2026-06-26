@@ -4,6 +4,7 @@ class BoardgameScoreGrid {
   final List<BoardgameScoreRound> rounds;
   final List<String?> teams;
   final List<int?> playerColors;
+  final Map<String, int> teamColorMap;
   final TeamScoreMode teamScoreMode;
 
   const BoardgameScoreGrid({
@@ -11,6 +12,7 @@ class BoardgameScoreGrid {
     required this.rounds,
     this.teams = const [],
     this.playerColors = const [],
+    this.teamColorMap = const {},
     this.teamScoreMode = TeamScoreMode.divided,
   });
 
@@ -65,11 +67,20 @@ class BoardgameScoreGrid {
     final teamScoreMode = TeamScoreMode.fromJson(
       json['team_score_mode']?.toString(),
     );
+    final rawTeamColors = json['team_colors'] as Map?;
+    final teamColorMap = <String, int>{};
+    if (rawTeamColors != null) {
+      for (final e in rawTeamColors.entries) {
+        final v = e.value;
+        if (v is num) teamColorMap[e.key.toString()] = v.round();
+      }
+    }
     return BoardgameScoreGrid(
       players: players,
       rounds: rounds,
       teams: teams,
       playerColors: playerColors,
+      teamColorMap: teamColorMap,
       teamScoreMode: teamScoreMode,
     );
   }
@@ -77,9 +88,10 @@ class BoardgameScoreGrid {
   Map<String, dynamic> toJson() => {
         'players': players,
         'rounds': rounds.map((r) => r.toJson()).toList(),
-        if (teams.any((t) => t != null && t!.trim().isNotEmpty))
+        if (teams.any((t) => t != null && t.trim().isNotEmpty))
           'teams': teams,
         if (playerColors.any((c) => c != null)) 'player_colors': playerColors,
+        if (teamColorMap.isNotEmpty) 'team_colors': teamColorMap,
         if (teamScoreMode != TeamScoreMode.divided)
           'team_score_mode': teamScoreMode.dbValue,
       };
@@ -90,7 +102,7 @@ class BoardgameScoreGrid {
   bool get hasScores => rounds.any((r) => r.scores.any((s) => s != null));
 
   bool get hasTeams =>
-      teams.any((t) => t != null && t!.trim().isNotEmpty);
+      teams.any((t) => t != null && t.trim().isNotEmpty);
 
   bool columnHasScores(int col) {
     for (final round in rounds) {
@@ -255,14 +267,20 @@ class BoardgameScoreGrid {
       nextPlayers.removeRange(count, nextPlayers.length);
     }
     final nextTeams = List<String?>.from(teams);
-    while (nextTeams.length < count) nextTeams.add(null);
+    while (nextTeams.length < count) {
+      nextTeams.add(null);
+    }
     if (nextTeams.length > count) nextTeams.removeRange(count, nextTeams.length);
     final nextColors = List<int?>.from(playerColors);
-    while (nextColors.length < count) nextColors.add(null);
+    while (nextColors.length < count) {
+      nextColors.add(null);
+    }
     if (nextColors.length > count) nextColors.removeRange(count, nextColors.length);
     final nextRounds = rounds.map((r) {
       final scores = List<int?>.from(r.scores);
-      while (scores.length < count) scores.add(null);
+      while (scores.length < count) {
+        scores.add(null);
+      }
       if (scores.length > count) scores.removeRange(count, scores.length);
       return r.copyWith(scores: scores);
     }).toList();

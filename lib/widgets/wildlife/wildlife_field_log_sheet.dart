@@ -120,7 +120,7 @@ class _WildlifeFieldLogSheetState extends State<_WildlifeFieldLogSheet> {
                 child: ListView.separated(
                   shrinkWrap: true,
                   itemCount: recent.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  separatorBuilder: (_, _) => const SizedBox(height: 8),
                   itemBuilder: (context, i) {
                     final item = recent[i];
                     final obs = item.gamesPlayed ?? 0;

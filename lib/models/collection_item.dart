@@ -4,6 +4,7 @@ import 'card_subcategory.dart';
 import 'category_metadata.dart';
 import 'item_condition.dart';
 import 'item_tag.dart';
+import '../utils/holder_label_utils.dart';
 
 class CollectionItem {
   final String id;
@@ -138,6 +139,13 @@ class CollectionItem {
     }
 
     final metadata = CategoryMetadata.parse(json['metadata']);
+
+    if ((locLabel == null || locLabel.trim().isEmpty) && metadata != null) {
+      final custom = metadata['holder_label'] as String?;
+      if (custom != null && custom.trim().isNotEmpty) {
+        locLabel = formatManualHolderLabel(custom.trim());
+      }
+    }
 
     return CollectionItem(
       id: json['id'],

@@ -213,12 +213,11 @@ class _WishlistOverviewScreenState extends State<WishlistOverviewScreen> {
               tooltip: 'Je l\'ai',
               onPressed: () async {
                 await promoteWishlistToCollection(item);
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('« ${item.title} » dans ta collection')),
-                  );
-                  _load();
-                }
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('« ${item.title} » dans ta collection')),
+                );
+                _load();
               },
             ),
             const Icon(Icons.chevron_right),

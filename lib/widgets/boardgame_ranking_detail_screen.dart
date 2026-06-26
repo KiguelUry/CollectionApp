@@ -4,14 +4,14 @@ import '../models/boardgame_play_session.dart';
 import '../utils/boardgame_play_stats.dart';
 
 enum RankingDetailMode {
+  global,
   scores,
   averages,
   wins,
 }
 
-/// Écran plein écran pour une vue statistique avec bascule de sens.
+/// Écran plein écran pour une vue statistique avec bascule de type.
 class BoardgameRankingDetailScreen extends StatefulWidget {
-  final String title;
   final RankingDetailMode mode;
   final BoardgameRankingStats stats;
   final List<BoardgamePlaySession> sessions;
@@ -19,7 +19,6 @@ class BoardgameRankingDetailScreen extends StatefulWidget {
 
   const BoardgameRankingDetailScreen({
     super.key,
-    required this.title,
     required this.mode,
     required this.stats,
     required this.sessions,
@@ -33,19 +32,36 @@ class BoardgameRankingDetailScreen extends StatefulWidget {
 
 class _BoardgameRankingDetailScreenState
     extends State<BoardgameRankingDetailScreen> {
+  late RankingDetailMode _mode;
   bool _reversed = false;
 
-  String get _flipTarget => switch (widget.mode) {
+  @override
+  void initState() {
+    super.initState();
+    _mode = widget.mode;
+  }
+
+  bool get _canReverse =>
+      _mode == RankingDetailMode.scores ||
+      _mode == RankingDetailMode.averages;
+
+  String get _title => switch (_mode) {
+        RankingDetailMode.global => 'Vue globale des parties',
+        RankingDetailMode.scores => 'Meilleurs scores',
+        RankingDetailMode.averages => 'Meilleures moyennes',
+        RankingDetailMode.wins => 'Nombre de victoires',
+      };
+
+  String get _flipTarget => switch (_mode) {
         RankingDetailMode.scores =>
           _reversed ? 'Meilleurs scores' : 'Pires scores',
         RankingDetailMode.averages =>
           _reversed ? 'Meilleures moyennes' : 'Pires moyennes',
-        RankingDetailMode.wins =>
-          _reversed ? 'Nombre de victoires' : 'Nombre de fois dernier',
+        _ => _title,
       };
 
   List<BoardgameMatrixRow> get _rows {
-    switch (widget.mode) {
+    switch (_mode) {
       case RankingDetailMode.scores:
         final rows = widget.stats.scoreMatrixRows.map((r) {
           final values = List<int>.from(r.values);
@@ -87,32 +103,24 @@ class _BoardgameRankingDetailScreenState
         return rows;
 
       case RankingDetailMode.wins:
-        if (!_reversed) {
-          return widget.stats.winsMatrixRows;
-        }
-        return (widget.stats.gamesPlayedByPlayer.keys.toList()
-              ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())))
-            .map((name) {
-          final last = widget.stats.lastPlaceByPlayer[name] ?? 0;
-          return BoardgameMatrixRow(
-            player: name,
-            gamesPlayed: widget.stats.gamesPlayedByPlayer[name] ?? 0,
-            values: [last],
-            sessionIndices: const [],
-          );
-        }).toList()
-          ..sort((a, b) => b.values.first.compareTo(a.values.first));
+        return widget.stats.winsMatrixRows;
+
+      case RankingDetailMode.global:
+        return [];
     }
   }
 
-  String get _valueHeader {
-    if (widget.mode == RankingDetailMode.scores) {
-      return _reversed ? 'Pire score' : 'Meilleur score';
+  String _valueHeaderFor(int colIndex) {
+    if (colIndex == 0) {
+      if (_mode == RankingDetailMode.scores) {
+        return _reversed ? 'Pire score' : 'Meilleur score';
+      }
+      if (_mode == RankingDetailMode.averages) {
+        return _reversed ? 'Pire moyenne' : 'Meilleure moyenne';
+      }
+      return 'Victoires';
     }
-    if (widget.mode == RankingDetailMode.averages) {
-      return _reversed ? 'Pire moyenne' : 'Meilleure moyenne';
-    }
-    return _reversed ? 'Fois dernier' : 'Victoires';
+    return 'Score ${colIndex + 1}';
   }
 
   double? _averageFor(String player) {
@@ -130,83 +138,182 @@ class _BoardgameRankingDetailScreenState
     return m.clamp(1, 12);
   }
 
+  String _medalEmoji(int? rank) => switch (rank) {
+        1 => '🥇',
+        2 => '🥈',
+        3 => '🥉',
+        _ => '',
+      };
+
+  Widget _buildGlobalTable(ColorScheme scheme) {
+    final matrix = widget.stats.globalMatrix;
+    if (matrix.players.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.all(24),
+        child: Text('Aucune partie avec scores enregistrés.'),
+      );
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: SingleChildScrollView(
+        child: DataTable(
+          headingRowColor: WidgetStatePropertyAll(
+            scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+          ),
+          columns: [
+            const DataColumn(label: Text('Joueur')),
+            ...matrix.sessionLabels.map((l) => DataColumn(label: Text(l))),
+          ],
+          rows: matrix.players.map((player) {
+            final scores = matrix.scoresByPlayer[player] ?? [];
+            return DataRow(
+              cells: [
+                DataCell(Text(player)),
+                for (var col = 0; col < matrix.sessionIndices.length; col++)
+                  DataCell(
+                    col < scores.length && scores[col] != null
+                        ? _GlobalScoreCell(
+                            score: scores[col]!,
+                            medal: _medalEmoji(
+                              matrix.medalFor(
+                                player,
+                                matrix.sessionIndices[col],
+                              ),
+                            ),
+                            onTap: widget.onOpenSession != null
+                                ? () => widget.onOpenSession!(
+                                      matrix.sessionIndices[col],
+                                    )
+                                : null,
+                          )
+                        : const Text('—'),
+                  ),
+              ],
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStandardTable(ColorScheme scheme) {
+    final rows = _rows;
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: SingleChildScrollView(
+        child: DataTable(
+          headingRowColor: WidgetStatePropertyAll(
+            scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+          ),
+          columns: [
+            const DataColumn(label: Text('Joueur')),
+            const DataColumn(label: Text('Parties')),
+            for (var i = 0; i < _maxValueCols; i++)
+              DataColumn(label: Text(_valueHeaderFor(i))),
+          ],
+          rows: rows.map((r) {
+            return DataRow(
+              cells: [
+                DataCell(Text(r.player)),
+                DataCell(Text('${r.gamesPlayed}')),
+                for (var i = 0; i < _maxValueCols; i++)
+                  DataCell(
+                    i < r.values.length
+                        ? _ScoreCell(
+                            value: _mode == RankingDetailMode.averages
+                                ? (_averageFor(r.player)?.toStringAsFixed(1) ??
+                                    '${r.values[i]}')
+                                : '${r.values[i]}',
+                            onTap: _mode == RankingDetailMode.scores &&
+                                    i < r.sessionIndices.length &&
+                                    widget.onOpenSession != null
+                                ? () => widget.onOpenSession!(
+                                      r.sessionIndices[i],
+                                    )
+                                : null,
+                          )
+                        : const Text('—'),
+                  ),
+              ],
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final rows = _rows;
 
     return Scaffold(
-      appBar: AppBar(title: Text(widget.title)),
+      appBar: AppBar(title: Text(_title)),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _reversed ? _flipTarget : widget.title,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                  ),
-                ),
-                TextButton.icon(
-                  onPressed: () => setState(() => _reversed = !_reversed),
-                  icon: const Icon(Icons.swap_horiz, size: 18),
-                  label: const Text('Changement de sens'),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
-              child: SingleChildScrollView(
-                child: DataTable(
-                  headingRowColor: WidgetStatePropertyAll(
-                    scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+              child: SegmentedButton<RankingDetailMode>(
+                segments: const [
+                  ButtonSegment(
+                    value: RankingDetailMode.global,
+                    label: Text('Global'),
+                    icon: Icon(Icons.grid_on_outlined, size: 18),
                   ),
-                  columns: [
-                    const DataColumn(label: Text('Joueur')),
-                    const DataColumn(label: Text('Parties')),
-                    DataColumn(label: Text(_valueHeader)),
-                    for (var i = 2; i < _maxValueCols; i++)
-                      DataColumn(label: Text('Score $i')),
-                  ],
-                  rows: rows.map((r) {
-                    return DataRow(
-                      cells: [
-                        DataCell(Text(r.player)),
-                        DataCell(Text('${r.gamesPlayed}')),
-                        for (var i = 0; i < _maxValueCols - 1; i++)
-                          DataCell(
-                            i < r.values.length
-                                ? _ScoreCell(
-                                    value: widget.mode ==
-                                            RankingDetailMode.averages
-                                        ? (_averageFor(r.player)
-                                                ?.toStringAsFixed(1) ??
-                                            '${r.values[i]}')
-                                        : '${r.values[i]}',
-                                    onTap: widget.mode ==
-                                                RankingDetailMode.scores &&
-                                            i < r.sessionIndices.length &&
-                                            widget.onOpenSession != null
-                                        ? () => widget.onOpenSession!(
-                                              r.sessionIndices[i],
-                                            )
-                                        : null,
-                                  )
-                                : const Text('—'),
-                          ),
-                      ],
-                    );
-                  }).toList(),
-                ),
+                  ButtonSegment(
+                    value: RankingDetailMode.scores,
+                    label: Text('Scores'),
+                    icon: Icon(Icons.leaderboard_outlined, size: 18),
+                  ),
+                  ButtonSegment(
+                    value: RankingDetailMode.averages,
+                    label: Text('Moyennes'),
+                    icon: Icon(Icons.functions_outlined, size: 18),
+                  ),
+                  ButtonSegment(
+                    value: RankingDetailMode.wins,
+                    label: Text('Victoires'),
+                    icon: Icon(Icons.emoji_events_outlined, size: 18),
+                  ),
+                ],
+                selected: {_mode},
+                onSelectionChanged: (s) {
+                  setState(() {
+                    _mode = s.first;
+                    _reversed = false;
+                  });
+                },
               ),
             ),
+          ),
+          if (_canReverse)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _reversed ? _flipTarget : _title,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: () => setState(() => _reversed = !_reversed),
+                    icon: const Icon(Icons.swap_horiz, size: 18),
+                    label: const Text('Changement de sens'),
+                  ),
+                ],
+              ),
+            ),
+          Expanded(
+            child: _mode == RankingDetailMode.global
+                ? _buildGlobalTable(scheme)
+                : _buildStandardTable(scheme),
           ),
         ],
       ),
@@ -234,5 +341,43 @@ class _ScoreCell extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class _GlobalScoreCell extends StatelessWidget {
+  final int score;
+  final String medal;
+  final VoidCallback? onTap;
+
+  const _GlobalScoreCell({
+    required this.score,
+    required this.medal,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final child = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (medal.isNotEmpty) ...[
+          Text(medal, style: const TextStyle(fontSize: 12)),
+          const SizedBox(width: 2),
+        ],
+        Text(
+          '$score',
+          style: TextStyle(
+            color: onTap != null
+                ? Theme.of(context).colorScheme.primary
+                : null,
+            fontWeight: onTap != null ? FontWeight.w600 : null,
+            decoration:
+                onTap != null ? TextDecoration.underline : null,
+          ),
+        ),
+      ],
+    );
+    if (onTap == null) return child;
+    return InkWell(onTap: onTap, child: child);
   }
 }

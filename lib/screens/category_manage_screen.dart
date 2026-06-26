@@ -89,9 +89,8 @@ class _CategoryManageScreenState extends State<CategoryManageScreen> {
     }
   }
 
-  void _onReorder(int oldIndex, int newIndex) {
+  void _onReorderItem(int oldIndex, int newIndex) {
     setState(() {
-      if (newIndex > oldIndex) newIndex -= 1;
       final item = _tiles.removeAt(oldIndex);
       _tiles.insert(newIndex, item);
     });
@@ -131,7 +130,7 @@ class _CategoryManageScreenState extends State<CategoryManageScreen> {
                   child: ReorderableListView.builder(
                     padding: const EdgeInsets.fromLTRB(8, 0, 8, 24),
                     itemCount: _tiles.length,
-                    onReorder: _onReorder,
+                    onReorderItem: _onReorderItem,
                     buildDefaultDragHandles: false,
                     itemBuilder: (context, index) {
                       final entry = _tiles[index];

@@ -29,6 +29,7 @@ import '../widgets/compact_whereabouts_dropdown.dart';
 import '../widgets/discogs_market_value_card.dart';
 import '../widgets/friend_ratings_panel.dart';
 import '../widgets/group_rules_panel.dart';
+import '../widgets/item_aspect_ratings_section.dart';
 import '../widgets/profile_avatar.dart';
 import '../widgets/restaurant_visits_panel.dart';
 import '../services/boardgame_expansion_service.dart';
@@ -38,6 +39,7 @@ import '../utils/boardgame_expansion_flow.dart';
 import '../services/bgg_service.dart';
 import '../utils/copy_friend_item.dart';
 import '../utils/friend_item_overlap.dart';
+import '../utils/holder_label_utils.dart';
 import '../utils/navigate_to_card_set.dart';
 import '../utils/wishlist_promote.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -73,6 +75,9 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
   List<CollectionGroup> _groups = [];
   Set<String> _selectedGroupIds = {};
   Timer? _saveDebounce;
+  Timer? _quantityDebounce;
+  bool _saveInFlight = false;
+  bool _saveQueued = false;
 
   @override
   void initState() {
@@ -113,6 +118,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
   @override
   void dispose() {
     _saveDebounce?.cancel();
+    _quantityDebounce?.cancel();
     _reviewController.dispose();
     _priceController.dispose();
     _gamesPlayedController.dispose();
@@ -251,8 +257,20 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     return meta;
   }
 
-  Map<String, dynamic> _metadataForSave(List<String> groupIds) =>
-      _metadataWithGroups(groupIds);
+  Map<String, dynamic> _metadataForSave(List<String> groupIds) {
+    final meta = _metadataWithGroups(groupIds);
+    if (_item.locationUserId != null) {
+      meta.remove('holder_label');
+    } else {
+      final label = _item.locationLabel?.trim();
+      if (label != null && label.isNotEmpty && label != '—') {
+        meta['holder_label'] = holderLabelStorageValue(label);
+      } else {
+        meta.remove('holder_label');
+      }
+    }
+    return meta;
+  }
 
   String? _groupNameById(String id) {
     for (final g in _groups) {
@@ -278,7 +296,31 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
 
   void _saveNow() {
     _saveDebounce?.cancel();
-    _save();
+    _enqueueSave();
+  }
+
+  Future<void> _enqueueSave() async {
+    if (_saveInFlight) {
+      _saveQueued = true;
+      return;
+    }
+    _saveInFlight = true;
+    try {
+      do {
+        _saveQueued = false;
+        await _save();
+      } while (_saveQueued);
+    } finally {
+      _saveInFlight = false;
+    }
+  }
+
+  void _adjustQuantity(int delta) {
+    final next = (_item.quantity + delta).clamp(1, 9999);
+    if (next == _item.quantity) return;
+    setState(() => _item = _item.copyWith(quantity: next));
+    _quantityDebounce?.cancel();
+    _quantityDebounce = Timer(const Duration(milliseconds: 300), _saveNow);
   }
 
   Future<void> _save() async {
@@ -597,6 +639,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                                     orphanExpansion: _item,
                                   );
                                   if (!mounted || base == null) return;
+                                  if (!context.mounted) return;
                                   Navigator.pushReplacement(
                                     context,
                                     MaterialPageRoute(
@@ -703,29 +746,13 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                             IconButton(
                               visualDensity: VisualDensity.compact,
                               onPressed: !ro && _item.quantity > 1
-                                  ? () {
-                                      setState(() {
-                                        _item = _item.copyWith(
-                                          quantity: _item.quantity - 1,
-                                        );
-                                      });
-                                      _saveNow();
-                                    }
+                                  ? () => _adjustQuantity(-1)
                                   : null,
                               icon: const Icon(Icons.remove, size: 20),
                             ),
                             IconButton(
                               visualDensity: VisualDensity.compact,
-                              onPressed: !ro
-                                  ? () {
-                                      setState(() {
-                                        _item = _item.copyWith(
-                                          quantity: _item.quantity + 1,
-                                        );
-                                      });
-                                      _saveNow();
-                                    }
-                                  : null,
+                              onPressed: !ro ? () => _adjustQuantity(1) : null,
                               icon: const Icon(Icons.add, size: 20),
                             ),
                           ],
@@ -780,6 +807,49 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       isBoardgame: isBoardgame,
                       metadataRows: metadataRows,
                     ),
+                    if (isBoardgame && !isWishlist) ...[
+                      const SizedBox(height: 12),
+                      CollapsibleSection(
+                        title: 'Jeu de société',
+                        accentColor: _item.category.color,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            BoardgamePlayHistoryPanel(
+                              item: _item,
+                              readOnly: ro,
+                              onMetadataChanged: (meta) {
+                                final count = parseBoardgamePlays(meta).length;
+                                setState(() {
+                                  _item = _item.copyWith(metadata: meta);
+                                  _gamesPlayedController.text =
+                                      count > 0 ? count.toString() : '';
+                                });
+                                _saveNow();
+                              },
+                            ),
+                            const SizedBox(height: 12),
+                            if (_item.groupId != null)
+                              GroupRulesPanel(
+                                groupId: _item.groupId!,
+                                itemId: _item.id,
+                                itemTitle: _item.title,
+                                accent: _groupAccent(),
+                              )
+                            else
+                              TextField(
+                                controller: _personalRulesController,
+                                readOnly: ro,
+                                maxLines: 5,
+                                decoration: const InputDecoration(
+                                  labelText: 'Règles personnalisées',
+                                  border: OutlineInputBorder(),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
                     if (isBoardgame && BoardgameExpansionService.itemActsAsBase(_item))
                       CollapsibleSection(
                         title: 'Extensions',
@@ -806,6 +876,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                                     if (_groups.isEmpty) await _loadGroups();
                                     if (!mounted) return;
                                     if (_groups.isEmpty) {
+                                      if (!context.mounted) return;
                                       ScaffoldMessenger.of(context)
                                           .showSnackBar(
                                         const SnackBar(
@@ -881,22 +952,36 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                                 setState(() {
                                   if (manualHolder) {
                                     final label = holderLabel?.trim();
+                                    final display = label != null &&
+                                            label.isNotEmpty
+                                        ? formatManualHolderLabel(label)
+                                        : null;
+                                    final meta = Map<String, dynamic>.from(
+                                      _item.metadata ?? {},
+                                    );
+                                    if (display != null) {
+                                      meta['holder_label'] =
+                                          holderLabelStorageValue(display);
+                                    } else {
+                                      meta.remove('holder_label');
+                                    }
                                     _item = _item.copyWith(
                                       clearLoan: true,
                                       clearLocationUserId: true,
-                                      locationLabel: label != null &&
-                                              label.isNotEmpty
-                                          ? (label.startsWith('Chez ')
-                                              ? label
-                                              : 'Chez $label')
-                                          : null,
+                                      locationLabel: display,
+                                      metadata: meta,
                                     );
                                   } else {
+                                    final meta = Map<String, dynamic>.from(
+                                      _item.metadata ?? {},
+                                    );
+                                    meta.remove('holder_label');
                                     _item = _item.copyWith(
                                       clearLoan: true,
                                       locationUserId: locationUserId,
                                       locationLabel: holderLabel,
                                       clearLocationUserId: clearHolder,
+                                      metadata: meta,
                                     );
                                   }
                                 });
@@ -952,6 +1037,16 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                               isDense: true,
                             ),
                           ),
+                          const SizedBox(height: 16),
+                          ItemAspectRatingsSection(
+                            category: _item.category,
+                            metadata: _item.metadata,
+                            readOnly: ro,
+                            onMetadataChanged: (meta) {
+                              setState(() => _item = _item.copyWith(metadata: meta));
+                              _saveNow();
+                            },
+                          ),
                           if (!ro) ...[
                             const SizedBox(height: 16),
                             FriendRatingsPanel(item: _item),
@@ -973,48 +1068,6 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         !ro) ...[
                       const Divider(height: 28),
                       RestaurantVisitsPanel(item: _item),
-                    ],
-                    if (isBoardgame && !isWishlist) ...[
-                      CollapsibleSection(
-                        title: 'Jeu de société',
-                        accentColor: _item.category.color,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            BoardgamePlayHistoryPanel(
-                              item: _item,
-                              readOnly: ro,
-                              onMetadataChanged: (meta) {
-                                final count = parseBoardgamePlays(meta).length;
-                                setState(() {
-                                  _item = _item.copyWith(metadata: meta);
-                                  _gamesPlayedController.text =
-                                      count > 0 ? count.toString() : '';
-                                });
-                                _saveNow();
-                              },
-                            ),
-                            const SizedBox(height: 12),
-                            if (_item.groupId != null)
-                              GroupRulesPanel(
-                                groupId: _item.groupId!,
-                                itemId: _item.id,
-                                itemTitle: _item.title,
-                                accent: _groupAccent(),
-                              )
-                            else
-                              TextField(
-                                controller: _personalRulesController,
-                                readOnly: ro,
-                                maxLines: 5,
-                                decoration: const InputDecoration(
-                                  labelText: 'Règles personnalisées',
-                                  border: OutlineInputBorder(),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
                     ],
                     if (!ro && !_item.isGroupOwned) ...[
                     const Divider(height: 28),

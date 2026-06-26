@@ -4,6 +4,16 @@ import '../models/boardgame_play_session.dart';
 import '../utils/boardgame_play_stats.dart';
 import 'boardgame_ranking_detail_screen.dart';
 
+String _rankEmoji(int index) {
+  return switch (index) {
+    0 => '🥇',
+    1 => '🥈',
+    2 => '🥉',
+    3 => '🍫',
+    _ => '',
+  };
+}
+
 /// Classement, podium et statistiques matricielles pour un jeu.
 class BoardgameRankingPanel extends StatelessWidget {
   final List<BoardgamePlaySession> sessions;
@@ -18,14 +28,12 @@ class BoardgameRankingPanel extends StatelessWidget {
   void _openDetail(
     BuildContext context,
     RankingDetailMode mode,
-    String title,
     BoardgameRankingStats stats,
   ) {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => BoardgameRankingDetailScreen(
-          title: title,
           mode: mode,
           stats: stats,
           sessions: sessions,
@@ -50,7 +58,7 @@ class BoardgameRankingPanel extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (stats.winPodium.isNotEmpty) ...[
+        if (stats.podiumSlots.isNotEmpty) ...[
           Text(
             'Podium',
             style: TextStyle(
@@ -60,7 +68,18 @@ class BoardgameRankingPanel extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
-          _PodiumRow(top: stats.winPodium.take(3).toList()),
+          _PodiumRow(slots: stats.podiumSlots),
+          const SizedBox(height: 8),
+          ...stats.winPodium.take(5).toList().asMap().entries.map((e) {
+            final w = e.value;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                '${_rankEmoji(e.key)} ${w.name} — ${w.wins} victoire${w.wins > 1 ? 's' : ''} · ${w.gamesPlayed} partie${w.gamesPlayed > 1 ? 's' : ''}',
+                style: const TextStyle(fontSize: 12),
+              ),
+            );
+          }),
           const SizedBox(height: 16),
         ],
         if (stats.topDuos.isNotEmpty) ...[
@@ -100,6 +119,22 @@ class BoardgameRankingPanel extends StatelessWidget {
           const SizedBox(height: 16),
         ],
         _StatBlock(
+          title: 'Vue globale des parties',
+          subtitle: 'Matrice joueurs × parties — tape pour agrandir',
+          children: [
+            Text(
+              '${stats.globalMatrix.players.length} joueur(s) · ${stats.globalMatrix.sessionLabels.length} partie(s)',
+              style: const TextStyle(fontSize: 12),
+            ),
+          ],
+          onTap: () => _openDetail(
+            context,
+            RankingDetailMode.global,
+            stats,
+          ),
+        ),
+        const SizedBox(height: 12),
+        _StatBlock(
           title: 'Meilleurs scores',
           subtitle: 'Tape pour voir toute la liste',
           children: stats.allScores.take(5).map((s) {
@@ -114,7 +149,6 @@ class BoardgameRankingPanel extends StatelessWidget {
           onTap: () => _openDetail(
             context,
             RankingDetailMode.scores,
-            'Meilleurs scores',
             stats,
           ),
         ),
@@ -134,7 +168,6 @@ class BoardgameRankingPanel extends StatelessWidget {
           onTap: () => _openDetail(
             context,
             RankingDetailMode.averages,
-            'Meilleures moyennes',
             stats,
           ),
         ),
@@ -154,7 +187,6 @@ class BoardgameRankingPanel extends StatelessWidget {
           onTap: () => _openDetail(
             context,
             RankingDetailMode.wins,
-            'Nombre de victoires',
             stats,
           ),
         ),
@@ -223,75 +255,95 @@ class _StatBlock extends StatelessWidget {
 }
 
 class _PodiumRow extends StatelessWidget {
-  final List<BoardgameWinHighlight> top;
+  final List<BoardgamePodiumSlot> slots;
 
-  const _PodiumRow({required this.top});
+  const _PodiumRow({required this.slots});
+
+  Color _medalColor(int rank) => switch (rank) {
+        1 => const Color(0xFFFFD700),
+        2 => const Color(0xFFC0C0C0),
+        3 => const Color(0xFFCD7F32),
+        _ => Colors.grey,
+      };
 
   @override
   Widget build(BuildContext context) {
-    if (top.isEmpty) return const SizedBox.shrink();
-    final ordered = <BoardgameWinHighlight?>[
-      if (top.length > 1) top[1],
-      top[0],
-      if (top.length > 2) top[2],
-    ];
-    final heights = [72.0, 96.0, 56.0];
-    final medals = [
-      Colors.grey.shade400,
-      Colors.amber.shade600,
-      Colors.brown.shade400,
-    ];
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: List.generate(ordered.length, (i) {
-        final e = ordered[i];
-        if (e == null) return const SizedBox(width: 80);
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.emoji_events, color: medals[i], size: 22),
-              const SizedBox(height: 4),
-              Container(
-                width: 76,
-                height: heights[i],
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: medals[i].withValues(alpha: 0.25),
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(8),
-                  ),
-                  border: Border.all(color: medals[i].withValues(alpha: 0.6)),
-                ),
-                child: Text(
-                  '${e.wins}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 18,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 4),
-              SizedBox(
-                width: 80,
-                child: Text(
-                  e.name,
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      }),
-    );
-  }
-}
+    BoardgamePodiumSlot? slotFor(int rank) {
+      for (final s in slots) {
+        if (s.rank == rank) return s;
+      }
+      return null;
+    }
+
+    final silver = slotFor(2);
+    final gold = slotFor(1);
+    final bronze = slotFor(3);
+
+    Widget buildSlot(BoardgamePodiumSlot slot) {
+      final medal = _medalColor(slot.rank);
+      final height = slot.rank == 1 ? 96.0 : slot.rank == 2 ? 72.0 : 56.0;
+      final width = slot.players.length > 1 ? 120.0 : 76.0;
+      final names = slot.players.map((p) => p.name).join(' & ');
+      final wins = slot.players.first.wins;
+      final games = slot.players.first.gamesPlayed;
+
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.emoji_events, color: medal, size: 22),
+            const SizedBox(height: 4),
+            Container(
+              width: width,
+              height: height,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: medal.withValues(alpha: 0.25),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(8),
+                ),
+                border: Border.all(color: medal.withValues(alpha: 0.6)),
+              ),
+              child: Text(
+                '$wins',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 18,
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            SizedBox(
+              width: width + 8,
+              child: Text(
+                names,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            Text(
+              '$games partie${games > 1 ? 's' : ''}',
+              style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        if (silver != null) buildSlot(silver) else const SizedBox(width: 88),
+        if (gold != null) buildSlot(gold) else const SizedBox(width: 88),
+        if (bronze != null) buildSlot(bronze) else const SizedBox(width: 88),
+      ],
+    );
+  }
+}

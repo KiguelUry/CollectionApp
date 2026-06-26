@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'image_compression_service.dart';
+
 import '../widgets/avatar_crop_sheet.dart';
 import '../models/collection_item.dart';
 import '../models/user_profile.dart';
@@ -195,10 +197,11 @@ class ProfileService {
     final id = _userId;
     if (id == null) throw Exception('Non connecté');
 
+    final compressed = await ImageCompressionService.compressForUpload(bytes);
     final path = '$id/avatar.jpg';
     await _client.storage.from('avatars').uploadBinary(
           path,
-          bytes,
+          compressed,
           fileOptions: const FileOptions(
             upsert: true,
             contentType: 'image/jpeg',

@@ -1,9 +1,4 @@
-import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-
 import '../models/collection_category.dart';
-import '../models/collection_item.dart';
-import '../models/user_collection_type.dart';
 import '../services/category_hub_preferences.dart';
 import '../services/user_collection_type_service.dart';
 import '../utils/category_hub_order.dart';

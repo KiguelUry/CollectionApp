@@ -498,7 +498,7 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: _wishlistItems.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              separatorBuilder: (_, _) => const SizedBox(width: 10),
               itemBuilder: (context, i) {
                 final item = _wishlistItems[i];
                 return GestureDetector(
@@ -517,7 +517,7 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
                               ? Image.network(
                                   item.imageUrl!,
                                   fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) =>
+                                  errorBuilder: (_, _, _) =>
                                       const Icon(Icons.pets),
                                 )
                               : ColoredBox(
@@ -632,7 +632,7 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: catalog.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              separatorBuilder: (_, _) => const SizedBox(width: 10),
               itemBuilder: (context, i) => _catalogCard(catalog[i]),
             ),
           ),
@@ -727,7 +727,7 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
                         height: 120,
                         width: 200,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const SizedBox(height: 0),
+                        errorBuilder: (_, _, _) => const SizedBox(height: 0),
                       ),
                     ),
                   const SizedBox(height: 12),
@@ -774,7 +774,7 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
                       child: Image.network(
                         entry.imageUrl!,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) =>
+                        errorBuilder: (_, _, _) =>
                             const Icon(Icons.pets, size: 40),
                       ),
                     )

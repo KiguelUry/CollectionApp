@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../models/collection_item.dart';
 import '../../models/wildlife_observation.dart';
+import '../../services/image_compression_service.dart';
 import '../../services/wildlife_service.dart';
 import '../../theme/wildlife_pokedex_theme.dart';
 import '../../widgets/collection_cover_image.dart';
@@ -112,11 +113,35 @@ class _WildlifeSpeciesScreenState extends State<WildlifeSpeciesScreen> {
     try {
       final picked = await ImagePicker().pickImage(
         source: ImageSource.gallery,
-        imageQuality: 95,
         requestFullMetadata: true,
       );
       if (picked != null) {
-        final bytes = await picked.readAsBytes();
+        if (!mounted) return;
+        showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => const PopScope(
+            canPop: false,
+            child: Center(
+              child: Card(
+                child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(),
+                      SizedBox(height: 12),
+                      Text('Compression et envoi…'),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        final raw = await picked.readAsBytes();
+        final bytes = await ImageCompressionService.compressForUpload(raw);
         final path =
             '${Supabase.instance.client.auth.currentUser!.id}/wildlife/${DateTime.now().millisecondsSinceEpoch}.jpg';
         await Supabase.instance.client.storage.from('avatars').uploadBinary(
@@ -126,8 +151,11 @@ class _WildlifeSpeciesScreenState extends State<WildlifeSpeciesScreen> {
             );
         photoUrl =
             Supabase.instance.client.storage.from('avatars').getPublicUrl(path);
+        if (mounted) Navigator.of(context, rootNavigator: true).pop();
       }
-    } catch (_) {}
+    } catch (_) {
+      if (mounted) Navigator.of(context, rootNavigator: true).pop();
+    }
 
     await _service.addObservation(
       itemId: widget.item.id,

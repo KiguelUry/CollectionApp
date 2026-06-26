@@ -4,17 +4,26 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 class ItemGroupService {
   final _client = Supabase.instance.client;
 
+  /// Sync incrémentale (évite les doublons PK sur insert concurrent).
   Future<void> syncItemGroups(String itemId, List<String> groupIds) async {
-    final unique = groupIds.toSet().toList();
-    await _client
-        .from('collection_item_groups')
-        .delete()
-        .eq('item_id', itemId);
+    final unique = groupIds.toSet();
+    final existing = (await fetchGroupIdsForItem(itemId)).toSet();
 
-    if (unique.isEmpty) return;
+    final toRemove = existing.difference(unique);
+    final toAdd = unique.difference(existing);
 
-    await _client.from('collection_item_groups').insert(
-          unique
+    for (final gid in toRemove) {
+      await _client
+          .from('collection_item_groups')
+          .delete()
+          .eq('item_id', itemId)
+          .eq('group_id', gid);
+    }
+
+    if (toAdd.isEmpty) return;
+
+    await _client.from('collection_item_groups').upsert(
+          toAdd
               .map(
                 (gid) => {
                   'item_id': itemId,
@@ -22,6 +31,7 @@ class ItemGroupService {
                 },
               )
               .toList(),
+          onConflict: 'item_id,group_id',
         );
   }
 

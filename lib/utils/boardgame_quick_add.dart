@@ -84,6 +84,7 @@ Future<void> quickAddBoardgameFromCatalog(
           if (!options.isWishlist &&
               game.bggId.isNotEmpty &&
               details != null) {
+            if (!context.mounted) return;
             final expansionMsg = await insertBoardgameWithExpansionRules(
               context: context,
               title: game.title,

@@ -14,10 +14,10 @@ class TcgSetLogo extends StatefulWidget {
 
   const TcgSetLogo({
     super.key,
-    required List<String> urls,
+    required this.urls,
     required this.fallbackColor,
     this.fallbackLabel,
-  }) : urls = urls;
+  });
 
   factory TcgSetLogo.forSet({
     Key? key,

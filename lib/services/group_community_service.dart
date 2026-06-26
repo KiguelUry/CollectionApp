@@ -7,6 +7,7 @@ class GroupRuleEntry {
   final String groupId;
   final String itemId;
   final String authorId;
+  final String? authorName;
   final String title;
   final String body;
   final int voteCount;
@@ -18,6 +19,7 @@ class GroupRuleEntry {
     required this.groupId,
     required this.itemId,
     required this.authorId,
+    this.authorName,
     required this.title,
     required this.body,
     required this.voteCount,
@@ -29,11 +31,13 @@ class GroupRuleEntry {
     Map<String, dynamic> json, {
     bool votedByMe = false,
   }) {
+    final profiles = json['profiles'] as Map<String, dynamic>?;
     return GroupRuleEntry(
       id: json['id'] as String,
       groupId: json['group_id'] as String,
       itemId: json['item_id'] as String,
       authorId: json['author_id'] as String,
+      authorName: profiles?['username']?.toString(),
       title: json['title'] as String? ?? 'Variante',
       body: json['body'] as String? ?? '',
       voteCount: json['vote_count'] as int? ?? 0,
@@ -100,7 +104,7 @@ class GroupCommunityService {
     try {
       final rows = await _client
           .from('group_rule_entries')
-          .select()
+          .select('*, ${SupabaseEmbeds.groupRuleAuthorProfile}')
           .eq('group_id', groupId)
           .eq('item_id', itemId)
           .order('vote_count', ascending: false)
@@ -241,6 +245,18 @@ class GroupCommunityService {
           'title': title.trim(),
           'body': body.trim(),
         })
+        .eq('id', ruleId)
+        .eq('author_id', _userId);
+  }
+
+  Future<void> deleteRule(String ruleId) async {
+    await _client
+        .from('group_rule_votes')
+        .delete()
+        .eq('rule_id', ruleId);
+    await _client
+        .from('group_rule_entries')
+        .delete()
         .eq('id', ruleId)
         .eq('author_id', _userId);
   }

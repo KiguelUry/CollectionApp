@@ -1,4 +1,5 @@
 import '../models/collection_item.dart';
+import 'holder_label_utils.dart';
 
 /// Option pour filtrer par « chez qui » (membre, nom libre, prêt).
 class HolderFilterOption {
@@ -37,8 +38,7 @@ String holderLabelForItem(CollectionItem item) {
   }
   final custom = item.metadata?['holder_label'] as String?;
   if (custom != null && custom.trim().isNotEmpty) {
-    final c = custom.trim();
-    return c.toLowerCase().startsWith('chez ') ? c : 'Chez $c';
+    return formatManualHolderLabel(custom.trim());
   }
   return 'Non renseigné';
 }

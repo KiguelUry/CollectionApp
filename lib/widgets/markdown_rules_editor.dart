@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 
-/// Mini éditeur Markdown avec barre d'outils et aperçu.
+/// Éditeur de règles : formatage visuel par défaut (aperçu WYSIWYG).
 class MarkdownRulesEditor extends StatefulWidget {
   final TextEditingController controller;
   final int minLines;
@@ -19,7 +19,8 @@ class MarkdownRulesEditor extends StatefulWidget {
 }
 
 class _MarkdownRulesEditorState extends State<MarkdownRulesEditor> {
-  bool _preview = false;
+  bool _preview = true;
+  double _fontSize = 12;
   final _focusNode = FocusNode();
   TextSelection _lastSelection = const TextSelection.collapsed(offset: 0);
 
@@ -49,10 +50,10 @@ class _MarkdownRulesEditorState extends State<MarkdownRulesEditor> {
     return _lastSelection;
   }
 
-  void _applyEdit(TextEditingValue value) {
+  void _applyEdit(TextEditingValue value, {bool showPreview = true}) {
     widget.controller.value = value;
     _lastSelection = value.selection;
-    setState(() {});
+    setState(() => _preview = showPreview);
   }
 
   void _wrapSelection(String before, String after) {
@@ -111,6 +112,20 @@ class _MarkdownRulesEditorState extends State<MarkdownRulesEditor> {
     );
   }
 
+  MarkdownStyleSheet _styleSheet(ThemeData theme) {
+    final base = theme.textTheme.bodyMedium?.copyWith(fontSize: _fontSize);
+    return MarkdownStyleSheet.fromTheme(theme).copyWith(
+      p: base,
+      listBullet: base,
+      h2: theme.textTheme.titleSmall?.copyWith(
+        fontWeight: FontWeight.bold,
+        fontSize: _fontSize + 2,
+      ),
+      strong: base?.copyWith(fontWeight: FontWeight.bold),
+      em: base?.copyWith(fontStyle: FontStyle.italic),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -121,6 +136,7 @@ class _MarkdownRulesEditorState extends State<MarkdownRulesEditor> {
         Wrap(
           spacing: 4,
           runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             IconButton(
               tooltip: 'Gras',
@@ -156,35 +172,51 @@ class _MarkdownRulesEditorState extends State<MarkdownRulesEditor> {
                 ),
               ],
             ),
+            const SizedBox(width: 4),
+            Text('Taille', style: theme.textTheme.labelSmall),
+            DropdownButton<double>(
+              value: _fontSize,
+              isDense: true,
+              underline: const SizedBox.shrink(),
+              items: const [9.0, 10.0, 11.0, 12.0, 13.0]
+                  .map(
+                    (s) => DropdownMenuItem(
+                      value: s,
+                      child: Text('${s.toInt()}'),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (v) {
+                if (v != null) setState(() => _fontSize = v);
+              },
+            ),
             const Spacer(),
             TextButton.icon(
               onPressed: () => setState(() => _preview = !_preview),
               icon: Icon(
-                _preview ? Icons.edit : Icons.visibility_outlined,
+                _preview ? Icons.edit_outlined : Icons.visibility_outlined,
                 size: 18,
               ),
-              label: Text(_preview ? 'Éditer' : 'Aperçu'),
+              label: Text(_preview ? 'Texte brut' : 'Aperçu'),
             ),
           ],
         ),
         const SizedBox(height: 4),
         if (_preview)
-          Container(
-            constraints: BoxConstraints(minHeight: widget.minLines * 22.0),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              border: Border.all(color: theme.dividerColor),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: MarkdownBody(
-              data: widget.controller.text.isEmpty
-                  ? '_Aucun contenu_'
-                  : widget.controller.text,
-              styleSheet: MarkdownStyleSheet.fromTheme(theme).copyWith(
-                p: theme.textTheme.bodyMedium,
-                h2: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
+          GestureDetector(
+            onTap: () => setState(() => _preview = false),
+            child: Container(
+              constraints: BoxConstraints(minHeight: widget.minLines * 22.0),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                border: Border.all(color: theme.dividerColor),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: MarkdownBody(
+                data: widget.controller.text.isEmpty
+                    ? '_Tape ici ou utilise « Texte brut » pour éditer_'
+                    : widget.controller.text,
+                styleSheet: _styleSheet(theme),
               ),
             ),
           )
@@ -197,8 +229,7 @@ class _MarkdownRulesEditorState extends State<MarkdownRulesEditor> {
             onTap: _trackSelection,
             onChanged: (_) => _trackSelection(),
             decoration: InputDecoration(
-              hintText: widget.hint ??
-                  '## Objectif\n\n- Règle 1\n- **Mise en gras**',
+              hintText: widget.hint ?? '## Objectif\n\n- Règle 1',
               border: const OutlineInputBorder(),
               alignLabelWithHint: true,
             ),

@@ -50,30 +50,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const _SectionHeader('Apparence'),
-          RadioListTile<AppThemePreference>(
-            title: const Text('Automatique'),
-            subtitle: const Text('Suit le thème du téléphone ou du navigateur'),
-            value: AppThemePreference.system,
-            groupValue: _settings.themePreference,
-            onChanged: (v) {
-              if (v != null) _settings.setThemePreference(v);
-            },
-          ),
-          RadioListTile<AppThemePreference>(
-            title: const Text('Clair'),
-            value: AppThemePreference.light,
-            groupValue: _settings.themePreference,
-            onChanged: (v) {
-              if (v != null) _settings.setThemePreference(v);
-            },
-          ),
-          RadioListTile<AppThemePreference>(
-            title: const Text('Sombre'),
-            value: AppThemePreference.dark,
-            groupValue: _settings.themePreference,
-            onChanged: (v) {
-              if (v != null) _settings.setThemePreference(v);
-            },
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: SegmentedButton<AppThemePreference>(
+              segments: const [
+                ButtonSegment(
+                  value: AppThemePreference.system,
+                  label: Text('Auto'),
+                  icon: Icon(Icons.brightness_auto, size: 18),
+                ),
+                ButtonSegment(
+                  value: AppThemePreference.light,
+                  label: Text('Clair'),
+                  icon: Icon(Icons.light_mode, size: 18),
+                ),
+                ButtonSegment(
+                  value: AppThemePreference.dark,
+                  label: Text('Sombre'),
+                  icon: Icon(Icons.dark_mode, size: 18),
+                ),
+              ],
+              selected: {_settings.themePreference},
+              onSelectionChanged: (selection) {
+                _settings.setThemePreference(selection.first);
+              },
+            ),
           ),
           const _SectionHeader('Notifications'),
           SwitchListTile(

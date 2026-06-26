@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/group_community_service.dart';
@@ -27,13 +28,31 @@ class GroupRulesPanel extends StatefulWidget {
 class _GroupRulesPanelState extends State<GroupRulesPanel> {
   final _service = GroupCommunityService();
   bool _loading = true;
+  bool _showAll = false;
   List<GroupRuleEntry> _rules = [];
+  String? _preferredRuleId;
+
   String get _userId => Supabase.instance.client.auth.currentUser!.id;
+
+  String get _prefKey => 'preferred_rule_${widget.groupId}_${widget.itemId}';
 
   @override
   void initState() {
     super.initState();
+    _loadPreferred();
     _load();
+  }
+
+  Future<void> _loadPreferred() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() => _preferredRuleId = prefs.getString(_prefKey));
+  }
+
+  Future<void> _setPreferred(String ruleId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefKey, ruleId);
+    if (mounted) setState(() => _preferredRuleId = ruleId);
   }
 
   Future<void> _load() async {
@@ -50,6 +69,16 @@ class _GroupRulesPanelState extends State<GroupRulesPanel> {
     }
   }
 
+  GroupRuleEntry? get _featuredRule {
+    if (_rules.isEmpty) return null;
+    if (_preferredRuleId != null) {
+      for (final r in _rules) {
+        if (r.id == _preferredRuleId) return r;
+      }
+    }
+    return _rules.first;
+  }
+
   Future<void> _addRule() async {
     final titleController = TextEditingController(text: 'Notre variante');
     final bodyController = TextEditingController();
@@ -61,12 +90,13 @@ class _GroupRulesPanelState extends State<GroupRulesPanel> {
     if (ok != true) return;
     final body = bodyController.text.trim();
     if (body.isEmpty) return;
-    await _service.addRule(
+    final created = await _service.addRule(
       groupId: widget.groupId,
       itemId: widget.itemId,
       title: titleController.text.trim(),
       body: body,
     );
+    if (created != null) await _setPreferred(created.id);
     _load();
   }
 
@@ -86,6 +116,34 @@ class _GroupRulesPanelState extends State<GroupRulesPanel> {
       title: titleController.text.trim(),
       body: body,
     );
+    _load();
+  }
+
+  Future<void> _deleteRule(GroupRuleEntry rule) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Supprimer cette variante ?'),
+        content: Text('« ${rule.title} » sera définitivement supprimée.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await _service.deleteRule(rule.id);
+    if (_preferredRuleId == rule.id) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_prefKey);
+      if (mounted) setState(() => _preferredRuleId = null);
+    }
     _load();
   }
 
@@ -141,8 +199,104 @@ class _GroupRulesPanelState extends State<GroupRulesPanel> {
     _load();
   }
 
+  Widget _ruleCard(GroupRuleEntry rule, {required bool featured}) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      color: featured ? widget.accent.withValues(alpha: 0.08) : null,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                if (featured)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: Icon(
+                      Icons.push_pin,
+                      size: 16,
+                      color: widget.accent,
+                    ),
+                  ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        rule.title,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      if (rule.authorName != null)
+                        Text(
+                          'Par ${rule.authorName}',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey.shade600,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                if (!_showAll && _rules.length > 1)
+                  TextButton(
+                    onPressed: () => _setPreferred(rule.id),
+                    child: Text(
+                      _preferredRuleId == rule.id
+                          ? 'Affichée'
+                          : 'Afficher',
+                    ),
+                  ),
+                if (rule.authorId == _userId) ...[
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    tooltip: 'Modifier',
+                    onPressed: () => _editRule(rule),
+                    icon: const Icon(Icons.edit_outlined, size: 20),
+                  ),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    tooltip: 'Supprimer',
+                    onPressed: () => _deleteRule(rule),
+                    icon: Icon(
+                      Icons.delete_outline,
+                      size: 20,
+                      color: Colors.red.shade400,
+                    ),
+                  ),
+                ],
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => _toggleVote(rule),
+                  icon: Icon(
+                    rule.votedByMe
+                        ? Icons.thumb_up
+                        : Icons.thumb_up_outlined,
+                    color: widget.accent,
+                    size: 20,
+                  ),
+                ),
+                Text('${rule.voteCount}'),
+              ],
+            ),
+            const SizedBox(height: 6),
+            MarkdownBody(
+              data: rule.body,
+              styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final featured = _featuredRule;
+    final others = featured == null
+        ? <GroupRuleEntry>[]
+        : _rules.where((r) => r.id != featured.id).toList();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -164,7 +318,7 @@ class _GroupRulesPanelState extends State<GroupRulesPanel> {
           ],
         ),
         Text(
-          'Variantes pour « ${widget.itemTitle} » — la plus votée est épinglée.',
+          'Variantes pour « ${widget.itemTitle} » — une seule affichée par défaut, modifiable par chacun.',
           style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
         ),
         const SizedBox(height: 10),
@@ -178,67 +332,24 @@ class _GroupRulesPanelState extends State<GroupRulesPanel> {
             'Aucune variante pour l\'instant. Propose la vôtre !',
             style: TextStyle(color: Colors.grey.shade600),
           )
-        else
-          for (final rule in _rules)
-            Card(
-              margin: const EdgeInsets.only(bottom: 8),
-              color: rule == _rules.first
-                  ? widget.accent.withValues(alpha: 0.08)
-                  : null,
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        if (rule == _rules.first)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 6),
-                            child: Icon(
-                              Icons.push_pin,
-                              size: 16,
-                              color: widget.accent,
-                            ),
-                          ),
-                        Expanded(
-                          child: Text(
-                            rule.title,
-                            style: const TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                        ),
-                        if (rule.authorId == _userId)
-                          IconButton(
-                            visualDensity: VisualDensity.compact,
-                            tooltip: 'Modifier',
-                            onPressed: () => _editRule(rule),
-                            icon: const Icon(Icons.edit_outlined, size: 20),
-                          ),
-                        IconButton(
-                          visualDensity: VisualDensity.compact,
-                          onPressed: () => _toggleVote(rule),
-                          icon: Icon(
-                            rule.votedByMe
-                                ? Icons.thumb_up
-                                : Icons.thumb_up_outlined,
-                            color: widget.accent,
-                            size: 20,
-                          ),
-                        ),
-                        Text('${rule.voteCount}'),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    MarkdownBody(
-                      data: rule.body,
-                      styleSheet: MarkdownStyleSheet.fromTheme(
-                        Theme.of(context),
-                      ),
-                    ),
-                  ],
+        else ...[
+          if (featured != null) _ruleCard(featured, featured: true),
+          if (_rules.length > 1)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => setState(() => _showAll = !_showAll),
+                icon: Icon(_showAll ? Icons.expand_less : Icons.expand_more),
+                label: Text(
+                  _showAll
+                      ? 'Masquer les autres variantes'
+                      : 'Voir toutes les variantes (${_rules.length})',
                 ),
               ),
             ),
+          if (_showAll)
+            for (final rule in others) _ruleCard(rule, featured: false),
+        ],
       ],
     );
   }
