@@ -4,12 +4,12 @@ import '../models/boardgame_play_session.dart';
 import '../utils/boardgame_play_stats.dart';
 import 'boardgame_ranking_detail_screen.dart';
 
-String _rankEmoji(int index) {
-  return switch (index) {
-    0 => '🥇',
-    1 => '🥈',
-    2 => '🥉',
-    3 => '🍫',
+String _rankEmoji(int rank) {
+  return switch (rank) {
+    1 => '🥇',
+    2 => '🥈',
+    3 => '🥉',
+    4 => '🍫',
     _ => '',
   };
 }
@@ -72,10 +72,14 @@ class BoardgameRankingPanel extends StatelessWidget {
           const SizedBox(height: 8),
           ...stats.winPodium.take(5).toList().asMap().entries.map((e) {
             final w = e.value;
+            final rank = BoardgameRankingStats.displayRankForWinPodium(
+              stats.winPodium,
+              e.key,
+            );
             return Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Text(
-                '${_rankEmoji(e.key)} ${w.name} — ${w.wins} victoire${w.wins > 1 ? 's' : ''} · ${w.gamesPlayed} partie${w.gamesPlayed > 1 ? 's' : ''}',
+                '${_rankEmoji(rank)} ${w.name} — ${w.wins} victoire${w.wins > 1 ? 's' : ''} · ${w.gamesPlayed} partie${w.gamesPlayed > 1 ? 's' : ''}',
                 style: const TextStyle(fontSize: 12),
               ),
             );
@@ -138,10 +142,14 @@ class BoardgameRankingPanel extends StatelessWidget {
           title: 'Meilleurs scores',
           subtitle: 'Tape pour voir toute la liste',
           children: stats.allScores.take(5).toList().asMap().entries.map((e) {
+            final rank = BoardgameRankingStats.displayRankForScore(
+              stats.allScores,
+              e.key,
+            );
             return Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Text(
-                '${_rankEmoji(e.key)} ${e.value.player} — ${e.value.score} pts',
+                '${_rankEmoji(rank)} ${e.value.player} — ${e.value.score} pts',
                 style: const TextStyle(fontSize: 13),
               ),
             );
@@ -157,10 +165,14 @@ class BoardgameRankingPanel extends StatelessWidget {
           title: 'Meilleures moyennes',
           subtitle: 'Tape pour voir toute la liste',
           children: stats.allAverages.take(5).toList().asMap().entries.map((e) {
+            final rank = BoardgameRankingStats.displayRankForAverage(
+              stats.allAverages,
+              e.key,
+            );
             return Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Text(
-                '${_rankEmoji(e.key)} ${e.value.player} — ${e.value.average.toStringAsFixed(1)} pts (${e.value.games} partie${e.value.games > 1 ? 's' : ''})',
+                '${_rankEmoji(rank)} ${e.value.player} — ${e.value.average.toStringAsFixed(1)} pts (${e.value.games} partie${e.value.games > 1 ? 's' : ''})',
                 style: const TextStyle(fontSize: 13),
               ),
             );
@@ -176,10 +188,14 @@ class BoardgameRankingPanel extends StatelessWidget {
           title: 'Nombre de victoires',
           subtitle: 'Tape pour voir toute la liste',
           children: stats.winPodium.take(5).toList().asMap().entries.map((e) {
+            final rank = BoardgameRankingStats.displayRankForWinPodium(
+              stats.winPodium,
+              e.key,
+            );
             return Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Text(
-                '${_rankEmoji(e.key)} ${e.value.name} — ${e.value.wins} victoire${e.value.wins > 1 ? 's' : ''}',
+                '${_rankEmoji(rank)} ${e.value.name} — ${e.value.wins} victoire${e.value.wins > 1 ? 's' : ''}',
                 style: const TextStyle(fontSize: 13),
               ),
             );
@@ -187,6 +203,40 @@ class BoardgameRankingPanel extends StatelessWidget {
           onTap: () => _openDetail(
             context,
             RankingDetailMode.wins,
+            stats,
+          ),
+        ),
+        const SizedBox(height: 12),
+        _StatBlock(
+          title: 'Dernières places',
+          subtitle: 'Tape pour voir toute la liste',
+          children: () {
+            final sorted = stats.lastPlaceByPlayer.entries.toList()
+              ..sort((a, b) => b.value.compareTo(a.value));
+            return sorted.take(5).toList().asMap().entries.map((e) {
+              final rank = BoardgameRankingStats.displayRankForWinPodium(
+                sorted
+                    .map(
+                      (x) => BoardgameWinHighlight(
+                        name: x.key,
+                        wins: x.value,
+                      ),
+                    )
+                    .toList(),
+                e.key,
+              );
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  '${_rankEmoji(rank)} ${e.value.key} — ${e.value.value} fois',
+                  style: const TextStyle(fontSize: 13),
+                ),
+              );
+            });
+          }(),
+          onTap: () => _openDetail(
+            context,
+            RankingDetailMode.lastPlaces,
             stats,
           ),
         ),

@@ -46,12 +46,7 @@ class _WishlistSuggestionsBannerState extends State<WishlistSuggestionsBanner> {
     if (widget.category != CollectionCategory.boardgame) {
       return const SizedBox.shrink();
     }
-    if (_loading) {
-      return const Padding(
-        padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
-        child: LinearProgressIndicator(),
-      );
-    }
+    if (_loading) return const SizedBox.shrink();
     if (_suggestions.isEmpty) return const SizedBox.shrink();
 
     return Padding(

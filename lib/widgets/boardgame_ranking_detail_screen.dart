@@ -8,6 +8,7 @@ enum RankingDetailMode {
   scores,
   averages,
   wins,
+  lastPlaces,
 }
 
 /// Écran plein écran pour une vue statistique avec bascule de type.
@@ -49,7 +50,8 @@ class _BoardgameRankingDetailScreenState
         RankingDetailMode.global => 'Vue globale des parties',
         RankingDetailMode.scores => 'Meilleurs scores',
         RankingDetailMode.averages => 'Meilleures moyennes',
-        RankingDetailMode.wins => 'Nombre de victoires',
+        RankingDetailMode.wins => 'Victoires & dernières places',
+        RankingDetailMode.lastPlaces => 'Dernières places',
       };
 
   String get _flipTarget => switch (_mode) {
@@ -103,7 +105,18 @@ class _BoardgameRankingDetailScreenState
         return rows;
 
       case RankingDetailMode.wins:
-        return widget.stats.winsMatrixRows;
+        final rows = List<BoardgameMatrixRow>.from(widget.stats.winsMatrixRows);
+        rows.sort((a, b) => b.values.first.compareTo(a.values.first));
+        return rows;
+
+      case RankingDetailMode.lastPlaces:
+        final rows = List<BoardgameMatrixRow>.from(widget.stats.winsMatrixRows);
+        rows.sort((a, b) {
+          final al = a.values.length > 1 ? a.values[1] : 0;
+          final bl = b.values.length > 1 ? b.values[1] : 0;
+          return bl.compareTo(al);
+        });
+        return rows;
 
       case RankingDetailMode.global:
         return [];
@@ -111,6 +124,12 @@ class _BoardgameRankingDetailScreenState
   }
 
   String _valueHeaderFor(int colIndex) {
+    if (_mode == RankingDetailMode.wins) {
+      return colIndex == 0 ? 'Victoires' : 'Dernières places';
+    }
+    if (_mode == RankingDetailMode.lastPlaces) {
+      return 'Dernières places';
+    }
     if (colIndex == 0) {
       if (_mode == RankingDetailMode.scores) {
         return _reversed ? 'Pire score' : 'Meilleur score';
@@ -131,6 +150,8 @@ class _BoardgameRankingDetailScreenState
   }
 
   int get _maxValueCols {
+    if (_mode == RankingDetailMode.wins) return 2;
+    if (_mode == RankingDetailMode.lastPlaces) return 1;
     var m = 1;
     for (final r in _rows) {
       if (r.values.length > m) m = r.values.length;

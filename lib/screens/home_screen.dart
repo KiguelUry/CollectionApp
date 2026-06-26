@@ -41,6 +41,7 @@ import '../widgets/collection_item_list_tile.dart';
 import '../widgets/collection_item_tile.dart';
 import '../widgets/cover_preview_sheet.dart';
 import '../widgets/isbn_scan_sheet.dart';
+import 'global_play_history_screen.dart';
 import 'shake_pick_screen.dart';
 import '../widgets/add_item_manual_dialog.dart';
 import '../widgets/add_item_options_dialog.dart';
@@ -1148,6 +1149,16 @@ class _HomeScreenState extends State<HomeScreen>
                 builder: (ctx) => const ShakePickScreen(
                   category: CollectionCategory.boardgame,
                 ),
+              ),
+            ),
+          ),
+          CategoryQuickAction(
+            label: 'Historique parties',
+            icon: Icons.history,
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (ctx) => const GlobalPlayHistoryScreen(),
               ),
             ),
           ),

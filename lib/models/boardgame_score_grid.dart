@@ -160,14 +160,15 @@ class BoardgameScoreGrid {
           })
           .toList();
       if (eligible.isEmpty) return {};
-      final best = condition == BoardgameWinCondition.lowest
-          ? eligible.reduce((a, b) => a.value <= b.value ? a : b)
-          : eligible.reduce((a, b) => a.value >= b.value ? a : b);
+      final bestVal = condition == BoardgameWinCondition.lowest
+          ? eligible.map((e) => e.value).reduce((a, b) => a <= b ? a : b)
+          : eligible.map((e) => e.value).reduce((a, b) => a >= b ? a : b);
       final winners = <int>{};
       for (var i = 0; i < teams.length; i++) {
-        if (teams[i]?.trim() == best.key && columnHasScores(i)) {
-          winners.add(i);
-        }
+        final team = teams[i]?.trim();
+        if (team == null || team.isEmpty || !columnHasScores(i)) continue;
+        final teamScore = tt[team];
+        if (teamScore == bestVal) winners.add(i);
       }
       return winners;
     }
@@ -202,10 +203,18 @@ class BoardgameScoreGrid {
   }
 
   String? autoWinnerName(BoardgameWinCondition condition) {
-    if (condition == BoardgameWinCondition.cooperative) return null;
+    final names = winnerNames(condition);
+    if (names.isEmpty) return null;
+    if (names.length == 1) return names.first;
+    return names.join(' & ');
+  }
+
+  /// Noms des gagnants (ex-aequo inclus).
+  List<String> winnerNames(BoardgameWinCondition condition) {
+    if (condition == BoardgameWinCondition.cooperative) return [];
     if (hasTeams && hasScores) {
       final tt = teamTotals();
-      if (tt.isEmpty) return null;
+      if (tt.isEmpty) return [];
       final eligible = <MapEntry<String, int>>[];
       for (final e in tt.entries) {
         var hasScored = false;
@@ -217,15 +226,76 @@ class BoardgameScoreGrid {
         }
         if (hasScored) eligible.add(e);
       }
-      if (eligible.isEmpty) return null;
-      final entry = condition == BoardgameWinCondition.lowest
-          ? eligible.reduce((a, b) => a.value <= b.value ? a : b)
-          : eligible.reduce((a, b) => a.value >= b.value ? a : b);
-      return entry.key;
+      if (eligible.isEmpty) return [];
+      final bestVal = condition == BoardgameWinCondition.lowest
+          ? eligible.map((e) => e.value).reduce((a, b) => a <= b ? a : b)
+          : eligible.map((e) => e.value).reduce((a, b) => a >= b ? a : b);
+      return eligible
+          .where((e) => e.value == bestVal)
+          .map((e) => e.key)
+          .toList();
     }
     final winners = winningColumnIndices(condition);
-    if (winners.isEmpty) return null;
-    return players[winners.first].trim();
+    return winners
+        .map((i) => players[i].trim())
+        .where((n) => n.isNotEmpty)
+        .toList();
+  }
+
+  /// Indices des colonnes en dernière place (ex-aequo inclus).
+  Set<int> lastPlaceColumnIndices(BoardgameWinCondition condition) {
+    if (condition == BoardgameWinCondition.cooperative || !hasScores) {
+      return {};
+    }
+    if (hasTeams) {
+      final tt = teamTotals();
+      if (tt.isEmpty) return {};
+      final eligible = tt.entries
+          .where((e) => e.key.isNotEmpty)
+          .where((e) {
+            for (var i = 0; i < teams.length; i++) {
+              if (teams[i]?.trim() == e.key && columnHasScores(i)) return true;
+            }
+            return false;
+          })
+          .toList();
+      if (eligible.isEmpty) return {};
+      final worstVal = condition == BoardgameWinCondition.lowest
+          ? eligible.map((e) => e.value).reduce((a, b) => a >= b ? a : b)
+          : eligible.map((e) => e.value).reduce((a, b) => a <= b ? a : b);
+      final losers = <int>{};
+      for (var i = 0; i < teams.length; i++) {
+        final team = teams[i]?.trim();
+        if (team == null || team.isEmpty || !columnHasScores(i)) continue;
+        if (tt[team] == worstVal) losers.add(i);
+      }
+      return losers;
+    }
+
+    final totals = columnTotals();
+    var worstIdx = -1;
+    var worstVal = condition == BoardgameWinCondition.lowest
+        ? -(1 << 30)
+        : (1 << 30);
+    for (var i = 0; i < players.length; i++) {
+      if (players[i].trim().isEmpty || !columnHasScores(i)) continue;
+      final v = i < totals.length ? totals[i] : 0;
+      final worse = condition == BoardgameWinCondition.lowest
+          ? v > worstVal
+          : v < worstVal;
+      if (worse) {
+        worstVal = v;
+        worstIdx = i;
+      }
+    }
+    if (worstIdx < 0) return {};
+    final losers = <int>{worstIdx};
+    for (var i = 0; i < players.length; i++) {
+      if (i == worstIdx || players[i].trim().isEmpty || !columnHasScores(i)) continue;
+      final v = i < totals.length ? totals[i] : 0;
+      if (v == worstVal) losers.add(i);
+    }
+    return losers;
   }
 
   /// Résumé « Alice : 12 · Bob : 8 » pour l'historique.

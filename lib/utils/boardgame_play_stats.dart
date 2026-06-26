@@ -205,7 +205,7 @@ class BoardgameRankingStats {
       }
       if (winners.isNotEmpty) recordDuoWinners(winners);
 
-      final losers = _losingPlayers(session);
+      final losers = _lastPlacePlayers(session);
       for (final l in losers) {
         lastCounts[l] = (lastCounts[l] ?? 0) + 1;
       }
@@ -360,13 +360,11 @@ class BoardgameRankingStats {
         }
       }
 
-      final sortedScores = sessionScores.entries.toList()
-        ..sort((a, b) => b.value.compareTo(a.value));
-      final medals = <String, int>{};
-      for (var r = 0; r < sortedScores.length && r < 3; r++) {
-        medals[sortedScores[r].key] = r + 1;
-      }
-      medalsBySession[sessionIdx] = medals;
+      final sortedScores = sessionScores.entries.toList();
+      medalsBySession[sessionIdx] = _assignSessionMedals(
+        Map.fromEntries(sortedScores),
+        session.winCondition,
+      );
 
       for (final entry in sessionScores.entries) {
         players.add(entry.key);
@@ -411,38 +409,114 @@ class BoardgameRankingStats {
   }
 
   static List<String> _winningPlayers(BoardgamePlaySession session) {
-    final grid = session.scoreGrid;
-    final winner = session.effectiveWinner?.trim();
-    if (winner == null || winner.isEmpty) return [];
+    final manual = session.winner?.trim();
+    if (manual != null && manual.isNotEmpty) {
+      if (manual.contains('&')) {
+        return manual
+            .split('&')
+            .map((s) => s.trim())
+            .where((s) => s.isNotEmpty)
+            .toList();
+      }
+      if (session.useTeams && session.scoreGrid != null && session.scoreGrid!.hasTeams) {
+        final grid = session.scoreGrid!;
+        final out = <String>[];
+        for (var i = 0; i < grid.players.length; i++) {
+          if (grid.teams[i]?.trim() == manual) {
+            final n = grid.players[i].trim();
+            if (n.isNotEmpty) out.add(n);
+          }
+        }
+        if (out.isNotEmpty) return out;
+      }
+      return [manual];
+    }
 
-    if (session.useTeams && grid != null && grid.hasTeams) {
+    final grid = session.scoreGrid;
+    if (grid == null || !grid.hasScores) return [];
+
+    if (session.useTeams && grid.hasTeams) {
+      final teams = grid.winnerNames(session.winCondition);
+      if (teams.isEmpty) return [];
       final out = <String>[];
-      for (var i = 0; i < grid.players.length; i++) {
-        if (grid.teams[i]?.trim() == winner) {
-          final n = grid.players[i].trim();
-          if (n.isNotEmpty) out.add(n);
+      for (final team in teams) {
+        for (var i = 0; i < grid.players.length; i++) {
+          if (grid.teams[i]?.trim() == team) {
+            final n = grid.players[i].trim();
+            if (n.isNotEmpty) out.add(n);
+          }
         }
       }
-      if (out.isNotEmpty) return out;
+      return out;
     }
-    return [winner];
+
+    return grid.winnerNames(session.winCondition);
   }
 
-  static List<String> _losingPlayers(BoardgamePlaySession session) {
+  static List<String> _lastPlacePlayers(BoardgamePlaySession session) {
     if (session.winCondition == BoardgameWinCondition.cooperative) return [];
     final grid = session.scoreGrid;
     if (grid == null || !grid.hasScores) return [];
 
-    final winners = grid.winningColumnIndices(session.winCondition);
-    if (winners.isEmpty) return [];
+    final indices = grid.lastPlaceColumnIndices(session.winCondition);
+    if (indices.isEmpty) return [];
 
-    final losers = <String>[];
-    for (var i = 0; i < grid.players.length; i++) {
-      final name = grid.players[i].trim();
-      if (name.isEmpty || !grid.columnHasScores(i)) continue;
-      if (!winners.contains(i)) losers.add(name);
+    return indices
+        .map((i) => grid.players[i].trim())
+        .where((n) => n.isNotEmpty)
+        .toList();
+  }
+
+  static Map<String, int> _assignSessionMedals(
+    Map<String, int> sessionScores,
+    BoardgameWinCondition condition,
+  ) {
+    if (sessionScores.isEmpty) return {};
+    final sorted = sessionScores.entries.toList()
+      ..sort((a, b) => condition == BoardgameWinCondition.lowest
+          ? a.value.compareTo(b.value)
+          : b.value.compareTo(a.value));
+
+    final medals = <String, int>{};
+    var i = 0;
+    var nextRank = 1;
+    while (i < sorted.length && nextRank <= 3) {
+      final score = sorted[i].value;
+      final group = <MapEntry<String, int>>[];
+      while (i < sorted.length && sorted[i].value == score) {
+        group.add(sorted[i]);
+        i++;
+      }
+      for (final entry in group) {
+        medals[entry.key] = nextRank;
+      }
+      if (nextRank == 1 && group.length > 1) {
+        nextRank = 3;
+      } else {
+        nextRank++;
+      }
     }
-    return losers;
+    return medals;
+  }
+
+  static List<int> _displayRanks<T>(
+    List<T> sorted,
+    bool Function(T a, T b) tied,
+  ) {
+    if (sorted.isEmpty) return [];
+    final ranks = <int>[];
+    var nextRank = 1;
+    for (var i = 0; i < sorted.length; i++) {
+      if (i > 0 && !tied(sorted[i], sorted[i - 1])) {
+        if (nextRank == 1 && ranks.where((r) => r == 1).length > 1) {
+          nextRank = 3;
+        } else {
+          nextRank++;
+        }
+      }
+      ranks.add(nextRank);
+    }
+    return ranks;
   }
 
   static List<BoardgameMatrixRow> _buildScoreMatrix(
@@ -502,7 +576,13 @@ class BoardgameRankingStats {
             player: name,
             gamesPlayed: gamesPlayed[name] ?? 0,
             values: [
-              podium.firstWhere((p) => p.name == name, orElse: () => BoardgameWinHighlight(name: name, wins: 0)).wins,
+              podium
+                  .firstWhere(
+                    (p) => p.name == name,
+                    orElse: () => BoardgameWinHighlight(name: name, wins: 0),
+                  )
+                  .wins,
+              lastCounts[name] ?? 0,
             ],
             sessionIndices: const [],
           ),
@@ -510,5 +590,36 @@ class BoardgameRankingStats {
         .toList()
       ..sort((a, b) => b.values.first.compareTo(a.values.first));
     return rows;
+  }
+
+  /// Rang affiché (ex-aequo → même médaille, saut de rang si or partagé).
+  static int displayRankForWinPodium(
+    List<BoardgameWinHighlight> sorted,
+    int index,
+  ) {
+    final ranks = _displayRanks(
+      sorted,
+      (a, b) => a.wins == b.wins && a.gamesPlayed == b.gamesPlayed,
+    );
+    return index < ranks.length ? ranks[index] : index + 1;
+  }
+
+  static int displayRankForScore(
+    List<BoardgameScoreHighlight> sorted,
+    int index,
+  ) {
+    final ranks = _displayRanks(sorted, (a, b) => a.score == b.score);
+    return index < ranks.length ? ranks[index] : index + 1;
+  }
+
+  static int displayRankForAverage(
+    List<BoardgameAverageHighlight> sorted,
+    int index,
+  ) {
+    final ranks = _displayRanks(
+      sorted,
+      (a, b) => a.average == b.average,
+    );
+    return index < ranks.length ? ranks[index] : index + 1;
   }
 }

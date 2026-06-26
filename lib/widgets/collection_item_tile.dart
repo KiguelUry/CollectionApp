@@ -93,24 +93,11 @@ class CollectionItemTile extends StatelessWidget {
                     child: _buildImage(),
                   ),
                 ),
-              if (showDuplicateBadge && totalQuantity > 1)
-                Positioned(
-                  top: 4,
-                  right: onDelete != null ? 32 : 4,
-                  child: _badge('×$totalQuantity', Colors.deepPurple),
-                ),
               if (onDelete != null)
                 Positioned(
                   top: 4,
                   right: 4,
                   child: _quickDeleteButton(),
-                ),
-              if (category == CollectionCategory.boardgame &&
-                  ownedExpansionCount(item) > 0)
-                Positioned(
-                  bottom: 4,
-                  right: 4,
-                  child: _expansionBadge(ownedExpansionCount(item)),
                 ),
               if (_overlapBadge != null) _overlapBadge!,
               if (item.isOnLoan && !item.isSold)
@@ -131,36 +118,6 @@ class CollectionItemTile extends StatelessWidget {
                   left: 4,
                   right: 4,
                   child: _badge('Vendu', Colors.grey.shade700),
-                ),
-              if (showGroupBadge &&
-                  item.isGroupOwned &&
-                  !item.isSold &&
-                  !(category == CollectionCategory.boardgame &&
-                      ownedExpansionCount(item) > 0))
-                Positioned(
-                  bottom: 4,
-                  right: 4,
-                  child: Tooltip(
-                    message: item.groupName ?? 'Collection de groupe',
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: Colors.deepPurple.shade700,
-                        borderRadius: BorderRadius.circular(8),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.2),
-                            blurRadius: 4,
-                          ),
-                        ],
-                      ),
-                      child: const Icon(
-                        Icons.groups,
-                        size: 14,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
                 ),
             ],
           ),
@@ -200,6 +157,7 @@ class CollectionItemTile extends StatelessWidget {
                     fontSize: 9,
                   ),
                 ),
+              if (_metaIconsRow(context) != null) _metaIconsRow(context)!,
             ],
           )
         else
@@ -355,6 +313,106 @@ class CollectionItemTile extends StatelessWidget {
     return item.locationLabel;
   }
 
+  int get _groupCount {
+    if (!item.isGroupOwned) return 0;
+    final extra = item.metadata?['group_ids'];
+    if (extra is List && extra.isNotEmpty) return extra.length;
+    return item.groupId != null ? 1 : 0;
+  }
+
+  void _showGroupDialog(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Groupes'),
+        content: Text(
+          _groupCount <= 1
+              ? (item.groupName ?? 'Collection de groupe')
+              : 'Cet objet est partagé dans $_groupCount groupes.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget? _metaIconsRow(BuildContext context) {
+    final qty = showDuplicateBadge && totalQuantity > 1;
+    final group = showGroupBadge && _groupCount > 0 && !item.isSold;
+    final expansions = category == CollectionCategory.boardgame &&
+        ownedExpansionCount(item) > 0;
+    if (!qty && !group && !expansions) return null;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          if (qty)
+            _metaChip(
+              icon: Icons.layers_outlined,
+              label: '×$totalQuantity',
+              color: Colors.deepPurple.shade700,
+            ),
+          if (group)
+            InkWell(
+              onTap: () => _showGroupDialog(context),
+              borderRadius: BorderRadius.circular(8),
+              child: _metaChip(
+                icon: _groupCount > 1 ? Icons.groups : Icons.group_outlined,
+                label: _groupCount > 1 ? '$_groupCount' : null,
+                color: Colors.deepPurple.shade700,
+              ),
+            ),
+          if (expansions)
+            _metaChip(
+              icon: Icons.extension_outlined,
+              label: '${ownedExpansionCount(item)}',
+              color: Colors.green.shade700,
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _metaChip({
+    required IconData icon,
+    String? label,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          if (label != null) ...[
+            const SizedBox(width: 3),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _quickDeleteButton() {
     return Material(
       color: Colors.black.withValues(alpha: 0.5),
@@ -370,37 +428,6 @@ class CollectionItemTile extends StatelessWidget {
             color: Colors.white,
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _expansionBadge(int count) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-      decoration: BoxDecoration(
-        color: Colors.green.shade700,
-        borderRadius: BorderRadius.circular(10),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.2),
-            blurRadius: 4,
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.add_circle_outline, size: 12, color: Colors.white),
-          const SizedBox(width: 2),
-          Text(
-            '$count',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 10,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
       ),
     );
   }

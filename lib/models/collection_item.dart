@@ -110,7 +110,10 @@ class CollectionItem {
       locLabel = loc['label'] as String?;
     }
     final holder = json['location_holder'];
-    if (holder is Map && holder['username'] != null) {
+    final locationUserId = json['location_user_id'] as String?;
+    if (locationUserId != null &&
+        holder is Map &&
+        holder['username'] != null) {
       locLabel = 'Chez ${holder['username']}';
     }
 
@@ -140,7 +143,13 @@ class CollectionItem {
 
     final metadata = CategoryMetadata.parse(json['metadata']);
 
-    if ((locLabel == null || locLabel.trim().isEmpty) && metadata != null) {
+    if (locationUserId == null && metadata != null) {
+      final custom = metadata['holder_label'] as String?;
+      if (custom != null && custom.trim().isNotEmpty) {
+        locLabel = formatManualHolderLabel(custom.trim());
+      }
+    } else if ((locLabel == null || locLabel.trim().isEmpty) &&
+        metadata != null) {
       final custom = metadata['holder_label'] as String?;
       if (custom != null && custom.trim().isNotEmpty) {
         locLabel = formatManualHolderLabel(custom.trim());

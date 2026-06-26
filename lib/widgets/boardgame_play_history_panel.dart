@@ -469,11 +469,13 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
       }
     }
 
-    final autoWinner = grid?.autoWinnerName(_winCondition);
+    final autoNames = grid?.winnerNames(_winCondition) ?? const <String>[];
     final manualWinner = _winnerController.text.trim();
     final winner = manualWinner.isNotEmpty
         ? manualWinner
-        : (_winCondition == BoardgameWinCondition.cooperative ? null : autoWinner);
+        : (_winCondition == BoardgameWinCondition.cooperative
+            ? null
+            : (autoNames.isEmpty ? null : autoNames.join(' & ')));
 
     Navigator.pop(
       context,

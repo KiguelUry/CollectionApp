@@ -130,12 +130,21 @@ class BoardgamePlaySession {
         } else {
           parts.add('Gagnant : $w');
         }
+      } else if (w.contains('&')) {
+        parts.add('Gagnants : $w');
       } else {
         parts.add(
           winCondition == BoardgameWinCondition.cooperative
               ? 'Coop réussi'
               : 'Gagnant : $w',
         );
+      }
+    } else if (scoreGrid != null && scoreGrid!.hasScores) {
+      final names = scoreGrid!.winnerNames(winCondition);
+      if (names.length > 1) {
+        parts.add('Gagnants : ${names.join(' & ')}');
+      } else if (names.length == 1) {
+        parts.add('Gagnant : ${names.first}');
       }
     } else if (winCondition == BoardgameWinCondition.cooperative) {
       if (coopVictory == true) {
