@@ -3,11 +3,15 @@ class BoardgameScoreGrid {
   final List<String> players;
   final List<BoardgameScoreRound> rounds;
   final List<String?> teams;
+  final List<int?> playerColors;
+  final TeamScoreMode teamScoreMode;
 
   const BoardgameScoreGrid({
     required this.players,
     required this.rounds,
     this.teams = const [],
+    this.playerColors = const [],
+    this.teamScoreMode = TeamScoreMode.divided,
   });
 
   /// Nombre de colonnes joueur par défaut selon la fiche BGG.
@@ -36,6 +40,7 @@ class BoardgameScoreGrid {
       players: players,
       rounds: rounds,
       teams: List.filled(playerCount, null),
+      playerColors: List.filled(playerCount, null),
     );
   }
 
@@ -53,7 +58,20 @@ class BoardgameScoreGrid {
     final teams = rawTeams != null
         ? rawTeams.map((e) => e?.toString()).toList()
         : List<String?>.filled(players.length, null);
-    return BoardgameScoreGrid(players: players, rounds: rounds, teams: teams);
+    final rawColors = json['player_colors'] as List?;
+    final playerColors = rawColors != null
+        ? rawColors.map((e) => e == null ? null : (e as num).round()).toList()
+        : List<int?>.filled(players.length, null);
+    final teamScoreMode = TeamScoreMode.fromJson(
+      json['team_score_mode']?.toString(),
+    );
+    return BoardgameScoreGrid(
+      players: players,
+      rounds: rounds,
+      teams: teams,
+      playerColors: playerColors,
+      teamScoreMode: teamScoreMode,
+    );
   }
 
   Map<String, dynamic> toJson() => {
@@ -61,6 +79,9 @@ class BoardgameScoreGrid {
         'rounds': rounds.map((r) => r.toJson()).toList(),
         if (teams.any((t) => t != null && t!.trim().isNotEmpty))
           'teams': teams,
+        if (playerColors.any((c) => c != null)) 'player_colors': playerColors,
+        if (teamScoreMode != TeamScoreMode.divided)
+          'team_score_mode': teamScoreMode.dbValue,
       };
 
   List<String> get activePlayers =>
@@ -70,6 +91,13 @@ class BoardgameScoreGrid {
 
   bool get hasTeams =>
       teams.any((t) => t != null && t!.trim().isNotEmpty);
+
+  bool columnHasScores(int col) {
+    for (final round in rounds) {
+      if (col < round.scores.length && round.scores[col] != null) return true;
+    }
+    return false;
+  }
 
   /// Totaux par colonne (somme des tours).
   List<int> columnTotals() {
@@ -110,12 +138,24 @@ class BoardgameScoreGrid {
     if (hasTeams) {
       final tt = teamTotals();
       if (tt.isEmpty) return {};
+      final eligible = tt.entries
+          .where((e) => e.key.isNotEmpty)
+          .where((e) {
+            for (var i = 0; i < teams.length; i++) {
+              if (teams[i]?.trim() == e.key && columnHasScores(i)) return true;
+            }
+            return false;
+          })
+          .toList();
+      if (eligible.isEmpty) return {};
       final best = condition == BoardgameWinCondition.lowest
-          ? tt.entries.reduce((a, b) => a.value <= b.value ? a : b)
-          : tt.entries.reduce((a, b) => a.value >= b.value ? a : b);
+          ? eligible.reduce((a, b) => a.value <= b.value ? a : b)
+          : eligible.reduce((a, b) => a.value >= b.value ? a : b);
       final winners = <int>{};
       for (var i = 0; i < teams.length; i++) {
-        if (teams[i]?.trim() == best.key) winners.add(i);
+        if (teams[i]?.trim() == best.key && columnHasScores(i)) {
+          winners.add(i);
+        }
       }
       return winners;
     }
@@ -126,7 +166,7 @@ class BoardgameScoreGrid {
         ? (1 << 30)
         : -(1 << 30);
     for (var i = 0; i < players.length; i++) {
-      if (players[i].trim().isEmpty) continue;
+      if (players[i].trim().isEmpty || !columnHasScores(i)) continue;
       final v = i < totals.length ? totals[i] : 0;
       final better = condition == BoardgameWinCondition.lowest
           ? v < bestVal
@@ -137,7 +177,16 @@ class BoardgameScoreGrid {
       }
     }
     if (bestIdx < 0) return {};
-    return {bestIdx};
+    // Égalités : toutes les colonnes au même score optimal.
+    final winners = <int>{bestIdx};
+    for (var i = 0; i < players.length; i++) {
+      if (i == bestIdx || players[i].trim().isEmpty || !columnHasScores(i)) {
+        continue;
+      }
+      final v = i < totals.length ? totals[i] : 0;
+      if (v == bestVal) winners.add(i);
+    }
+    return winners;
   }
 
   String? autoWinnerName(BoardgameWinCondition condition) {
@@ -145,9 +194,21 @@ class BoardgameScoreGrid {
     if (hasTeams && hasScores) {
       final tt = teamTotals();
       if (tt.isEmpty) return null;
+      final eligible = <MapEntry<String, int>>[];
+      for (final e in tt.entries) {
+        var hasScored = false;
+        for (var i = 0; i < teams.length; i++) {
+          if (teams[i]?.trim() == e.key && columnHasScores(i)) {
+            hasScored = true;
+            break;
+          }
+        }
+        if (hasScored) eligible.add(e);
+      }
+      if (eligible.isEmpty) return null;
       final entry = condition == BoardgameWinCondition.lowest
-          ? tt.entries.reduce((a, b) => a.value <= b.value ? a : b)
-          : tt.entries.reduce((a, b) => a.value >= b.value ? a : b);
+          ? eligible.reduce((a, b) => a.value <= b.value ? a : b)
+          : eligible.reduce((a, b) => a.value >= b.value ? a : b);
       return entry.key;
     }
     final winners = winningColumnIndices(condition);
@@ -196,6 +257,9 @@ class BoardgameScoreGrid {
     final nextTeams = List<String?>.from(teams);
     while (nextTeams.length < count) nextTeams.add(null);
     if (nextTeams.length > count) nextTeams.removeRange(count, nextTeams.length);
+    final nextColors = List<int?>.from(playerColors);
+    while (nextColors.length < count) nextColors.add(null);
+    if (nextColors.length > count) nextColors.removeRange(count, nextColors.length);
     final nextRounds = rounds.map((r) {
       final scores = List<int?>.from(r.scores);
       while (scores.length < count) scores.add(null);
@@ -206,6 +270,8 @@ class BoardgameScoreGrid {
       players: nextPlayers,
       rounds: nextRounds,
       teams: nextTeams,
+      playerColors: nextColors,
+      teamScoreMode: teamScoreMode,
     );
   }
 
@@ -213,13 +279,56 @@ class BoardgameScoreGrid {
     List<String>? players,
     List<BoardgameScoreRound>? rounds,
     List<String?>? teams,
+    List<int?>? playerColors,
+    TeamScoreMode? teamScoreMode,
   }) {
     return BoardgameScoreGrid(
       players: players ?? this.players,
       rounds: rounds ?? this.rounds,
       teams: teams ?? this.teams,
+      playerColors: playerColors ?? this.playerColors,
+      teamScoreMode: teamScoreMode ?? this.teamScoreMode,
     );
   }
+
+  /// Colonnes affichées en mode scores communs par équipe.
+  List<String> uniqueTeamNames() {
+    final out = <String>[];
+    for (final t in teams) {
+      final n = t?.trim() ?? '';
+      if (n.isNotEmpty && !out.contains(n)) out.add(n);
+    }
+    return out;
+  }
+
+  /// Indices joueurs pour une équipe donnée.
+  List<int> indicesForTeam(String team) {
+    final out = <int>[];
+    for (var i = 0; i < teams.length; i++) {
+      if (teams[i]?.trim() == team) out.add(i);
+    }
+    return out;
+  }
+}
+
+enum TeamScoreMode {
+  divided,
+  shared;
+
+  String get label => switch (this) {
+        TeamScoreMode.divided => 'Points par joueur',
+        TeamScoreMode.shared => 'Points communs par équipe',
+      };
+
+  static TeamScoreMode fromJson(String? raw) => switch (raw) {
+        'shared' => TeamScoreMode.shared,
+        _ => TeamScoreMode.divided,
+      };
+
+  String get dbValue => switch (this) {
+        TeamScoreMode.divided => 'divided',
+        TeamScoreMode.shared => 'shared',
+      };
 }
 
 enum BoardgameWinCondition {

@@ -7,7 +7,8 @@ import '../models/boardgame_score_grid.dart';
 import '../models/collection_item.dart';
 import '../services/friend_service.dart';
 import '../services/profile_cache_service.dart';
-import '../utils/boardgame_play_stats.dart';
+import '../utils/boardgame_past_players.dart';
+import 'boardgame_ranking_panel.dart';
 import 'boardgame_score_grid_editor.dart';
 
 /// Historique des parties jouées (stocké dans metadata.boardgame_plays).
@@ -31,9 +32,15 @@ class BoardgamePlayHistoryPanel extends StatefulWidget {
 class _BoardgamePlayHistoryPanelState extends State<BoardgamePlayHistoryPanel> {
   static const _visibleLimit = 5;
   bool _showAll = false;
+  int _tabIndex = 0;
 
   List<BoardgamePlaySession> get _sessions =>
       parseBoardgamePlays(widget.item.metadata);
+
+  Future<void> _openSessionAtIndex(int index) async {
+    if (index < 0 || index >= _sessions.length) return;
+    await _openSessionDetail(_sessions[index], index);
+  }
 
   Future<void> _openAddSession() async {
     final session = await Navigator.push<BoardgamePlaySession>(
@@ -111,9 +118,6 @@ class _BoardgamePlayHistoryPanelState extends State<BoardgamePlayHistoryPanel> {
     final sessions = _sessions;
     final dateFmt = DateFormat('d MMM yyyy', 'fr_FR');
     final scheme = Theme.of(context).colorScheme;
-    final stats = sessions.length >= 2
-        ? BoardgamePlayAggregateStats.fromSessions(sessions)
-        : null;
     final visible = _showAll || sessions.length <= _visibleLimit
         ? sessions
         : sessions.take(_visibleLimit).toList();
@@ -122,222 +126,119 @@ class _BoardgamePlayHistoryPanelState extends State<BoardgamePlayHistoryPanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                sessions.isEmpty
-                    ? 'Aucune partie enregistrée'
-                    : '${sessions.length} partie${sessions.length > 1 ? 's' : ''}',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: scheme.onSurfaceVariant,
+        SegmentedButton<int>(
+          segments: const [
+            ButtonSegment(value: 0, label: Text('Historique')),
+            ButtonSegment(value: 1, label: Text('Classement')),
+          ],
+          selected: {_tabIndex},
+          onSelectionChanged: (s) => setState(() => _tabIndex = s.first),
+        ),
+        const SizedBox(height: 12),
+        if (_tabIndex == 0) ...[
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  sessions.isEmpty
+                      ? 'Aucune partie enregistrée'
+                      : '${sessions.length} partie${sessions.length > 1 ? 's' : ''}',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
               ),
-            ),
-            if (!widget.readOnly)
-              FilledButton.tonalIcon(
-                onPressed: _openAddSession,
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('Partie'),
-              ),
-          ],
-        ),
-        if (stats != null) ...[
-          const SizedBox(height: 12),
-          _StatsSummary(stats: stats),
-        ],
-        if (sessions.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          ...List.generate(visible.length, (i) {
-            final s = visible[i];
-            final realIndex = sessions.indexOf(s);
-            return Card(
-              margin: const EdgeInsets.only(bottom: 8),
-              clipBehavior: Clip.antiAlias,
-              child: InkWell(
-                onTap: () => _openSessionDetail(s, realIndex),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      CircleAvatar(
-                        radius: 20,
-                        backgroundColor:
-                            scheme.primaryContainer.withValues(alpha: 0.7),
-                        child: Icon(
-                          s.trackScores
-                              ? Icons.grid_on_rounded
-                              : Icons.groups,
-                          size: 20,
-                          color: scheme.onPrimaryContainer,
+              if (!widget.readOnly)
+                FilledButton.tonalIcon(
+                  onPressed: _openAddSession,
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Partie'),
+                ),
+            ],
+          ),
+          if (sessions.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            ...List.generate(visible.length, (i) {
+              final s = visible[i];
+              final realIndex = sessions.indexOf(s);
+              return Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: () => _openSessionDetail(s, realIndex),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        CircleAvatar(
+                          radius: 18,
+                          backgroundColor:
+                              scheme.primaryContainer.withValues(alpha: 0.7),
+                          child: Icon(
+                            s.trackScores
+                                ? Icons.grid_on_rounded
+                                : Icons.groups,
+                            size: 18,
+                            color: scheme.onPrimaryContainer,
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    dateFmt.format(s.date),
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                                if (s.effectiveWinner != null)
-                                  Icon(
-                                    Icons.emoji_events,
-                                    size: 16,
-                                    color: scheme.primary,
-                                  ),
-                              ],
-                            ),
-                            if (s.summaryLine().isNotEmpty) ...[
-                              const SizedBox(height: 4),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
                               Text(
-                                s.summaryLine(),
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  height: 1.35,
-                                  color: scheme.onSurfaceVariant,
+                                dateFmt.format(s.date),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 14,
                                 ),
                               ),
+                              if (s.summaryLine().isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  s.summaryLine(),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    height: 1.35,
+                                    color: scheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
                             ],
-                          ],
+                          ),
                         ),
-                      ),
-                      if (!widget.readOnly)
-                        IconButton(
-                          icon: const Icon(Icons.delete_outline, size: 20),
-                          onPressed: () => _deleteSession(realIndex),
-                        ),
-                    ],
+                        if (!widget.readOnly)
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, size: 20),
+                            onPressed: () => _deleteSession(realIndex),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
+              );
+            }),
+            if (hiddenCount > 0)
+              TextButton.icon(
+                onPressed: () => setState(() => _showAll = true),
+                icon: const Icon(Icons.expand_more),
+                label:
+                    Text('Voir $hiddenCount autre${hiddenCount > 1 ? 's' : ''}'),
+              )
+            else if (_showAll && sessions.length > _visibleLimit)
+              TextButton.icon(
+                onPressed: () => setState(() => _showAll = false),
+                icon: const Icon(Icons.expand_less),
+                label: const Text('Réduire'),
               ),
-            );
-          }),
-          if (hiddenCount > 0)
-            TextButton.icon(
-              onPressed: () => setState(() => _showAll = true),
-              icon: const Icon(Icons.expand_more),
-              label: Text('Voir $hiddenCount autre${hiddenCount > 1 ? 's' : ''}'),
-            )
-          else if (_showAll && sessions.length > _visibleLimit)
-            TextButton.icon(
-              onPressed: () => setState(() => _showAll = false),
-              icon: const Icon(Icons.expand_less),
-              label: const Text('Réduire'),
-            ),
-        ],
-      ],
-    );
-  }
-}
-
-class _StatsSummary extends StatelessWidget {
-  final BoardgamePlayAggregateStats stats;
-
-  const _StatsSummary({required this.stats});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.5)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'Bilan',
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: scheme.primary,
-                ),
-          ),
-          if (stats.winPodium.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              'Podium victoires',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: scheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              children: [
-                for (var i = 0; i < stats.winPodium.length; i++)
-                  Chip(
-                    avatar: CircleAvatar(
-                      radius: 10,
-                      backgroundColor: switch (i) {
-                        0 => Colors.amber.shade700,
-                        1 => Colors.grey.shade500,
-                        2 => Colors.brown.shade400,
-                        _ => scheme.primaryContainer,
-                      },
-                      child: Text(
-                        '${i + 1}',
-                        style: const TextStyle(fontSize: 10, color: Colors.white),
-                      ),
-                    ),
-                    label: Text(
-                      '${stats.winPodium[i].name} (${stats.winPodium[i].wins})',
-                    ),
-                    visualDensity: VisualDensity.compact,
-                  ),
-              ],
-            ),
           ],
-          if (stats.bestScores.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            _scoreList('Meilleurs scores', stats.bestScores, scheme),
-          ],
-          if (stats.worstScores.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            _scoreList('Pires scores', stats.worstScores, scheme),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _scoreList(
-    String title,
-    List<BoardgameScoreHighlight> entries,
-    ColorScheme scheme,
-  ) {
-    final fmt = DateFormat('d/M/yy', 'fr_FR');
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: scheme.onSurfaceVariant,
-          ),
-        ),
-        const SizedBox(height: 2),
-        for (final e in entries)
-          Text(
-            '${e.player} : ${e.score} (${fmt.format(e.date)})',
-            style: const TextStyle(fontSize: 12),
+        ]         else
+          BoardgameRankingPanel(
+            sessions: sessions,
+            onOpenSession: widget.readOnly ? null : _openSessionAtIndex,
           ),
       ],
     );
@@ -429,6 +330,8 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
   late bool _useTeams;
   late BoardgameWinCondition _winCondition;
   late BoardgameScoreGrid _initialGrid;
+  bool? _coopVictory;
+  int _coopTeamCount = 1;
   final _winnerController = TextEditingController();
   final _notesController = TextEditingController();
   final _playersOnlyController = TextEditingController();
@@ -438,21 +341,16 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
   void initState() {
     super.initState();
     final s = widget.initial;
-    final item = widget.item;
     _date = s?.date ?? DateTime.now();
     _trackScores = s?.trackScores ?? false;
     _useTeams = s?.useTeams ?? false;
     _winCondition = s?.winCondition ?? BoardgameWinCondition.highest;
-    _initialGrid = s?.scoreGrid ??
-        BoardgameScoreGrid.empty(
-          playerCount: BoardgameScoreGrid.defaultPlayerCount(
-            minPlayers: item?.minPlayers,
-            maxPlayers: item?.maxPlayers,
-          ),
-        );
+    _initialGrid = s?.scoreGrid ?? BoardgameScoreGrid.empty(playerCount: 0);
     _winnerController.text = s?.winner ?? '';
     _notesController.text = s?.notes ?? '';
     _playersOnlyController.text = s?.players.join(', ') ?? '';
+    _coopVictory = s?.coopVictory;
+    _coopTeamCount = s?.coopTeamCount ?? 1;
     _loadProfiles();
   }
 
@@ -489,7 +387,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     if (picked != null) setState(() => _date = picked);
   }
 
-  Future<String?> _pickPlayerForColumn(int columnIndex) async {
+  Future<String?> _pickPlayerFromContacts() async {
     if (_pickableProfiles.isEmpty) return null;
     return showModalBottomSheet<String>(
       context: context,
@@ -527,7 +425,25 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     BoardgameScoreGrid? grid;
     Map<String, int>? scores;
 
-    if (_trackScores) {
+    if (_trackScores &&
+        _winCondition == BoardgameWinCondition.cooperative &&
+        _coopTeamCount <= 1) {
+      grid = _gridKey.currentState?.buildGrid() ?? _initialGrid;
+      players = grid.activePlayers;
+      if (players.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Ajoute au moins un joueur.')),
+        );
+        return;
+      }
+      if (_coopVictory == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Indique victoire ou défaite.')),
+        );
+        return;
+      }
+      scores = null;
+    } else if (_trackScores) {
       grid = _gridKey.currentState?.buildGrid() ?? _initialGrid;
       players = grid.activePlayers;
       if (players.isEmpty) {
@@ -573,6 +489,12 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
         trackScores: _trackScores,
         winCondition: _winCondition,
         useTeams: _useTeams,
+        coopVictory: _winCondition == BoardgameWinCondition.cooperative
+            ? _coopVictory
+            : null,
+        coopTeamCount: _winCondition == BoardgameWinCondition.cooperative
+            ? _coopTeamCount
+            : null,
       ),
     );
   }
@@ -628,20 +550,82 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
               ),
             ),
             const SizedBox(height: 8),
-            Text(
-              'Grille de score',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
+            if (_winCondition == BoardgameWinCondition.cooperative) ...[
+              Row(
+                children: [
+                  Text(
+                    'Équipes',
+                    style: Theme.of(context).textTheme.labelLarge,
                   ),
-            ),
-            const SizedBox(height: 8),
+                  const Spacer(),
+                  IconButton(
+                    onPressed: _coopTeamCount > 1
+                        ? () => setState(() => _coopTeamCount--)
+                        : null,
+                    icon: const Icon(Icons.remove_circle_outline),
+                  ),
+                  Text('$_coopTeamCount'),
+                  IconButton(
+                    onPressed: _coopTeamCount < 4
+                        ? () => setState(() => _coopTeamCount++)
+                        : null,
+                    icon: const Icon(Icons.add_circle_outline),
+                  ),
+                ],
+              ),
+              if (_coopTeamCount <= 1) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Résultat face au jeu',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                const SizedBox(height: 6),
+                SegmentedButton<bool>(
+                  segments: const [
+                    ButtonSegment(
+                      value: true,
+                      label: Text('Victoire'),
+                      icon: Icon(Icons.check_circle_outline),
+                    ),
+                    ButtonSegment(
+                      value: false,
+                      label: Text('Défaite'),
+                      icon: Icon(Icons.cancel_outlined),
+                    ),
+                  ],
+                  selected: _coopVictory == null ? {} : {_coopVictory!},
+                  emptySelectionAllowed: true,
+                  onSelectionChanged: (s) =>
+                      setState(() => _coopVictory = s.firstOrNull),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Joueurs',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                const SizedBox(height: 8),
+              ],
+            ],
+            if (!(_winCondition == BoardgameWinCondition.cooperative &&
+                _coopTeamCount <= 1)) ...[
+              const SizedBox(height: 8),
+            ],
             BoardgameScoreGridEditor(
               key: _gridKey,
               initialGrid: _initialGrid,
-              useTeams: _useTeams,
+              suggestedPlayerNames: pastPlayerNamesFromSessions(
+                parseBoardgamePlays(widget.item?.metadata),
+              ),
+              useTeams: _useTeams || _winCondition == BoardgameWinCondition.cooperative,
               winCondition: _winCondition,
-              onTeamsChanged: (v) => setState(() => _useTeams = v),
-              onPickPlayer: canPickPlayers ? _pickPlayerForColumn : null,
+              onTeamsChanged: _winCondition == BoardgameWinCondition.cooperative
+                  ? null
+                  : (v) => setState(() => _useTeams = v),
+              onPickPlayer:
+                  canPickPlayers ? _pickPlayerFromContacts : null,
+              showScoreTable: !(_winCondition ==
+                      BoardgameWinCondition.cooperative &&
+                  _coopTeamCount <= 1),
             ),
           ] else ...[
             const SizedBox(height: 8),

@@ -18,8 +18,6 @@ import '../widgets/loan_item_dialog.dart';
 import '../widgets/collection_cover_image.dart';
 import '../widgets/cover_preview_sheet.dart';
 import '../widgets/group_badge.dart';
-import '../widgets/item_whereabouts_field.dart';
-import '../widgets/personal_whereabouts_field.dart';
 import '../widgets/star_rating_bar.dart';
 import '../widgets/assign_book_series_sheet.dart';
 import '../widgets/item_tags_editor.dart';
@@ -27,6 +25,7 @@ import '../widgets/boardgame_expansions_section.dart';
 import '../models/boardgame_play_session.dart';
 import '../widgets/boardgame_play_history_panel.dart';
 import '../widgets/collapsible_section.dart';
+import '../widgets/compact_whereabouts_dropdown.dart';
 import '../widgets/discogs_market_value_card.dart';
 import '../widgets/friend_ratings_panel.dart';
 import '../widgets/group_rules_panel.dart';
@@ -183,10 +182,11 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                     Padding(
                       padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
                       child: FilledButton(
-                        onPressed: selected.isEmpty
-                            ? null
-                            : () => Navigator.pop(ctx, Set<String>.from(selected)),
-                        child: const Text('Valider'),
+                        onPressed: () =>
+                            Navigator.pop(ctx, Set<String>.from(selected)),
+                        child: Text(
+                          selected.isEmpty ? 'Retirer des groupes' : 'Valider',
+                        ),
                       ),
                     ),
                   ],
@@ -240,22 +240,6 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
   }
 
   bool get _sharesWithGroup => _selectedGroupIds.isNotEmpty;
-
-  String? get _primaryGroupId =>
-      _item.groupId ?? (_selectedGroupIds.isEmpty ? null : _selectedGroupIds.first);
-
-  String? _customHolderName() =>
-      _item.metadata?['holder_label'] as String?;
-
-  Map<String, dynamic> _metadataWithHolder(String? customName) {
-    final meta = Map<String, dynamic>.from(_item.metadata ?? {});
-    if (customName != null && customName.trim().isNotEmpty) {
-      meta['holder_label'] = customName.trim();
-    } else {
-      meta.remove('holder_label');
-    }
-    return meta;
-  }
 
   Map<String, dynamic> _metadataWithGroups(List<String> groupIds) {
     final meta = Map<String, dynamic>.from(_item.metadata ?? {});
@@ -797,271 +781,132 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       metadataRows: metadataRows,
                     ),
                     if (isBoardgame && BoardgameExpansionService.itemActsAsBase(_item))
-                      BoardgameExpansionsSection(
-                        item: _item,
-                        readOnly: ro,
-                        onItemUpdated: (updated) =>
-                            setState(() => _item = updated),
+                      CollapsibleSection(
+                        title: 'Extensions',
+                        accentColor: _item.category.color,
+                        child: BoardgameExpansionsSection(
+                          item: _item,
+                          readOnly: ro,
+                          onItemUpdated: (updated) =>
+                              setState(() => _item = updated),
+                        ),
                       ),
                     if (!isWishlist) ...[
-                      const SizedBox(height: 8),
                       CollapsibleSection(
                         title: 'Partage & groupes',
-                        accentColor: _groupAccent(),
+                        accentColor: _item.category.color,
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            SwitchListTile(
-                              contentPadding: EdgeInsets.zero,
-                              title: const Text('Partagé avec un groupe'),
-                              value: _sharesWithGroup,
-                              onChanged: ro
-                                  ? null
-                                  : (v) async {
-                                if (v && _groups.isEmpty) {
-                                  await _loadGroups();
-                                }
-                                if (!mounted) return;
-                                if (v && _groups.isEmpty) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'Crée d\'abord un groupe dans le menu « Groupes »',
-                                      ),
-                                    ),
-                                  );
-                                  return;
-                                }
-                                if (!v) {
-                                  setState(() {
-                                    _selectedGroupIds = {};
-                                    _item = _item.copyWith(clearGroup: true);
-                                  });
-                                  _saveNow();
-                                  return;
-                                }
-                                final picked = await _pickGroups(initial: {});
-                                if (!mounted || picked == null || picked.isEmpty) {
-                                  return;
-                                }
-                                final first = picked.first;
-                                final g = _groups.firstWhere((x) => x.id == first);
-                                setState(() {
-                                  _selectedGroupIds = picked;
-                                  _item = _item.copyWith(
-                                    groupId: first,
-                                    groupName: g.name,
-                                    clearLocation: true,
-                                    metadata: _metadataWithGroups(picked.toList()),
-                                  );
-                                });
-                                _saveNow();
-                              },
-                            ),
-                            if (_sharesWithGroup && _groups.isNotEmpty) ...[
-                              const SizedBox(height: 8),
-                              OutlinedButton.icon(
-                        onPressed: ro
-                            ? null
-                            : () async {
-                                final picked = await _pickGroups();
-                                if (!mounted ||
-                                    picked == null ||
-                                    picked.isEmpty) {
-                                  return;
-                                }
-                                final first = picked.first;
-                                final g =
-                                    _groups.firstWhere((x) => x.id == first);
-                                setState(() {
-                                  _selectedGroupIds = picked;
-                                  _item = _item.copyWith(
-                                    groupId: first,
-                                    groupName: g.name,
-                                    metadata: _metadataWithGroups(
-                                      picked.toList(),
-                                    ),
-                                    clearLocation: true,
-                                  );
-                                });
-                                _saveNow();
-                              },
-                        icon: const Icon(Icons.group_outlined, size: 18),
-                        label: const Text('Modifier les groupes'),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Groupes',
-                        style: Theme.of(context).textTheme.titleSmall,
-                      ),
-                      const SizedBox(height: 8),
-                      if (_groups.any((g) => !_selectedGroupIds.contains(g.id)))
-                        DropdownButtonFormField<String>(
-                          initialValue: null,
-                          decoration: const InputDecoration(
-                            labelText: 'Ajouter à un groupe',
-                          ),
-                          items: _groups
-                              .where((g) => !_selectedGroupIds.contains(g.id))
-                              .map(
-                                (g) => DropdownMenuItem(
-                                  value: g.id,
-                                  child: GroupBadge.dropdownLabel(
-                                    name: g.name,
-                                    avatarUrl: g.avatarUrl,
-                                    accentColor: g.accentColor,
-                                    iconKey: g.iconKey,
-                                  ),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: ro
-                              ? null
-                              : (id) {
-                                  if (id == null) return;
-                                  final g =
-                                      _groups.firstWhere((x) => x.id == id);
-                                  setState(() {
-                                    _selectedGroupIds.add(id);
-                                    _item = _item.copyWith(
-                                      groupId: _selectedGroupIds.first,
-                                      groupName: g.name,
-                                      metadata: _metadataWithGroups(
-                                        _selectedGroupIds.toList(),
-                                      ),
-                                      clearLocation: true,
+                            if (!ro)
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: OutlinedButton.icon(
+                                  onPressed: () async {
+                                    if (_groups.isEmpty) await _loadGroups();
+                                    if (!mounted) return;
+                                    if (_groups.isEmpty) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'Crée d\'abord un groupe dans le menu « Groupes »',
+                                          ),
+                                        ),
+                                      );
+                                      return;
+                                    }
+                                    final picked = await _pickGroups(
+                                      initial: _selectedGroupIds,
                                     );
-                                  });
-                                  _saveNow();
-                                },
-                        ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: _groups
-                            .where((g) => _selectedGroupIds.contains(g.id))
-                            .map((g) {
-                          return InputChip(
-                            label: Text(g.name),
-                            onDeleted: ro
-                                ? null
-                                : () {
-                                    setState(() {
-                                      _selectedGroupIds.remove(g.id);
-                                      final ids =
-                                          _selectedGroupIds.toList();
-                                      if (ids.isEmpty) {
-                                        _item =
-                                            _item.copyWith(clearGroup: true);
-                                      } else {
-                                        final first = _groups
-                                            .firstWhere((x) => x.id == ids.first);
+                                    if (!mounted || picked == null) return;
+                                    if (picked.isEmpty) {
+                                      setState(() {
+                                        _selectedGroupIds = {};
+                                        _item = _item.copyWith(clearGroup: true);
+                                      });
+                                    } else {
+                                      final first = picked.first;
+                                      final g = _groups
+                                          .firstWhere((x) => x.id == first);
+                                      setState(() {
+                                        _selectedGroupIds = picked;
                                         _item = _item.copyWith(
-                                          groupId: ids.first,
-                                          groupName: first.name,
-                                          metadata:
-                                              _metadataWithGroups(ids),
+                                          groupId: first,
+                                          groupName: g.name,
+                                          metadata: _metadataWithGroups(
+                                            picked.toList(),
+                                          ),
+                                          clearLocation: true,
                                         );
-                                      }
-                                    });
+                                      });
+                                    }
                                     _saveNow();
                                   },
-                          );
-                        }).toList(),
-                      ),
+                                  icon: const Icon(Icons.group_outlined, size: 18),
+                                  label: const Text('Gestion des groupes'),
+                                ),
+                              ),
+                            if (_selectedGroupIds.isNotEmpty) ...[
+                              const SizedBox(height: 10),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 6,
+                                children: _groups
+                                    .where(
+                                      (g) => _selectedGroupIds.contains(g.id),
+                                    )
+                                    .map(
+                                      (g) => Chip(
+                                        label: Text(g.name),
+                                        visualDensity: VisualDensity.compact,
+                                      ),
+                                    )
+                                    .toList(),
+                              ),
                             ],
-                          ],
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 8),
-                    IgnorePointer(
-                      ignoring: ro,
-                      child: isWishlist
-                          ? const SizedBox.shrink()
-                          : _primaryGroupId != null
-                          ? ItemWhereaboutsField(
-                              key: ValueKey('where_$_primaryGroupId'),
-                              groupId: _primaryGroupId!,
+                            const SizedBox(height: 12),
+                            CompactWhereaboutsDropdown(
+                              groups: _groups,
+                              selectedGroupIds: _selectedGroupIds,
                               locationUserId: _item.locationUserId,
                               holderLabel: _item.locationLabel,
-                              customHolderName: _customHolderName(),
-                              isOnLoan: _item.isOnLoan,
-                              loanedToId: _item.loanedToId,
-                              loanedToName: _item.loanedToName,
                               readOnly: ro,
                               onChanged: ({
                                 locationUserId,
                                 holderLabel,
-                                customHolderName,
                                 clearHolder = false,
-                                loanedToId,
-                                loanedToName,
-                                clearLoan = false,
+                                manualHolder = false,
                               }) {
                                 setState(() {
-                                  if (clearLoan) {
+                                  if (manualHolder) {
+                                    final label = holderLabel?.trim();
                                     _item = _item.copyWith(
                                       clearLoan: true,
-                                      metadata: _metadataWithHolder(
-                                        customHolderName,
-                                      ),
-                                      locationUserId: locationUserId,
-                                      locationLabel: holderLabel,
-                                      clearLocation: clearHolder,
-                                    );
-                                  } else if (loanedToName != null ||
-                                      loanedToId != null) {
-                                    _item = _item.copyWith(
-                                      clearLocation: true,
-                                      clearLoan: false,
-                                      loanedToId: loanedToId,
-                                      loanedToName: loanedToName,
-                                      loanedAt: DateTime.now(),
-                                      metadata: _metadataWithHolder(null),
+                                      clearLocationUserId: true,
+                                      locationLabel: label != null &&
+                                              label.isNotEmpty
+                                          ? (label.startsWith('Chez ')
+                                              ? label
+                                              : 'Chez $label')
+                                          : null,
                                     );
                                   } else {
                                     _item = _item.copyWith(
                                       clearLoan: true,
                                       locationUserId: locationUserId,
                                       locationLabel: holderLabel,
-                                      clearLocation: clearHolder,
-                                      metadata: _metadataWithHolder(
-                                        customHolderName,
-                                      ),
+                                      clearLocationUserId: clearHolder,
                                     );
                                   }
                                 });
                                 _saveNow();
                               },
-                            )
-                          : PersonalWhereaboutsField(
-                              key: const ValueKey('pers_where'),
-                              locationUserId: _item.locationUserId ??
-                                  Supabase.instance.client.auth.currentUser?.id,
-                              customHolderName: _customHolderName(),
-                              readOnly: ro,
-                              onChanged: ({
-                                locationUserId,
-                                holderLabel,
-                                customHolderName,
-                                clearHolder = false,
-                              }) {
-                                setState(() {
-                                  _item = _item.copyWith(
-                                    locationUserId: locationUserId,
-                                    locationLabel: holderLabel,
-                                    clearLocation: clearHolder,
-                                    metadata: _metadataWithHolder(
-                                      customHolderName,
-                                    ),
-                                  );
-                                });
-                                _saveNow();
-                              },
                             ),
-                    ),
+                          ],
+                        ),
+                      ),
+                    ],
                     if (isBook && !_item.isWishlist && !_item.isSold) ...[
                       SwitchListTile(
                         contentPadding: EdgeInsets.zero,
@@ -1075,7 +920,6 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                               },
                       ),
                     ],
-                    const Divider(height: 32),
                     CollapsibleSection(
                       title: 'Ma note & avis',
                       accentColor: _item.category.color,
@@ -1096,6 +940,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                                     _saveNow();
                                   },
                           ),
+                          const SizedBox(height: 16),
                           TextField(
                             controller: _reviewController,
                             readOnly: ro,
@@ -1126,11 +971,10 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                     ],
                     if (_item.category == CollectionCategory.restaurant &&
                         !ro) ...[
-                      const Divider(height: 32),
+                      const Divider(height: 28),
                       RestaurantVisitsPanel(item: _item),
                     ],
                     if (isBoardgame && !isWishlist) ...[
-                      const Divider(height: 32),
                       CollapsibleSection(
                         title: 'Jeu de société',
                         accentColor: _item.category.color,
@@ -1173,7 +1017,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       ),
                     ],
                     if (!ro && !_item.isGroupOwned) ...[
-                    const Divider(height: 32),
+                    const Divider(height: 28),
                     _buildSectionTitle('Prêt'),
                     if (_item.isOnLoan) ...[
                       ListTile(
@@ -1212,8 +1056,12 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       ),
                     ],
                     if (!ro && !isWishlist) ...[
-                    const Divider(height: 32),
-                    _buildSectionTitle('Doubles & vente'),
+                    CollapsibleSection(
+                      title: 'Doubles & vente',
+                      accentColor: _item.category.color,
+                      initiallyExpanded: false,
+                      child: Column(
+                        children: [
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       title: const Text('À vendre / échanger'),
@@ -1250,9 +1098,12 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         _saveNow();
                       },
                     ),
+                        ],
+                      ),
+                    ),
                     ],
                     if (isWishlist && isBoardgame) ...[
-                      const Divider(height: 32),
+                      const Divider(height: 28),
                       _buildSectionTitle('Prix marché (indicatif)'),
                       Text(
                         'Les estimations neuf / occasion via une API ne sont pas encore disponibles. Consulte BoardGameGeek pour une fourchette.',
@@ -1263,8 +1114,12 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       ),
                     ],
                     if (!isWishlist) ...[
-                    const Divider(height: 32),
-                    _buildSectionTitle('Valeur & état'),
+                    CollapsibleSection(
+                      title: 'Valeur & état',
+                      accentColor: _item.category.color,
+                      initiallyExpanded: false,
+                      child: Column(
+                        children: [
                     TextField(
                       controller: _priceController,
                       readOnly: ro,
@@ -1302,9 +1157,12 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                               _scheduleSave();
                             },
                     ),
+                        ],
+                      ),
+                    ),
                     ],
                     if (!isBoardgame || isWishlist) ...[
-                      const Divider(height: 32),
+                      const Divider(height: 28),
                       _buildSectionTitle('Notes'),
                       TextField(
                         controller: _personalRulesController,
@@ -1404,11 +1262,17 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
             contentPadding: EdgeInsets.zero,
             title: Text(
               row.key,
-              style: TextStyle(color: Colors.grey.shade600),
+              style: TextStyle(
+                color: Colors.grey.shade600,
+                fontSize: 12,
+              ),
             ),
             subtitle: Text(
               row.value,
-              style: const TextStyle(fontWeight: FontWeight.w500),
+              style: const TextStyle(
+                fontWeight: FontWeight.w500,
+                fontSize: 13,
+              ),
             ),
           ),
         ),
@@ -1429,12 +1293,12 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
 
   Widget _buildSectionTitle(String title) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: 12, top: 4),
       child: Text(
         title,
         style: TextStyle(
-          fontSize: 20,
-          fontWeight: FontWeight.bold,
+          fontSize: 17,
+          fontWeight: FontWeight.w600,
           color: _item.category.color,
         ),
       ),
@@ -1446,12 +1310,12 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       width: 88,
       child: Column(
         children: [
-          Icon(icon, color: iconColor ?? Colors.deepPurple, size: 30),
+          Icon(icon, color: iconColor ?? Colors.deepPurple, size: 26),
           const SizedBox(height: 4),
           Text(
             label,
             textAlign: TextAlign.center,
-            style: const TextStyle(fontWeight: FontWeight.bold),
+            style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
           ),
         ],
       ),

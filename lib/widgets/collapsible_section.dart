@@ -33,40 +33,44 @@ class _CollapsibleSectionState extends State<CollapsibleSection> {
     final accent =
         widget.accentColor ?? Theme.of(context).colorScheme.primary;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        InkWell(
-          onTap: () => setState(() => _expanded = !_expanded),
-          borderRadius: BorderRadius.circular(8),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    widget.title,
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: accent,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Divider(height: 28),
+          InkWell(
+            onTap: () => setState(() => _expanded = !_expanded),
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      widget.title,
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w600,
+                        color: accent,
+                      ),
                     ),
                   ),
-                ),
-                Icon(
-                  _expanded ? Icons.expand_less : Icons.expand_more,
-                  color: accent,
-                ),
-              ],
+                  Icon(
+                    _expanded ? Icons.expand_more : Icons.expand_less,
+                    color: accent,
+                    size: 22,
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-        if (_expanded) ...[
-          const SizedBox(height: 8),
-          widget.child,
+          if (_expanded) ...[
+            const SizedBox(height: 10),
+            widget.child,
+          ],
         ],
-        const SizedBox(height: 8),
-      ],
+      ),
     );
   }
 }

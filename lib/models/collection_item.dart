@@ -285,6 +285,7 @@ class CollectionItem {
     bool clearGamesPlayed = false,
     bool clearGroup = false,
     bool clearLocation = false,
+    bool clearLocationUserId = false,
     String? locationUserId,
     Map<String, dynamic>? metadata,
     List<ItemTag>? tags,
@@ -312,8 +313,9 @@ class CollectionItem {
       groupId: clearGroup ? null : (groupId ?? this.groupId),
       groupName: clearGroup ? null : (groupName ?? this.groupName),
       addedBy: addedBy,
-      locationUserId:
-          clearLocation ? null : (locationUserId ?? this.locationUserId),
+      locationUserId: clearLocation || clearLocationUserId
+          ? null
+          : (locationUserId ?? this.locationUserId),
       loanedToId: clearLoan ? null : (loanedToId ?? this.loanedToId),
       loanedToName: clearLoan ? null : (loanedToName ?? this.loanedToName),
       loanedAt: clearLoan ? null : (loanedAt ?? this.loanedAt),

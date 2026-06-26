@@ -162,13 +162,7 @@ class _BoardgameExpansionsSectionState extends State<BoardgameExpansionsSection>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SizedBox(height: 8),
-        Text(
-          title,
-          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-        ),
         if (subtitle != null) ...[
-          const SizedBox(height: 4),
           Text(
             subtitle,
             style: TextStyle(fontSize: 12, color: Colors.grey.shade600),

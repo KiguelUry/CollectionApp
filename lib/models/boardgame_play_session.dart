@@ -12,6 +12,8 @@ class BoardgamePlaySession {
   final bool trackScores;
   final BoardgameWinCondition winCondition;
   final bool useTeams;
+  final bool? coopVictory;
+  final int? coopTeamCount;
 
   const BoardgamePlaySession({
     required this.date,
@@ -23,6 +25,8 @@ class BoardgamePlaySession {
     this.trackScores = false,
     this.winCondition = BoardgameWinCondition.highest,
     this.useTeams = false,
+    this.coopVictory,
+    this.coopTeamCount,
   });
 
   factory BoardgamePlaySession.fromJson(Map<String, dynamic> json) {
@@ -60,6 +64,8 @@ class BoardgamePlaySession {
         json['win_condition']?.toString(),
       ),
       useTeams: json['use_teams'] as bool? ?? grid?.hasTeams == true,
+      coopVictory: json['coop_victory'] as bool?,
+      coopTeamCount: json['coop_team_count'] as int?,
     );
   }
 
@@ -72,6 +78,8 @@ class BoardgamePlaySession {
         'track_scores': trackScores,
         'win_condition': winCondition.dbValue,
         if (useTeams) 'use_teams': true,
+        if (coopVictory != null) 'coop_victory': coopVictory,
+        if (coopTeamCount != null) 'coop_team_count': coopTeamCount,
         if (notes != null && notes!.trim().isNotEmpty) 'notes': notes!.trim(),
       };
 
@@ -106,16 +114,53 @@ class BoardgamePlaySession {
     }
     final w = effectiveWinner;
     if (w != null && w.isNotEmpty) {
-      parts.add(
-        winCondition == BoardgameWinCondition.cooperative
-            ? 'Coop réussi'
-            : 'Gagnant : $w',
-      );
-    } else if (winCondition == BoardgameWinCondition.cooperative &&
-        scoreGrid?.hasScores == true) {
-      parts.add('Score coop : ${scoreGrid!.columnTotals().fold(0, (a, b) => a + b)}');
+      if (useTeams && scoreGrid != null && scoreGrid!.hasTeams) {
+        final members = <String>[];
+        for (var i = 0; i < scoreGrid!.players.length; i++) {
+          if (scoreGrid!.teams.length > i &&
+              scoreGrid!.teams[i]?.trim() == w.trim()) {
+            final n = scoreGrid!.players[i].trim();
+            if (n.isNotEmpty) members.add(n);
+          }
+        }
+        if (members.isNotEmpty) {
+          parts.add(
+            'Équipe gagnante : $w (Joueurs : ${_formatNameList(members)})',
+          );
+        } else {
+          parts.add('Gagnant : $w');
+        }
+      } else {
+        parts.add(
+          winCondition == BoardgameWinCondition.cooperative
+              ? 'Coop réussi'
+              : 'Gagnant : $w',
+        );
+      }
+    } else if (winCondition == BoardgameWinCondition.cooperative) {
+      if (coopVictory == true) {
+        if (players.isNotEmpty) {
+          parts.add(
+            'Victoire coop (${_formatNameList(players)})',
+          );
+        } else {
+          parts.add('Victoire coop');
+        }
+      } else if (coopVictory == false) {
+        parts.add('Défaite coop');
+      } else if (scoreGrid?.hasScores == true) {
+        parts.add(
+          'Score coop : ${scoreGrid!.columnTotals().fold(0, (a, b) => a + b)}',
+        );
+      }
     }
     return parts.join('\n');
+  }
+
+  static String _formatNameList(List<String> names) {
+    if (names.length <= 1) return names.join();
+    if (names.length == 2) return '${names[0]} et ${names[1]}';
+    return '${names.sublist(0, names.length - 1).join(', ')} et ${names.last}';
   }
 }
 
