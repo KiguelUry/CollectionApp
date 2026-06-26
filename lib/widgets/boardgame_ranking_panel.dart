@@ -137,11 +137,11 @@ class BoardgameRankingPanel extends StatelessWidget {
         _StatBlock(
           title: 'Meilleurs scores',
           subtitle: 'Tape pour voir toute la liste',
-          children: stats.allScores.take(5).map((s) {
+          children: stats.allScores.take(5).toList().asMap().entries.map((e) {
             return Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Text(
-                '${s.player} — ${s.score} pts',
+                '${_rankEmoji(e.key)} ${e.value.player} — ${e.value.score} pts',
                 style: const TextStyle(fontSize: 13),
               ),
             );
@@ -156,11 +156,11 @@ class BoardgameRankingPanel extends StatelessWidget {
         _StatBlock(
           title: 'Meilleures moyennes',
           subtitle: 'Tape pour voir toute la liste',
-          children: stats.allAverages.take(5).map((a) {
+          children: stats.allAverages.take(5).toList().asMap().entries.map((e) {
             return Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Text(
-                '${a.player} — ${a.average.toStringAsFixed(1)} pts (${a.games} partie${a.games > 1 ? 's' : ''})',
+                '${_rankEmoji(e.key)} ${e.value.player} — ${e.value.average.toStringAsFixed(1)} pts (${e.value.games} partie${e.value.games > 1 ? 's' : ''})',
                 style: const TextStyle(fontSize: 13),
               ),
             );
@@ -175,11 +175,11 @@ class BoardgameRankingPanel extends StatelessWidget {
         _StatBlock(
           title: 'Nombre de victoires',
           subtitle: 'Tape pour voir toute la liste',
-          children: stats.winPodium.take(5).map((w) {
+          children: stats.winPodium.take(5).toList().asMap().entries.map((e) {
             return Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Text(
-                '${w.name} — ${w.wins} victoire${w.wins > 1 ? 's' : ''}',
+                '${_rankEmoji(e.key)} ${e.value.name} — ${e.value.wins} victoire${e.value.wins > 1 ? 's' : ''}',
                 style: const TextStyle(fontSize: 13),
               ),
             );

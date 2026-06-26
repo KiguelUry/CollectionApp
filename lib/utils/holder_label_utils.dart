@@ -20,6 +20,7 @@ String formatManualHolderLabel(String raw) {
   const aPlaces = {
     'paris', 'lyon', 'marseille', 'londres', 'berlin', 'madrid', 'rome',
     'barcelone', 'bruxelles', 'genève', 'zurich', 'montréal', 'montreal',
+    'braine', 'namur', 'liège', 'liege', 'charleroi', 'gand', 'anvers',
   };
 
   String cap(String s) =>

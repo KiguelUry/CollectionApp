@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_group.dart';
 import '../services/friend_service.dart';
 import '../services/group_service.dart';
+import '../services/holder_place_history_service.dart';
 import '../utils/holder_label_utils.dart';
 
 /// « Chez ? » compact — membres uniques, saisie manuelle, défaut « Chez moi ».
@@ -51,8 +52,10 @@ class _CompactWhereaboutsDropdownState
     extends State<CompactWhereaboutsDropdown> {
   final _groupService = GroupService();
   final _friendService = FriendService();
+  final _manualFocusNode = FocusNode();
 
   List<_MemberOption> _options = [];
+  List<String> _placeSuggestions = [];
   bool _initialLoading = true;
   bool _defaultApplied = false;
   late TextEditingController _manualController;
@@ -68,15 +71,14 @@ class _CompactWhereaboutsDropdownState
     super.initState();
     _syncManualStateFromWidget();
     _load(initial: true);
+    _loadPlaceSuggestions();
   }
 
   void _syncManualStateFromWidget() {
     _manualMode = _isManualHolder;
     _manualController = TextEditingController(
       text: _manualMode
-          ? widget.holderLabel!
-              .trim()
-              .replaceFirst(RegExp(r'^Chez\s+', caseSensitive: false), '')
+          ? holderLabelStorageValue(widget.holderLabel!.trim())
           : '',
     );
   }
@@ -90,20 +92,20 @@ class _CompactWhereaboutsDropdownState
     );
     if (groupsChanged) {
       _load(initial: false);
+      _loadPlaceSuggestions();
     }
     if (oldWidget.holderLabel != widget.holderLabel ||
         oldWidget.locationUserId != widget.locationUserId) {
       final manual = _isManualHolder;
       if (manual) {
         _manualMode = true;
-        final stripped = widget.holderLabel!
-            .trim()
-            .replaceFirst(RegExp(r'^Chez\s+', caseSensitive: false), '');
+        final stripped = holderLabelStorageValue(widget.holderLabel!.trim());
         if (_manualController.text != stripped) {
           _manualController.text = stripped;
         }
       } else if (_manualMode && widget.locationUserId != null) {
         _manualMode = false;
+        _manualFocusNode.unfocus();
       }
     }
   }
@@ -114,9 +116,27 @@ class _CompactWhereaboutsDropdownState
   }
 
   @override
+  void deactivate() {
+    _manualFocusNode.unfocus();
+    super.deactivate();
+  }
+
+  @override
   void dispose() {
+    _manualFocusNode.dispose();
     _manualController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadPlaceSuggestions() async {
+    final ids = widget.selectedGroupIds;
+    if (ids.isEmpty) {
+      if (mounted) setState(() => _placeSuggestions = []);
+      return;
+    }
+    final places = await HolderPlaceHistoryService.loadForGroups(ids);
+    if (!mounted) return;
+    setState(() => _placeSuggestions = places);
   }
 
   void _applyDefaultIfNeeded() {
@@ -230,7 +250,10 @@ class _CompactWhereaboutsDropdownState
       setState(() => _manualMode = true);
       return;
     }
-    setState(() => _manualMode = false);
+    setState(() {
+      _manualMode = false;
+      _manualFocusNode.unfocus();
+    });
     if (v.startsWith('user:')) {
       final uid = v.substring(5);
       final opt = _options.firstWhere(
@@ -244,34 +267,48 @@ class _CompactWhereaboutsDropdownState
     }
   }
 
-  Future<void> _submitManual() async {
+  void _applySuggestion(String raw) {
+    _manualController.text = raw;
+    _submitManual(skipConfirm: true);
+  }
+
+  Future<void> _submitManual({bool skipConfirm = false}) async {
     final t = _manualController.text.trim();
     if (t.isEmpty) return;
 
     final preview = formatManualHolderLabel(t);
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Confirmer le lieu'),
-        content: Text(
-          'Afficher comme :\n\n$preview',
-          style: const TextStyle(fontWeight: FontWeight.w600),
+    if (!skipConfirm) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Confirmer le lieu'),
+          content: Text(
+            'Afficher comme :\n\n$preview',
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Modifier'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Valider'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Modifier'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Valider'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
+      );
+      if (ok != true || !mounted) return;
+    }
 
+    _manualFocusNode.unfocus();
     setState(() => _manualMode = true);
+    await HolderPlaceHistoryService.saveForGroups(
+      widget.selectedGroupIds,
+      preview,
+    );
+    await _loadPlaceSuggestions();
+    if (!mounted) return;
     widget.onChanged(holderLabel: preview, manualHolder: true);
   }
 
@@ -330,11 +367,28 @@ class _CompactWhereaboutsDropdownState
         ),
         if ((_manualMode || _isManualHolder) && !widget.readOnly) ...[
           const SizedBox(height: 8),
+          if (_placeSuggestions.isNotEmpty) ...[
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: _placeSuggestions.map((place) {
+                final label = formatManualHolderLabel(place);
+                return ActionChip(
+                  label: Text(label, style: const TextStyle(fontSize: 12)),
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => _applySuggestion(place),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 8),
+          ],
           Row(
             children: [
               Expanded(
                 child: TextField(
                   controller: _manualController,
+                  focusNode: _manualFocusNode,
+                  autofocus: false,
                   decoration: const InputDecoration(
                     labelText: 'Nom ou lieu',
                     isDense: true,

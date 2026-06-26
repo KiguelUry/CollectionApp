@@ -22,6 +22,8 @@ pluginManagement {
 plugins {
     id("dev.flutter.flutter-plugin-loader") version "1.0.0"
     id("com.android.application") version "8.11.1" apply false
+    // Requis pour aligner le compilateur Kotlin des plugins Flutter (device_info_plus, etc.)
+    id("org.jetbrains.kotlin.android") version "2.2.20" apply false
 }
 
 include(":app")

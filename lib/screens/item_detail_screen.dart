@@ -39,6 +39,7 @@ import '../utils/boardgame_expansion_flow.dart';
 import '../services/bgg_service.dart';
 import '../utils/copy_friend_item.dart';
 import '../utils/friend_item_overlap.dart';
+import '../utils/boardgame_expansions.dart';
 import '../utils/holder_label_utils.dart';
 import '../utils/navigate_to_card_set.dart';
 import '../utils/wishlist_promote.dart';
@@ -220,7 +221,18 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
         .single();
     if (mounted) {
       setState(() {
-        _item = CollectionItem.fromJson(row);
+        final reloaded = CollectionItem.fromJson(row);
+        final localOwned = ownedExpansionBggIds(_item.metadata);
+        final remoteOwned = ownedExpansionBggIds(reloaded.metadata);
+        if (localOwned.length < remoteOwned.length) {
+          final meta = metadataWithOwnedExpansions(
+            reloaded.metadata,
+            localOwned,
+          );
+          _item = reloaded.copyWith(metadata: meta);
+        } else {
+          _item = reloaded;
+        }
         _syncGroupSelectionFromItem();
       });
     }

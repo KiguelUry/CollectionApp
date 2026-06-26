@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/rule_section.dart';
 import '../services/group_community_service.dart';
-import 'markdown_rules_editor.dart';
+import 'modular_rule_editor.dart';
 
 /// Règles collectives d'un jeu au sein d'un groupe (wiki + votes).
 class GroupRulesPanel extends StatefulWidget {
@@ -81,20 +81,25 @@ class _GroupRulesPanelState extends State<GroupRulesPanel> {
 
   Future<void> _addRule() async {
     final titleController = TextEditingController(text: 'Notre variante');
-    final bodyController = TextEditingController();
+    var sections = <RuleSection>[
+      RuleSection(
+        id: 'new_objective',
+        kind: RuleSectionKind.objective,
+      ),
+    ];
     final ok = await _openRuleDialog(
       title: 'Ajouter une variante',
       titleController: titleController,
-      bodyController: bodyController,
+      initialSections: sections,
+      onSectionsChanged: (s) => sections = s,
     );
     if (ok != true) return;
-    final body = bodyController.text.trim();
-    if (body.isEmpty) return;
+    if (RuleBodyCodec.isEmpty(sections)) return;
     final created = await _service.addRule(
       groupId: widget.groupId,
       itemId: widget.itemId,
       title: titleController.text.trim(),
-      body: body,
+      body: RuleBodyCodec.encode(sections),
     );
     if (created != null) await _setPreferred(created.id);
     _load();
@@ -102,19 +107,19 @@ class _GroupRulesPanelState extends State<GroupRulesPanel> {
 
   Future<void> _editRule(GroupRuleEntry rule) async {
     final titleController = TextEditingController(text: rule.title);
-    final bodyController = TextEditingController(text: rule.body);
+    var sections = RuleBodyCodec.decode(rule.body);
     final ok = await _openRuleDialog(
       title: 'Modifier la variante',
       titleController: titleController,
-      bodyController: bodyController,
+      initialSections: sections,
+      onSectionsChanged: (s) => sections = s,
     );
     if (ok != true) return;
-    final body = bodyController.text.trim();
-    if (body.isEmpty) return;
+    if (RuleBodyCodec.isEmpty(sections)) return;
     await _service.updateRule(
       ruleId: rule.id,
       title: titleController.text.trim(),
-      body: body,
+      body: RuleBodyCodec.encode(sections),
     );
     _load();
   }
@@ -150,8 +155,10 @@ class _GroupRulesPanelState extends State<GroupRulesPanel> {
   Future<bool?> _openRuleDialog({
     required String title,
     required TextEditingController titleController,
-    required TextEditingController bodyController,
+    required List<RuleSection> initialSections,
+    required ValueChanged<List<RuleSection>> onSectionsChanged,
   }) {
+    var sections = List<RuleSection>.from(initialSections);
     return showDialog<bool>(
       context: context,
       builder: (ctx) {
@@ -171,9 +178,12 @@ class _GroupRulesPanelState extends State<GroupRulesPanel> {
                     decoration: const InputDecoration(labelText: 'Titre'),
                   ),
                   const SizedBox(height: 12),
-                  MarkdownRulesEditor(
-                    controller: bodyController,
-                    hint: '## Objectif\n\n- Règle 1',
+                  ModularRuleEditor(
+                    initialSections: sections,
+                    onChanged: (s) {
+                      sections = s;
+                      onSectionsChanged(s);
+                    },
                   ),
                 ],
               ),
@@ -200,6 +210,7 @@ class _GroupRulesPanelState extends State<GroupRulesPanel> {
   }
 
   Widget _ruleCard(GroupRuleEntry rule, {required bool featured}) {
+    final sections = RuleBodyCodec.decode(rule.body);
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       color: featured ? widget.accent.withValues(alpha: 0.08) : null,
@@ -280,9 +291,9 @@ class _GroupRulesPanelState extends State<GroupRulesPanel> {
               ],
             ),
             const SizedBox(height: 6),
-            MarkdownBody(
-              data: rule.body,
-              styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)),
+            ModularRuleBodyView(
+              sections: sections,
+              accent: widget.accent,
             ),
           ],
         ),
@@ -318,7 +329,7 @@ class _GroupRulesPanelState extends State<GroupRulesPanel> {
           ],
         ),
         Text(
-          'Variantes pour « ${widget.itemTitle} » — une seule affichée par défaut, modifiable par chacun.',
+          'Variantes pour « ${widget.itemTitle} » — sections modulaires, une variante affichée par défaut.',
           style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
         ),
         const SizedBox(height: 10),

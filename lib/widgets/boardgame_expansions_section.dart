@@ -34,6 +34,9 @@ class _BoardgameExpansionsSectionState extends State<BoardgameExpansionsSection>
   bool _showAll = false;
   bool _syncing = false;
   final Set<String> _pendingUncheck = {};
+  int _refreshGeneration = 0;
+
+  bool get _hasPendingChanges => _syncing || _pendingUncheck.isNotEmpty;
 
   @override
   void initState() {
@@ -54,7 +57,7 @@ class _BoardgameExpansionsSectionState extends State<BoardgameExpansionsSection>
       _refreshOwnedFromDb();
       return;
     }
-    if (_syncing) return;
+    if (_hasPendingChanges) return;
     final fromMeta = ownedExpansionBggIds(widget.item.metadata).toSet()
       ..removeAll(_pendingUncheck);
     if (fromMeta.length != _owned.length ||
@@ -64,11 +67,12 @@ class _BoardgameExpansionsSectionState extends State<BoardgameExpansionsSection>
   }
 
   Future<void> _refreshOwnedFromDb() async {
-    if (_syncing) return;
+    if (_hasPendingChanges) return;
+    final gen = ++_refreshGeneration;
     final owned = await _expansionService.ownedExpansionBggIdsForBase(
       widget.item,
     );
-    if (!mounted || _syncing) return;
+    if (!mounted || _hasPendingChanges || gen != _refreshGeneration) return;
     final next = owned.where((id) => !_pendingUncheck.contains(id)).toSet();
     setState(() => _owned = next);
   }
@@ -141,14 +145,18 @@ class _BoardgameExpansionsSectionState extends State<BoardgameExpansionsSection>
       final synced = await _expansionService.ownedExpansionBggIdsForBase(
         widget.item,
       );
-      _pendingUncheck.remove(exp.bggId);
+      final confirmedRemoved = !owned && !synced.contains(exp.bggId);
+      if (confirmedRemoved || owned) {
+        _pendingUncheck.remove(exp.bggId);
+      }
+      final nextOwned = synced.where((id) => !_pendingUncheck.contains(id)).toSet();
       final meta = metadataWithOwnedExpansions(
         widget.item.metadata,
-        synced.toList(),
+        nextOwned.toList(),
       );
       if (!mounted) return;
       widget.onItemUpdated(widget.item.copyWith(metadata: meta));
-      setState(() => _owned = synced.toSet());
+      setState(() => _owned = nextOwned);
     } catch (e) {
       if (!mounted) return;
       _pendingUncheck.remove(exp.bggId);
