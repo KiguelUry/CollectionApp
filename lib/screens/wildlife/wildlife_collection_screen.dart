@@ -12,6 +12,8 @@ import '../../theme/wildlife_pokedex_theme.dart';
 import '../../widgets/collection_cover_image.dart';
 import '../../widgets/wildlife/inat_search_dialog.dart';
 import '../../widgets/wildlife/pokedex_stats_panel.dart';
+import '../../widgets/wildlife/wildlife_field_log_sheet.dart';
+import '../../widgets/wildlife/wildlife_friends_compare_sheet.dart';
 import 'wildlife_map_screen.dart';
 import 'wildlife_species_screen.dart';
 
@@ -28,6 +30,7 @@ class WildlifeCollectionScreen extends StatefulWidget {
 
 class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
   List<CollectionItem> _items = [];
+  List<CollectionItem> _wishlistItems = [];
   bool _loading = true;
   bool _entered = false;
 
@@ -62,14 +65,14 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
         .select()
         .or('added_by.eq.$userId,location_user_id.eq.$userId')
         .eq('category', CollectionCategory.wildlife.dbValue)
-        .eq('is_wishlist', false)
         .order('title');
-    final items = (rows as List)
+    final all = (rows as List)
         .map((r) => CollectionItem.fromJson(Map<String, dynamic>.from(r)))
         .toList();
     if (mounted) {
       setState(() {
-        _items = items;
+        _items = all.where((i) => !i.isWishlist).toList();
+        _wishlistItems = all.where((i) => i.isWishlist).toList();
         _loading = false;
       });
     }
@@ -240,10 +243,13 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
     }
   }
 
-  Future<void> _addSpecies() async {
+  Future<void> _addSpecies({String? initialQuery, String? dialogTitle}) async {
     final hit = await showDialog<WildlifeTaxonHit>(
       context: context,
-      builder: (_) => const WildlifeINatSearchDialog(),
+      builder: (_) => WildlifeINatSearchDialog(
+        initialQuery: initialQuery,
+        title: dialogTitle ?? 'Chercher sur iNaturalist',
+      ),
     );
     if (hit == null || !mounted) return;
 
@@ -267,6 +273,13 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
         );
       }
     }
+  }
+
+  Future<void> _scanWishlistItem(CollectionItem wish) async {
+    await _addSpecies(
+      initialQuery: wish.title,
+      dialogTitle: 'Observer · ${wish.title}',
+    );
   }
 
   String get _levelTitle => switch (_level) {
@@ -366,6 +379,20 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
             ),
           ),
           IconButton(
+            tooltip: 'Comparer avec mes amis',
+            icon: const Icon(Icons.people_outline, color: WildlifePokedexTheme.neon),
+            onPressed: () => showWildlifeFriendsCompareSheet(context),
+          ),
+          IconButton(
+            tooltip: 'Sortie terrain',
+            icon: const Icon(Icons.hiking, color: WildlifePokedexTheme.neon),
+            onPressed: () => showWildlifeFieldLogSheet(
+              context,
+              species: _items,
+              onLogged: _load,
+            ),
+          ),
+          IconButton(
             tooltip: 'Carte sauvage',
             icon: const Icon(Icons.map_outlined, color: WildlifePokedexTheme.warn),
             onPressed: () => Navigator.push(
@@ -419,29 +446,111 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
   }
 
   Widget _realmGrid() {
-    return GridView.builder(
-      padding: const EdgeInsets.all(16),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        childAspectRatio: 0.95,
-        crossAxisSpacing: 14,
-        mainAxisSpacing: 14,
+    return CustomScrollView(
+      slivers: [
+        if (_wishlistItems.isNotEmpty)
+          SliverToBoxAdapter(child: _buildWishlistStrip()),
+        SliverPadding(
+          padding: const EdgeInsets.all(16),
+          sliver: SliverGrid(
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              childAspectRatio: 0.95,
+              crossAxisSpacing: 14,
+              mainAxisSpacing: 14,
+            ),
+            delegate: SliverChildBuilderDelegate(
+              (context, i) {
+                final r = WildlifeRealm.values[i];
+                return _TaxonTile(
+                  label: r.label,
+                  subtitle: r.subtitle,
+                  count: _countRealm(r),
+                  countLabel: 'fiches',
+                  icon: r.icon,
+                  color: WildlifePokedexTheme.realmGlow(r),
+                  delayMs: i * 60,
+                  entered: _entered,
+                  onTap: () => setState(() => _realm = r),
+                );
+              },
+              childCount: WildlifeRealm.values.length,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildWishlistStrip() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 0, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'À OBSERVER',
+            style: WildlifePokedexTheme.titleStyle(context).copyWith(fontSize: 13),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 108,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: _wishlistItems.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              itemBuilder: (context, i) {
+                final item = _wishlistItems[i];
+                return GestureDetector(
+                  onTap: () => _scanWishlistItem(item),
+                  child: Container(
+                    width: 120,
+                    decoration: WildlifePokedexTheme.tileDecoration(
+                      glow: WildlifePokedexTheme.warn,
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(
+                          child: item.imageUrl != null
+                              ? Image.network(
+                                  item.imageUrl!,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) =>
+                                      const Icon(Icons.pets),
+                                )
+                              : ColoredBox(
+                                  color: WildlifePokedexTheme.panel,
+                                  child: Icon(
+                                    Icons.flag_outlined,
+                                    color: WildlifePokedexTheme.warn
+                                        .withValues(alpha: 0.7),
+                                  ),
+                                ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.all(6),
+                          child: Text(
+                            item.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: WildlifePokedexTheme.text,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
       ),
-      itemCount: WildlifeRealm.values.length,
-      itemBuilder: (context, i) {
-        final r = WildlifeRealm.values[i];
-        return _TaxonTile(
-          label: r.label,
-          subtitle: r.subtitle,
-          count: _countRealm(r),
-          countLabel: 'fiches',
-          icon: r.icon,
-          color: r.color,
-          delayMs: i * 60,
-          entered: _entered,
-          onTap: () => setState(() => _realm = r),
-        );
-      },
     );
   }
 
@@ -563,70 +672,123 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
     );
   }
 
+  bool _isCatalogObserved(WildlifeCatalogEntry entry) {
+    final key = entry.label.toLowerCase();
+    return _items.any(
+      (i) =>
+          i.title.toLowerCase() == key && (i.gamesPlayed ?? 0) > 0,
+    );
+  }
+
+  Color _itemGlow(CollectionItem item) {
+    final realm = WildlifeRealm.fromDb(
+      item.metadata?['wildlife_realm'] as String?,
+    );
+    final kingdom = WildlifeKingdom.fromDb(
+      item.metadata?['wildlife_kingdom'] as String?,
+    );
+    if (kingdom != null && realm == WildlifeRealm.animalia) {
+      return WildlifePokedexTheme.kingdomGlow(kingdom);
+    }
+    return WildlifePokedexTheme.realmGlow(realm);
+  }
+
   Widget _catalogCard(WildlifeCatalogEntry entry) {
+    final observed = _isCatalogObserved(entry);
+    final glow = observed ? WildlifePokedexTheme.neon : WildlifePokedexTheme.panel;
     return GestureDetector(
-      onTap: () => showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: WildlifePokedexTheme.panel,
-          title: Text(entry.label,
-              style: const TextStyle(color: WildlifePokedexTheme.neon)),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (entry.imageUrl != null)
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.network(
-                      entry.imageUrl!,
-                      height: 120,
-                      width: 200,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => const SizedBox(height: 0),
+      onTap: () {
+        if (!observed) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '${entry.label} — observe cette espèce pour débloquer la fiche !',
+              ),
+              backgroundColor: WildlifePokedexTheme.panel,
+            ),
+          );
+          return;
+        }
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: WildlifePokedexTheme.panel,
+            title: Text(entry.label,
+                style: const TextStyle(color: WildlifePokedexTheme.neon)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (entry.imageUrl != null)
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.network(
+                        entry.imageUrl!,
+                        height: 120,
+                        width: 200,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const SizedBox(height: 0),
+                      ),
+                    ),
+                  const SizedBox(height: 12),
+                  Text(
+                    entry.description,
+                    style: TextStyle(
+                      color: WildlifePokedexTheme.text.withValues(alpha: 0.9),
                     ),
                   ),
-                const SizedBox(height: 12),
-                Text(
-                  entry.description,
-                  style: TextStyle(
-                    color: WildlifePokedexTheme.text.withValues(alpha: 0.9),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Fermer'),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Fermer'),
-            ),
-          ],
-        ),
-      ),
+        );
+      },
       child: Container(
         width: 140,
-        decoration: WildlifePokedexTheme.tileDecoration(
-          glow: WildlifePokedexTheme.accent,
-        ),
+        decoration: WildlifePokedexTheme.tileDecoration(glow: glow),
         clipBehavior: Clip.antiAlias,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Expanded(
-              child: entry.imageUrl != null
-                  ? Image.network(
-                      entry.imageUrl!,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => const Icon(Icons.pets, size: 40),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (entry.imageUrl != null)
+                    ColorFiltered(
+                      colorFilter: observed
+                          ? const ColorFilter.mode(
+                              Colors.transparent, BlendMode.dst)
+                          : const ColorFilter.matrix([
+                              0, 0, 0, 0, 0,
+                              0, 0, 0, 0, 0,
+                              0, 0, 0, 0, 0,
+                              0, 0, 0, 1, 0,
+                            ]),
+                      child: Image.network(
+                        entry.imageUrl!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) =>
+                            const Icon(Icons.pets, size: 40),
+                      ),
                     )
-                  : ColoredBox(
+                  else
+                    ColoredBox(
                       color: WildlifePokedexTheme.panel,
                       child: Icon(
                         Icons.menu_book,
                         color: WildlifePokedexTheme.text.withValues(alpha: 0.4),
                       ),
                     ),
+                  if (!observed) WildlifePokedexTheme.silhouetteOverlay(),
+                ],
+              ),
             ),
             Padding(
               padding: const EdgeInsets.all(8),
@@ -649,6 +811,7 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
 
   Widget _speciesCard(CollectionItem item, int index) {
     final unlocked = (item.gamesPlayed ?? 0) > 0;
+    final glow = unlocked ? _itemGlow(item) : WildlifePokedexTheme.panel;
     return GestureDetector(
       onTap: () async {
         await Navigator.push(
@@ -658,9 +821,7 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
         _load();
       },
       child: Container(
-        decoration: WildlifePokedexTheme.tileDecoration(
-          glow: unlocked ? WildlifePokedexTheme.neon : WildlifePokedexTheme.panel,
-        ),
+        decoration: WildlifePokedexTheme.tileDecoration(glow: glow),
         clipBehavior: Clip.antiAlias,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -675,9 +836,9 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
                           ? const ColorFilter.mode(
                               Colors.transparent, BlendMode.dst)
                           : const ColorFilter.matrix([
-                              0.2126, 0.7152, 0.0722, 0, 0,
-                              0.2126, 0.7152, 0.0722, 0, 0,
-                              0.2126, 0.7152, 0.0722, 0, 0,
+                              0, 0, 0, 0, 0,
+                              0, 0, 0, 0, 0,
+                              0, 0, 0, 0, 0,
                               0, 0, 0, 1, 0,
                             ]),
                       child: CollectionCoverImage(
@@ -687,17 +848,10 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
                     )
                   else
                     ColoredBox(
-                      color: WildlifePokedexTheme.neonDim.withValues(alpha: 0.3),
-                      child: const Icon(Icons.pets, size: 48,
-                          color: WildlifePokedexTheme.neon),
+                      color: glow.withValues(alpha: 0.25),
+                      child: Icon(Icons.pets, size: 48, color: glow),
                     ),
-                  if (!unlocked)
-                    Container(
-                      color: Colors.black38,
-                      alignment: Alignment.center,
-                      child: const Icon(Icons.lock_outline,
-                          color: Colors.white70, size: 32),
-                    ),
+                  if (!unlocked) WildlifePokedexTheme.silhouetteOverlay(),
                 ],
               ),
             ),

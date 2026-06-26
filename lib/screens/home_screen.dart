@@ -1104,13 +1104,14 @@ class _HomeScreenState extends State<HomeScreen>
     final title = widget.screenTitle ?? widget.category.label;
 
     return Scaffold(
-        floatingActionButton: FloatingActionButton.extended(
+        floatingActionButton: FloatingActionButton(
           onPressed: _onAddPressed,
           backgroundColor: _accentColor,
           foregroundColor: _onAccent,
-          icon: const Icon(Icons.add_rounded),
-          label: const Text('Ajouter'),
+          tooltip: 'Ajouter',
+          child: const Icon(Icons.add_rounded),
         ),
+        floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
         body: Column(
           children: [
             CategoryCollectionHeader(
@@ -1464,7 +1465,7 @@ class _HomeScreenState extends State<HomeScreen>
     return Builder(
       builder: (context) {
         final grid = GridView.builder(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: CollectionGridLayout.crossAxisCount(context),
             crossAxisSpacing: 12,

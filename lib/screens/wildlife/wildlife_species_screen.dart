@@ -139,12 +139,56 @@ class _WildlifeSpeciesScreenState extends State<WildlifeSpeciesScreen> {
       photoUrl: photoUrl,
     );
 
+    final wasFirstCapture = _observations.isEmpty;
     final count = _observations.length + 1;
     await Supabase.instance.client.from('collection_items').update({
       'games_played': count,
     }).eq('id', widget.item.id);
 
-    _load();
+    await _load();
+
+    if (mounted && wasFirstCapture) {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: WildlifePokedexTheme.panel,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(color: WildlifePokedexTheme.neon, width: 3),
+          ),
+          title: Row(
+            children: [
+              Icon(Icons.check_circle, color: WildlifePokedexTheme.neon),
+              const SizedBox(width: 8),
+              const Text(
+                'CAPTURE RÉUSSIE !',
+                style: TextStyle(
+                  color: WildlifePokedexTheme.neon,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1,
+                ),
+              ),
+            ],
+          ),
+          content: Text(
+            '${widget.item.title} rejoint ton Pokédex.\n'
+            '${photoUrl != null ? 'Photo HD enregistrée.' : 'Ajoute une photo lors de ta prochaine sortie !'}',
+            style: const TextStyle(color: WildlifePokedexTheme.text),
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              style: FilledButton.styleFrom(
+                backgroundColor: WildlifePokedexTheme.neon,
+                foregroundColor: Colors.black,
+              ),
+              child: const Text('Génial !'),
+            ),
+          ],
+        ),
+      );
+    }
   }
 
   @override

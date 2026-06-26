@@ -50,11 +50,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const _SectionHeader('Apparence'),
-          SwitchListTile(
-            title: const Text('Mode sombre'),
-            subtitle: const Text('Interface foncée'),
-            value: _settings.darkMode,
-            onChanged: (v) => _settings.setDarkMode(v),
+          RadioListTile<AppThemePreference>(
+            title: const Text('Automatique'),
+            subtitle: const Text('Suit le thème du téléphone ou du navigateur'),
+            value: AppThemePreference.system,
+            groupValue: _settings.themePreference,
+            onChanged: (v) {
+              if (v != null) _settings.setThemePreference(v);
+            },
+          ),
+          RadioListTile<AppThemePreference>(
+            title: const Text('Clair'),
+            value: AppThemePreference.light,
+            groupValue: _settings.themePreference,
+            onChanged: (v) {
+              if (v != null) _settings.setThemePreference(v);
+            },
+          ),
+          RadioListTile<AppThemePreference>(
+            title: const Text('Sombre'),
+            value: AppThemePreference.dark,
+            groupValue: _settings.themePreference,
+            onChanged: (v) {
+              if (v != null) _settings.setThemePreference(v);
+            },
           ),
           const _SectionHeader('Notifications'),
           SwitchListTile(

@@ -24,6 +24,9 @@ import '../widgets/star_rating_bar.dart';
 import '../widgets/assign_book_series_sheet.dart';
 import '../widgets/item_tags_editor.dart';
 import '../widgets/boardgame_expansions_section.dart';
+import '../models/boardgame_play_session.dart';
+import '../widgets/boardgame_play_history_panel.dart';
+import '../widgets/collapsible_section.dart';
 import '../widgets/discogs_market_value_card.dart';
 import '../widgets/friend_ratings_panel.dart';
 import '../widgets/group_rules_panel.dart';
@@ -121,6 +124,79 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
   Future<void> _loadGroups() async {
     _groups = await GroupService().fetchMyGroups();
     if (mounted) setState(() {});
+  }
+
+  Future<Set<String>?> _pickGroups({Set<String>? initial}) async {
+    if (_groups.isEmpty) return null;
+    final selected = Set<String>.from(initial ?? _selectedGroupIds);
+
+    return showModalBottomSheet<Set<String>>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      child: Text(
+                        'Choisir un ou plusieurs groupes',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
+                    ),
+                    Flexible(
+                      child: ListView(
+                        shrinkWrap: true,
+                        children: _groups.map((g) {
+                          return CheckboxListTile(
+                            value: selected.contains(g.id),
+                            onChanged: (v) {
+                              setModalState(() {
+                                if (v == true) {
+                                  selected.add(g.id);
+                                } else {
+                                  selected.remove(g.id);
+                                }
+                              });
+                            },
+                            title: GroupBadge.dropdownLabel(
+                              name: g.name,
+                              avatarUrl: g.avatarUrl,
+                              accentColor: g.accentColor,
+                              iconKey: g.iconKey,
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                      child: FilledButton(
+                        onPressed: selected.isEmpty
+                            ? null
+                            : () => Navigator.pop(ctx, Set<String>.from(selected)),
+                        child: const Text('Valider'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   Color _groupAccent() {
@@ -617,23 +693,87 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                           Chip(label: Text(_item.cardSubcategory!.label)),
                       ],
                     ),
-                    if (_item.createdAtLabel != null) ...[
+                    if (_item.createdAtLabel != null || !isWishlist) ...[
                       const SizedBox(height: 4),
-                      Text(
-                        _item.createdAtLabel!,
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.grey.shade600,
-                        ),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          if (_item.createdAtLabel != null)
+                            Expanded(
+                              child: Text(
+                                _item.createdAtLabel!,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.grey.shade600,
+                                ),
+                              ),
+                            ),
+                          if (!isWishlist) ...[
+                            Text(
+                              'Possédé : $ownedQty',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              onPressed: !ro && _item.quantity > 1
+                                  ? () {
+                                      setState(() {
+                                        _item = _item.copyWith(
+                                          quantity: _item.quantity - 1,
+                                        );
+                                      });
+                                      _saveNow();
+                                    }
+                                  : null,
+                              icon: const Icon(Icons.remove, size: 20),
+                            ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              onPressed: !ro
+                                  ? () {
+                                      setState(() {
+                                        _item = _item.copyWith(
+                                          quantity: _item.quantity + 1,
+                                        );
+                                      });
+                                      _saveNow();
+                                    }
+                                  : null,
+                              icon: const Icon(Icons.add, size: 20),
+                            ),
+                          ],
+                        ],
                       ),
+                      if (isWishlist)
+                        Text(
+                          'Passe à 1 pour l\'ajouter à ta collection',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade600,
+                          ),
+                        )
+                      else if (_groupOwnershipSubtitle().isNotEmpty)
+                        Text(
+                          _groupOwnershipSubtitle(),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade600,
+                          ),
+                        ),
                     ],
                     if (!isBoardgame && !isWishlist && !isCard) ...[
                       const SizedBox(height: 12),
-                      _buildSectionTitle('Tags'),
-                      ItemTagsEditor(
-                        itemId: _item.id,
-                        initialTags: _item.tags,
-                        readOnly: ro,
+                      CollapsibleSection(
+                        title: 'Tags',
+                        accentColor: _item.category.color,
+                        child: ItemTagsEditor(
+                          itemId: _item.id,
+                          initialTags: _item.tags,
+                          readOnly: ro,
+                        ),
                       ),
                     ],
                     if (canOpenSet) ...[
@@ -663,69 +803,21 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         onItemUpdated: (updated) =>
                             setState(() => _item = updated),
                       ),
-                    const SizedBox(height: 16),
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.inventory_2),
-                      title: Text(
-                        isWishlist
-                            ? 'Possédé : $ownedQty (wishlist)'
-                            : 'Possédé : $ownedQty',
-                      ),
-                      subtitle: isWishlist
-                          ? const Text(
-                              'Passe à 1 pour l\'ajouter à ta collection',
-                            )
-                          : Text(_groupOwnershipSubtitle()),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            onPressed: !ro &&
-                                    !isWishlist &&
-                                    _item.quantity > 1
-                                ? () {
-                                    setState(() {
-                                      _item = _item.copyWith(
-                                        quantity: _item.quantity - 1,
-                                      );
-                                    });
-                                    _saveNow();
-                                  }
-                                : null,
-                            icon: const Icon(Icons.remove),
-                          ),
-                          IconButton(
-                            onPressed: !ro
-                                ? () {
-                                    setState(() {
-                                      if (isWishlist) {
-                                        _item = _item.copyWith(
-                                          isWishlist: false,
-                                          quantity: 1,
-                                        );
-                                      } else {
-                                        _item = _item.copyWith(
-                                          quantity: _item.quantity + 1,
-                                        );
-                                      }
-                                    });
-                                    _saveNow();
-                                  }
-                                : null,
-                            icon: const Icon(Icons.add),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (!isWishlist)
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Partagé avec un groupe'),
-                        value: _sharesWithGroup,
-                        onChanged: ro
-                            ? null
-                            : (v) async {
+                    if (!isWishlist) ...[
+                      const SizedBox(height: 8),
+                      CollapsibleSection(
+                        title: 'Partage & groupes',
+                        accentColor: _groupAccent(),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            SwitchListTile(
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text('Partagé avec un groupe'),
+                              value: _sharesWithGroup,
+                              onChanged: ro
+                                  ? null
+                                  : (v) async {
                                 if (v && _groups.isEmpty) {
                                   await _loadGroups();
                                 }
@@ -740,27 +832,63 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                                   );
                                   return;
                                 }
-                                setState(() {
-                                  if (!v) {
+                                if (!v) {
+                                  setState(() {
                                     _selectedGroupIds = {};
                                     _item = _item.copyWith(clearGroup: true);
-                                  } else {
-                                    final g = _groups.first;
-                                    _selectedGroupIds = {g.id};
-                                    _item = _item.copyWith(
-                                      groupId: g.id,
-                                      groupName: g.name,
-                                      clearLocation: true,
-                                      metadata: _metadataWithGroups(
-                                        _selectedGroupIds.toList(),
-                                      ),
-                                    );
-                                  }
+                                  });
+                                  _saveNow();
+                                  return;
+                                }
+                                final picked = await _pickGroups(initial: {});
+                                if (!mounted || picked == null || picked.isEmpty) {
+                                  return;
+                                }
+                                final first = picked.first;
+                                final g = _groups.firstWhere((x) => x.id == first);
+                                setState(() {
+                                  _selectedGroupIds = picked;
+                                  _item = _item.copyWith(
+                                    groupId: first,
+                                    groupName: g.name,
+                                    clearLocation: true,
+                                    metadata: _metadataWithGroups(picked.toList()),
+                                  );
                                 });
                                 _saveNow();
                               },
+                            ),
+                            if (_sharesWithGroup && _groups.isNotEmpty) ...[
+                              const SizedBox(height: 8),
+                              OutlinedButton.icon(
+                        onPressed: ro
+                            ? null
+                            : () async {
+                                final picked = await _pickGroups();
+                                if (!mounted ||
+                                    picked == null ||
+                                    picked.isEmpty) {
+                                  return;
+                                }
+                                final first = picked.first;
+                                final g =
+                                    _groups.firstWhere((x) => x.id == first);
+                                setState(() {
+                                  _selectedGroupIds = picked;
+                                  _item = _item.copyWith(
+                                    groupId: first,
+                                    groupName: g.name,
+                                    metadata: _metadataWithGroups(
+                                      picked.toList(),
+                                    ),
+                                    clearLocation: true,
+                                  );
+                                });
+                                _saveNow();
+                              },
+                        icon: const Icon(Icons.group_outlined, size: 18),
+                        label: const Text('Modifier les groupes'),
                       ),
-                    if (!isWishlist && _sharesWithGroup && _groups.isNotEmpty) ...[
                       const SizedBox(height: 8),
                       Text(
                         'Groupes',
@@ -841,6 +969,10 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                                   },
                           );
                         }).toList(),
+                      ),
+                            ],
+                          ],
+                        ),
                       ),
                     ],
                     const SizedBox(height: 8),
@@ -944,34 +1076,44 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       ),
                     ],
                     const Divider(height: 32),
-                    _buildSectionTitle('Ma note & avis'),
-                    StarRatingBar(
-                      rating: _item.rating ?? 0,
-                      onChanged: ro
-                          ? (_) {}
-                          : (value) {
-                              setState(() {
-                                _item = _item.copyWith(
-                                  rating: value <= 0 ? null : value,
-                                  clearRating: value <= 0,
-                                );
-                              });
-                              _saveNow();
-                            },
-                    ),
-                    TextField(
-                      controller: _reviewController,
-                      readOnly: ro,
-                      maxLines: 4,
-                      decoration: const InputDecoration(
-                        labelText: 'Mon avis',
-                        border: OutlineInputBorder(),
+                    CollapsibleSection(
+                      title: 'Ma note & avis',
+                      accentColor: _item.category.color,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          StarRatingBar(
+                            rating: _item.rating ?? 0,
+                            onChanged: ro
+                                ? (_) {}
+                                : (value) {
+                                    setState(() {
+                                      _item = _item.copyWith(
+                                        rating: value <= 0 ? null : value,
+                                        clearRating: value <= 0,
+                                      );
+                                    });
+                                    _saveNow();
+                                  },
+                          ),
+                          TextField(
+                            controller: _reviewController,
+                            readOnly: ro,
+                            maxLines: 2,
+                            minLines: 1,
+                            decoration: const InputDecoration(
+                              labelText: 'Mon avis',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                          ),
+                          if (!ro) ...[
+                            const SizedBox(height: 16),
+                            FriendRatingsPanel(item: _item),
+                          ],
+                        ],
                       ),
                     ),
-                    if (!ro) ...[
-                      const SizedBox(height: 16),
-                      FriendRatingsPanel(item: _item),
-                    ],
                     if (_item.category == CollectionCategory.media &&
                         !isWishlist) ...[
                       const SizedBox(height: 16),
@@ -986,6 +1128,49 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         !ro) ...[
                       const Divider(height: 32),
                       RestaurantVisitsPanel(item: _item),
+                    ],
+                    if (isBoardgame && !isWishlist) ...[
+                      const Divider(height: 32),
+                      CollapsibleSection(
+                        title: 'Jeu de société',
+                        accentColor: _item.category.color,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            BoardgamePlayHistoryPanel(
+                              item: _item,
+                              readOnly: ro,
+                              onMetadataChanged: (meta) {
+                                final count = parseBoardgamePlays(meta).length;
+                                setState(() {
+                                  _item = _item.copyWith(metadata: meta);
+                                  _gamesPlayedController.text =
+                                      count > 0 ? count.toString() : '';
+                                });
+                                _saveNow();
+                              },
+                            ),
+                            const SizedBox(height: 12),
+                            if (_item.groupId != null)
+                              GroupRulesPanel(
+                                groupId: _item.groupId!,
+                                itemId: _item.id,
+                                itemTitle: _item.title,
+                                accent: _groupAccent(),
+                              )
+                            else
+                              TextField(
+                                controller: _personalRulesController,
+                                readOnly: ro,
+                                maxLines: 5,
+                                decoration: const InputDecoration(
+                                  labelText: 'Règles personnalisées',
+                                  border: OutlineInputBorder(),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
                     ],
                     if (!ro && !_item.isGroupOwned) ...[
                     const Divider(height: 32),
@@ -1118,37 +1303,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                             },
                     ),
                     ],
-                    if (isBoardgame && !isWishlist) ...[
-                      const Divider(height: 32),
-                      _buildSectionTitle('Jeu de société'),
-                      TextField(
-                        controller: _gamesPlayedController,
-                        readOnly: ro,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Nombre de parties jouées',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      if (_item.groupId != null)
-                        GroupRulesPanel(
-                          groupId: _item.groupId!,
-                          itemId: _item.id,
-                          itemTitle: _item.title,
-                          accent: _groupAccent(),
-                        )
-                      else
-                        TextField(
-                          controller: _personalRulesController,
-                          readOnly: ro,
-                          maxLines: 5,
-                          decoration: const InputDecoration(
-                            labelText: 'Règles personnalisées',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                    ] else ...[
+                    if (!isBoardgame || isWishlist) ...[
                       const Divider(height: 32),
                       _buildSectionTitle('Notes'),
                       TextField(
@@ -1277,7 +1432,11 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       padding: const EdgeInsets.only(bottom: 12),
       child: Text(
         title,
-        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        style: TextStyle(
+          fontSize: 20,
+          fontWeight: FontWeight.bold,
+          color: _item.category.color,
+        ),
       ),
     );
   }

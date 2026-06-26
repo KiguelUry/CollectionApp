@@ -4,7 +4,14 @@ import '../../services/inaturalist_service.dart';
 
 /// Dialogue iNaturalist — défilement adapté au clavier virtuel.
 class WildlifeINatSearchDialog extends StatefulWidget {
-  const WildlifeINatSearchDialog({super.key});
+  final String? initialQuery;
+  final String title;
+
+  const WildlifeINatSearchDialog({
+    super.key,
+    this.initialQuery,
+    this.title = 'Chercher sur iNaturalist',
+  });
 
   @override
   State<WildlifeINatSearchDialog> createState() =>
@@ -12,9 +19,18 @@ class WildlifeINatSearchDialog extends StatefulWidget {
 }
 
 class _WildlifeINatSearchDialogState extends State<WildlifeINatSearchDialog> {
-  final _controller = TextEditingController();
+  late final TextEditingController _controller;
   List<WildlifeTaxonHit> _hits = [];
   bool _searching = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialQuery ?? '');
+    if ((widget.initialQuery ?? '').trim().length >= 2) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _search());
+    }
+  }
 
   @override
   void dispose() {
@@ -39,7 +55,7 @@ class _WildlifeINatSearchDialogState extends State<WildlifeINatSearchDialog> {
     final maxH = MediaQuery.sizeOf(context).height - viewInsets.vertical - 140;
 
     return AlertDialog(
-      title: const Text('Chercher sur iNaturalist'),
+      title: Text(widget.title),
       contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
       content: SingleChildScrollView(
         padding: EdgeInsets.only(bottom: viewInsets.bottom),

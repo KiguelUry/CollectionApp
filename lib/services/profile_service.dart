@@ -125,6 +125,25 @@ class ProfileService {
         e.message.contains('hide_collection');
   }
 
+  Future<bool> isUsernameTaken(
+    String username, {
+    String? excludeUserId,
+  }) async {
+    final trimmed = username.trim();
+    if (trimmed.isEmpty) return true;
+
+    final rows = await _client
+        .from('profiles')
+        .select('id')
+        .ilike('username', trimmed);
+
+    for (final row in rows as List) {
+      final id = row['id'] as String?;
+      if (id != null && id != excludeUserId) return true;
+    }
+    return false;
+  }
+
   Future<UserProfile> updateProfile(UserProfile profile) async {
     final id = _userId;
     if (id == null || id != profile.id) {

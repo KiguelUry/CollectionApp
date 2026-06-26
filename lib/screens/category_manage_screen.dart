@@ -4,6 +4,7 @@ import '../models/collection_category.dart';
 import '../models/user_collection_type.dart';
 import '../services/category_hub_preferences.dart';
 import '../services/user_collection_type_service.dart';
+import '../utils/category_hub_order.dart';
 import '../widgets/app_app_bar.dart';
 import '../widgets/create_custom_collection_dialog.dart';
 
@@ -17,7 +18,7 @@ class CategoryManageScreen extends StatefulWidget {
 class _CategoryManageScreenState extends State<CategoryManageScreen> {
   final _prefs = CategoryHubPreferences.instance;
   final _customService = UserCollectionTypeService();
-  List<UserCollectionType> _customTypes = [];
+  List<HubTileEntry> _tiles = [];
   bool _loading = true;
 
   @override
@@ -29,8 +30,14 @@ class _CategoryManageScreenState extends State<CategoryManageScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     await _prefs.load();
-    _customTypes = await _customService.fetchMine();
-    if (mounted) setState(() => _loading = false);
+    final customTypes = await _customService.fetchMine();
+    final tiles = await CategoryHubOrder.loadOrderedTiles(customTypes);
+    if (mounted) {
+      setState(() {
+        _tiles = tiles;
+        _loading = false;
+      });
+    }
   }
 
   Future<void> _toggleCategory(CollectionCategory cat, bool visible) async {
@@ -82,64 +89,128 @@ class _CategoryManageScreenState extends State<CategoryManageScreen> {
     }
   }
 
+  void _onReorder(int oldIndex, int newIndex) {
+    setState(() {
+      if (newIndex > oldIndex) newIndex -= 1;
+      final item = _tiles.removeAt(oldIndex);
+      _tiles.insert(newIndex, item);
+    });
+    CategoryHubOrder.saveTileOrder(_tiles);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const AppAppBar(title: 'Gestion des collections'),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _addCustom,
-        icon: const Icon(Icons.add),
-        label: const Text('Nouvelle collection'),
+      appBar: AppAppBar(
+        title: 'Gestion des collections',
+        actions: [
+          IconButton(
+            onPressed: _addCustom,
+            tooltip: 'Nouvelle collection',
+            icon: const Icon(Icons.add),
+          ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(16),
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
-                  'Catégories intégrées',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
-                const SizedBox(height: 8),
-                ...CollectionCategory.menuValues.map((cat) {
-                  return SwitchListTile(
-                    secondary: Icon(cat.icon, color: cat.color),
-                    title: Text(cat.label),
-                    subtitle: Text(cat.description),
-                    value: _prefs.isVisible(cat),
-                    onChanged: (v) => _toggleCategory(cat, v),
-                  );
-                }),
-                const Divider(height: 32),
-                Text(
-                  'Collections personnalisées',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
-                if (_customTypes.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    child: Text(
-                      'Aucune collection perso.',
-                      style: TextStyle(color: Colors.grey.shade600),
-                    ),
-                  )
-                else
-                  ..._customTypes.map(
-                    (t) => ListTile(
-                      leading: Icon(t.icon, color: t.color),
-                      title: Text(t.name),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete_outline, color: Colors.red),
-                        onPressed: () => _deleteCustom(t),
-                      ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: Text(
+                    'Glisse pour réordonner le menu principal. '
+                    'Les catégories masquées restent ici mais disparaissent du hub.',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
+                ),
+                Expanded(
+                  child: ReorderableListView.builder(
+                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 24),
+                    itemCount: _tiles.length,
+                    onReorder: _onReorder,
+                    buildDefaultDragHandles: false,
+                    itemBuilder: (context, index) {
+                      final entry = _tiles[index];
+                      final key = ValueKey(entry.storageKey);
+                      if (entry.category != null) {
+                        final cat = entry.category!;
+                        return _ManageTile(
+                          key: key,
+                          index: index,
+                          leading: Icon(cat.icon, color: cat.color),
+                          title: cat.label,
+                          subtitle: cat.description,
+                          trailing: Switch(
+                            value: _prefs.isVisible(cat),
+                            onChanged: (v) => _toggleCategory(cat, v),
+                          ),
+                        );
+                      }
+                      final type = entry.customType!;
+                      return _ManageTile(
+                        key: key,
+                        index: index,
+                        leading: Icon(type.icon, color: type.color),
+                        title: type.name,
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete_outline, color: Colors.red),
+                          onPressed: () => _deleteCustom(type),
+                        ),
+                      );
+                    },
+                  ),
+                ),
               ],
             ),
+    );
+  }
+}
+
+class _ManageTile extends StatelessWidget {
+  final int index;
+  final Widget leading;
+  final String title;
+  final String? subtitle;
+  final Widget trailing;
+
+  const _ManageTile({
+    super.key,
+    required this.index,
+    required this.leading,
+    required this.title,
+    this.subtitle,
+    required this.trailing,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+      child: ListTile(
+        leading: leading,
+        title: Text(title),
+        subtitle: subtitle != null ? Text(subtitle!) : null,
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            trailing,
+            ReorderableDragStartListener(
+              index: index,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 4),
+                child: Icon(
+                  Icons.drag_handle,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

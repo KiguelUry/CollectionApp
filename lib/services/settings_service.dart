@@ -4,12 +4,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'profile_cache_service.dart';
 import 'profile_service.dart';
 
+enum AppThemePreference { system, light, dark }
+
 /// Préférences locales (thème, notifications, confidentialité affichée).
 class SettingsService extends ChangeNotifier {
   SettingsService._();
   static final SettingsService instance = SettingsService._();
 
-  static const _keyDarkMode = 'settings_dark_mode';
+  static const _keyDarkModeLegacy = 'settings_dark_mode';
+  static const _keyThemePreference = 'settings_theme_preference_v2';
   static const _keyNotifications = 'settings_notifications_enabled';
   static const _keyHideFromNonFriends = 'settings_hide_from_non_friends';
   static const _keyHideFromFriends = 'settings_hide_from_friends';
@@ -18,7 +21,7 @@ class SettingsService extends ChangeNotifier {
   SharedPreferences? _prefs;
   bool _loaded = false;
 
-  bool darkMode = false;
+  AppThemePreference themePreference = AppThemePreference.system;
   bool notificationsEnabled = true;
   /// Masquer ma collection aux non-amis (défaut : oui).
   bool hideCollectionFromNonFriends = true;
@@ -30,7 +33,19 @@ class SettingsService extends ChangeNotifier {
   Future<void> load() async {
     if (_loaded) return;
     _prefs = await SharedPreferences.getInstance();
-    darkMode = _prefs!.getBool(_keyDarkMode) ?? false;
+    final stored = _prefs!.getString(_keyThemePreference);
+    if (stored != null) {
+      themePreference = AppThemePreference.values.firstWhere(
+        (p) => p.name == stored,
+        orElse: () => AppThemePreference.system,
+      );
+    } else if (_prefs!.containsKey(_keyDarkModeLegacy)) {
+      final legacyDark = _prefs!.getBool(_keyDarkModeLegacy) ?? false;
+      themePreference =
+          legacyDark ? AppThemePreference.dark : AppThemePreference.light;
+    } else {
+      themePreference = AppThemePreference.system;
+    }
     notificationsEnabled = _prefs!.getBool(_keyNotifications) ?? true;
     hideCollectionFromNonFriends =
         _prefs!.getBool(_keyHideFromNonFriends) ?? true;
@@ -62,11 +77,19 @@ class SettingsService extends ChangeNotifier {
     }
   }
 
-  Future<void> setDarkMode(bool value) async {
-    darkMode = value;
-    await _prefs?.setBool(_keyDarkMode, value);
+  Future<void> setThemePreference(AppThemePreference value) async {
+    themePreference = value;
+    await _prefs?.setString(_keyThemePreference, value.name);
     notifyListeners();
   }
+
+  Future<void> setDarkMode(bool value) async {
+    await setThemePreference(
+      value ? AppThemePreference.dark : AppThemePreference.light,
+    );
+  }
+
+  bool get darkMode => themePreference == AppThemePreference.dark;
 
   Future<void> setNotificationsEnabled(bool value) async {
     notificationsEnabled = value;
@@ -110,6 +133,9 @@ class SettingsService extends ChangeNotifier {
     }
   }
 
-  ThemeMode get themeMode =>
-      darkMode ? ThemeMode.dark : ThemeMode.light;
+  ThemeMode get themeMode => switch (themePreference) {
+        AppThemePreference.dark => ThemeMode.dark,
+        AppThemePreference.light => ThemeMode.light,
+        AppThemePreference.system => ThemeMode.system,
+      };
 }

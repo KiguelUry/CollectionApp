@@ -58,12 +58,21 @@ class _BggCatalogGridScreenState extends State<BggCatalogGridScreen> {
   String? _error;
   int _refreshSeed = 0;
 
+  bool get _searchAwaitingQuery =>
+      widget.source == BggCatalogSource.search &&
+      _searchController.text.trim().isEmpty &&
+      (widget.initialQuery == null || widget.initialQuery!.trim().isEmpty);
+
   @override
   void initState() {
     super.initState();
     _searchController = TextEditingController(text: widget.initialQuery ?? '');
     _scrollController.addListener(_onScroll);
-    _load();
+    if (_searchAwaitingQuery) {
+      _loading = false;
+    } else {
+      _load();
+    }
   }
 
   @override
@@ -270,7 +279,7 @@ class _BggCatalogGridScreenState extends State<BggCatalogGridScreen> {
                 textInputAction: TextInputAction.search,
                 onSubmitted: (_) => _runSearch(),
                 decoration: InputDecoration(
-                  hintText: 'Rechercher un jeu sur BGG…',
+                  hintText: 'Rechercher un jeu',
                   isDense: true,
                   prefixIcon: const Icon(Icons.search, size: 20),
                   suffixIcon: IconButton(
@@ -333,12 +342,16 @@ class _BggCatalogGridScreenState extends State<BggCatalogGridScreen> {
                     : visible.isEmpty
                         ? EmptyState(
                             icon: Icons.casino_outlined,
-                            title: 'Aucun jeu',
-                            message: _hideOwnedAndWishlist
-                                ? 'Tout est déjà dans ta collection ou ta wishlist. Désactive le filtre.'
-                                : widget.source == BggCatalogSource.friends
-                                    ? 'Aucun ami n\'a ajouté de jeu récemment (ou collections non partagées).'
-                                    : 'Essaie une autre recherche ou reviens plus tard.',
+                            title: _searchAwaitingQuery
+                                ? 'Trouve ton jeu'
+                                : 'Aucun jeu',
+                            message: _searchAwaitingQuery
+                                ? 'Tape le nom d\'un jeu dans la barre de recherche pour explorer BGG.'
+                                : _hideOwnedAndWishlist
+                                    ? 'Tout est déjà dans ta collection ou ta wishlist. Désactive le filtre.'
+                                    : widget.source == BggCatalogSource.friends
+                                        ? 'Aucun ami n\'a ajouté de jeu récemment (ou collections non partagées).'
+                                        : 'Essaie une autre recherche ou reviens plus tard.',
                             iconColor: _accent,
                           )
                         : RefreshIndicator(

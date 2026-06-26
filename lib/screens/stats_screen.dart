@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import '../models/category_stat.dart';
 import '../models/collection_item.dart';
@@ -220,6 +222,12 @@ class _StatsScreenState extends State<StatsScreen> {
   Widget _buildCategoryBar(CategoryStat stat) {
     final total = _summary.ownedCount;
     final pct = (stat.shareOf(total) * 100).clamp(0, 100);
+    final maxCount = _byCategory
+        .map((s) => s.itemCount)
+        .fold<int>(0, (a, b) => a > b ? a : b);
+    final barValue = maxCount == 0
+        ? 0.0
+        : math.sqrt(stat.itemCount) / math.sqrt(maxCount);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -246,7 +254,7 @@ class _StatsScreenState extends State<StatsScreen> {
           ClipRRect(
             borderRadius: BorderRadius.circular(6),
             child: LinearProgressIndicator(
-              value: total == 0 ? 0 : stat.itemCount / total,
+              value: barValue,
               minHeight: 8,
               backgroundColor: stat.category.color.withValues(alpha: 0.12),
               color: stat.category.color,

@@ -37,6 +37,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   @override
   void initState() {
     super.initState();
+    _accentColor = ProfileCacheService.instance.profile?.accentColor ??
+        profileAccentPresets.first;
     _load();
   }
 
@@ -281,8 +283,19 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
 
     setState(() => _saving = true);
     try {
+      final username = _usernameController.text.trim();
+      if (username.isEmpty) {
+        throw Exception('Le pseudo ne peut pas être vide.');
+      }
+      final taken = await _service.isUsernameTaken(
+        username,
+        excludeUserId: _profile!.id,
+      );
+      if (taken) {
+        throw Exception('Ce pseudo est déjà pris (même avec une autre casse).');
+      }
       final updated = _profile!.copyWith(
-        username: _usernameController.text,
+        username: username,
         bio: _bioController.text,
         accentColor: _accentColor,
         clearBio: _bioController.text.trim().isEmpty,
@@ -316,6 +329,18 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         title: const Text('Mon profil'),
         backgroundColor: accent,
         foregroundColor: Colors.white,
+        flexibleSpace: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                accent,
+                Color.lerp(accent, Colors.white, 0.22) ?? accent,
+              ],
+            ),
+          ),
+        ),
         actions: [
           IconButton(
             onPressed: _saving ? null : _save,
@@ -388,13 +413,16 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                   const SizedBox(height: 16),
                   TextField(
                     controller: _bioController,
-                    decoration: const InputDecoration(
-                      labelText: 'Bio (optionnel)',
+                    decoration: InputDecoration(
+                      labelText: 'Ta bio',
                       hintText: 'ex: Collectionneur de jeux familiaux',
-                      border: OutlineInputBorder(),
+                      border: const OutlineInputBorder(),
+                      isDense: _bioController.text.trim().isEmpty,
                     ),
                     maxLength: 280,
-                    maxLines: 3,
+                    maxLines: _bioController.text.trim().isEmpty ? 2 : 3,
+                    minLines: 1,
+                    onChanged: (_) => setState(() {}),
                   ),
                   const SizedBox(height: 8),
                   Text(

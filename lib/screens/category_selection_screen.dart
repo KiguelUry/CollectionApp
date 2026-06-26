@@ -6,6 +6,7 @@ import '../services/recommendation_service.dart';
 import '../widgets/recommendations_banner.dart';
 import '../widgets/main_drawer.dart';
 import '../models/user_collection_type.dart';
+import '../models/user_profile.dart';
 import '../utils/collection_grid_layout.dart';
 import 'books_collection_screen.dart';
 import 'boardgame/boardgames_collection_screen.dart';
@@ -22,6 +23,8 @@ import '../utils/app_haptics.dart';
 import '../utils/category_hub_order.dart';
 import '../utils/collection_item_scope.dart';
 import '../utils/hub_category_visibility.dart';
+import '../services/profile_cache_service.dart';
+import '../widgets/profile_avatar.dart';
 import 'category_manage_screen.dart';
 import 'wildlife/wildlife_collection_screen.dart';
 import 'restaurant/restaurant_collection_screen.dart';
@@ -47,19 +50,26 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
   @override
   void initState() {
     super.initState();
+    ProfileCacheService.instance.addListener(_onProfileCacheChanged);
     _load();
   }
 
-  Future<String> _getUsername() async {
-    final user = Supabase.instance.client.auth.currentUser;
-    if (user == null) return 'Aventurier';
+  @override
+  void dispose() {
+    ProfileCacheService.instance.removeListener(_onProfileCacheChanged);
+    super.dispose();
+  }
 
-    final data = await Supabase.instance.client
-        .from('profiles')
-        .select('username')
-        .eq('id', user.id)
-        .single();
-    return data['username'] ?? 'Aventurier';
+  void _onProfileCacheChanged() {
+    if (mounted) setState(() {});
+  }
+
+  String get _username =>
+      ProfileCacheService.instance.profile?.username ?? 'Aventurier';
+
+  Color get _profileAccent {
+    final hex = ProfileCacheService.instance.profile?.accentColor;
+    return ProfileAvatar.colorFromHex(hex ?? profileAccentPresets.first);
   }
 
   Future<void> _load() async {
@@ -292,6 +302,12 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     }
 
     final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final subtitleColor = scheme.onSurfaceVariant;
+    final accent = _profileAccent;
+    final greetingStyle = Theme.of(context).textTheme.titleLarge?.copyWith(
+          fontWeight: FontWeight.w800,
+        );
 
     return Scaffold(
       appBar: AppBar(
@@ -312,36 +328,37 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
             width: double.infinity,
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
             decoration: AppTheme.heroGradient(
-              scheme.primary,
+              accent,
               brightness: Theme.of(context).brightness,
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                FutureBuilder<String>(
-                  future: _getUsername(),
-                  builder: (context, snapshot) {
-                    final name = snapshot.data ?? '...';
-                    return Text(
-                      'Salut $name',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w800,
-                          ),
-                    );
-                  },
-                ),
+                if (isDark)
+                  ShaderMask(
+                    shaderCallback: (bounds) => LinearGradient(
+                      colors: [
+                        accent,
+                        Colors.white.withValues(alpha: 0.88),
+                      ],
+                    ).createShader(bounds),
+                    child: Text(
+                      'Salut $_username',
+                      style: greetingStyle?.copyWith(color: Colors.white),
+                    ),
+                  )
+                else
+                  Text(
+                    'Salut $_username',
+                    style: greetingStyle?.copyWith(
+                      color: Color.lerp(accent, const Color(0xFF1A1033), 0.72),
+                    ),
+                  ),
                 Text(
                   'Quelle collection ouvrir ?',
                   style: TextStyle(
                     fontSize: 13,
-                    color: Colors.grey.shade700,
-                  ),
-                ),
-                Text(
-                  'Maintenir une tuile pour la déplacer',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.grey.shade600,
+                    color: subtitleColor,
                   ),
                 ),
               ],
