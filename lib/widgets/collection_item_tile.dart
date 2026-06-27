@@ -209,19 +209,13 @@ class CollectionItemTile extends StatelessWidget {
           SizedBox(
             height: _metaRowHeight,
             width: double.infinity,
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: _buildInventoryMetaRow(context),
-            ),
+            child: _buildIconRowTop(context),
           ),
           const SizedBox(height: 3),
           SizedBox(
             height: _metaRowHeight,
             width: double.infinity,
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: _buildLocationRatingRow(context),
-            ),
+            child: _buildIconRowBottom(context),
           ),
         ],
       ),
@@ -510,45 +504,7 @@ class CollectionItemTile extends StatelessWidget {
     );
   }
 
-  Widget _buildLocationRatingRow(BuildContext context) {
-    final location = _locationChipLabel;
-    final rating = _bggRatingLabel;
-    final locationColor = location != null
-        ? Colors.deepOrange.shade400
-        : Colors.grey.shade500;
-    final ratingColor = rating != null
-        ? Colors.amber.shade700
-        : Colors.grey.shade500;
-
-    return Row(
-      children: [
-        Expanded(
-          child: GestureDetector(
-            onTap: () => _showLocationSheet(context),
-            behavior: HitTestBehavior.opaque,
-            child: _metaChip(
-              icon: Icons.place_outlined,
-              suffix: location,
-              color: locationColor,
-              expandSuffix: location != null,
-            ),
-          ),
-        ),
-        const SizedBox(width: 4),
-        GestureDetector(
-          onTap: () => _showRatingSheet(context),
-          behavior: HitTestBehavior.opaque,
-          child: _metaChip(
-            icon: Icons.star_rounded,
-            suffix: rating,
-            color: ratingColor,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildInventoryMetaRow(BuildContext context) {
+  Widget _buildIconRowTop(BuildContext context) {
     final groupCount = showGroupBadge && !item.isSold ? _groupCount : 0;
     final expansionCount = ownedExpansionCount(item);
 
@@ -562,6 +518,7 @@ class CollectionItemTile extends StatelessWidget {
               icon: Icons.layers_outlined,
               suffix: '$_ownedQty',
               color: Colors.lightBlue.shade600,
+              active: true,
             ),
           ),
         ),
@@ -574,6 +531,7 @@ class CollectionItemTile extends StatelessWidget {
               icon: groupCount > 1 ? Icons.groups : Icons.group_outlined,
               suffix: '$groupCount',
               color: Colors.teal.shade500,
+              active: groupCount > 0,
             ),
           ),
         ),
@@ -586,6 +544,45 @@ class CollectionItemTile extends StatelessWidget {
               icon: Icons.extension_outlined,
               suffix: '$expansionCount',
               color: Colors.green.shade600,
+              active: expansionCount > 0,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildIconRowBottom(BuildContext context) {
+    final location = _locationChipLabel;
+    final rating = _bggRatingLabel;
+
+    return Row(
+      children: [
+        Expanded(
+          flex: 3,
+          child: GestureDetector(
+            onTap: () => _showLocationSheet(context),
+            behavior: HitTestBehavior.opaque,
+            child: _metaChip(
+              icon: Icons.place_outlined,
+              suffix: location ?? '—',
+              color: Colors.deepOrange.shade400,
+              active: location != null,
+              expandSuffix: true,
+            ),
+          ),
+        ),
+        const SizedBox(width: 4),
+        Expanded(
+          flex: 2,
+          child: GestureDetector(
+            onTap: () => _showRatingSheet(context),
+            behavior: HitTestBehavior.opaque,
+            child: _metaChip(
+              icon: Icons.star_rounded,
+              suffix: rating ?? '—',
+              color: Colors.amber.shade700,
+              active: rating != null,
             ),
           ),
         ),
@@ -660,19 +657,25 @@ class CollectionItemTile extends StatelessWidget {
     required Color color,
     double maxSuffixWidth = 40,
     bool expandSuffix = false,
+    bool active = true,
   }) {
+    final chipColor = active ? color : Colors.grey.shade500;
+    final iconAlpha = active ? 1.0 : 0.45;
+    final bgAlpha = active ? 0.12 : 0.06;
+    final borderAlpha = active ? 0.35 : 0.18;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
+        color: chipColor.withValues(alpha: bgAlpha),
         borderRadius: BorderRadius.circular(5),
-        border: Border.all(color: color.withValues(alpha: 0.35)),
+        border: Border.all(color: chipColor.withValues(alpha: borderAlpha)),
       ),
       child: Row(
         mainAxisSize:
             expandSuffix ? MainAxisSize.max : MainAxisSize.min,
         children: [
-          Icon(icon, size: 12, color: color),
+          Icon(icon, size: 12, color: chipColor.withValues(alpha: iconAlpha)),
           if (suffix != null) ...[
             const SizedBox(width: 3),
             if (expandSuffix)
@@ -684,7 +687,7 @@ class CollectionItemTile extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 9,
                     fontWeight: FontWeight.w700,
-                    color: color,
+                    color: chipColor.withValues(alpha: active ? 1.0 : 0.5),
                     height: 1,
                   ),
                 ),
@@ -699,7 +702,7 @@ class CollectionItemTile extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 9,
                     fontWeight: FontWeight.w700,
-                    color: color,
+                    color: chipColor.withValues(alpha: active ? 1.0 : 0.5),
                     height: 1,
                   ),
                 ),

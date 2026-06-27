@@ -60,7 +60,7 @@ alter table public.collection_items
   drop constraint if exists collection_items_quantity_positive;
 
 alter table public.collection_items
-  add constraint collection_items_quantity_positive check (quantity >= 1);
+  add constraint collection_items_quantity_non_negative check (quantity >= 0);
 
 create index if not exists collection_items_group_id_idx on public.collection_items (group_id);
 create index if not exists collection_items_location_id_idx on public.collection_items (location_id);

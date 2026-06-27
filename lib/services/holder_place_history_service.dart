@@ -52,10 +52,10 @@ class HolderPlaceHistoryService {
         } catch (_) {}
       }
       final lower = stored.toLowerCase();
-      final next = [
+      final next = <String>[
         stored,
         ...existing.where((e) => e.toLowerCase() != lower),
-      ].take(24);
+      ].take(24).toList();
       await prefs.setString(key, jsonEncode(next));
     }
   }
