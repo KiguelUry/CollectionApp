@@ -318,6 +318,14 @@ class _CompactWhereaboutsDropdownState
     widget.onChanged(holderLabel: preview, manualHolder: true);
   }
 
+  Future<void> _removeSuggestion(String place) async {
+    await HolderPlaceHistoryService.removeForGroups(
+      widget.selectedGroupIds,
+      place,
+    );
+    await _loadPlaceSuggestions();
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_initialLoading) {
@@ -379,10 +387,17 @@ class _CompactWhereaboutsDropdownState
               runSpacing: 6,
               children: _placeSuggestions.map((place) {
                 final label = formatManualHolderLabel(place);
-                return ActionChip(
-                  label: Text(label, style: const TextStyle(fontSize: 12)),
+                return InputChip(
+                  label: Text(
+                    label,
+                    style: const TextStyle(fontSize: 12),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   visualDensity: VisualDensity.compact,
                   onPressed: () => _applySuggestion(place),
+                  onDeleted: () => _removeSuggestion(place),
+                  deleteIcon: const Icon(Icons.close, size: 16),
                 );
               }).toList(),
             ),

@@ -205,13 +205,13 @@ class CollectionItemTile extends StatelessWidget {
                 height: 1.15,
               ),
             ),
-          const SizedBox(height: 3),
+          const SizedBox(height: 2),
           SizedBox(
             height: _metaRowHeight,
             width: double.infinity,
             child: _buildIconRowTop(context),
           ),
-          const SizedBox(height: 3),
+          const SizedBox(height: 2),
           SizedBox(
             height: _metaRowHeight,
             width: double.infinity,
@@ -577,6 +577,7 @@ class CollectionItemTile extends StatelessWidget {
               icon: Icons.star_rounded,
               suffix: rating ?? '—',
               color: Colors.amber.shade700,
+              shrinkSuffix: true,
             ),
           ),
         ),
@@ -649,9 +650,10 @@ class CollectionItemTile extends StatelessWidget {
     required IconData icon,
     String? suffix,
     required Color color,
+    bool shrinkSuffix = false,
   }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(5),
@@ -661,19 +663,34 @@ class CollectionItemTile extends StatelessWidget {
         children: [
           Icon(icon, size: 12, color: color),
           if (suffix != null) ...[
-            const SizedBox(width: 3),
+            const SizedBox(width: 2),
             Expanded(
-              child: Text(
-                suffix,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 9,
-                  fontWeight: FontWeight.w700,
-                  color: color,
-                  height: 1,
-                ),
-              ),
+              child: shrinkSuffix
+                  ? FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        suffix,
+                        maxLines: 1,
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          color: color,
+                          height: 1,
+                        ),
+                      ),
+                    )
+                  : Text(
+                      suffix,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        color: color,
+                        height: 1,
+                      ),
+                    ),
             ),
           ],
         ],

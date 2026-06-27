@@ -112,13 +112,29 @@ Map<String, dynamic> buildCollectionItemInsertPayload({
     holderLabel: holderLabel,
     isWishlist: isWishlist,
   );
-  final whereabouts = buildWhereaboutsDbFields(draft);
-  final json = draft.toInsertJson(
+  final groupIds = item.groupId != null && item.groupId!.isNotEmpty
+      ? [item.groupId!]
+      : <String>[];
+  var working = draft;
+  if (groupIds.isNotEmpty) {
+    working = draft.copyWith(
+      metadata: metadataWithGroupIds(draft.metadata, groupIds),
+    );
+  }
+  final whereabouts = buildWhereaboutsDbFields(
+    working,
+    groupIds: groupIds.isEmpty ? null : groupIds,
+  );
+  var meta = Map<String, dynamic>.from(
+    whereabouts['metadata'] as Map<String, dynamic>,
+  );
+  meta = finalizeMetadataPayload(working, meta);
+  final json = working.toInsertJson(
     isWishlist: isWishlist,
     locationUserId: whereabouts['location_user_id'] as String?,
     addedBy: addedBy,
   );
-  json['metadata'] = whereabouts['metadata'];
+  json['metadata'] = meta;
   json['location_user_id'] = whereabouts['location_user_id'];
   return json;
 }

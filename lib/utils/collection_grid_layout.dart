@@ -43,7 +43,7 @@ abstract final class CollectionGridLayout {
   static const double gridMainSpacing = 7;
 
   /// Hauteur max du pied de tuile (titre + stats + 2 rangées d'icônes).
-  static const double boardgameMaxFooterHeight = 108;
+  static const double boardgameMaxFooterHeight = 94;
 
   static double _boardgameCellWidth(
     BuildContext context, {

@@ -35,6 +35,7 @@ import '../models/collection_list_filters.dart';
 import '../models/collection_view_mode.dart';
 import '../models/item_tag.dart';
 import '../models/storage_location.dart';
+import '../services/item_group_service.dart';
 import '../services/group_service.dart';
 import '../services/location_service.dart';
 import '../services/collection_refresh.dart';
@@ -926,6 +927,39 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  Future<void> _insertCollectionItem({
+    required CollectionItem item,
+    required String userId,
+    required AddItemOptions options,
+  }) async {
+    final client = Supabase.instance.client;
+    final payload = buildCollectionItemInsertPayload(
+      item: item,
+      addedBy: userId,
+      isWishlist: options.isWishlist,
+      holderLabel: options.holderLabel,
+      defaultUserId: userId,
+    );
+    final inserted = await client
+        .from('collection_items')
+        .insert(payload)
+        .select()
+        .single();
+    final groupId = options.groupId;
+    if (groupId != null && groupId.isNotEmpty && !options.isWishlist) {
+      final saved = CollectionItem.fromJson(
+        Map<String, dynamic>.from(inserted as Map),
+      ).copyWith(
+        metadata: Map<String, dynamic>.from(
+          payload['metadata'] as Map? ?? {},
+        ),
+        locationUserId: payload['location_user_id'] as String?,
+        groupId: groupId,
+      );
+      await ItemGroupService().syncItemGroupsWithItem(saved, [groupId]);
+    }
+  }
+
   Future<void> _handleSave({
     required BuildContext dialogContext,
     required String title,
@@ -1050,15 +1084,11 @@ class _HomeScreenState extends State<HomeScreen>
               playingTime: resolvedTime,
             );
 
-            await client.from('collection_items').insert(
-                  buildCollectionItemInsertPayload(
-                    item: item,
-                    addedBy: userId,
-                    isWishlist: options.isWishlist,
-                    holderLabel: options.holderLabel,
-                    defaultUserId: userId,
-                  ),
-                );
+            await _insertCollectionItem(
+              item: item,
+              userId: userId,
+              options: options,
+            );
           }
         } else {
           final item = CollectionItem(
@@ -1078,15 +1108,11 @@ class _HomeScreenState extends State<HomeScreen>
             playingTime: resolvedTime,
           );
 
-          await client.from('collection_items').insert(
-                buildCollectionItemInsertPayload(
-                  item: item,
-                  addedBy: userId,
-                  isWishlist: options.isWishlist,
-                  holderLabel: options.holderLabel,
-                  defaultUserId: userId,
-                ),
-              );
+          await _insertCollectionItem(
+            item: item,
+            userId: userId,
+            options: options,
+          );
         }
         if (options.isWishlist) {
           message = '« $title » ajouté à la wishlist';

@@ -59,4 +59,32 @@ class HolderPlaceHistoryService {
       await prefs.setString(key, jsonEncode(next));
     }
   }
+
+  /// Retire un lieu des suggestions pour les groupes donnés.
+  static Future<void> removeForGroups(
+    Iterable<String> groupIds,
+    String displayLabel,
+  ) async {
+    final target = holderLabelStorageValue(
+      formatManualHolderLabel(displayLabel),
+    ).trim().toLowerCase();
+    if (target.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    for (final gid in groupIds) {
+      final key = _key(gid);
+      final raw = prefs.getString(key);
+      if (raw == null) continue;
+      try {
+        final list = (jsonDecode(raw) as List)
+            .whereType<String>()
+            .where((e) => e.trim().toLowerCase() != target)
+            .toList();
+        if (list.isEmpty) {
+          await prefs.remove(key);
+        } else {
+          await prefs.setString(key, jsonEncode(list));
+        }
+      } catch (_) {}
+    }
+  }
 }

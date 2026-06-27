@@ -36,7 +36,7 @@ class GroupService {
         .toList();
   }
 
-  /// Nombre d'objets boardgame par groupe (pour tri par activité).
+  /// Nombre de jeux de société uniques par groupe (table `collection_item_groups`).
   Future<Map<String, int>> fetchGroupActivityCounts() async {
     final userId = _userId;
     if (userId == null) return {};
@@ -51,30 +51,25 @@ class GroupService {
       if (ids.isEmpty) return {};
 
       final rows = await _client
-          .from('collection_items')
-          .select('group_id, metadata')
-          .inFilter('group_id', ids)
-          .eq('category', 'boardgame');
+          .from('collection_item_groups')
+          .select('group_id, item_id, collection_items(category, is_wishlist)')
+          .inFilter('group_id', ids);
 
-      final counts = <String, int>{};
+      final seen = <String, Set<String>>{};
       for (final row in rows as List) {
         final map = Map<String, dynamic>.from(row as Map);
         final gid = map['group_id'] as String?;
-        if (gid != null && gid.isNotEmpty) {
-          counts[gid] = (counts[gid] ?? 0) + 1;
+        final iid = map['item_id'] as String?;
+        if (gid == null || iid == null) continue;
+        final item = map['collection_items'];
+        if (item is Map) {
+          if (item['is_wishlist'] == true) continue;
+          if (item['category'] != 'boardgame') continue;
         }
-        final meta = map['metadata'];
-        if (meta is Map) {
-          final extra = meta['group_ids'];
-          if (extra is List) {
-            for (final raw in extra) {
-              final id = raw.toString();
-              if (id.isNotEmpty) counts[id] = (counts[id] ?? 0) + 1;
-            }
-          }
-        }
+        seen.putIfAbsent(gid, () => {}).add(iid);
       }
-      return counts;
+
+      return {for (final e in seen.entries) e.key: e.value.length};
     } catch (_) {
       return {};
     }

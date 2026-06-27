@@ -123,6 +123,15 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
     return holderLabelStorageValue(formatManualHolderLabel(label));
   }
 
+  bool get _hasManualHolder =>
+      _holderLabel != null && _holderLabel!.trim().isNotEmpty;
+
+  String? _resolvedLocationUserId(String userId) {
+    if (_isWishlist || _hasManualHolder) return null;
+    if (_shareWithGroup) return _locationUserId;
+    return _locationUserId ?? userId;
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -319,11 +328,7 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                       Supabase.instance.client.auth.currentUser!.id;
                   final options = AddItemOptions(
                     isWishlist: _isWishlist,
-                    locationUserId: _isWishlist
-                        ? null
-                        : (_shareWithGroup
-                            ? _locationUserId
-                            : (_locationUserId ?? userId)),
+                    locationUserId: _resolvedLocationUserId(userId),
                     groupId: _shareWithGroup ? _selectedGroupId : null,
                     holderLabel: _holderLabelForSave(),
                     quantity: _quantity,

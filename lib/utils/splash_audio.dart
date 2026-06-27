@@ -1,11 +1,14 @@
+import 'dart:async';
+
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-/// Son court au démarrage (WAV/MP3 optionnels + bip système en secours).
+/// Son court au démarrage (piano ~2,5 s avec fondu, bip système en secours).
 class SplashAudio {
   static final AudioPlayer _player = AudioPlayer();
   static bool _played = false;
+  static Timer? _fadeTimer;
 
   static const _assetCandidates = [
     'audio/splash_chime.wav',
@@ -17,7 +20,9 @@ class SplashAudio {
     _played = true;
     for (final asset in _assetCandidates) {
       try {
+        await _player.setVolume(1);
         await _player.play(AssetSource(asset));
+        _scheduleFadeOut(const Duration(milliseconds: 2200));
         return;
       } catch (e) {
         if (kDebugMode) debugPrint('Splash audio ($asset): $e');
@@ -30,5 +35,24 @@ class SplashAudio {
     } catch (_) {}
   }
 
-  static Future<void> dispose() => _player.dispose();
+  static void _scheduleFadeOut(Duration delay) {
+    _fadeTimer?.cancel();
+    _fadeTimer = Timer(delay, () async {
+      for (var step = 10; step >= 0; step--) {
+        try {
+          await _player.setVolume(step / 10);
+        } catch (_) {}
+        await Future<void>.delayed(const Duration(milliseconds: 70));
+      }
+      try {
+        await _player.stop();
+      } catch (_) {}
+    });
+  }
+
+  static Future<void> dispose() async {
+    _fadeTimer?.cancel();
+    _fadeTimer = null;
+    await _player.dispose();
+  }
 }
