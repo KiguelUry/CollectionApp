@@ -13,7 +13,7 @@ Future<bool> promoteWishlistToCollection(CollectionItem item) async {
 
   await client.from('collection_items').update({
     'is_wishlist': false,
-    'quantity': item.quantity < 1 ? 1 : item.quantity,
+    'quantity': item.quantity.clamp(0, 9999),
     'location_user_id': userId,
   }).eq('id', item.id);
 

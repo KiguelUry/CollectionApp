@@ -1,5 +1,6 @@
 import '../models/collection_item.dart';
 import 'whereabouts_apply.dart';
+import 'holder_label_utils.dart';
 
 /// Fusionne `group_ids` sans écraser le reste du metadata (dont `holder_label`).
 Map<String, dynamic> metadataWithGroupIds(
@@ -50,6 +51,24 @@ Map<String, dynamic> mergeMetadataPreservingHolder(
     merged['holder_label'] = preservedHolder;
   }
   return merged;
+}
+
+/// Force `holder_label` dans le payload si l'objet est en mode manuel.
+Map<String, dynamic> finalizeMetadataPayload(
+  CollectionItem item,
+  Map<String, dynamic> metadata,
+) {
+  if (item.locationUserId != null) return metadata;
+  final fromMeta = item.metadata?['holder_label']?.toString().trim();
+  if (fromMeta != null && fromMeta.isNotEmpty) {
+    metadata['holder_label'] = fromMeta;
+    return metadata;
+  }
+  final fromLabel = item.locationLabel?.trim();
+  if (fromLabel != null && fromLabel.isNotEmpty && fromLabel != '—') {
+    metadata['holder_label'] = holderLabelStorageValue(fromLabel);
+  }
+  return metadata;
 }
 
 bool itemHasManualHolder(CollectionItem item) {

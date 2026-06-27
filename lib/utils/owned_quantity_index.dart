@@ -12,7 +12,7 @@ String collectionItemMatchKey(CollectionItem item) {
 Map<String, int> buildOwnedQuantityIndex(Iterable<CollectionItem> items) {
   final map = <String, int>{};
   for (final item in items) {
-    if (item.isWishlist || item.isSold) continue;
+    if (item.isWishlist) continue;
     final key = collectionItemMatchKey(item);
     map[key] = (map[key] ?? 0) + item.quantity;
   }

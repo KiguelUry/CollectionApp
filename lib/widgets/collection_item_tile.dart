@@ -50,7 +50,8 @@ class CollectionItemTile extends StatelessWidget {
     this.groupActivityCounts = const {},
   });
 
-  bool get _isGrayed => item.isSold;
+  bool get _isGrayed =>
+      item.isSold || (!item.isWishlist && item.quantity <= 0);
 
   bool get _isCard => category == CollectionCategory.card;
 
@@ -607,7 +608,7 @@ class CollectionItemTile extends StatelessWidget {
         if (qty)
           _metaChip(
             icon: Icons.layers_outlined,
-            suffix: '$_displayQuantity',
+            suffix: '$_ownedQty',
             color: Colors.lightBlue.shade600,
           ),
         if (qty && (group || expansions || rating != null || location != null))

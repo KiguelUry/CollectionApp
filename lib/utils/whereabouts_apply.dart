@@ -54,13 +54,21 @@ Map<String, dynamic> whereaboutsMetadataForSave(CollectionItem item) {
   final meta = Map<String, dynamic>.from(item.metadata ?? {});
   if (item.locationUserId != null) {
     meta.remove('holder_label');
-  } else {
-    final label = item.locationLabel?.trim();
-    if (label != null && label.isNotEmpty && label != '—') {
-      meta['holder_label'] = holderLabelStorageValue(label);
-    } else {
-      meta.remove('holder_label');
-    }
+    return meta;
+  }
+
+  // Saisie libre : conserver holder_label existant en metadata en priorité.
+  final stored = meta['holder_label']?.toString().trim();
+  if (stored != null && stored.isNotEmpty) {
+    meta['holder_label'] = holderLabelStorageValue(
+      formatManualHolderLabel(stored),
+    );
+    return meta;
+  }
+
+  final label = item.locationLabel?.trim();
+  if (label != null && label.isNotEmpty && label != '—') {
+    meta['holder_label'] = holderLabelStorageValue(label);
   }
   return meta;
 }

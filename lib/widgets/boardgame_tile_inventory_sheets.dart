@@ -10,7 +10,8 @@ import '../services/bgg_service.dart';
 import '../services/collection_refresh.dart';
 import '../services/item_group_service.dart';
 import '../utils/boardgame_expansions.dart';
-import '../utils/whereabouts_persistence.dart';
+import '../utils/item_stock_persistence.dart';
+import '../utils/transaction_history.dart';
 import '../utils/wishlist_collection_bridge.dart';
 import '../utils/marketplace_status.dart';
 import 'boardgame_expansion_detail_sheet.dart';
@@ -70,12 +71,6 @@ Future<void> showBoardgameTileExpansionSheet(
   );
 }
 
-Map<String, dynamic> _metadataWithGroups(
-  Map<String, dynamic>? metadata,
-  List<String> groupIds,
-) =>
-    metadataWithGroupIds(metadata, groupIds);
-
 class _BoardgameTileQuantitySheet extends StatefulWidget {
   final CollectionItem item;
   final int ownedQuantity;
@@ -95,16 +90,20 @@ class _BoardgameTileQuantitySheet extends StatefulWidget {
 class _BoardgameTileQuantitySheetState
     extends State<_BoardgameTileQuantitySheet> {
   late int _ownedQuantity;
-  late MarketplaceDisposition _disposition;
+  late ItemListingIntent _intent;
   bool _saving = false;
+  late List<TransactionRecord> _history;
 
   bool get _canTransact => _ownedQuantity > 0;
+  int get _soldCount => _history.where((r) => r.kind == 'sold').length;
+  int get _tradedCount => _history.where((r) => r.kind == 'traded').length;
 
   @override
   void initState() {
     super.initState();
     _ownedQuantity = widget.ownedQuantity.clamp(0, 9999);
-    _disposition = marketplaceDisposition(widget.item);
+    _intent = listingIntent(widget.item);
+    _history = parseTransactionHistory(widget.item.metadata);
   }
 
   Future<void> _promptRemoveFromWishlist() async {
@@ -120,7 +119,7 @@ class _BoardgameTileQuantitySheetState
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Garder en wishlist'),
+            child: const Text('Non, garder en wishlist'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
@@ -149,10 +148,10 @@ class _BoardgameTileQuantitySheetState
         await addOneToCollectionFromWishlist(widget.item);
         if (mounted) await _promptRemoveFromWishlist();
       } else if (!widget.item.isWishlist) {
-        await Supabase.instance.client
-            .from('collection_items')
-            .update({'quantity': next})
-            .eq('id', widget.item.id);
+        await persistOwnedQuantity(
+          itemId: widget.item.id,
+          quantity: next,
+        );
       }
       CollectionRefresh.instance.bump();
     } catch (_) {
@@ -167,20 +166,20 @@ class _BoardgameTileQuantitySheetState
     }
   }
 
-  Future<void> _persistDisposition(MarketplaceDisposition next) async {
+  Future<void> _persistIntent(ItemListingIntent next) async {
     if (widget.readOnly || _saving || !_canTransact) return;
     setState(() {
-      _disposition = next;
+      _intent = next;
       _saving = true;
     });
     try {
       final meta = metadataWithWantsTrade(
         widget.item.metadata,
-        next == MarketplaceDisposition.wantsTrade,
+        next == ItemListingIntent.wantsTrade,
       );
       await Supabase.instance.client.from('collection_items').update({
-        'is_for_sale': next == MarketplaceDisposition.forSale,
-        'is_sold': next == MarketplaceDisposition.sold,
+        'is_for_sale': next == ItemListingIntent.forSale,
+        'is_sold': false,
         'metadata': meta,
       }).eq('id', widget.item.id);
       CollectionRefresh.instance.bump();
@@ -195,132 +194,355 @@ class _BoardgameTileQuantitySheetState
     }
   }
 
+  Future<void> _recordSale() async {
+    if (widget.readOnly || _saving || !_canTransact || widget.item.isWishlist) {
+      return;
+    }
+    final priceCtrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Enregistrer une vente'),
+        content: TextField(
+          controller: priceCtrl,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(
+            labelText: 'Prix de vente (€)',
+            hintText: 'Optionnel',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Valider'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    setState(() => _saving = true);
+    try {
+      final nextQty = await recordSale(
+        item: widget.item,
+        salePrice: double.tryParse(priceCtrl.text.replaceAll(',', '.')),
+      );
+      if (!mounted) return;
+      final row = await Supabase.instance.client
+          .from('collection_items')
+          .select('metadata')
+          .eq('id', widget.item.id)
+          .maybeSingle();
+      if (!mounted) return;
+      setState(() {
+        _ownedQuantity = nextQty;
+        if (row?['metadata'] is Map) {
+          _history = parseTransactionHistory(
+            Map<String, dynamic>.from(row!['metadata'] as Map),
+          );
+        }
+      });
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Erreur lors de la vente')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _recordTrade() async {
+    if (widget.readOnly || _saving || !_canTransact || widget.item.isWishlist) {
+      return;
+    }
+    final labelCtrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Enregistrer un échange'),
+        content: TextField(
+          controller: labelCtrl,
+          decoration: const InputDecoration(
+            labelText: 'Reçu en échange',
+            hintText: 'Ex. Jeu X',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Valider'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final label = labelCtrl.text.trim();
+    if (label.isEmpty) return;
+
+    setState(() => _saving = true);
+    try {
+      final nextQty = await recordTrade(
+        item: widget.item,
+        tradedFor: label,
+      );
+      if (!mounted) return;
+      final row = await Supabase.instance.client
+          .from('collection_items')
+          .select('metadata')
+          .eq('id', widget.item.id)
+          .maybeSingle();
+      if (!mounted) return;
+      setState(() {
+        _ownedQuantity = nextQty;
+        if (row?['metadata'] is Map) {
+          _history = parseTransactionHistory(
+            Map<String, dynamic>.from(row!['metadata'] as Map),
+          );
+        }
+      });
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Erreur lors de l\'échange')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _addToWishlist() async {
+    if (widget.readOnly || _saving || widget.item.isWishlist) return;
+    setState(() => _saving = true);
+    try {
+      await addToWishlistFromCollection(widget.item);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Ajouté à la wishlist')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Erreur lors de l\'ajout')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final item = widget.item;
     final loanLine =
         _canTransact && item.isOnLoan ? 'Prêté à ${item.loaneeDisplayName}' : null;
+    final historySummary = formatTransactionHistorySummary(item.metadata);
 
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              'Stock',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              item.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 13,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Stock',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
               ),
-            ),
-            Text(
-              widget.item.isWishlist
-                  ? 'Exemplaires possédés (collection)'
-                  : 'Exemplaires possédés',
-              style: TextStyle(
-                fontSize: 13,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _qtyButton(
-                  icon: Icons.remove,
-                  onPressed: widget.readOnly || _ownedQuantity <= 0
-                      ? null
-                      : () => _changeOwnedQuantity(_ownedQuantity - 1),
+              const SizedBox(height: 4),
+              Text(
+                item.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Text(
-                    '$_ownedQuantity',
-                    style: const TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w800,
+              ),
+              Text(
+                widget.item.isWishlist
+                    ? 'Exemplaires possédés (collection)'
+                    : 'Exemplaires possédés',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _qtyButton(
+                    icon: Icons.remove,
+                    onPressed: widget.readOnly || _saving
+                        ? null
+                        : () => _changeOwnedQuantity(_ownedQuantity - 1),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Text(
+                      '$_ownedQuantity',
+                      style: const TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
-                ),
-                _qtyButton(
-                  icon: Icons.add,
-                  onPressed: widget.readOnly
-                      ? null
-                      : () => _changeOwnedQuantity(_ownedQuantity + 1),
-                ),
-              ],
-            ),
-            if (widget.item.isWishlist && _ownedQuantity == 0) ...[
-              const SizedBox(height: 12),
-              Text(
-                'Passe à 1 pour ajouter le jeu à ta collection.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey.shade600,
-                ),
-              ),
-            ],
-            if (loanLine != null) ...[
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Icon(Icons.handshake_outlined,
-                      size: 18, color: Colors.blue.shade700),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text(loanLine)),
+                  _qtyButton(
+                    icon: Icons.add,
+                    onPressed: widget.readOnly || _saving
+                        ? null
+                        : () => _changeOwnedQuantity(_ownedQuantity + 1),
+                  ),
                 ],
               ),
-            ],
-            const SizedBox(height: 20),
-            Text(
-              'Statut marketplace',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-            if (!_canTransact)
-              Padding(
-                padding: const EdgeInsets.only(top: 4, bottom: 8),
-                child: Text(
-                  'Indisponible tant que tu ne possèdes pas l\'objet.',
+              if (widget.item.isWishlist && _ownedQuantity == 0) ...[
+                const SizedBox(height: 12),
+                Text(
+                  'Passe à 1 pour ajouter le jeu à ta collection.',
+                  textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 12,
                     color: Colors.grey.shade600,
                   ),
                 ),
+              ],
+              if (!widget.item.isWishlist && !widget.readOnly) ...[
+                const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  onPressed: _saving ? null : _addToWishlist,
+                  icon: const Icon(Icons.favorite_border),
+                  label: const Text('Ajouter à la wishlist'),
+                ),
+              ],
+              if (loanLine != null) ...[
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Icon(Icons.handshake_outlined,
+                        size: 18, color: Colors.blue.shade700),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(loanLine)),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 20),
+              Text(
+                'Intention',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
               ),
-            const SizedBox(height: 8),
-            ...MarketplaceDisposition.values.map((d) {
-              return RadioListTile<MarketplaceDisposition>(
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-                value: d,
-                groupValue: _disposition,
-                onChanged: widget.readOnly || !_canTransact
-                    ? null
-                    : (v) {
-                        if (v != null) _persistDisposition(v);
-                      },
-                title: Text(marketplaceDispositionLabel(d)),
-              );
-            }),
-            if (_saving) ...[
-              const SizedBox(height: 8),
-              const LinearProgressIndicator(minHeight: 2),
+              if (!_canTransact)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4, bottom: 8),
+                  child: Text(
+                    'Indisponible tant que tu ne possèdes pas l\'objet.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                ),
+              ...ItemListingIntent.values.map((intent) {
+                return RadioListTile<ItemListingIntent>(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  value: intent,
+                  groupValue: _intent,
+                  onChanged: widget.readOnly || !_canTransact || _saving
+                      ? null
+                      : (v) {
+                          if (v != null) _persistIntent(v);
+                        },
+                  title: Text(listingIntentLabel(intent)),
+                );
+              }),
+              const SizedBox(height: 12),
+              Text(
+                'Historique des transactions',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              if (historySummary.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  historySummary,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey.shade700,
+                  ),
+                ),
+              ],
+              if (!_canTransact || widget.item.isWishlist)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4, bottom: 8),
+                  child: Text(
+                    'Enregistre une vente ou un échange uniquement si tu possèdes l\'objet.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                )
+              else ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _saving ? null : _recordSale,
+                        icon: const Icon(Icons.sell_outlined, size: 18),
+                        label: Text('Vendu ($_soldCount)'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _saving ? null : _recordTrade,
+                        icon: const Icon(Icons.swap_horiz, size: 18),
+                        label: Text('Échangé ($_tradedCount)'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              if (_history.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                ..._history.reversed.take(5).map(
+                      (r) => Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Text(
+                          formatTransactionRecordLine(r),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey.shade700,
+                          ),
+                        ),
+                      ),
+                    ),
+              ],
+              if (_saving) ...[
+                const SizedBox(height: 8),
+                const LinearProgressIndicator(minHeight: 2),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -413,20 +635,7 @@ class _BoardgameTileGroupSheetState extends State<_BoardgameTileGroupSheet> {
 
     try {
       final ids = next.toList();
-      await _itemGroupService.syncItemGroups(widget.item.id, ids);
-
-      final first = ids.isEmpty ? null : ids.first;
-      final whereabouts = buildWhereaboutsDbFields(
-        widget.item,
-        groupIds: ids,
-      );
-
-      await Supabase.instance.client.from('collection_items').update({
-        'group_id': first,
-        'location_user_id': whereabouts['location_user_id'],
-        'metadata': whereabouts['metadata'],
-      }).eq('id', widget.item.id);
-
+      await _itemGroupService.syncItemGroupsWithItem(widget.item, ids);
       CollectionRefresh.instance.bump();
     } catch (_) {
       if (mounted) {

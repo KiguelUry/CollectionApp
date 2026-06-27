@@ -239,12 +239,6 @@ class _BoardgameTileLocationSheetState
     super.dispose();
   }
 
-  Map<String, dynamic> _metadataForSave() {
-    final groupIds = _groupIdsFromItem(_item).toList();
-    return buildWhereaboutsDbFields(_item, groupIds: groupIds)['metadata']
-        as Map<String, dynamic>;
-  }
-
   void _applyWhereabouts({
     String? locationUserId,
     String? holderLabel,
@@ -276,9 +270,24 @@ class _BoardgameTileLocationSheetState
         _item,
         groupIds: groupIds,
       );
+      final row = await Supabase.instance.client
+          .from('collection_items')
+          .select('metadata')
+          .eq('id', _item.id)
+          .maybeSingle();
+      var meta = Map<String, dynamic>.from(_item.metadata ?? {});
+      if (row?['metadata'] is Map) {
+        meta = Map<String, dynamic>.from(row!['metadata'] as Map);
+      }
+      meta = mergeMetadataPreservingHolder(
+        meta,
+        Map<String, dynamic>.from(whereabouts['metadata'] as Map),
+      );
+      meta = finalizeMetadataPayload(_item, meta);
+
       await Supabase.instance.client.from('collection_items').update({
         'location_user_id': whereabouts['location_user_id'],
-        'metadata': whereabouts['metadata'],
+        'metadata': meta,
       }).eq('id', _item.id);
       CollectionRefresh.instance.bump();
     } catch (_) {

@@ -1,5 +1,8 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/collection_item.dart';
+import '../utils/whereabouts_persistence.dart';
+
 /// Synchronise l'appartenance multi-groupe d'un objet.
 class ItemGroupService {
   final _client = Supabase.instance.client;
@@ -33,6 +36,38 @@ class ItemGroupService {
               .toList(),
           onConflict: 'item_id,group_id',
         );
+  }
+
+  /// Sync groupes + mise à jour de la ligne principale en préservant `holder_label`.
+  Future<void> syncItemGroupsWithItem(
+    CollectionItem item,
+    List<String> groupIds,
+  ) async {
+    await syncItemGroups(item.id, groupIds);
+
+    final whereabouts = buildWhereaboutsDbFields(item, groupIds: groupIds);
+    final whereaboutsMeta = Map<String, dynamic>.from(
+      whereabouts['metadata'] as Map<String, dynamic>,
+    );
+
+    final row = await _client
+        .from('collection_items')
+        .select('metadata')
+        .eq('id', item.id)
+        .maybeSingle();
+
+    var meta = Map<String, dynamic>.from(item.metadata ?? {});
+    if (row?['metadata'] is Map) {
+      meta = Map<String, dynamic>.from(row!['metadata'] as Map);
+    }
+    meta = mergeMetadataPreservingHolder(meta, whereaboutsMeta);
+    meta = finalizeMetadataPayload(item, meta);
+
+    await _client.from('collection_items').update({
+      'group_id': groupIds.isEmpty ? null : groupIds.first,
+      'location_user_id': whereabouts['location_user_id'],
+      'metadata': meta,
+    }).eq('id', item.id);
   }
 
   Future<List<String>> fetchGroupIdsForItem(String itemId) async {

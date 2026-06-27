@@ -424,7 +424,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
   }
 
   void _adjustQuantity(int delta) {
-    final minQ = _item.isWishlist ? 0 : 1;
+    final minQ = 0;
     final next = (_item.quantity + delta).clamp(minQ, 9999);
     if (next == _item.quantity) return;
     setState(() => _item = _item.copyWith(quantity: next));
@@ -459,14 +459,20 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     try {
       final whereabouts = buildWhereaboutsDbFields(_item, groupIds: groupIds);
       final payload = _item.toUpdateJson();
-      payload['metadata'] = whereabouts['metadata'];
+      var meta = Map<String, dynamic>.from(_item.metadata ?? {});
+      meta = mergeMetadataPreservingHolder(
+        meta,
+        Map<String, dynamic>.from(whereabouts['metadata'] as Map),
+      );
+      meta = finalizeMetadataPayload(_item, meta);
+      payload['metadata'] = meta;
       payload['location_user_id'] = whereabouts['location_user_id'];
       payload['group_id'] = groupIds.isEmpty ? null : groupIds.first;
       await Supabase.instance.client
           .from('collection_items')
           .update(payload)
           .eq('id', _item.id);
-      await _itemGroupService.syncItemGroups(_item.id, groupIds);
+      await _itemGroupService.syncItemGroupsWithItem(_item, groupIds);
       await _reloadItem();
       CollectionRefresh.instance.bump();
     } catch (e) {
@@ -863,7 +869,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                           if (!isWishlist && !ro) ...[
                             IconButton(
                               visualDensity: VisualDensity.compact,
-                              onPressed: _item.quantity > 1
+                              onPressed: _item.quantity > 0
                                   ? () => _adjustQuantity(-1)
                                   : null,
                               icon: const Icon(Icons.remove, size: 20),

@@ -53,7 +53,7 @@ class CollectionItem {
     required this.isWishlist,
     this.isForSale = false,
     this.isSold = false,
-    this.quantity = 1,
+    this.quantity = 0,
     this.locationId,
     this.locationLabel,
     this.groupId,
@@ -162,9 +162,7 @@ class CollectionItem {
       isWishlist: json['is_wishlist'] ?? false,
       isForSale: json['is_for_sale'] as bool? ?? false,
       isSold: json['is_sold'] as bool? ?? false,
-      quantity: json['is_wishlist'] == true
-          ? ((json['quantity'] as int?) ?? 0)
-          : ((json['quantity'] as int?) ?? 1),
+      quantity: (json['quantity'] as int?) ?? 0,
       locationId: json['location_id'] as String?,
       locationLabel: locLabel,
       groupId: json['group_id'] as String?,
