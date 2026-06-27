@@ -9,6 +9,7 @@ class CollectionItemListTile extends StatelessWidget {
   final CollectionItem item;
   final CollectionCategory category;
   final int totalQuantity;
+  final int? ownedQuantity;
   final VoidCallback? onTap;
   final VoidCallback? onDelete;
 
@@ -17,6 +18,7 @@ class CollectionItemListTile extends StatelessWidget {
     required this.item,
     required this.category,
     this.totalQuantity = 1,
+    this.ownedQuantity,
     this.onTap,
     this.onDelete,
   });
@@ -102,10 +104,18 @@ class CollectionItemListTile extends StatelessWidget {
                 padding: const EdgeInsets.only(right: 4),
                 child: Icon(Icons.groups, size: 18, color: Colors.deepPurple.shade400),
               ),
-            if (totalQuantity > 1)
+            if ((ownedQuantity ?? (item.isWishlist ? 0 : totalQuantity)) > 1)
               Text(
-                '×$totalQuantity',
+                '×${ownedQuantity ?? (item.isWishlist ? 0 : totalQuantity)}',
                 style: const TextStyle(fontWeight: FontWeight.bold),
+              )
+            else if (item.isWishlist)
+              Text(
+                '${ownedQuantity ?? 0}',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey.shade600,
+                ),
               ),
           ],
         ),

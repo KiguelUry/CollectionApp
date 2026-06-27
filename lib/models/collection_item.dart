@@ -111,11 +111,6 @@ class CollectionItem {
     }
     final holder = json['location_holder'];
     final locationUserId = json['location_user_id'] as String?;
-    if (locationUserId != null &&
-        holder is Map &&
-        holder['username'] != null) {
-      locLabel = 'Chez ${holder['username']}';
-    }
 
     String? gName;
     final grp = json['groups'];
@@ -143,17 +138,16 @@ class CollectionItem {
 
     final metadata = CategoryMetadata.parse(json['metadata']);
 
-    if (locationUserId == null && metadata != null) {
-      final custom = metadata['holder_label'] as String?;
-      if (custom != null && custom.trim().isNotEmpty) {
-        locLabel = formatManualHolderLabel(custom.trim());
-      }
-    } else if ((locLabel == null || locLabel.trim().isEmpty) &&
-        metadata != null) {
-      final custom = metadata['holder_label'] as String?;
-      if (custom != null && custom.trim().isNotEmpty) {
-        locLabel = formatManualHolderLabel(custom.trim());
-      }
+    final customHolder = metadata?['holder_label'] as String?;
+    final hasCustomHolder =
+        customHolder != null && customHolder.trim().isNotEmpty;
+
+    if (hasCustomHolder) {
+      locLabel = formatManualHolderLabel(customHolder.trim());
+    } else if (locationUserId != null &&
+        holder is Map &&
+        holder['username'] != null) {
+      locLabel = 'Chez ${holder['username']}';
     }
 
     return CollectionItem(
@@ -168,7 +162,9 @@ class CollectionItem {
       isWishlist: json['is_wishlist'] ?? false,
       isForSale: json['is_for_sale'] as bool? ?? false,
       isSold: json['is_sold'] as bool? ?? false,
-      quantity: (json['quantity'] as int?) ?? 1,
+      quantity: json['is_wishlist'] == true
+          ? ((json['quantity'] as int?) ?? 0)
+          : ((json['quantity'] as int?) ?? 1),
       locationId: json['location_id'] as String?,
       locationLabel: locLabel,
       groupId: json['group_id'] as String?,

@@ -332,8 +332,8 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
           padding: const EdgeInsets.all(12),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: CollectionGridLayout.crossAxisCount(context),
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
+            crossAxisSpacing: CollectionGridLayout.gridCrossSpacing,
+            mainAxisSpacing: CollectionGridLayout.gridMainSpacing,
             childAspectRatio:
                 CollectionGridLayout.aspectRatio(category, context),
           ),

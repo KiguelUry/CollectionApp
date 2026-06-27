@@ -22,6 +22,7 @@ import '../theme/app_theme.dart';
 import '../utils/app_haptics.dart';
 import '../utils/category_hub_order.dart';
 import '../utils/collection_item_scope.dart';
+import '../utils/boardgame_expansions.dart';
 import '../utils/hub_category_visibility.dart';
 import '../services/profile_cache_service.dart';
 import '../widgets/profile_avatar.dart';
@@ -42,6 +43,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
   Map<CollectionCategory, int> _counts = {};
   Map<CollectionCategory, int> _groupCounts = {};
   Map<CollectionCategory, int> _wishlistCounts = {};
+  int _boardgameExpansionCount = 0;
   Map<String, int> _customCounts = {};
   bool _loadingCounts = true;
   List<HubTileEntry> _orderedTiles = [];
@@ -80,6 +82,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     final groupCounts = emptyCategoryCounts();
     final wishCounts = emptyCategoryCounts();
     final customCounts = <String, int>{};
+    var boardgameExpansionCount = 0;
     var orderedTiles = <HubTileEntry>[];
     var recommendationsList = <Recommendation>[];
     String? loadError;
@@ -89,15 +92,21 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
       final rows = await CollectionItemScope.personal(
         Supabase.instance.client
             .from('collection_items')
-            .select('category, subcategory, is_wishlist'),
+            .select(
+              'category, subcategory, is_wishlist, is_expansion, metadata',
+            ),
         userId: userId,
       );
 
+      final boardgameRows = <Map<String, dynamic>>[];
+
       for (final row in rows as List) {
-        final cat = CollectionCategory.fromDbValue(row['category'] as String);
-        final isWishlist = row['is_wishlist'] as bool? ?? false;
+        final map = Map<String, dynamic>.from(row as Map);
+        final cat = CollectionCategory.fromDbValue(map['category'] as String);
+        final isWishlist = map['is_wishlist'] as bool? ?? false;
+        final isExpansion = map['is_expansion'] as bool? ?? false;
         if (cat == CollectionCategory.custom) {
-          final sub = row['subcategory'] as String?;
+          final sub = map['subcategory'] as String?;
           if (sub != null) {
             if (isWishlist) {
               // wishlist custom — ignore for tile badge for now
@@ -107,29 +116,44 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
           }
           continue;
         }
+        if (cat == CollectionCategory.boardgame && !isWishlist) {
+          boardgameRows.add(map);
+        }
         if (isWishlist) {
           wishCounts[cat] = (wishCounts[cat] ?? 0) + 1;
-        } else {
+        } else if (!isExpansion) {
           counts[cat] = (counts[cat] ?? 0) + 1;
         }
       }
+
+      boardgameExpansionCount = countUniqueOwnedExpansions(boardgameRows);
 
       try {
         final groupIds = await CollectionItemScope.myGroupIds(userId);
         if (groupIds.isNotEmpty) {
           final gRows = await Supabase.instance.client
               .from('collection_items')
-              .select('category, is_wishlist, is_sold, is_for_sale')
+              .select(
+                'category, is_wishlist, is_sold, is_for_sale, is_expansion, metadata',
+              )
               .inFilter('group_id', groupIds);
           for (final row in gRows as List) {
-            final isWishlist = row['is_wishlist'] as bool? ?? false;
-            final isSold = row['is_sold'] as bool? ?? false;
-            final isForSale = row['is_for_sale'] as bool? ?? false;
+            final map = Map<String, dynamic>.from(row as Map);
+            final isWishlist = map['is_wishlist'] as bool? ?? false;
+            final isSold = map['is_sold'] as bool? ?? false;
+            final isForSale = map['is_for_sale'] as bool? ?? false;
             if (isWishlist || isSold || isForSale) continue;
             final cat =
-                CollectionCategory.fromDbValue(row['category'] as String);
-            groupCounts[cat] = (groupCounts[cat] ?? 0) + 1;
+                CollectionCategory.fromDbValue(map['category'] as String);
+            final isExpansion = map['is_expansion'] as bool? ?? false;
+            if (cat == CollectionCategory.boardgame) {
+              boardgameRows.add(map);
+            }
+            if (!isExpansion) {
+              groupCounts[cat] = (groupCounts[cat] ?? 0) + 1;
+            }
           }
+          boardgameExpansionCount = countUniqueOwnedExpansions(boardgameRows);
         }
       } catch (_) {
         // group_members RLS : compteurs perso OK, groupes ignorés
@@ -149,6 +173,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
         _counts = counts;
         _groupCounts = groupCounts;
         _wishlistCounts = wishCounts;
+        _boardgameExpansionCount = boardgameExpansionCount;
         _customCounts = customCounts;
         _orderedTiles = orderedTiles;
         _recommendationsList = recommendationsList;
@@ -396,6 +421,14 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     final total = count + groupCount;
     final countLabel = category.countSummary(total);
     final wishLabel = wishCount > 0 ? '♥ $wishCount en wishlist' : null;
+    final expansionCount = category == CollectionCategory.boardgame
+        ? _boardgameExpansionCount
+        : 0;
+    final expansionLabel = expansionCount > 0
+        ? expansionCount == 1
+            ? '1 extension'
+            : '$expansionCount extensions'
+        : null;
 
     return InkWell(
       onTap: () => _openCategory(category),
@@ -449,6 +482,29 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
                   color: Colors.amber.shade800,
                   fontWeight: FontWeight.w500,
                 ),
+              ),
+            ],
+            if (expansionLabel != null) ...[
+              const SizedBox(height: 2),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.extension_outlined,
+                    size: 12,
+                    color: Colors.green.shade600,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    expansionLabel,
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: Colors.green.shade700,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
               ),
             ],
           ],

@@ -36,6 +36,50 @@ class GroupService {
         .toList();
   }
 
+  /// Nombre d'objets boardgame par groupe (pour tri par activité).
+  Future<Map<String, int>> fetchGroupActivityCounts() async {
+    final userId = _userId;
+    if (userId == null) return {};
+    try {
+      final memberRows = await _client
+          .from('group_members')
+          .select('group_id')
+          .eq('profile_id', userId);
+      final ids = (memberRows as List)
+          .map((r) => r['group_id'] as String)
+          .toList();
+      if (ids.isEmpty) return {};
+
+      final rows = await _client
+          .from('collection_items')
+          .select('group_id, metadata')
+          .inFilter('group_id', ids)
+          .eq('category', 'boardgame');
+
+      final counts = <String, int>{};
+      for (final row in rows as List) {
+        final map = Map<String, dynamic>.from(row as Map);
+        final gid = map['group_id'] as String?;
+        if (gid != null && gid.isNotEmpty) {
+          counts[gid] = (counts[gid] ?? 0) + 1;
+        }
+        final meta = map['metadata'];
+        if (meta is Map) {
+          final extra = meta['group_ids'];
+          if (extra is List) {
+            for (final raw in extra) {
+              final id = raw.toString();
+              if (id.isNotEmpty) counts[id] = (counts[id] ?? 0) + 1;
+            }
+          }
+        }
+      }
+      return counts;
+    } catch (_) {
+      return {};
+    }
+  }
+
   Future<CollectionGroup> fetchGroup(String groupId) async {
     final row =
         await _client.from('groups').select().eq('id', groupId).single();

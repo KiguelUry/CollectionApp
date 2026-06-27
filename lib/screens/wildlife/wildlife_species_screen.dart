@@ -180,30 +180,9 @@ class _WildlifeSpeciesScreenState extends State<WildlifeSpeciesScreen> {
         context: context,
         barrierDismissible: false,
         builder: (ctx) => AlertDialog(
-          backgroundColor: WildlifePokedexTheme.panel,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: WildlifePokedexTheme.neon, width: 3),
-          ),
-          title: Row(
-            children: [
-              Icon(Icons.check_circle, color: WildlifePokedexTheme.neon),
-              const SizedBox(width: 8),
-              const Text(
-                'CAPTURE RÉUSSIE !',
-                style: TextStyle(
-                  color: WildlifePokedexTheme.neon,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 1,
-                ),
-              ),
-            ],
-          ),
-          content: Text(
-            '${widget.item.title} rejoint ton Pokédex.\n'
-            '${photoUrl != null ? 'Photo HD enregistrée.' : 'Ajoute une photo lors de ta prochaine sortie !'}',
-            style: const TextStyle(color: WildlifePokedexTheme.text),
-          ),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          content: WildlifePokedexTheme.captureFlashBanner(),
           actions: [
             FilledButton(
               onPressed: () => Navigator.pop(ctx),

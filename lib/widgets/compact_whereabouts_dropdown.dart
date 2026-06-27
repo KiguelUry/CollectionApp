@@ -7,13 +7,14 @@ import '../services/group_service.dart';
 import '../services/holder_place_history_service.dart';
 import '../utils/holder_label_utils.dart';
 
-/// « Chez ? » compact — membres uniques, saisie manuelle, défaut « Chez moi ».
+/// « Chez ? » — membre, ami ou saisie libre. La persistance est gérée par le parent via [onChanged].
 class CompactWhereaboutsDropdown extends StatefulWidget {
   final List<CollectionGroup> groups;
   final Set<String> selectedGroupIds;
   final String? locationUserId;
   final String? holderLabel;
   final bool readOnly;
+  final bool applyDefaultIfEmpty;
   final void Function({
     String? locationUserId,
     String? holderLabel,
@@ -28,6 +29,7 @@ class CompactWhereaboutsDropdown extends StatefulWidget {
     required this.locationUserId,
     required this.holderLabel,
     required this.readOnly,
+    this.applyDefaultIfEmpty = false,
     required this.onChanged,
   });
 
@@ -53,12 +55,12 @@ class _CompactWhereaboutsDropdownState
   final _groupService = GroupService();
   final _friendService = FriendService();
   final _manualFocusNode = FocusNode();
+  late TextEditingController _manualController;
 
   List<_MemberOption> _options = [];
   List<String> _placeSuggestions = [];
   bool _initialLoading = true;
   bool _defaultApplied = false;
-  late TextEditingController _manualController;
   bool _manualMode = false;
 
   bool get _isManualHolder =>
@@ -69,15 +71,15 @@ class _CompactWhereaboutsDropdownState
   @override
   void initState() {
     super.initState();
-    _syncManualStateFromWidget();
+    _syncFromWidget();
     _load(initial: true);
     _loadPlaceSuggestions();
   }
 
-  void _syncManualStateFromWidget() {
+  void _syncFromWidget() {
     _manualMode = _isManualHolder;
     _manualController = TextEditingController(
-      text: _manualMode
+      text: _isManualHolder
           ? holderLabelStorageValue(widget.holderLabel!.trim())
           : '',
     );
@@ -94,18 +96,22 @@ class _CompactWhereaboutsDropdownState
       _load(initial: false);
       _loadPlaceSuggestions();
     }
+
+    if (_manualMode || _manualFocusNode.hasFocus) return;
+
     if (oldWidget.holderLabel != widget.holderLabel ||
         oldWidget.locationUserId != widget.locationUserId) {
-      final manual = _isManualHolder;
-      if (manual) {
+      if (_isManualHolder) {
         _manualMode = true;
         final stripped = holderLabelStorageValue(widget.holderLabel!.trim());
         if (_manualController.text != stripped) {
           _manualController.text = stripped;
         }
-      } else if (_manualMode && widget.locationUserId != null) {
+      } else {
         _manualMode = false;
-        _manualFocusNode.unfocus();
+        if (widget.locationUserId != null) {
+          _manualController.clear();
+        }
       }
     }
   }
@@ -113,12 +119,6 @@ class _CompactWhereaboutsDropdownState
   static bool _setEquals(Set<String> a, Set<String> b) {
     if (a.length != b.length) return false;
     return a.containsAll(b);
-  }
-
-  @override
-  void deactivate() {
-    _manualFocusNode.unfocus();
-    super.deactivate();
   }
 
   @override
@@ -140,18 +140,18 @@ class _CompactWhereaboutsDropdownState
   }
 
   void _applyDefaultIfNeeded() {
-    if (widget.readOnly || _defaultApplied || _isManualHolder) return;
+    if (!widget.applyDefaultIfEmpty || widget.readOnly || _defaultApplied) {
+      return;
+    }
+    if (_isManualHolder || _manualMode) return;
     if (widget.locationUserId != null) return;
     final me = Supabase.instance.client.auth.currentUser?.id;
     if (me == null) return;
     _defaultApplied = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      widget.onChanged(
-        locationUserId: me,
-        holderLabel: 'Chez moi',
-      );
-    });
+    widget.onChanged(
+      locationUserId: me,
+      holderLabel: 'Chez moi',
+    );
   }
 
   Future<void> _load({required bool initial}) async {
@@ -247,7 +247,13 @@ class _CompactWhereaboutsDropdownState
   void _onDropdownChanged(String? v) {
     if (v == null || v.startsWith('hdr:')) return;
     if (v == 'manual') {
-      setState(() => _manualMode = true);
+      setState(() {
+        _manualMode = true;
+        if (!_isManualHolder) _manualController.clear();
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _manualFocusNode.requestFocus();
+      });
       return;
     }
     setState(() {
@@ -388,7 +394,8 @@ class _CompactWhereaboutsDropdownState
                 child: TextField(
                   controller: _manualController,
                   focusNode: _manualFocusNode,
-                  autofocus: false,
+                  enableInteractiveSelection: true,
+                  textInputAction: TextInputAction.done,
                   decoration: const InputDecoration(
                     labelText: 'Nom ou lieu',
                     isDense: true,

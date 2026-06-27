@@ -573,7 +573,7 @@ class _WildlifeCollectionScreenState extends State<WildlifeCollectionScreen> {
           count: _countAnimalGroup(k),
           countLabel: 'espèces',
           icon: _animalIcon(k),
-          color: WildlifePokedexTheme.neon,
+          color: WildlifePokedexTheme.kingdomGlow(k),
           delayMs: i * 50,
           entered: _entered,
           onTap: () => setState(() => _animalGroup = k),

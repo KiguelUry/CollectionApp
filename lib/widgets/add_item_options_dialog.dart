@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_group.dart';
 import '../services/group_service.dart';
+import '../utils/holder_label_utils.dart';
 import 'bgg_network_image.dart';
+import 'compact_whereabouts_dropdown.dart';
 import 'cover_preview_sheet.dart';
 import 'group_badge.dart';
-import 'item_whereabouts_field.dart';
-import 'personal_whereabouts_field.dart';
 
 class AddItemOptions {
   final bool isWishlist;
@@ -49,36 +49,78 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
   late bool _isWishlist;
   bool _shareWithGroup = false;
   String? _selectedGroupId;
-  String? _selectedLocationId;
-  String? _atMemberUserId;
-  String? _customHolderName;
-  bool _isLoanOnAdd = false;
-  String? _loanFriendId;
-  String? _loanExternalName;
+  String? _locationUserId;
+  String? _holderLabel;
   int _quantity = 1;
   List<CollectionGroup> _groups = [];
+  Map<String, int> _groupActivityCounts = {};
   bool _loading = true;
 
   @override
   void initState() {
     super.initState();
     _isWishlist = widget.defaultWishlist;
-    _atMemberUserId = Supabase.instance.client.auth.currentUser?.id;
+    _quantity = widget.defaultWishlist ? 0 : 1;
+    _locationUserId = Supabase.instance.client.auth.currentUser?.id;
     _load();
+  }
+
+  List<CollectionGroup> get _sortedGroups {
+    final copy = List<CollectionGroup>.from(_groups);
+    copy.sort((a, b) {
+      final ca = _groupActivityCounts[a.id] ?? 0;
+      final cb = _groupActivityCounts[b.id] ?? 0;
+      if (ca != cb) return cb.compareTo(ca);
+      return a.name.compareTo(b.name);
+    });
+    return copy;
   }
 
   Future<void> _load() async {
     var groups = <CollectionGroup>[];
+    var activity = <String, int>{};
     try {
-      groups = await _groupService.fetchMyGroups();
+      final results = await Future.wait([
+        _groupService.fetchMyGroups(),
+        _groupService.fetchGroupActivityCounts(),
+      ]);
+      groups = results[0] as List<CollectionGroup>;
+      activity = results[1] as Map<String, int>;
     } catch (_) {}
     if (mounted) {
       setState(() {
         _groups = groups;
-        if (_groups.isNotEmpty) _selectedGroupId = _groups.first.id;
+        _groupActivityCounts = activity;
         _loading = false;
       });
     }
+  }
+
+  void _onWhereaboutsChanged({
+    String? locationUserId,
+    String? holderLabel,
+    bool clearHolder = false,
+    bool manualHolder = false,
+  }) {
+    setState(() {
+      if (manualHolder) {
+        _locationUserId = null;
+        _holderLabel = holderLabel;
+      } else if (clearHolder) {
+        _locationUserId = null;
+        _holderLabel = null;
+      } else {
+        _locationUserId = locationUserId;
+        _holderLabel = holderLabel;
+      }
+    });
+  }
+
+  String? _holderLabelForSave() {
+    if (_locationUserId != null) return null;
+    final label = _holderLabel?.trim();
+    if (label == null || label.isEmpty) return null;
+    return holderLabelStorageValue(formatManualHolderLabel(label));
   }
 
   @override
@@ -135,7 +177,14 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                         contentPadding: EdgeInsets.zero,
                         title: const Text('Wishlist'),
                         value: _isWishlist,
-                        onChanged: (v) => setState(() => _isWishlist = v),
+                        onChanged: (v) => setState(() {
+                          _isWishlist = v;
+                          if (v) {
+                            _quantity = 0;
+                          } else if (_quantity == 0) {
+                            _quantity = 1;
+                          }
+                        }),
                       )
                     else
                       ListTile(
@@ -156,32 +205,37 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                         value: _shareWithGroup,
                         onChanged: (v) => setState(() {
                           _shareWithGroup = v;
-                          _selectedLocationId = null;
+                          if (!v) _selectedGroupId = null;
                         }),
                       ),
                       if (_shareWithGroup && _groups.isNotEmpty)
                         DropdownButtonFormField<String>(
-                          initialValue: _selectedGroupId,
+                          value: _selectedGroupId,
+                          isExpanded: true,
                           decoration: const InputDecoration(
                             labelText: 'Groupe',
                           ),
-                          items: _groups
+                          hint: const Text('Choisir un groupe'),
+                          items: _sortedGroups
                               .map(
-                                (g) => DropdownMenuItem(
-                                  value: g.id,
-                                  child: GroupBadge.dropdownLabel(
-                                    name: g.name,
-                                    avatarUrl: g.avatarUrl,
-                                    accentColor: g.accentColor,
-                                    iconKey: g.iconKey,
-                                  ),
-                                ),
+                                (g) {
+                                  final count = _groupActivityCounts[g.id] ?? 0;
+                                  final label = count > 0
+                                      ? '${g.name} ($count)'
+                                      : g.name;
+                                  return DropdownMenuItem(
+                                    value: g.id,
+                                    child: GroupBadge.dropdownLabel(
+                                      name: label,
+                                      avatarUrl: g.avatarUrl,
+                                      accentColor: g.accentColor,
+                                      iconKey: g.iconKey,
+                                    ),
+                                  );
+                                },
                               )
                               .toList(),
-                          onChanged: (v) => setState(() {
-                            _selectedGroupId = v;
-                            _selectedLocationId = null;
-                          }),
+                          onChanged: (v) => setState(() => _selectedGroupId = v),
                         )
                       else if (_shareWithGroup && _groups.isEmpty)
                         const Text(
@@ -190,60 +244,26 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                         ),
                       const SizedBox(height: 8),
                       if (_shareWithGroup && _selectedGroupId != null)
-                        ItemWhereaboutsField(
+                        CompactWhereaboutsDropdown(
                           key: ValueKey('gm_$_selectedGroupId'),
-                          groupId: _selectedGroupId!,
-                          locationUserId: _atMemberUserId,
-                          holderLabel: null,
-                          customHolderName: _customHolderName,
-                          isOnLoan: _isLoanOnAdd,
-                          loanedToId: _loanFriendId,
-                          loanedToName: _loanExternalName,
-                          onChanged: ({
-                            locationUserId,
-                            holderLabel,
-                            customHolderName,
-                            clearHolder = false,
-                            loanedToId,
-                            loanedToName,
-                            clearLoan = false,
-                          }) => setState(() {
-                            if (clearLoan) {
-                              _isLoanOnAdd = false;
-                              _loanFriendId = null;
-                              _loanExternalName = null;
-                              _atMemberUserId = locationUserId;
-                              _customHolderName = customHolderName;
-                            } else if (loanedToName != null ||
-                                loanedToId != null) {
-                              _isLoanOnAdd = true;
-                              _loanFriendId = loanedToId;
-                              _loanExternalName = loanedToName;
-                              _atMemberUserId = null;
-                              _customHolderName = null;
-                            } else {
-                              _isLoanOnAdd = false;
-                              _atMemberUserId =
-                                  clearHolder ? null : locationUserId;
-                              _customHolderName = customHolderName;
-                            }
-                          }),
+                          groups: _groups,
+                          selectedGroupIds: {_selectedGroupId!},
+                          locationUserId: _locationUserId,
+                          holderLabel: _holderLabel,
+                          readOnly: false,
+                          applyDefaultIfEmpty: true,
+                          onChanged: _onWhereaboutsChanged,
                         )
-                      else
-                        PersonalWhereaboutsField(
+                      else if (!_shareWithGroup)
+                        CompactWhereaboutsDropdown(
                           key: const ValueKey('pers_add'),
-                          locationUserId: _atMemberUserId,
-                          customHolderName: _customHolderName,
-                          onChanged: ({
-                            locationUserId,
-                            holderLabel,
-                            customHolderName,
-                            clearHolder = false,
-                          }) => setState(() {
-                            _atMemberUserId =
-                                clearHolder ? null : locationUserId;
-                            _customHolderName = customHolderName;
-                          }),
+                          groups: const [],
+                          selectedGroupIds: const {},
+                          locationUserId: _locationUserId,
+                          holderLabel: _holderLabel,
+                          readOnly: false,
+                          applyDefaultIfEmpty: true,
+                          onChanged: _onWhereaboutsChanged,
                         ),
                       const SizedBox(height: 12),
                       Wrap(
@@ -285,19 +305,27 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
           onPressed: _loading
               ? null
               : () async {
+                  if (_shareWithGroup &&
+                      !_isWishlist &&
+                      _selectedGroupId == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Choisis un groupe pour le partage'),
+                      ),
+                    );
+                    return;
+                  }
                   final userId =
                       Supabase.instance.client.auth.currentUser!.id;
                   final options = AddItemOptions(
                     isWishlist: _isWishlist,
-                    locationUserId: _isWishlist || _isLoanOnAdd
+                    locationUserId: _isWishlist
                         ? null
                         : (_shareWithGroup
-                            ? _atMemberUserId
-                            : (_atMemberUserId ?? userId)),
+                            ? _locationUserId
+                            : (_locationUserId ?? userId)),
                     groupId: _shareWithGroup ? _selectedGroupId : null,
-                    locationId:
-                        _shareWithGroup ? _selectedLocationId : null,
-                    holderLabel: _customHolderName,
+                    holderLabel: _holderLabelForSave(),
                     quantity: _quantity,
                   );
                   try {

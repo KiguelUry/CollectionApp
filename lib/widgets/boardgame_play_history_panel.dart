@@ -497,6 +497,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
         coopTeamCount: _winCondition == BoardgameWinCondition.cooperative
             ? _coopTeamCount
             : null,
+        createdAt: widget.initial?.createdAt ?? DateTime.now(),
       ),
     );
   }

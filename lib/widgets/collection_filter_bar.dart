@@ -100,7 +100,31 @@ class CollectionFilterBar extends StatelessWidget {
                 PopupMenuButton<CollectionSort>(
                   tooltip: 'Trier',
                   initialValue: filters.sort,
-                  onSelected: (s) => onChanged(filters.copyWith(sort: s)),
+                  onSelected: (s) {
+                    if (s == CollectionSort.ratingDesc &&
+                        filters.sort == CollectionSort.ratingDesc) {
+                      onChanged(
+                        filters.copyWith(
+                          ratingAscending: !filters.ratingAscending,
+                        ),
+                      );
+                    } else if (s == CollectionSort.bggRatingDesc &&
+                        filters.sort == CollectionSort.bggRatingDesc) {
+                      onChanged(
+                        filters.copyWith(
+                          bggRatingAscending: !filters.bggRatingAscending,
+                        ),
+                      );
+                    } else {
+                      onChanged(
+                        filters.copyWith(
+                          sort: s,
+                          ratingAscending: false,
+                          bggRatingAscending: false,
+                        ),
+                      );
+                    }
+                  },
                   itemBuilder: (context) => [
                     const PopupMenuItem(
                       value: CollectionSort.titleAsc,
@@ -120,8 +144,13 @@ class CollectionFilterBar extends StatelessWidget {
                     ),
                     const PopupMenuItem(
                       value: CollectionSort.ratingDesc,
-                      child: Text('Mieux notés'),
+                      child: Text('Ma note'),
                     ),
+                    if (showBoardgameGenreFilter)
+                      const PopupMenuItem(
+                        value: CollectionSort.bggRatingDesc,
+                        child: Text('Note communautaire'),
+                      ),
                     const PopupMenuItem(
                       value: CollectionSort.quantityDesc,
                       child: Text('Quantité'),

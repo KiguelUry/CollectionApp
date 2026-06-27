@@ -242,6 +242,12 @@ function parseThingItem(xml: string, id: string): Record<string, unknown> | null
     }
   }
 
+  const desc = inner.match(/<description>([\s\S]*?)<\/description>/i)?.[1];
+  const cleanDesc = stripHtml(desc);
+  const bestPlayers = parseBestPlayerCount(inner);
+  const avgRaw = inner.match(/<average[^>]*value="([^"]*)"/i)?.[1];
+  const avgRating = avgRaw ? parseFloat(avgRaw) : undefined;
+
   return {
     bgg_id: id,
     ...(image ? { image_url: image } : {}),
@@ -254,6 +260,11 @@ function parseThingItem(xml: string, id: string): Record<string, unknown> | null
     playing_time:
       playingTime != null && playingTime > 0 ? playingTime : null,
     ...(categories.length ? { bgg_categories: categories } : {}),
+    ...(cleanDesc ? { bgg_description: cleanDesc } : {}),
+    ...(avgRating != null && !Number.isNaN(avgRating) && avgRating > 0
+      ? { bgg_avg_rating: avgRating }
+      : {}),
+    ...(bestPlayers != null ? { bgg_best_players: bestPlayers } : {}),
     ...(isExpansion ? { bgg_is_expansion: true } : {}),
     ...(baseBggId ? { base_game_bgg_id: baseBggId } : {}),
     ...(baseTitle ? { base_game_title: baseTitle } : {}),
@@ -263,6 +274,58 @@ function parseThingItem(xml: string, id: string): Record<string, unknown> | null
 function stripHtml(html: string | undefined): string {
   if (!html) return "";
   return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+async function fetchGeekItemExtras(
+  id: string,
+): Promise<Record<string, unknown>> {
+  try {
+    const res = await fetch(
+      `https://boardgamegeek.com/api/geekitems?objectid=${id}&objecttype=thing`,
+      {
+        headers: {
+          "User-Agent": "Collectingo/1.1",
+          Accept: "application/json",
+        },
+      },
+    );
+    if (!res.ok) return {};
+    const data = await res.json();
+    const short = data?.item?.short_description?.toString?.()?.trim();
+    return short ? { bgg_short_description: short } : {};
+  } catch {
+    return {};
+  }
+}
+
+function parseBestPlayerCount(inner: string): number | undefined {
+  const pollRe =
+    /<poll\b[^>]*\bname="suggested_numplayers"[^>]*>([\s\S]*?)<\/poll>/i;
+  const pollMatch = inner.match(pollRe);
+  if (!pollMatch) return undefined;
+
+  const pollInner = pollMatch[1];
+  let bestCount: number | undefined;
+  let maxVotes = 0;
+  const resultsRe = /<results\b[^>]*\bnumplayers="([^"]*)"[^>]*>([\s\S]*?)<\/results>/gi;
+  let rm: RegExpExecArray | null;
+  while ((rm = resultsRe.exec(pollInner)) !== null) {
+    const numMatch = rm[1].match(/^(\d+)/);
+    if (!numMatch) continue;
+    const numPlayers = parseInt(numMatch[1], 10);
+    if (Number.isNaN(numPlayers)) continue;
+
+    const resultsInner = rm[2];
+    const bestVoteMatch = resultsInner.match(
+      /<result\b[^>]*\bvalue="Best"[^>]*\bnumvotes="(\d+)"/i,
+    );
+    const votes = bestVoteMatch ? parseInt(bestVoteMatch[1], 10) : 0;
+    if (!Number.isNaN(votes) && votes > maxVotes) {
+      maxVotes = votes;
+      bestCount = numPlayers;
+    }
+  }
+  return maxVotes > 0 ? bestCount : undefined;
 }
 
 function parseExpansions(xml: string): Array<Record<string, unknown>> {
@@ -487,10 +550,13 @@ async function handleGame(id: string): Promise<Response> {
   if (!/^\d+$/.test(id)) {
     return json({ error: "Invalid id" }, 400);
   }
-  const xml = await fetchBgg("/xmlapi2/thing", { id });
+  const [xml, extras] = await Promise.all([
+    fetchBgg("/xmlapi2/thing", { id, stats: "1" }),
+    fetchGeekItemExtras(id),
+  ]);
   const game = parseThingItem(xml, id);
   if (!game) return json({ error: "Not found" }, 404);
-  return json({ game });
+  return json({ game: { ...game, ...extras } });
 }
 
 async function handleExpansions(id: string): Promise<Response> {

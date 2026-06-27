@@ -14,6 +14,8 @@ class BoardgamePlaySession {
   final bool useTeams;
   final bool? coopVictory;
   final int? coopTeamCount;
+  /// Heure d'ajout (tri stable quand plusieurs parties ont la même date).
+  final DateTime? createdAt;
 
   const BoardgamePlaySession({
     required this.date,
@@ -27,6 +29,7 @@ class BoardgamePlaySession {
     this.useTeams = false,
     this.coopVictory,
     this.coopTeamCount,
+    this.createdAt,
   });
 
   factory BoardgamePlaySession.fromJson(Map<String, dynamic> json) {
@@ -50,6 +53,12 @@ class BoardgamePlaySession {
     }
     scores ??= grid?.hasScores == true ? grid!.toLegacyScores() : null;
 
+    DateTime? createdAt;
+    final rawCreated = json['created_at']?.toString();
+    if (rawCreated != null && rawCreated.isNotEmpty) {
+      createdAt = DateTime.tryParse(rawCreated);
+    }
+
     return BoardgamePlaySession(
       date: DateTime.tryParse(json['date']?.toString() ?? '') ?? DateTime.now(),
       players: grid?.activePlayers.isNotEmpty == true
@@ -66,11 +75,14 @@ class BoardgamePlaySession {
       useTeams: json['use_teams'] as bool? ?? grid?.hasTeams == true,
       coopVictory: json['coop_victory'] as bool?,
       coopTeamCount: json['coop_team_count'] as int?,
+      createdAt: createdAt,
     );
   }
 
   Map<String, dynamic> toJson() => {
         'date': DateFormat('yyyy-MM-dd').format(date),
+        if (createdAt != null)
+          'created_at': createdAt!.toUtc().toIso8601String(),
         if (players.isNotEmpty) 'players': players,
         if (winner != null && winner!.isNotEmpty) 'winner': winner,
         if (trackScores && scoreGrid != null) 'score_grid': scoreGrid!.toJson(),
@@ -173,12 +185,49 @@ class BoardgamePlaySession {
   }
 }
 
+/// Tri décroissant : date, puis heure d'ajout, puis ordre d'enregistrement.
+int compareBoardgamePlaySessions(
+  BoardgamePlaySession a,
+  int indexA,
+  BoardgamePlaySession b,
+  int indexB,
+) {
+  final byDate = b.date.compareTo(a.date);
+  if (byDate != 0) return byDate;
+
+  final ca = a.createdAt;
+  final cb = b.createdAt;
+  if (ca != null && cb != null) {
+    final byCreated = cb.compareTo(ca);
+    if (byCreated != 0) return byCreated;
+  } else if (ca != null) {
+    return -1;
+  } else if (cb != null) {
+    return 1;
+  }
+
+  // Legacy : index 0 = ajout le plus récent (insert en tête).
+  return indexA.compareTo(indexB);
+}
+
 List<BoardgamePlaySession> parseBoardgamePlays(Map<String, dynamic>? metadata) {
   final raw = metadata?['boardgame_plays'];
   if (raw is! List) return [];
-  return raw
-      .whereType<Map>()
-      .map((e) => BoardgamePlaySession.fromJson(Map<String, dynamic>.from(e)))
-      .toList()
-    ..sort((a, b) => b.date.compareTo(a.date));
+  final indexed = raw.whereType<Map>().toList().asMap().entries.map((entry) {
+    return (
+      index: entry.key,
+      session: BoardgamePlaySession.fromJson(
+        Map<String, dynamic>.from(entry.value),
+      ),
+    );
+  }).toList();
+  indexed.sort(
+    (a, b) => compareBoardgamePlaySessions(
+      a.session,
+      a.index,
+      b.session,
+      b.index,
+    ),
+  );
+  return indexed.map((e) => e.session).toList();
 }

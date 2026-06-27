@@ -3,6 +3,7 @@ import '../screens/login_screen.dart';
 import '../screens/profile_edit_screen.dart';
 import '../screens/inventory_manage_screen.dart';
 import '../screens/loans_screen.dart';
+import '../screens/marketplace/marketplace_screen.dart';
 import '../screens/stats_screen.dart';
 import '../services/auth_service.dart';
 import '../services/profile_cache_service.dart';
@@ -172,6 +173,11 @@ class _MainDrawerState extends State<MainDrawer> {
                     icon: Icons.handshake_rounded,
                     label: 'Prêts',
                     onTap: () => _closeAndPush(const LoansScreen()),
+                  ),
+                  _item(
+                    icon: Icons.storefront_outlined,
+                    label: 'Hôtel des Ventes / Échanges',
+                    onTap: () => _closeAndPush(const MarketplaceScreen()),
                   ),
                   _item(
                     icon: Icons.copy_all_rounded,

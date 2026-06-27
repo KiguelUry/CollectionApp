@@ -113,6 +113,9 @@ Future<void> quickAddBoardgameFromCatalog(
                 'bgg_is_expansion',
                 'base_game_bgg_id',
                 'base_game_title',
+                'bgg_short_description',
+                'bgg_avg_rating',
+                'bgg_best_players',
               ]) {
                 final v = details[key];
                 if (v != null) meta[key] = v;
@@ -153,6 +156,9 @@ Future<void> quickAddBoardgameFromCatalog(
                 'year_published',
                 'min_age',
                 'bgg_categories',
+                'bgg_short_description',
+                'bgg_avg_rating',
+                'bgg_best_players',
               ]) {
                 final v = details[key];
                 if (v != null) meta[key] = v;

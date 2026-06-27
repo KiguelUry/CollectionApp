@@ -34,6 +34,9 @@ CollectionItem _itemFromGame(
       'bgg_is_expansion',
       'base_game_bgg_id',
       'base_game_title',
+      'bgg_short_description',
+      'bgg_avg_rating',
+      'bgg_best_players',
     ]) {
       final v = details[key];
       if (v != null) meta[key] = v;

@@ -461,8 +461,8 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
           padding: const EdgeInsets.all(12),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: CollectionGridLayout.crossAxisCount(context),
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
+            crossAxisSpacing: CollectionGridLayout.gridCrossSpacing,
+            mainAxisSpacing: CollectionGridLayout.gridMainSpacing,
             childAspectRatio:
                 CollectionGridLayout.aspectRatio(category, context),
           ),
@@ -477,6 +477,13 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
               totalQuantity: entry.totalQuantity,
               showDuplicateBadge: entry.hasDuplicates,
               showGroupBadge: false,
+              groupNamesById: {widget.group.id: widget.group.name},
+              boardgameQuickEditGroups: category == CollectionCategory.boardgame
+                  ? [widget.group]
+                  : null,
+              groupActivityCounts: category == CollectionCategory.boardgame
+                  ? {widget.group.id: items.length}
+                  : const {},
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(

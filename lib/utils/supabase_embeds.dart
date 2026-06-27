@@ -16,6 +16,10 @@ abstract final class SupabaseEmbeds {
   static const loanedToProfile =
       'profiles!collection_items_loaned_to_id_fkey(username)';
 
+  /// Objet + localisation + groupe principal + détenteur (listes / grilles).
+  static const collectionItemList =
+      '*, $locationsLabel, $groupsName, location_holder:$locationHolderProfile';
+
   /// Objet + localisation + groupe principal.
   static const collectionItem =
       '*, $locationsLabel, $groupsName';

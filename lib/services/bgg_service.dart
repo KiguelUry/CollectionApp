@@ -693,6 +693,14 @@ class BggService {
       }
     }
 
+    final desc = _stripHtml(
+      item.findElements('description').firstOrNull?.innerText,
+    );
+    final bestPlayers = _parseBestPlayerCount(item);
+    final avgRaw =
+        item.findAllElements('average').firstOrNull?.getAttribute('value');
+    final avgRating = double.tryParse(avgRaw ?? '');
+
     return {
       if (bggId != null) 'bgg_id': bggId,
       if (image != null && image.isNotEmpty) 'image_url': image,
@@ -702,6 +710,9 @@ class BggService {
       'max_players': parseAttr('maxplayers'),
       'playing_time': _positivePlayingTime(playingTime),
       if (categories.isNotEmpty) 'bgg_categories': categories,
+      if (desc.isNotEmpty) 'bgg_description': desc,
+      if (avgRating != null && avgRating > 0) 'bgg_avg_rating': avgRating,
+      if (bestPlayers != null) 'bgg_best_players': bestPlayers,
       if (isExpansion) 'bgg_is_expansion': true,
       if (baseBggId != null) 'base_game_bgg_id': baseBggId,
       if (baseTitle != null && baseTitle.isNotEmpty)
@@ -713,6 +724,87 @@ class BggService {
   static String? gamePageUrl(String? bggId) {
     if (bggId == null || bggId.isEmpty) return null;
     return 'https://boardgamegeek.com/boardgame/$bggId';
+  }
+
+  static String? expansionPageUrl(String? bggId) {
+    if (bggId == null || bggId.isEmpty) return null;
+    return 'https://boardgamegeek.com/boardgameexpansion/$bggId';
+  }
+
+  /// Accroche BGG officielle (`short_description` sur le site).
+  static Future<String?> fetchThingDescription(String bggId) async {
+    if (bggId.isEmpty) return null;
+    final details = await getGameFullDetails(bggId);
+    final short = details?['bgg_short_description']?.toString().trim();
+    if (short != null && short.isNotEmpty) return short;
+    return null;
+  }
+
+  /// `short_description` BGG (API interne geekitems, absente du XML API2).
+  static Future<Map<String, dynamic>> _fetchGeekItemExtras(String bggId) async {
+    if (bggId.isEmpty) return {};
+    try {
+      final uri = Uri.https('boardgamegeek.com', '/api/geekitems', {
+        'objectid': bggId,
+        'objecttype': 'thing',
+      });
+      final response = await http.get(
+        uri,
+        headers: {
+          'User-Agent': 'CollectionFamille/1.0',
+          'Accept': 'application/json',
+        },
+      );
+      if (response.statusCode != 200 || response.body.isEmpty) return {};
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map) return {};
+      final item = decoded['item'];
+      if (item is! Map) return {};
+      final short = item['short_description']?.toString().trim();
+      if (short == null || short.isEmpty) return {};
+      return {'bgg_short_description': short};
+    } catch (e) {
+      if (kDebugMode) debugPrint('BGG geekitems $bggId: $e');
+      return {};
+    }
+  }
+
+  static int? _parseBestPlayerCount(XmlElement item) {
+    XmlElement? poll;
+    for (final p in item.findAllElements('poll')) {
+      if (p.getAttribute('name') == 'suggested_numplayers') {
+        poll = p;
+        break;
+      }
+    }
+    if (poll == null) return null;
+
+    int? bestCount;
+    var maxVotes = 0;
+    for (final results in poll.findElements('results')) {
+      final numPlayers = _parsePollNumPlayers(
+        results.getAttribute('numplayers'),
+      );
+      if (numPlayers == null) continue;
+
+      for (final result in results.findElements('result')) {
+        if (result.getAttribute('value') != 'Best') continue;
+        final votes =
+            int.tryParse(result.getAttribute('numvotes') ?? '') ?? 0;
+        if (votes > maxVotes) {
+          maxVotes = votes;
+          bestCount = numPlayers;
+        }
+      }
+    }
+    return maxVotes > 0 ? bestCount : null;
+  }
+
+  static int? _parsePollNumPlayers(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+    final match = RegExp(r'^(\d+)').firstMatch(raw.trim());
+    if (match == null) return null;
+    return int.tryParse(match.group(1)!);
   }
 
   @Deprecated('Use gamePageUrl')
@@ -859,18 +951,31 @@ class BggService {
     }
 
     try {
-      final url = Uri.https('boardgamegeek.com', '/xmlapi2/thing', {
-        'id': bggId,
-      });
-      final response = await _getWithRetry(url);
-
-      if (response.statusCode == 200 && response.body.isNotEmpty) {
-        final document = XmlDocument.parse(response.body);
-        final item = document.findAllElements('item').firstOrNull;
-        if (item != null) return _parseThingItem(item);
-      }
+      final results = await Future.wait<Object?>([
+        _fetchThingXmlDetails(bggId),
+        _fetchGeekItemExtras(bggId),
+      ]);
+      final thing = results[0] as Map<String, dynamic>?;
+      final extras = results[1] as Map<String, dynamic>? ?? {};
+      if (thing == null && extras.isEmpty) return null;
+      return {...?thing, ...extras};
     } catch (e) {
       if (kDebugMode) debugPrint('Erreur détails BGG: $e');
+    }
+    return null;
+  }
+
+  static Future<Map<String, dynamic>?> _fetchThingXmlDetails(String bggId) async {
+    final url = Uri.https('boardgamegeek.com', '/xmlapi2/thing', {
+      'id': bggId,
+      'stats': '1',
+    });
+    final response = await _getWithRetry(url);
+
+    if (response.statusCode == 200 && response.body.isNotEmpty) {
+      final document = XmlDocument.parse(response.body);
+      final item = document.findAllElements('item').firstOrNull;
+      if (item != null) return _parseThingItem(item);
     }
     return null;
   }

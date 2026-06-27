@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/book_subcategory.dart';
 import '../models/category_metadata.dart';
@@ -22,6 +23,7 @@ import '../widgets/star_rating_bar.dart';
 import '../widgets/assign_book_series_sheet.dart';
 import '../widgets/item_tags_editor.dart';
 import '../widgets/boardgame_expansions_section.dart';
+import '../widgets/bgg_community_rating_panel.dart';
 import '../models/boardgame_play_session.dart';
 import '../widgets/boardgame_play_history_panel.dart';
 import '../widgets/collapsible_section.dart';
@@ -36,17 +38,21 @@ import '../services/boardgame_expansion_service.dart';
 import '../utils/boardgame_display.dart';
 import '../utils/boardgame_collection_visibility.dart';
 import '../utils/boardgame_expansion_flow.dart';
+import '../utils/boardgame_expansions.dart';
 import '../services/bgg_service.dart';
+import '../services/global_play_history_service.dart';
 import '../utils/copy_friend_item.dart';
 import '../utils/friend_item_overlap.dart';
-import '../utils/boardgame_expansions.dart';
-import '../utils/holder_label_utils.dart';
+import '../utils/whereabouts_apply.dart';
+import '../utils/whereabouts_persistence.dart';
+import '../utils/owned_quantity_index.dart';
 import '../utils/navigate_to_card_set.dart';
 import '../utils/wishlist_promote.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class ItemDetailScreen extends StatefulWidget {
   final CollectionItem item;
+  final int? ownedQuantity;
   final bool readOnly;
   final String? friendUsername;
   final FriendOverlapKind? friendOverlap;
@@ -54,6 +60,7 @@ class ItemDetailScreen extends StatefulWidget {
   const ItemDetailScreen({
     super.key,
     required this.item,
+    this.ownedQuantity,
     this.readOnly = false,
     this.friendUsername,
     this.friendOverlap,
@@ -79,11 +86,19 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
   Timer? _quantityDebounce;
   bool _saveInFlight = false;
   bool _saveQueued = false;
+  String? _bggDescription;
+  bool _bggDescriptionLoading = false;
+  int? _bggBestPlayers;
+  double? _bggAvgRating;
+
+  int _ownedDisplayQty = 0;
 
   @override
   void initState() {
     super.initState();
     _item = widget.item;
+    _ownedDisplayQty = widget.ownedQuantity ??
+        (_item.isWishlist ? 0 : _item.quantity);
     _condition = _item.itemCondition;
     _reviewController = TextEditingController(text: _item.review ?? '');
     _priceController = TextEditingController(
@@ -96,6 +111,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       text: _item.personalRules ?? '',
     );
     _syncGroupSelectionFromItem();
+    _loadBggDescription();
     if (!widget.readOnly) {
       _reviewController.addListener(_scheduleSave);
       _priceController.addListener(_scheduleSave);
@@ -104,7 +120,97 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       _loadGroups();
       _loadGroupMembership();
       _reloadItem();
+      if (widget.ownedQuantity == null && _item.isWishlist) {
+        _resolveOwnedQuantity();
+      }
     }
+  }
+
+  Future<void> _resolveOwnedQuantity() async {
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    if (uid == null) return;
+    try {
+      final rows = await Supabase.instance.client
+          .from('collection_items')
+          .select('title, category, subcategory, metadata, quantity, is_wishlist, is_sold')
+          .eq('category', _item.category.dbValue);
+      final items = (rows as List)
+          .map((r) => CollectionItem.fromJson(Map<String, dynamic>.from(r)))
+          .toList();
+      final idx = buildOwnedQuantityIndex(items);
+      if (mounted) {
+        setState(() => _ownedDisplayQty = ownedQuantityFor(_item, idx));
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _loadBggDescription() async {
+    if (_item.category != CollectionCategory.boardgame) return;
+
+    final meta = _item.metadata;
+    final bestFromMeta = parseBggBestPlayers(meta?['bgg_best_players']);
+    final avgFromMeta = parseBggAvgRating(meta?['bgg_avg_rating']);
+    if (mounted) {
+      setState(() {
+        if (bestFromMeta != null) _bggBestPlayers = bestFromMeta;
+        if (avgFromMeta != null) _bggAvgRating = avgFromMeta;
+      });
+    }
+
+    final shortFromMeta = meta?['bgg_short_description']?.toString().trim();
+    if (shortFromMeta != null && shortFromMeta.isNotEmpty) {
+      if (mounted) setState(() => _bggDescription = shortFromMeta);
+      if (bestFromMeta != null && avgFromMeta != null) return;
+    }
+
+    final bggId = meta?['bgg_id']?.toString();
+    if (bggId == null || bggId.isEmpty) return;
+
+    if (mounted) setState(() => _bggDescriptionLoading = true);
+    final details = await BggService.getGameFullDetails(bggId);
+    if (!mounted) return;
+    final short = details?['bgg_short_description']?.toString().trim();
+    setState(() {
+      if (short != null && short.isNotEmpty) {
+        _bggDescription = short;
+      }
+      _bggBestPlayers =
+          _bggBestPlayers ?? parseBggBestPlayers(details?['bgg_best_players']);
+      _bggAvgRating =
+          _bggAvgRating ?? parseBggAvgRating(details?['bgg_avg_rating']);
+      _bggDescriptionLoading = false;
+    });
+    await _persistBggExtrasToMetadata(details);
+  }
+
+  Future<void> _persistBggExtrasToMetadata(
+    Map<String, dynamic>? details,
+  ) async {
+    if (details == null || widget.readOnly) return;
+
+    final meta = Map<String, dynamic>.from(_item.metadata ?? {});
+    var dirty = false;
+    for (final key in [
+      'bgg_short_description',
+      'bgg_avg_rating',
+      'bgg_best_players',
+    ]) {
+      final v = details[key];
+      if (v == null) continue;
+      if (meta[key] == v) continue;
+      meta[key] = v;
+      dirty = true;
+    }
+    if (!dirty || !mounted) return;
+
+    setState(() => _item = _item.copyWith(metadata: meta));
+    try {
+      await Supabase.instance.client
+          .from('collection_items')
+          .update({'metadata': meta})
+          .eq('id', _item.id);
+      CollectionRefresh.instance.bump();
+    } catch (_) {}
   }
 
   Future<void> _loadGroupMembership() async {
@@ -270,18 +376,8 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
   }
 
   Map<String, dynamic> _metadataForSave(List<String> groupIds) {
-    final meta = _metadataWithGroups(groupIds);
-    if (_item.locationUserId != null) {
-      meta.remove('holder_label');
-    } else {
-      final label = _item.locationLabel?.trim();
-      if (label != null && label.isNotEmpty && label != '—') {
-        meta['holder_label'] = holderLabelStorageValue(label);
-      } else {
-        meta.remove('holder_label');
-      }
-    }
-    return meta;
+    return buildWhereaboutsDbFields(_item, groupIds: groupIds)['metadata']
+        as Map<String, dynamic>;
   }
 
   String? _groupNameById(String id) {
@@ -328,7 +424,8 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
   }
 
   void _adjustQuantity(int delta) {
-    final next = (_item.quantity + delta).clamp(1, 9999);
+    final minQ = _item.isWishlist ? 0 : 1;
+    final next = (_item.quantity + delta).clamp(minQ, 9999);
     if (next == _item.quantity) return;
     setState(() => _item = _item.copyWith(quantity: next));
     _quantityDebounce?.cancel();
@@ -360,9 +457,14 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     );
 
     try {
+      final whereabouts = buildWhereaboutsDbFields(_item, groupIds: groupIds);
+      final payload = _item.toUpdateJson();
+      payload['metadata'] = whereabouts['metadata'];
+      payload['location_user_id'] = whereabouts['location_user_id'];
+      payload['group_id'] = groupIds.isEmpty ? null : groupIds.first;
       await Supabase.instance.client
           .from('collection_items')
-          .update(_item.toUpdateJson())
+          .update(payload)
           .eq('id', _item.id);
       await _itemGroupService.syncItemGroups(_item.id, groupIds);
       await _reloadItem();
@@ -395,7 +497,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
   }
 
   Future<void> _lend() async {
-    if (_item.isWishlist || _item.isSold) return;
+    if (_item.isWishlist || _item.isSold || _ownedDisplayQty <= 0) return;
 
     final result = await showLoanItemDialog(
       context: context,
@@ -497,6 +599,10 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     );
     if (confirm != true || !mounted) return;
 
+    if (_item.category == CollectionCategory.boardgame) {
+      await GlobalPlayHistoryService().archivePlaysFromDeletedItem(_item);
+    }
+
     await Supabase.instance.client
         .from('collection_items')
         .delete()
@@ -517,7 +623,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
         (_item.metadata?['set_id']?.toString().trim().isNotEmpty ?? false);
     final ro = widget.readOnly;
     final isWishlist = _item.isWishlist;
-    final ownedQty = isWishlist ? 0 : _item.quantity;
+    final ownedQty = _ownedDisplayQty;
 
     final expansionOf = boardgameExpansionOfLabel(_item);
 
@@ -732,9 +838,9 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                           Chip(label: Text(_item.cardSubcategory!.label)),
                       ],
                     ),
-                    if (_item.createdAtLabel != null || !isWishlist) ...[
-                      const SizedBox(height: 4),
-                      Row(
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Row(
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
                           if (_item.createdAtLabel != null)
@@ -747,46 +853,54 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                                 ),
                               ),
                             ),
-                          if (!isWishlist) ...[
-                            Text(
-                              'Possédé : $ownedQty',
-                              style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                              ),
+                          Text(
+                            'Possédé : $ownedQty',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
                             ),
+                          ),
+                          if (!isWishlist && !ro) ...[
                             IconButton(
                               visualDensity: VisualDensity.compact,
-                              onPressed: !ro && _item.quantity > 1
+                              onPressed: _item.quantity > 1
                                   ? () => _adjustQuantity(-1)
                                   : null,
                               icon: const Icon(Icons.remove, size: 20),
                             ),
                             IconButton(
                               visualDensity: VisualDensity.compact,
-                              onPressed: !ro ? () => _adjustQuantity(1) : null,
+                              onPressed: () => _adjustQuantity(1),
                               icon: const Icon(Icons.add, size: 20),
                             ),
                           ],
                         ],
                       ),
-                      if (isWishlist)
-                        Text(
-                          'Passe à 1 pour l\'ajouter à ta collection',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey.shade600,
-                          ),
-                        )
-                      else if (_groupOwnershipSubtitle().isNotEmpty)
-                        Text(
-                          _groupOwnershipSubtitle(),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey.shade600,
-                          ),
+                    ),
+                    if (isWishlist && ownedQty == 0)
+                      Text(
+                        'Tu peux enregistrer des parties même sans posséder le jeu.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
                         ),
-                    ],
+                      )
+                    else if (isWishlist && ownedQty > 0)
+                      Text(
+                        'Tu possèdes déjà $ownedQty exemplaire${ownedQty > 1 ? 's' : ''} en collection.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
+                        ),
+                      )
+                    else if (_groupOwnershipSubtitle().isNotEmpty)
+                      Text(
+                        _groupOwnershipSubtitle(),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
                     if (!isBoardgame && !isWishlist && !isCard) ...[
                       const SizedBox(height: 12),
                       CollapsibleSection(
@@ -815,11 +929,18 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       ),
                     ],
                     const SizedBox(height: 16),
+                    if (isBoardgame) ...[
+                      _buildBggDescriptionSection(),
+                      if (_bggDescriptionLoading ||
+                          (_bggDescription != null &&
+                              _bggDescription!.isNotEmpty))
+                        const SizedBox(height: 16),
+                    ],
                     _buildInformationsSection(
                       isBoardgame: isBoardgame,
                       metadataRows: metadataRows,
                     ),
-                    if (isBoardgame && !isWishlist) ...[
+                    if (isBoardgame) ...[
                       const SizedBox(height: 12),
                       CollapsibleSection(
                         title: 'Jeu de société',
@@ -840,24 +961,26 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                                 _saveNow();
                               },
                             ),
-                            const SizedBox(height: 12),
-                            if (_item.groupId != null)
-                              GroupRulesPanel(
-                                groupId: _item.groupId!,
-                                itemId: _item.id,
-                                itemTitle: _item.title,
-                                accent: _groupAccent(),
-                              )
-                            else
-                              TextField(
-                                controller: _personalRulesController,
-                                readOnly: ro,
-                                maxLines: 5,
-                                decoration: const InputDecoration(
-                                  labelText: 'Règles personnalisées',
-                                  border: OutlineInputBorder(),
+                            if (!isWishlist) ...[
+                              const SizedBox(height: 12),
+                              if (_item.groupId != null)
+                                GroupRulesPanel(
+                                  groupId: _item.groupId!,
+                                  itemId: _item.id,
+                                  itemTitle: _item.title,
+                                  accent: _groupAccent(),
+                                )
+                              else
+                                TextField(
+                                  controller: _personalRulesController,
+                                  readOnly: ro,
+                                  maxLines: 5,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Règles personnalisées',
+                                    border: OutlineInputBorder(),
+                                  ),
                                 ),
-                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -955,6 +1078,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                               locationUserId: _item.locationUserId,
                               holderLabel: _item.locationLabel,
                               readOnly: ro,
+                              applyDefaultIfEmpty: !itemHasManualHolder(_item),
                               onChanged: ({
                                 locationUserId,
                                 holderLabel,
@@ -962,42 +1086,17 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                                 manualHolder = false,
                               }) {
                                 setState(() {
-                                  if (manualHolder) {
-                                    final label = holderLabel?.trim();
-                                    final display = label != null &&
-                                            label.isNotEmpty
-                                        ? formatManualHolderLabel(label)
-                                        : null;
-                                    final meta = Map<String, dynamic>.from(
-                                      _item.metadata ?? {},
-                                    );
-                                    if (display != null) {
-                                      meta['holder_label'] =
-                                          holderLabelStorageValue(display);
-                                    } else {
-                                      meta.remove('holder_label');
-                                    }
-                                    _item = _item.copyWith(
-                                      clearLoan: true,
-                                      clearLocationUserId: true,
-                                      locationLabel: display,
-                                      metadata: meta,
-                                    );
-                                  } else {
-                                    final meta = Map<String, dynamic>.from(
-                                      _item.metadata ?? {},
-                                    );
-                                    meta.remove('holder_label');
-                                    _item = _item.copyWith(
-                                      clearLoan: true,
-                                      locationUserId: locationUserId,
-                                      locationLabel: holderLabel,
-                                      clearLocationUserId: clearHolder,
-                                      metadata: meta,
-                                    );
-                                  }
+                                  _item = applyWhereaboutsChange(
+                                    _item,
+                                    locationUserId: locationUserId,
+                                    holderLabel: holderLabel,
+                                    clearHolder: clearHolder,
+                                    manualHolder: manualHolder,
+                                  );
                                 });
-                                _saveNow();
+                                if (manualHolder || locationUserId != null) {
+                                  _saveNow();
+                                }
                               },
                             ),
                           ],
@@ -1059,6 +1158,16 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                               _saveNow();
                             },
                           ),
+                          if (isBoardgame) ...[
+                            const SizedBox(height: 16),
+                            BggCommunityRatingPanel(
+                              avgRating: _bggAvgRating ??
+                                  parseBggAvgRating(
+                                    _item.metadata?['bgg_avg_rating'],
+                                  ),
+                              loading: _bggDescriptionLoading,
+                            ),
+                          ],
                           if (!ro) ...[
                             const SizedBox(height: 16),
                             FriendRatingsPanel(item: _item),
@@ -1105,7 +1214,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         icon: const Icon(Icons.undo),
                         label: const Text('Marquer comme rendu'),
                       ),
-                    ] else if (!_item.isWishlist && !_item.isSold)
+                    ] else if (!_item.isSold && ownedQty > 0)
                       FilledButton.icon(
                         onPressed: _lend,
                         icon: const Icon(Icons.handshake_outlined),
@@ -1113,14 +1222,16 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       )
                     else
                       Text(
-                        'Les objets en wishlist ou vendus ne peuvent pas être prêtés.',
+                        ownedQty == 0
+                            ? 'Tu ne peux pas prêter un objet que tu ne possèdes pas.'
+                            : 'Les objets en wishlist ou vendus ne peuvent pas être prêtés.',
                         style: TextStyle(
                           fontSize: 13,
                           color: Colors.grey.shade600,
                         ),
                       ),
                     ],
-                    if (!ro && !isWishlist) ...[
+                    if (!ro && !isWishlist && ownedQty > 0) ...[
                     CollapsibleSection(
                       title: 'Doubles & vente',
                       accentColor: _item.category.color,
@@ -1171,7 +1282,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       const Divider(height: 28),
                       _buildSectionTitle('Prix marché (indicatif)'),
                       Text(
-                        'Les estimations neuf / occasion via une API ne sont pas encore disponibles. Consulte BoardGameGeek pour une fourchette.',
+                        'Consulte BoardGameGeek pour une fourchette de prix neuf / occasion.',
                         style: TextStyle(
                           fontSize: 13,
                           color: Colors.grey.shade600,
@@ -1249,15 +1360,41 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     );
   }
 
+  Widget _buildBggDescriptionSection() {
+    if (_bggDescriptionLoading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 8),
+        child: LinearProgressIndicator(minHeight: 2),
+      );
+    }
+
+    final text = _bggDescription;
+    if (text == null || text.isEmpty) return const SizedBox.shrink();
+
+    return Text(
+      text,
+      maxLines: 3,
+      overflow: TextOverflow.ellipsis,
+      style: GoogleFonts.lora(
+        fontSize: 15,
+        height: 1.55,
+        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.85),
+      ),
+    );
+  }
+
   Widget _buildInformationsSection({
     required bool isBoardgame,
     required List<MapEntry<String, String>> metadataRows,
   }) {
-    final players = formatPlayerCount(_item.minPlayers, _item.maxPlayers);
-    final time = formatPlayingTime(_item.playingTime);
-    final bggId = _item.metadata?['bgg_id']?.toString();
-    final bggPageUrl = BggService.gamePageUrl(bggId);
     final m = _item.metadata ?? {};
+    final players = formatPlayerCount(_item.minPlayers, _item.maxPlayers);
+    final bestPlayersLabel = formatBggBestPlayersLabel(
+      _bggBestPlayers ?? parseBggBestPlayers(m['bgg_best_players']),
+    );
+    final time = formatPlayingTime(_item.playingTime);
+    final bggId = m['bgg_id']?.toString();
+    final bggPageUrl = BggService.gamePageUrl(bggId);
     final year = m['year_published'] ?? m['year'];
     final minAge = m['min_age'];
     final boardAccent = Colors.orange.shade800;
@@ -1284,7 +1421,14 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     final boardTiles = <Widget>[];
     if (isBoardgame) {
       if (players != null) {
-        boardTiles.add(_infoTile(Icons.people, players, boardAccent));
+        boardTiles.add(
+          _infoTile(
+            Icons.people,
+            players,
+            boardAccent,
+            bestPlayersLabel,
+          ),
+        );
       }
       if (time != null) {
         boardTiles.add(_infoTile(Icons.timer, time, boardAccent));
@@ -1370,7 +1514,12 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     );
   }
 
-  Widget _infoTile(IconData icon, String label, [Color? iconColor]) {
+  Widget _infoTile(
+    IconData icon,
+    String label, [
+    Color? iconColor,
+    String? subtitle,
+  ]) {
     return SizedBox(
       width: 88,
       child: Column(
@@ -1382,6 +1531,21 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
             textAlign: TextAlign.center,
             style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
           ),
+          if (subtitle != null) ...[
+            const SizedBox(height: 2),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: Theme.of(context)
+                    .colorScheme
+                    .onSurface
+                    .withValues(alpha: 0.55),
+              ),
+            ),
+          ],
         ],
       ),
     );

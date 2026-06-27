@@ -160,7 +160,14 @@ Future<CollectionItem> _insertBaseGame({
   final userId = client.auth.currentUser!.id;
   final meta = <String, dynamic>{'bgg_id': baseBggId};
   if (baseDetails != null) {
-    for (final key in ['year_published', 'min_age', 'bgg_categories']) {
+    for (final key in [
+      'year_published',
+      'min_age',
+      'bgg_categories',
+      'bgg_short_description',
+      'bgg_avg_rating',
+      'bgg_best_players',
+    ]) {
       final v = baseDetails[key];
       if (v != null) meta[key] = v;
     }

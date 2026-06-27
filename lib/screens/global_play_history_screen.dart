@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -20,6 +22,7 @@ class GlobalPlayHistoryScreen extends StatefulWidget {
 
 class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
   final _service = GlobalPlayHistoryService();
+  final _searchController = TextEditingController();
   bool _loading = true;
   List<GlobalPlayHistoryGroup> _groups = [];
   final _expanded = <String>{};
@@ -27,7 +30,22 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
   @override
   void initState() {
     super.initState();
+    _searchController.addListener(() => setState(() {}));
     _load();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<GlobalPlayHistoryGroup> get _visibleGroups {
+    final q = _searchController.text.trim().toLowerCase();
+    if (q.isEmpty) return _groups;
+    return _groups
+        .where((g) => g.title.toLowerCase().contains(q))
+        .toList();
   }
 
   Future<void> _load() async {
@@ -38,6 +56,28 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
       _groups = groupPlayHistoryEntries(entries);
       _loading = false;
     });
+  }
+
+  Future<void> _deleteEntry(GlobalPlayHistoryEntry entry) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Supprimer cette partie ?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await _service.deleteEntry(entry);
+    _load();
   }
 
   Future<void> _openEntry(GlobalPlayHistoryEntry entry) async {
@@ -122,118 +162,7 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (ctx) {
-        final searchController = TextEditingController();
-        var bggResults = <Map<String, String>>[];
-        var searching = false;
-
-        return StatefulBuilder(
-          builder: (ctx, setModal) {
-            Future<void> searchBgg(String q) async {
-              if (q.trim().length < 2) {
-                setModal(() => bggResults = []);
-                return;
-              }
-              setModal(() => searching = true);
-              try {
-                final r = await BggService.searchGames(q.trim());
-                if (ctx.mounted) setModal(() => bggResults = r);
-              } catch (_) {
-              } finally {
-                if (ctx.mounted) setModal(() => searching = false);
-              }
-            }
-
-            return SafeArea(
-              child: Padding(
-                padding: EdgeInsets.only(
-                  bottom: MediaQuery.viewInsetsOf(ctx).bottom,
-                ),
-                child: SizedBox(
-                  height: MediaQuery.sizeOf(ctx).height * 0.65,
-                  child: Column(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Text(
-                          'Pour quel jeu ?',
-                          style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.bold,
-                              ),
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: TextField(
-                          controller: searchController,
-                          decoration: const InputDecoration(
-                            labelText: 'Rechercher sur BGG',
-                            prefixIcon: Icon(Icons.search),
-                          ),
-                          onChanged: searchBgg,
-                        ),
-                      ),
-                      if (searching)
-                        const Padding(
-                          padding: EdgeInsets.all(12),
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      Expanded(
-                        child: ListView(
-                          children: [
-                            if (searchController.text.trim().length < 2) ...[
-                              const ListTile(
-                                title: Text(
-                                  'Ma collection',
-                                  style: TextStyle(fontWeight: FontWeight.w700),
-                                ),
-                              ),
-                              for (final item in items)
-                                ListTile(
-                                  leading: _historyThumb(item.imageUrl),
-                                  title: Text(item.title),
-                                  onTap: () => Navigator.pop(
-                                    ctx,
-                                    _GamePick.owned(item),
-                                  ),
-                                ),
-                            ],
-                            if (bggResults.isNotEmpty) ...[
-                              const ListTile(
-                                title: Text(
-                                  'Résultats BGG (jeu non possédé)',
-                                  style: TextStyle(fontWeight: FontWeight.w700),
-                                ),
-                              ),
-                              for (final g in bggResults)
-                                ListTile(
-                                  leading: _historyThumb(g['image_url']),
-                                  title: Text(g['title'] ?? 'Jeu'),
-                                  subtitle: const Text(
-                                    'Partie sans ajouter à la collection',
-                                    style: TextStyle(fontSize: 11),
-                                  ),
-                                  onTap: () => Navigator.pop(
-                                    ctx,
-                                    _GamePick.bgg(
-                                      bggId: g['id'],
-                                      title: g['title'] ?? 'Jeu',
-                                      imageUrl: g['image_url'],
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
+      builder: (ctx) => _PickGameBottomSheet(items: items),
     );
   }
 
@@ -249,20 +178,55 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _groups.isEmpty
-              ? Center(
-                  child: Text(
-                    'Aucune partie enregistrée.',
-                    style: TextStyle(color: Colors.grey.shade600),
+          : Column(
+              children: [
+                if (_groups.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                    child: TextField(
+                      controller: _searchController,
+                      textInputAction: TextInputAction.search,
+                      decoration: InputDecoration(
+                        labelText: 'Rechercher un jeu',
+                        prefixIcon: const Icon(Icons.search),
+                        suffixIcon: _searchController.text.isEmpty
+                            ? null
+                            : IconButton(
+                                icon: const Icon(Icons.clear),
+                                onPressed: () {
+                                  _searchController.clear();
+                                  FocusScope.of(context).unfocus();
+                                },
+                              ),
+                        isDense: true,
+                      ),
+                      onSubmitted: (_) => FocusScope.of(context).unfocus(),
+                    ),
                   ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
-                    itemCount: _groups.length,
-                    itemBuilder: (context, index) {
-                      final group = _groups[index];
+                Expanded(
+                  child: _groups.isEmpty
+                      ? Center(
+                          child: Text(
+                            'Aucune partie enregistrée.',
+                            style: TextStyle(color: Colors.grey.shade600),
+                          ),
+                        )
+                      : _visibleGroups.isEmpty
+                          ? Center(
+                              child: Text(
+                                'Aucun jeu ne correspond à « ${_searchController.text.trim()} ».',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: Colors.grey.shade600),
+                              ),
+                            )
+                          : RefreshIndicator(
+                              onRefresh: _load,
+                              child: ListView.builder(
+                                padding:
+                                    const EdgeInsets.fromLTRB(12, 12, 12, 88),
+                                itemCount: _visibleGroups.length,
+                                itemBuilder: (context, index) {
+                                  final group = _visibleGroups[index];
                       final expanded = _expanded.contains(group.groupKey);
 
                       if (group.isStreak && !expanded) {
@@ -291,6 +255,7 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
                                 title: group.title,
                                 nested: true,
                                 onTap: () => _openEntry(entry),
+                                onDelete: () => _deleteEntry(entry),
                               ),
                           ],
                         );
@@ -303,10 +268,196 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
                         title: group.title,
                         imageUrl: group.imageUrl,
                         onTap: () => _openEntry(entry),
+                        onDelete: () => _deleteEntry(entry),
                       );
                     },
                   ),
                 ),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+class _PickGameBottomSheet extends StatefulWidget {
+  final List<CollectionItem> items;
+
+  const _PickGameBottomSheet({required this.items});
+
+  @override
+  State<_PickGameBottomSheet> createState() => _PickGameBottomSheetState();
+}
+
+class _PickGameBottomSheetState extends State<_PickGameBottomSheet> {
+  final _searchController = TextEditingController();
+  List<Map<String, String>> _bggResults = [];
+  bool _searching = false;
+  Timer? _debounce;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController.addListener(_onQueryChanged);
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  String get _query => _searchController.text.trim();
+
+  List<CollectionItem> get _filteredCollection {
+    final q = _query.toLowerCase();
+    if (q.length < 2) return widget.items;
+    return widget.items
+        .where((i) => i.title.toLowerCase().contains(q))
+        .toList();
+  }
+
+  void _onQueryChanged() {
+    _debounce?.cancel();
+    final q = _query;
+    if (q.length < 2) {
+      setState(() => _bggResults = []);
+      return;
+    }
+    setState(() {});
+    _debounce = Timer(const Duration(milliseconds: 350), () => _searchBgg(q));
+  }
+
+  Future<void> _searchBgg(String q) async {
+    setState(() => _searching = true);
+    try {
+      final r = await BggService.searchGames(q);
+      if (mounted) setState(() => _bggResults = r);
+    } catch (_) {
+      if (mounted) setState(() => _bggResults = []);
+    } finally {
+      if (mounted) setState(() => _searching = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final collection = _filteredCollection;
+    final showBgg = _query.length >= 2;
+
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: SizedBox(
+          height: MediaQuery.sizeOf(context).height * 0.7,
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  'Pour quel jeu ?',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: TextField(
+                  controller: _searchController,
+                  autofocus: true,
+                  textInputAction: TextInputAction.search,
+                  decoration: InputDecoration(
+                    labelText: 'Rechercher (collection ou BGG)',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: _query.isEmpty
+                        ? null
+                        : IconButton(
+                            icon: const Icon(Icons.clear),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() => _bggResults = []);
+                            },
+                          ),
+                  ),
+                  onSubmitted: (_) => FocusScope.of(context).unfocus(),
+                ),
+              ),
+              if (_searching)
+                const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: LinearProgressIndicator(minHeight: 2),
+                ),
+              Expanded(
+                child: ListView(
+                  children: [
+                    ListTile(
+                      title: Text(
+                        showBgg ? 'Ma collection' : 'Ma collection',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      subtitle: showBgg && collection.isEmpty
+                          ? const Text(
+                              'Aucun jeu correspondant dans ta collection',
+                              style: TextStyle(fontSize: 12),
+                            )
+                          : null,
+                    ),
+                    for (final item in collection)
+                      ListTile(
+                        leading: _historyThumb(item.imageUrl),
+                        title: Text(item.title),
+                        onTap: () => Navigator.pop(
+                          context,
+                          _GamePick.owned(item),
+                        ),
+                      ),
+                    if (showBgg && _bggResults.isNotEmpty) ...[
+                      const ListTile(
+                        title: Text(
+                          'Résultats BGG (jeu non possédé)',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      for (final g in _bggResults)
+                        ListTile(
+                          leading: _historyThumb(g['image_url']),
+                          title: Text(g['title'] ?? 'Jeu'),
+                          subtitle: const Text(
+                            'Partie sans ajouter à la collection',
+                            style: TextStyle(fontSize: 11),
+                          ),
+                          onTap: () => Navigator.pop(
+                            context,
+                            _GamePick.bgg(
+                              bggId: g['id'],
+                              title: g['title'] ?? 'Jeu',
+                              imageUrl: g['image_url'],
+                            ),
+                          ),
+                        ),
+                    ],
+                    if (showBgg && !_searching && _bggResults.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Text(
+                          'Aucun résultat BGG pour « $_query ».',
+                          style: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -399,6 +550,7 @@ class _EntryTile extends StatelessWidget {
   final DateFormat dateFmt;
   final String title;
   final VoidCallback onTap;
+  final VoidCallback? onDelete;
   final String? imageUrl;
   final bool nested;
 
@@ -407,6 +559,7 @@ class _EntryTile extends StatelessWidget {
     required this.dateFmt,
     required this.title,
     required this.onTap,
+    this.onDelete,
     this.imageUrl,
     this.nested = false,
   });
@@ -429,6 +582,13 @@ class _EntryTile extends StatelessWidget {
           maxLines: 3,
           overflow: TextOverflow.ellipsis,
         ),
+        trailing: onDelete == null
+            ? null
+            : IconButton(
+                icon: const Icon(Icons.delete_outline),
+                tooltip: 'Supprimer',
+                onPressed: onDelete,
+              ),
         onTap: onTap,
       ),
     );

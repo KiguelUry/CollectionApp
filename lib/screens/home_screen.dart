@@ -19,12 +19,18 @@ import '../utils/boardgame_genres.dart';
 import '../utils/boardgame_expansion_flow.dart';
 import '../utils/boardgame_expansion_reconcile.dart';
 import '../utils/boardgame_collection_visibility.dart';
+import '../utils/boardgame_display.dart';
 import '../utils/collection_grid_grouper.dart';
 import '../utils/collection_grid_layout.dart';
 import '../utils/collection_item_filters.dart';
+import '../utils/owned_quantity_index.dart';
+import '../utils/collection_count_label.dart';
+import '../utils/supabase_embeds.dart';
 import '../utils/card_item_metadata.dart';
 import '../utils/tcg_rarity_order.dart';
+import '../utils/whereabouts_persistence.dart';
 import '../utils/wishlist_promote.dart';
+import '../services/global_play_history_service.dart';
 import '../models/collection_list_filters.dart';
 import '../models/collection_view_mode.dart';
 import '../models/item_tag.dart';
@@ -116,8 +122,10 @@ class _HomeScreenState extends State<HomeScreen>
   bool _mediaGroupByArtist = false;
   List<StorageLocation> _locations = [];
   List<ItemTag> _tags = [];
+  List<CollectionGroup> _groups = [];
   Map<String, String> _groupNamesById = {};
   Set<String> _myGroupIds = {};
+  bool _bggRatingEnrichInFlight = false;
 
   @override
   void initState() {
@@ -129,7 +137,7 @@ class _HomeScreenState extends State<HomeScreen>
         .stream(primaryKey: ['id'])
         .eq('category', widget.category.dbValue);
     _itemsStream = rawStream.map(_filterAndScopeRows);
-    _itemsSub = _itemsStream.listen(_onItemRows);
+    _itemsSub = _itemsStream.listen((_) => _reloadItemsFromDb());
     CollectionRefresh.instance.addListener(_reloadItemsFromDb);
     _reloadItemsFromDb();
     _loadFilterData();
@@ -231,7 +239,7 @@ class _HomeScreenState extends State<HomeScreen>
     try {
       var query = Supabase.instance.client
           .from('collection_items')
-          .select()
+          .select(SupabaseEmbeds.collectionItemList)
           .eq('category', widget.category.dbValue);
       final data = await query;
       if (!mounted) return;
@@ -270,6 +278,54 @@ class _HomeScreenState extends State<HomeScreen>
     }).toList();
   }
 
+  Future<void> _enrichBggRatingsForSort(List<CollectionItem> items) async {
+    if (widget.category != CollectionCategory.boardgame) return;
+    if (_bggRatingEnrichInFlight) return;
+
+    final missing = items
+        .where(
+          (i) =>
+              parseBggAvgRating(i.metadata?['bgg_avg_rating']) == null &&
+              (i.metadata?['bgg_id']?.toString().isNotEmpty ?? false),
+        )
+        .take(20)
+        .toList();
+    if (missing.isEmpty) return;
+
+    _bggRatingEnrichInFlight = true;
+    try {
+      var changed = false;
+      for (final item in missing) {
+        final bggId = item.metadata!['bgg_id'].toString();
+        final details = await BggService.getGameFullDetails(bggId);
+        if (details == null) continue;
+
+        final meta = Map<String, dynamic>.from(item.metadata ?? {});
+        var itemDirty = false;
+        for (final key in [
+          'bgg_avg_rating',
+          'bgg_short_description',
+          'bgg_best_players',
+        ]) {
+          final v = details[key];
+          if (v == null || meta[key] == v) continue;
+          meta[key] = v;
+          itemDirty = true;
+        }
+        if (!itemDirty) continue;
+
+        await Supabase.instance.client
+            .from('collection_items')
+            .update({'metadata': meta})
+            .eq('id', item.id);
+        changed = true;
+      }
+      if (changed && mounted) _reloadItemsFromDb();
+    } finally {
+      _bggRatingEnrichInFlight = false;
+    }
+  }
+
   Future<void> _loadFilterData() async {
     try {
       final results = await Future.wait([
@@ -282,6 +338,7 @@ class _HomeScreenState extends State<HomeScreen>
         setState(() {
           _locations = results[0] as List<StorageLocation>;
           _tags = results[1] as List<ItemTag>;
+          _groups = groups;
           _groupNamesById = {for (final g in groups) g.id: g.name};
           _myGroupIds = groups.map((g) => g.id).toSet();
         });
@@ -381,6 +438,10 @@ class _HomeScreenState extends State<HomeScreen>
       ),
     );
     if (confirm != true || !mounted) return;
+
+    if (item.category == CollectionCategory.boardgame) {
+      await GlobalPlayHistoryService().archivePlaysFromDeletedItem(item);
+    }
 
     await Supabase.instance.client
         .from('collection_items')
@@ -913,8 +974,10 @@ class _HomeScreenState extends State<HomeScreen>
       if (!mounted) return;
       var message = '« $title » ajouté';
       if (existing != null) {
-        final newQty =
-            ((existing['quantity'] as int?) ?? 1) + options.quantity;
+        final baseQty = options.isWishlist
+            ? ((existing['quantity'] as int?) ?? 0)
+            : ((existing['quantity'] as int?) ?? 1);
+        final newQty = baseQty + options.quantity;
         await client
             .from('collection_items')
             .update({'quantity': newQty})
@@ -923,10 +986,6 @@ class _HomeScreenState extends State<HomeScreen>
         CollectionRefresh.instance.bump();
       } else {
         final meta = Map<String, dynamic>.from(metadata ?? {});
-        if (options.holderLabel != null &&
-            options.holderLabel!.trim().isNotEmpty) {
-          meta['holder_label'] = options.holderLabel!.trim();
-        }
         if (bggId != null) meta['bgg_id'] = bggId;
         if (bggDetails != null) {
           for (final key in [
@@ -936,6 +995,9 @@ class _HomeScreenState extends State<HomeScreen>
             'bgg_is_expansion',
             'base_game_bgg_id',
             'base_game_title',
+            'bgg_short_description',
+            'bgg_avg_rating',
+            'bgg_best_players',
           ]) {
             final v = bggDetails[key];
             if (v != null) meta[key] = v;
@@ -981,18 +1043,20 @@ class _HomeScreenState extends State<HomeScreen>
               quantity: options.quantity,
               locationId: options.locationId,
               groupId: options.groupId,
+              locationUserId:
+                  options.isWishlist ? null : options.locationUserId,
               minPlayers: resolvedMin,
               maxPlayers: resolvedMax,
               playingTime: resolvedTime,
             );
 
             await client.from('collection_items').insert(
-                  item.toInsertJson(
-                    isWishlist: options.isWishlist,
-                    locationUserId: options.isWishlist
-                        ? null
-                        : (options.locationUserId ?? userId),
+                  buildCollectionItemInsertPayload(
+                    item: item,
                     addedBy: userId,
+                    isWishlist: options.isWishlist,
+                    holderLabel: options.holderLabel,
+                    defaultUserId: userId,
                   ),
                 );
           }
@@ -1008,18 +1072,19 @@ class _HomeScreenState extends State<HomeScreen>
             quantity: options.quantity,
             locationId: options.locationId,
             groupId: options.groupId,
+            locationUserId: options.isWishlist ? null : options.locationUserId,
             minPlayers: resolvedMin,
             maxPlayers: resolvedMax,
             playingTime: resolvedTime,
           );
 
           await client.from('collection_items').insert(
-                item.toInsertJson(
-                  isWishlist: options.isWishlist,
-                  locationUserId: options.isWishlist
-                      ? null
-                      : (options.locationUserId ?? userId),
+                buildCollectionItemInsertPayload(
+                  item: item,
                   addedBy: userId,
+                  isWishlist: options.isWishlist,
+                  holderLabel: options.holderLabel,
+                  defaultUserId: userId,
                 ),
               );
         }
@@ -1218,12 +1283,26 @@ class _HomeScreenState extends State<HomeScreen>
     if (filtered.length != items.length) {
       return '${filtered.length} sur ${items.length}';
     }
-    final personal = items.where((i) => !i.isGroupOwned).length;
-    final inGroup = items.length - personal;
-    if (inGroup > 0 && personal > 0) {
-      return '$personal objet${personal > 1 ? 's' : ''} · $inGroup en groupe${inGroup > 1 ? 's' : ''}';
+    final inGroup = items.where((i) => i.isGroupOwned).length;
+    return formatCollectionCountLabel(total: items.length, inGroup: inGroup);
+  }
+
+  Map<String, int> _groupActivityCounts(List<CollectionItem> items) {
+    final counts = <String, int>{};
+    for (final item in items) {
+      final extra = item.metadata?['group_ids'];
+      if (extra is List) {
+        for (final raw in extra) {
+          final id = raw.toString();
+          if (id.isNotEmpty) counts[id] = (counts[id] ?? 0) + 1;
+        }
+      }
+      final gid = item.groupId;
+      if (gid != null && gid.isNotEmpty) {
+        counts[gid] = (counts[gid] ?? 0) + 1;
+      }
     }
-    return '${items.length} objet${items.length > 1 ? 's' : ''}';
+    return counts;
   }
 
   Widget _buildCollectionTabs() {
@@ -1234,15 +1313,23 @@ class _HomeScreenState extends State<HomeScreen>
         .toList();
     final collection = _visibleCollectionItems(rawCollection);
     final wishlist = scoped.where((item) => item.isWishlist).toList();
+    final ownedIndex = buildOwnedQuantityIndex(scoped);
 
     return TabBarView(
       controller: _tabController,
       children: [
         _buildTab(
           items: collection,
+          ownedQuantityIndex: ownedIndex,
           filters: _collectionFilters,
           searchController: _collectionSearch,
-          onFiltersChanged: (f) => setState(() => _collectionFilters = f),
+          onFiltersChanged: (f) {
+            setState(() => _collectionFilters = f);
+            if (widget.category == CollectionCategory.boardgame &&
+                f.sort == CollectionSort.bggRatingDesc) {
+              _enrichBggRatingsForSort(_filterHubScope(_parseItems(_itemRows)));
+            }
+          },
           emptyHint: 'Ta collection est vide ici.',
           showFocusFilter: true,
           showLocationFilter: widget.category != CollectionCategory.boardgame,
@@ -1250,6 +1337,7 @@ class _HomeScreenState extends State<HomeScreen>
         ),
         _buildTab(
           items: wishlist,
+          ownedQuantityIndex: ownedIndex,
           filters: _wishlistFilters,
           searchController: _wishlistSearch,
           onFiltersChanged: (f) => setState(() => _wishlistFilters = f),
@@ -1266,6 +1354,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   Widget _buildTab({
     required List<CollectionItem> items,
+    required Map<String, int> ownedQuantityIndex,
     required CollectionListFilters filters,
     required TextEditingController searchController,
     required ValueChanged<CollectionListFilters> onFiltersChanged,
@@ -1371,6 +1460,7 @@ class _HomeScreenState extends State<HomeScreen>
               : _viewMode == CollectionViewMode.grid
                   ? _buildItemGrid(
                       filtered,
+                      ownedQuantityIndex: ownedQuantityIndex,
                       emptyHint: emptyHint,
                       filters: filters,
                       onClearFilters: () {
@@ -1380,6 +1470,7 @@ class _HomeScreenState extends State<HomeScreen>
                     )
                   : _buildItemList(
                       filtered,
+                      ownedQuantityIndex: ownedQuantityIndex,
                       emptyHint: emptyHint,
                       filters: filters,
                       onClearFilters: () {
@@ -1443,6 +1534,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   Widget _buildItemGrid(
     List<CollectionItem> items, {
+    required Map<String, int> ownedQuantityIndex,
     required String emptyHint,
     required CollectionListFilters filters,
     required VoidCallback onClearFilters,
@@ -1476,6 +1568,7 @@ class _HomeScreenState extends State<HomeScreen>
     }
 
     final grouped = CollectionGridGrouper.group(items);
+    final groupActivity = _groupActivityCounts(items);
 
     return Builder(
       builder: (context) {
@@ -1483,8 +1576,8 @@ class _HomeScreenState extends State<HomeScreen>
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: CollectionGridLayout.crossAxisCount(context),
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
+            crossAxisSpacing: CollectionGridLayout.gridCrossSpacing,
+            mainAxisSpacing: CollectionGridLayout.gridMainSpacing,
             childAspectRatio:
                 CollectionGridLayout.aspectRatio(widget.category, context),
           ),
@@ -1498,13 +1591,21 @@ class _HomeScreenState extends State<HomeScreen>
               item: item,
               category: widget.category,
               totalQuantity: entry.totalQuantity,
+              ownedQuantity: ownedQuantityFor(item, ownedQuantityIndex),
               showDuplicateBadge: entry.hasDuplicates,
+              groupNamesById: _groupNamesById,
+              boardgameQuickEditGroups:
+                  widget.category == CollectionCategory.boardgame
+                      ? _groups
+                      : null,
+              groupActivityCounts: groupActivity,
               onDelete: () => _confirmDeleteItem(item),
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(
                   builder: (context) => ItemDetailScreen(
                     item: item.copyWith(quantity: entry.totalQuantity),
+                    ownedQuantity: ownedQuantityFor(item, ownedQuantityIndex),
                   ),
                 ),
               ),
@@ -1535,6 +1636,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   Widget _buildItemList(
     List<CollectionItem> items, {
+    required Map<String, int> ownedQuantityIndex,
     required String emptyHint,
     required CollectionListFilters filters,
     required VoidCallback onClearFilters,
@@ -1582,12 +1684,14 @@ class _HomeScreenState extends State<HomeScreen>
           item: item,
           category: widget.category,
           totalQuantity: entry.totalQuantity,
+          ownedQuantity: ownedQuantityFor(item, ownedQuantityIndex),
           onDelete: () => _confirmDeleteItem(item),
           onTap: () => Navigator.push(
             context,
             MaterialPageRoute(
               builder: (context) => ItemDetailScreen(
                 item: item.copyWith(quantity: entry.totalQuantity),
+                ownedQuantity: ownedQuantityFor(item, ownedQuantityIndex),
               ),
             ),
           ),

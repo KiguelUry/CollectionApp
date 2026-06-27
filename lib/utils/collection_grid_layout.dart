@@ -37,15 +37,45 @@ abstract final class CollectionGridLayout {
     return w.clamp(1280.0, 1680.0);
   }
 
-  static double aspectRatio(CollectionCategory category, BuildContext context) {
+  static const double gridCrossSpacing = 12;
+
+  /// Espacement vertical entre tuiles (même colonne).
+  static const double gridMainSpacing = 7;
+
+  /// Hauteur max du pied de tuile (titre + stats + 2 rangées d'icônes).
+  static const double boardgameMaxFooterHeight = 108;
+
+  static double _boardgameCellWidth(
+    BuildContext context, {
+    required int mobileColumns,
+    double gridPadding = 24,
+    double crossSpacing = 12,
+  }) {
+    final cols = columns(context, mobile: mobileColumns);
+    final w = MediaQuery.sizeOf(context).width;
+    return (w - gridPadding - crossSpacing * (cols - 1)) / cols;
+  }
+
+  static double aspectRatio(
+    CollectionCategory category,
+    BuildContext context, {
+    int mobileColumns = 3,
+    double gridPadding = 24,
+    double crossSpacing = 12,
+  }) {
+    if (category == CollectionCategory.boardgame) {
+      final cellW = _boardgameCellWidth(
+        context,
+        mobileColumns: mobileColumns,
+        gridPadding: gridPadding,
+        crossSpacing: crossSpacing,
+      );
+      return cellW / (cellW + boardgameMaxFooterHeight);
+    }
     final base = switch (category) {
-      CollectionCategory.boardgame => 0.72,
       CollectionCategory.card => 0.5,
       _ => 0.85,
     };
-    if (isWebDesktop(context) && category == CollectionCategory.boardgame) {
-      return 0.84;
-    }
     return base;
   }
 

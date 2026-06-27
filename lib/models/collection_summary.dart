@@ -1,3 +1,5 @@
+import '../utils/collection_count_label.dart';
+
 class CollectionSummary {
   /// Objets perso (hors groupe).
   final int ownedCount;
@@ -19,18 +21,9 @@ class CollectionSummary {
 
   bool get hasAnyValue => pricedItemCount > 0;
 
-  /// Ex. « 2 objets · 1 en groupe »
+  /// Ex. « 6 objets dont 5 en groupes »
   String get ownedCountLabel {
-    if (ownedCount == 0 && groupOwnedCount == 0) return '0 objet';
-    final parts = <String>[];
-    if (ownedCount > 0) {
-      parts.add('$ownedCount objet${ownedCount > 1 ? 's' : ''}');
-    }
-    if (groupOwnedCount > 0) {
-      parts.add(
-        '$groupOwnedCount en groupe${groupOwnedCount > 1 ? 's' : ''}',
-      );
-    }
-    return parts.join(' · ');
+    final total = totalOwnedCount;
+    return formatCollectionCountLabel(total: total, inGroup: groupOwnedCount);
   }
 }

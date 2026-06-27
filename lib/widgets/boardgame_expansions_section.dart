@@ -5,6 +5,7 @@ import '../models/collection_item.dart';
 import '../services/bgg_service.dart';
 import '../services/boardgame_expansion_service.dart';
 import '../utils/boardgame_expansions.dart';
+import 'boardgame_expansion_detail_sheet.dart';
 import 'bgg_network_image.dart';
 
 /// Extensions BGG visibles uniquement sur la fiche du jeu de base.
@@ -238,6 +239,7 @@ class _BoardgameExpansionsSectionState extends State<BoardgameExpansionsSection>
               owned: true,
               readOnly: widget.readOnly,
               accent: accent,
+              baseGameTitle: widget.item.title,
               onToggle: (v) => _toggleOwned(exp, v),
             ),
             const SizedBox(height: 6),
@@ -284,6 +286,7 @@ class _BoardgameExpansionsSectionState extends State<BoardgameExpansionsSection>
                 owned: false,
                 readOnly: widget.readOnly,
                 accent: accent,
+                baseGameTitle: widget.item.title,
                 onToggle: (v) => _toggleOwned(exp, v),
               ),
               const SizedBox(height: 6),
@@ -300,6 +303,7 @@ class _ExpansionRow extends StatelessWidget {
   final bool owned;
   final bool readOnly;
   final Color accent;
+  final String? baseGameTitle;
   final ValueChanged<bool> onToggle;
 
   const _ExpansionRow({
@@ -307,6 +311,7 @@ class _ExpansionRow extends StatelessWidget {
     required this.owned,
     required this.readOnly,
     required this.accent,
+    this.baseGameTitle,
     required this.onToggle,
   });
 
@@ -325,56 +330,73 @@ class _ExpansionRow extends StatelessWidget {
           color: owned ? ownedBorder : accent.withValues(alpha: 0.16),
         ),
       ),
-      child: InkWell(
-        onTap: readOnly ? null : () => onToggle(!owned),
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          child: Row(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: SizedBox(
-                  width: 44,
-                  height: 44,
-                  child: expansion.imageUrl != null
-                      ? BggNetworkImage(
-                          url: expansion.imageUrl!,
-                          boxedCover: true,
-                          largeSource: true,
-                        )
-                      : ColoredBox(
-                          color: accent.withValues(alpha: 0.12),
-                          child: Icon(Icons.extension, color: accent, size: 22),
-                        ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        child: Row(
+          children: [
+            Expanded(
+              child: InkWell(
+                onTap: () => showBoardgameExpansionDetailSheet(
+                  context,
+                  expansion: expansion,
+                  baseGameTitle: baseGameTitle,
                 ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  expansion.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 14,
-                    color: owned ? ownedText : scheme.onSurface,
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: SizedBox(
+                          width: 44,
+                          height: 44,
+                          child: expansion.imageUrl != null
+                              ? BggNetworkImage(
+                                  url: expansion.imageUrl!,
+                                  boxedCover: true,
+                                  largeSource: true,
+                                )
+                              : ColoredBox(
+                                  color: accent.withValues(alpha: 0.12),
+                                  child: Icon(
+                                    Icons.extension,
+                                    color: accent,
+                                    size: 22,
+                                  ),
+                                ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          expansion.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                            color: owned ? ownedText : scheme.onSurface,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
-              if (!readOnly)
-                Checkbox(
-                  visualDensity: VisualDensity.compact,
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  value: owned,
-                  activeColor: scheme.tertiary,
-                  checkColor: scheme.onTertiary,
-                  onChanged: (v) => onToggle(v ?? false),
-                )
-              else if (owned)
-                Icon(Icons.check_circle, color: scheme.tertiary, size: 20),
-            ],
-          ),
+            ),
+            if (!readOnly)
+              Checkbox(
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                value: owned,
+                activeColor: scheme.tertiary,
+                checkColor: scheme.onTertiary,
+                onChanged: (v) => onToggle(v ?? false),
+              )
+            else if (owned)
+              Icon(Icons.check_circle, color: scheme.tertiary, size: 20),
+          ],
         ),
       ),
     );

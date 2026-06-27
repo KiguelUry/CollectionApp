@@ -163,8 +163,42 @@ class GlobalPlayHistoryService {
       );
     }
 
-    entries.sort((a, b) => b.session.date.compareTo(a.session.date));
+    entries.sort(
+      (a, b) => compareBoardgamePlaySessions(
+        a.session,
+        a.sessionIndex,
+        b.session,
+        b.sessionIndex,
+      ),
+    );
     return entries;
+  }
+
+  Future<void> deleteEntry(GlobalPlayHistoryEntry entry) async {
+    if (entry.isOrphan) {
+      final orphans = await loadOrphans();
+      orphans.removeWhere((o) => o.id == entry.orphanId);
+      await saveOrphans(orphans);
+      return;
+    }
+
+    final itemId = entry.itemId;
+    if (itemId == null) return;
+
+    final row = await _client
+        .from('collection_items')
+        .select(SupabaseEmbeds.collectionItemDetail)
+        .eq('id', itemId)
+        .maybeSingle();
+    if (row == null) return;
+
+    final item = CollectionItem.fromJson(Map<String, dynamic>.from(row as Map));
+    final sessions = parseBoardgamePlays(item.metadata);
+    if (entry.sessionIndex < 0 || entry.sessionIndex >= sessions.length) {
+      return;
+    }
+    sessions.removeAt(entry.sessionIndex);
+    await saveSessionToItem(item, sessions);
   }
 
   Future<void> saveSessionToItem(
@@ -181,6 +215,30 @@ class GlobalPlayHistoryService {
           'games_played': sessions.length,
         })
         .eq('id', item.id);
+  }
+
+  /// Archive les parties d'un jeu avant suppression de l'objet collection.
+  Future<void> archivePlaysFromDeletedItem(CollectionItem item) async {
+    if (item.category != CollectionCategory.boardgame) return;
+    final sessions = parseBoardgamePlays(item.metadata);
+    if (sessions.isEmpty) return;
+
+    final orphans = await loadOrphans();
+    final bggId = item.metadata?['bgg_id']?.toString();
+    final base = DateTime.now().microsecondsSinceEpoch;
+    for (var i = 0; i < sessions.length; i++) {
+      orphans.insert(
+        0,
+        OrphanBoardgamePlay(
+          id: 'archived_${item.id}_${i}_$base',
+          title: item.title,
+          bggId: bggId,
+          imageUrl: item.imageUrl,
+          session: sessions[i],
+        ),
+      );
+    }
+    await saveOrphans(orphans);
   }
 
   Future<void> linkOrphansToItem(CollectionItem item) async {

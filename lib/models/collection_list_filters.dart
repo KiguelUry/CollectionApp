@@ -1,4 +1,5 @@
 import '../models/collection_item.dart';
+import '../utils/boardgame_display.dart';
 import '../utils/boardgame_genres.dart';
 import '../utils/card_item_metadata.dart';
 import '../utils/holder_filter.dart';
@@ -7,6 +8,7 @@ enum CollectionSort {
   titleAsc,
   titleDesc,
   ratingDesc,
+  bggRatingDesc,
   quantityDesc,
   newestFirst,
   oldestFirst,
@@ -53,6 +55,10 @@ class CollectionListFilters {
   Set<String> pokemonTypes;
   /// Sous-catégories cartes (pokemon, onepiece…) — vue « toutes les cartes ».
   Set<String> cardSubcategories;
+  /// Tri « Ma note » : false = meilleures d'abord, true = moins bonnes d'abord.
+  bool ratingAscending;
+  /// Tri note communautaire : false = meilleures d'abord, true = moins bonnes d'abord.
+  bool bggRatingAscending;
 
   CollectionListFilters({
     this.searchQuery = '',
@@ -69,6 +75,8 @@ class CollectionListFilters {
     Set<String>? cardRarities,
     Set<String>? pokemonTypes,
     Set<String>? cardSubcategories,
+    this.ratingAscending = false,
+    this.bggRatingAscending = false,
   })  : groupIds = groupIds ?? <String>{},
         boardgameGenres = boardgameGenres ?? <String>{},
         cardRarities = cardRarities ?? <String>{},
@@ -113,10 +121,14 @@ class CollectionListFilters {
     bool clearBoardgameGenre = false,
     bool clearGroups = false,
     bool clearCardFilters = false,
+    bool? ratingAscending,
+    bool? bggRatingAscending,
   }) {
     return CollectionListFilters(
       searchQuery: searchQuery ?? this.searchQuery,
       sort: sort ?? this.sort,
+      ratingAscending: ratingAscending ?? this.ratingAscending,
+      bggRatingAscending: bggRatingAscending ?? this.bggRatingAscending,
       scope: scope ?? this.scope,
       status: status ?? this.status,
       locationId: clearLocation ? null : (locationId ?? this.locationId),
@@ -249,7 +261,13 @@ class CollectionListFilters {
       case CollectionSort.ratingDesc:
         final ra = a.rating ?? -1;
         final rb = b.rating ?? -1;
-        final cmp = rb.compareTo(ra);
+        final cmp = ratingAscending ? ra.compareTo(rb) : rb.compareTo(ra);
+        return cmp != 0 ? cmp : a.title.compareTo(b.title);
+      case CollectionSort.bggRatingDesc:
+        final ra = parseBggAvgRating(a.metadata?['bgg_avg_rating']) ?? -1;
+        final rb = parseBggAvgRating(b.metadata?['bgg_avg_rating']) ?? -1;
+        final cmp =
+            bggRatingAscending ? ra.compareTo(rb) : rb.compareTo(ra);
         return cmp != 0 ? cmp : a.title.compareTo(b.title);
       case CollectionSort.quantityDesc:
         final cmp = b.quantity.compareTo(a.quantity);
