@@ -180,7 +180,7 @@ class CollectionItemTile extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(top: 5),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
@@ -518,7 +518,6 @@ class CollectionItemTile extends StatelessWidget {
               icon: Icons.layers_outlined,
               suffix: '$_ownedQty',
               color: Colors.lightBlue.shade600,
-              active: true,
             ),
           ),
         ),
@@ -531,7 +530,6 @@ class CollectionItemTile extends StatelessWidget {
               icon: groupCount > 1 ? Icons.groups : Icons.group_outlined,
               suffix: '$groupCount',
               color: Colors.teal.shade500,
-              active: groupCount > 0,
             ),
           ),
         ),
@@ -544,7 +542,6 @@ class CollectionItemTile extends StatelessWidget {
               icon: Icons.extension_outlined,
               suffix: '$expansionCount',
               color: Colors.green.shade600,
-              active: expansionCount > 0,
             ),
           ),
         ),
@@ -567,8 +564,6 @@ class CollectionItemTile extends StatelessWidget {
               icon: Icons.place_outlined,
               suffix: location ?? '—',
               color: Colors.deepOrange.shade400,
-              active: location != null,
-              expandSuffix: true,
             ),
           ),
         ),
@@ -582,7 +577,6 @@ class CollectionItemTile extends StatelessWidget {
               icon: Icons.star_rounded,
               suffix: rating ?? '—',
               color: Colors.amber.shade700,
-              active: rating != null,
             ),
           ),
         ),
@@ -655,58 +649,32 @@ class CollectionItemTile extends StatelessWidget {
     required IconData icon,
     String? suffix,
     required Color color,
-    double maxSuffixWidth = 40,
-    bool expandSuffix = false,
-    bool active = true,
   }) {
-    final chipColor = active ? color : Colors.grey.shade500;
-    final iconAlpha = active ? 1.0 : 0.45;
-    final bgAlpha = active ? 0.12 : 0.06;
-    final borderAlpha = active ? 0.35 : 0.18;
-
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
       decoration: BoxDecoration(
-        color: chipColor.withValues(alpha: bgAlpha),
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(5),
-        border: Border.all(color: chipColor.withValues(alpha: borderAlpha)),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
       ),
       child: Row(
-        mainAxisSize:
-            expandSuffix ? MainAxisSize.max : MainAxisSize.min,
         children: [
-          Icon(icon, size: 12, color: chipColor.withValues(alpha: iconAlpha)),
+          Icon(icon, size: 12, color: color),
           if (suffix != null) ...[
             const SizedBox(width: 3),
-            if (expandSuffix)
-              Expanded(
-                child: Text(
-                  suffix,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
-                    color: chipColor.withValues(alpha: active ? 1.0 : 0.5),
-                    height: 1,
-                  ),
-                ),
-              )
-            else
-              ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: maxSuffixWidth),
-                child: Text(
-                  suffix,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
-                    color: chipColor.withValues(alpha: active ? 1.0 : 0.5),
-                    height: 1,
-                  ),
+            Expanded(
+              child: Text(
+                suffix,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
+                  color: color,
+                  height: 1,
                 ),
               ),
+            ),
           ],
         ],
       ),

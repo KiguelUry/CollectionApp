@@ -133,10 +133,60 @@ class _BoardgameTileQuantitySheetState
     }
   }
 
+  Future<void> _promptZeroWithWishlist() async {
+    final choice = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('0 exemplaire'),
+        content: const Text(
+          'Passer à 0 exemplaire.\n\n'
+          'Voulez-vous ajouter cet objet à votre Wishlist ?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Non, juste le retirer'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Oui, l\'ajouter'),
+          ),
+        ],
+      ),
+    );
+    if (choice == null || !mounted) return;
+
+    setState(() {
+      _ownedQuantity = 0;
+      _saving = true;
+    });
+    try {
+      await zeroOutCollectionItem(
+        item: widget.item,
+        addToWishlist: choice,
+      );
+      CollectionRefresh.instance.bump();
+    } catch (_) {
+      if (mounted) {
+        setState(() => _ownedQuantity = 1);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Erreur lors de la sauvegarde')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   Future<void> _changeOwnedQuantity(int next) async {
     if (widget.readOnly || _saving) return;
     final prev = _ownedQuantity;
     if (next == prev) return;
+
+    if (!widget.item.isWishlist && prev == 1 && next == 0) {
+      await _promptZeroWithWishlist();
+      return;
+    }
 
     setState(() {
       _ownedQuantity = next;

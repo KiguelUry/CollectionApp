@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_item.dart';
 import '../services/collection_refresh.dart';
 import '../utils/whereabouts_persistence.dart';
+import 'item_stock_persistence.dart';
 import 'wishlist_promote.dart';
 
 /// Ajoute 1 exemplaire en collection à partir d'une ligne wishlist (sans supprimer la wishlist).
@@ -82,6 +83,18 @@ Future<void> addToWishlistFromCollection(CollectionItem collectionItem) async {
         ),
       );
   CollectionRefresh.instance.bump();
+}
+
+/// Passe un exemplaire collection à 0 ; optionnellement crée une ligne wishlist.
+Future<void> zeroOutCollectionItem({
+  required CollectionItem item,
+  required bool addToWishlist,
+}) async {
+  if (item.isWishlist || item.id.isEmpty) return;
+  await persistOwnedQuantity(itemId: item.id, quantity: 0);
+  if (addToWishlist) {
+    await addToWishlistFromCollection(item);
+  }
 }
 
 /// Retire la ligne wishlist (après confirmation utilisateur).
