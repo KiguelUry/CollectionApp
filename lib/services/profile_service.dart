@@ -17,7 +17,7 @@ import 'activity_service.dart';
 import 'profile_cache_service.dart';
 
 class ProfileService {
-  final _client = Supabase.instance.client;
+  SupabaseClient get _client => Supabase.instance.client;
   final _picker = ImagePicker();
 
   String? get _userId => _client.auth.currentUser?.id;

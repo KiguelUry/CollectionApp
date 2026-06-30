@@ -22,13 +22,15 @@ Future<void> main() async {
   } catch (_) {
     // Web/Vercel : assets/.env parfois absent ; repli AppEnv.
   }
-  await SettingsService.instance.load();
   await initializeDateFormatting('fr_FR');
 
   await Supabase.initialize(
     url: AppEnv.supabaseUrl,
     anonKey: AppEnv.supabaseAnonKey,
   );
+
+  // Après Supabase : SettingsService peut synchroniser le profil (ProfileService).
+  await SettingsService.instance.load();
 
   runApp(const MyApp());
 }
