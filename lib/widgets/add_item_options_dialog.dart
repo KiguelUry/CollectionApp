@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_group.dart';
 import '../services/group_service.dart';
 import '../utils/holder_label_utils.dart';
+import '../utils/boardgame_display.dart';
 import 'bgg_network_image.dart';
 import 'compact_whereabouts_dropdown.dart';
 import 'cover_preview_sheet.dart';
@@ -30,6 +31,7 @@ class AddItemOptionsDialog extends StatefulWidget {
   final String itemTitle;
   final String? itemImageUrl;
   final bool defaultWishlist;
+  final double? bggAvgRating;
   final Future<void> Function(AddItemOptions options) onConfirm;
 
   const AddItemOptionsDialog({
@@ -38,6 +40,7 @@ class AddItemOptionsDialog extends StatefulWidget {
     required this.onConfirm,
     this.itemImageUrl,
     this.defaultWishlist = false,
+    this.bggAvgRating,
   });
 
   @override
@@ -180,6 +183,10 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                             fontWeight: FontWeight.w700,
                           ),
                     ),
+                    if (widget.bggAvgRating != null) ...[
+                      const SizedBox(height: 6),
+                      _BggRatingPreview(avgRating: widget.bggAvgRating!),
+                    ],
                     const SizedBox(height: 8),
                     if (!widget.defaultWishlist)
                       SwitchListTile(
@@ -227,21 +234,15 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                           hint: const Text('Choisir un groupe'),
                           items: _sortedGroups
                               .map(
-                                (g) {
-                                  final count = _groupActivityCounts[g.id] ?? 0;
-                                  final label = count > 0
-                                      ? '${g.name} ($count)'
-                                      : g.name;
-                                  return DropdownMenuItem(
-                                    value: g.id,
-                                    child: GroupBadge.dropdownLabel(
-                                      name: label,
-                                      avatarUrl: g.avatarUrl,
-                                      accentColor: g.accentColor,
-                                      iconKey: g.iconKey,
-                                    ),
-                                  );
-                                },
+                                (g) => DropdownMenuItem(
+                                  value: g.id,
+                                  child: GroupBadge.dropdownLabel(
+                                    name: g.name,
+                                    avatarUrl: g.avatarUrl,
+                                    accentColor: g.accentColor,
+                                    iconKey: g.iconKey,
+                                  ),
+                                ),
                               )
                               .toList(),
                           onChanged: (v) => setState(() => _selectedGroupId = v),
@@ -350,6 +351,43 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
           child: const Text('Ajouter'),
         ),
       ],
+    );
+  }
+}
+
+class _BggRatingPreview extends StatelessWidget {
+  final double avgRating;
+
+  const _BggRatingPreview({required this.avgRating});
+
+  @override
+  Widget build(BuildContext context) {
+    final onFive = bggRatingOnFive(avgRating);
+    if (onFive == null) return const SizedBox.shrink();
+    final chipLabel = formatBggRatingChipLabel(avgRating) ?? onFive.toStringAsFixed(1);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.amber.shade700.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.amber.shade700.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.star_rounded, size: 18, color: Colors.amber.shade700),
+          const SizedBox(width: 6),
+          Text(
+            'Note communautaire : $chipLabel',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: Colors.amber.shade800,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

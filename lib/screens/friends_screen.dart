@@ -297,7 +297,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
                         Text(
                           sharing
                               ? 'Collection partagée · appui long = options'
-                              : 'Collections privées',
+                              : 'Appui long = options',
                           style: TextStyle(
                             fontSize: 12,
                             color: sharing
@@ -438,6 +438,60 @@ class _FriendsScreenState extends State<FriendsScreen> {
                       _openFriend(friend);
                     }
                   : null,
+            ),
+            ListTile(
+              leading: Icon(Icons.person_remove_outlined, color: Colors.red.shade400),
+              title: Text(
+                'Retirer cet ami',
+                style: TextStyle(color: Colors.red.shade700),
+              ),
+              onTap: () async {
+                Navigator.pop(ctx);
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (dCtx) => AlertDialog(
+                    title: const Text('Retirer cet ami ?'),
+                    content: Text(
+                      '« ${friend['username']} » ne sera plus dans ta liste d\'amis.',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(dCtx, false),
+                        child: const Text('Annuler'),
+                      ),
+                      FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.red,
+                        ),
+                        onPressed: () => Navigator.pop(dCtx, true),
+                        child: const Text('Retirer'),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirm != true || !mounted) return;
+                try {
+                  await _service.removeFriend(
+                    friend['friendship_id'] as String,
+                  );
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          '${friend['username']} retiré de tes amis',
+                        ),
+                      ),
+                    );
+                    await _load();
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('$e')),
+                    );
+                  }
+                }
+              },
             ),
           ],
         ),

@@ -205,6 +205,23 @@ class GroupService {
     return List<Map<String, dynamic>>.from(rows);
   }
 
+  Future<void> removeMember(String groupId, String profileId) async {
+    final userId = _userId;
+    if (userId == null) throw Exception('Non connecté');
+
+    final group = await fetchGroup(groupId);
+    final isSelf = profileId == userId;
+    if (!isSelf && !canEdit(group)) {
+      throw Exception('Seul le créateur peut retirer un membre');
+    }
+
+    await _client
+        .from('group_members')
+        .delete()
+        .eq('group_id', groupId)
+        .eq('profile_id', profileId);
+  }
+
   /// Supprime le groupe (cascade membres ; objets : group_id → null en base).
   Future<void> deleteGroup(String groupId) async {
     final group = await fetchGroup(groupId);

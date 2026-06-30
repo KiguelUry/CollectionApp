@@ -13,9 +13,20 @@ const corsHeaders: Record<string, string> = {
 };
 
 const MAX_SEARCH = 50;
-const MAX_META = 50;
+const MAX_META = 24;
 const MAX_HOT = 50;
 const THING_CHUNK = 8;
+const SEARCH_TYPES = "boardgame,rpgitem,boardgameexpansion";
+const SEARCH_CACHE_TTL_MS = 15 * 60 * 1000;
+const SEARCH_CACHE_MAX = 48;
+const MIN_BGG_GAP_MS = 320;
+
+/** Titres très courts que l’API search BGG rate souvent. */
+const KNOWN_BGG_ID_BY_TITLE: Record<string, string> = { ra: "12" };
+
+const searchCache = new Map<string, { at: number; games: GameHit[] }>();
+let lastBggHttpAt = 0;
+let lastBggStatus: string | undefined;
 
 type GameHit = Record<string, string>;
 type ThingMeta = {
@@ -54,6 +65,22 @@ function primaryTitle(inner: string): string {
   return any?.[1] ?? "Sans titre";
 }
 
+function isSearchableType(attrs: string): boolean {
+  return /type="(boardgame|rpgitem|boardgameexpansion)"/i.test(attrs);
+}
+
+function exactQueryVariants(query: string): string[] {
+  const t = query.trim();
+  if (!t) return [];
+  const out = new Set<string>([t]);
+  const lower = t.toLowerCase();
+  out.add(lower);
+  if (t.length <= 20 && lower.length > 0) {
+    out.add(`${lower[0].toUpperCase()}${lower.slice(1)}`);
+  }
+  return [...out];
+}
+
 function parseSearchItems(xml: string): GameHit[] {
   const out: GameHit[] = [];
   const re = /<item\b([^>]*)>([\s\S]*?)<\/item>/gi;
@@ -61,12 +88,15 @@ function parseSearchItems(xml: string): GameHit[] {
   while ((m = re.exec(xml)) !== null) {
     const attrs = m[1];
     const inner = m[2];
-    if (!/type="boardgame"/i.test(attrs)) continue;
+    if (!isSearchableType(attrs)) continue;
     const id = attrs.match(/\bid="(\d+)"/i)?.[1];
     if (!id) continue;
+    const type = attrs.match(/\btype="([^"]*)"/i)?.[1] ?? "";
     const year =
       inner.match(/<yearpublished[^>]*value="([^"]*)"/i)?.[1] ?? "";
-    out.push({ id, title: primaryTitle(inner), year });
+    const hit: GameHit = { id, title: primaryTitle(inner), year };
+    if (type) hit.bgg_type = type;
+    out.push(hit);
     if (out.length >= MAX_SEARCH) break;
   }
   return out;
@@ -423,10 +453,21 @@ async function fetchBgg(path: string, params: Record<string, string>): Promise<s
   let lastStatus = 502;
   let lastBody = "";
   for (let attempt = 0; attempt < 10; attempt++) {
+    const now = Date.now();
+    const wait = MIN_BGG_GAP_MS - (now - lastBggHttpAt);
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    lastBggHttpAt = Date.now();
+
     const res = await fetch(target.toString(), { headers });
     const text = await res.text();
     lastStatus = res.status;
     lastBody = text;
+    if (res.status === 429) {
+      lastBggStatus =
+        `BGG surchargé — nouvel essai (${attempt + 1}/10)…`;
+      await new Promise((r) => setTimeout(r, 900 + attempt * 700));
+      continue;
+    }
     const pending =
       res.status === 202 ||
       (res.status === 200 && text.includes("Please try again"));
@@ -483,18 +524,153 @@ function sortSearchResults(
   });
 }
 
+function mergeSearchHits(primary: GameHit[], secondary: GameHit[]): GameHit[] {
+  const seen = new Set(primary.map((g) => g.id));
+  const out = [...primary];
+  for (const g of secondary) {
+    if (!g.id || seen.has(g.id)) continue;
+    seen.add(g.id);
+    out.push(g);
+    if (out.length >= MAX_SEARCH) break;
+  }
+  return out;
+}
+
+async function fetchExactSearchHits(
+  query: string,
+  type = SEARCH_TYPES,
+): Promise<GameHit[]> {
+  let merged: GameHit[] = [];
+  for (const variant of exactQueryVariants(query)) {
+    try {
+      const exactXml = await fetchBgg("/xmlapi2/search", {
+        query: variant,
+        type,
+        exact: "1",
+      });
+      merged = mergeSearchHits(merged, parseSearchItems(exactXml));
+    } catch {
+      // recherche exacte optionnelle
+    }
+  }
+  return merged;
+}
+
+async function fetchKnownTitleHits(query: string): Promise<GameHit[]> {
+  const id = KNOWN_BGG_ID_BY_TITLE[normalize(query)];
+  if (!id) return [];
+  try {
+    const enriched = await enrichGameHits([{ id, title: "" }]);
+    return enriched.filter((g) => g.title?.trim());
+  } catch {
+    return [];
+  }
+}
+
+function searchCacheKey(query: string, sort: string): string {
+  return `${sort}:${normalize(query)}`;
+}
+
+function storeSearchCache(key: string, games: GameHit[]): void {
+  searchCache.set(key, { at: Date.now(), games: [...games] });
+  if (searchCache.size <= SEARCH_CACHE_MAX) return;
+  let oldestKey: string | undefined;
+  let oldestAt = Infinity;
+  for (const [k, v] of searchCache.entries()) {
+    if (v.at < oldestAt) {
+      oldestAt = v.at;
+      oldestKey = k;
+    }
+  }
+  if (oldestKey) searchCache.delete(oldestKey);
+}
+
+function pinExactTitleMatches(items: GameHit[], query: string): void {
+  const q = normalize(query);
+  if (!q) return;
+  const exact: GameHit[] = [];
+  const rest: GameHit[] = [];
+  for (const g of items) {
+    if (normalize(g.title) === q) exact.push(g);
+    else rest.push(g);
+  }
+  if (exact.length === 0) return;
+  items.length = 0;
+  items.push(...exact, ...rest);
+}
+
 async function handleSearch(query: string, sort: string): Promise<Response> {
   const trimmed = query.trim();
   if (trimmed.length < 1) {
     return json({ games: [] });
   }
 
-  const xml = await fetchBgg("/xmlapi2/search", {
-    query: trimmed,
-    type: "boardgame",
-  });
-  const candidates = parseSearchItems(xml);
-  if (candidates.length === 0) return json({ games: [] });
+  const cacheKey = searchCacheKey(trimmed, sort);
+  const cached = searchCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < SEARCH_CACHE_TTL_MS) {
+    return json({
+      games: cached.games,
+      cached: true,
+      status: "Résultats en cache (moins d’appels BGG)",
+    });
+  }
+
+  lastBggStatus = "Recherche sur BoardGameGeek…";
+
+  let candidates: GameHit[] = [];
+  try {
+    if (trimmed.length <= 3) {
+      candidates = mergeSearchHits(
+        await fetchKnownTitleHits(trimmed),
+        mergeSearchHits(
+          await fetchExactSearchHits(trimmed, "boardgame"),
+          await fetchExactSearchHits(trimmed),
+        ),
+      );
+    } else {
+      const xml = await fetchBgg("/xmlapi2/search", {
+        query: trimmed,
+        type: SEARCH_TYPES,
+      });
+      candidates = parseSearchItems(xml);
+      if (trimmed.length <= 8) {
+        candidates = mergeSearchHits(
+          await fetchKnownTitleHits(trimmed),
+          candidates,
+        );
+        candidates = mergeSearchHits(
+          await fetchExactSearchHits(trimmed, "boardgame"),
+          candidates,
+        );
+        candidates = mergeSearchHits(
+          await fetchExactSearchHits(trimmed),
+          candidates,
+        );
+      }
+    }
+  } catch (e) {
+    const known = await fetchKnownTitleHits(trimmed).catch(() => []);
+    if (known.length > 0) {
+      return json({
+        games: known,
+        status: lastBggStatus,
+        warning: String(e),
+      });
+    }
+    return json(
+      {
+        error: String(e),
+        status: lastBggStatus ??
+          "BGG limite les requêtes — réessaie dans quelques secondes.",
+      },
+      503,
+    );
+  }
+
+  if (candidates.length === 0) {
+    lastBggStatus = undefined;
+    return json({ games: [] });
+  }
 
   candidates.sort(
     (a, b) =>
@@ -515,7 +691,11 @@ async function handleSearch(query: string, sort: string): Promise<Response> {
   }
 
   sortSearchResults(enriched, trimmed, sort, meta);
-  return json({ games: enriched.slice(0, 40) });
+  pinExactTitleMatches(enriched, trimmed);
+  const games = enriched.slice(0, 40);
+  storeSearchCache(cacheKey, games);
+  lastBggStatus = undefined;
+  return json({ games });
 }
 
 async function handleHot(): Promise<Response> {

@@ -7,7 +7,7 @@ import '../services/group_service.dart';
 import '../services/holder_place_history_service.dart';
 import '../utils/holder_label_utils.dart';
 
-/// « Chez ? » — membre, ami ou saisie libre. La persistance est gérée par le parent via [onChanged].
+/// « Chez qui ? » — membre, ami ou saisie libre. La persistance est gérée par le parent via [onChanged].
 class CompactWhereaboutsDropdown extends StatefulWidget {
   final List<CollectionGroup> groups;
   final Set<String> selectedGroupIds;
@@ -39,14 +39,21 @@ class CompactWhereaboutsDropdown extends StatefulWidget {
 }
 
 class _MemberOption {
-  final String value;
+  final String userId;
   final String label;
-  final bool isHeader;
 
-  const _MemberOption({
-    required this.value,
-    required this.label,
-    this.isHeader = false,
+  const _MemberOption({required this.userId, required this.label});
+}
+
+class _GroupSection {
+  final String id;
+  final String name;
+  final List<_MemberOption> members;
+
+  const _GroupSection({
+    required this.id,
+    required this.name,
+    required this.members,
   });
 }
 
@@ -57,7 +64,9 @@ class _CompactWhereaboutsDropdownState
   final _manualFocusNode = FocusNode();
   late TextEditingController _manualController;
 
-  List<_MemberOption> _options = [];
+  String? _meUserId;
+  List<_GroupSection> _groupSections = [];
+  List<_MemberOption> _friendOptions = [];
   List<String> _placeSuggestions = [];
   bool _initialLoading = true;
   bool _defaultApplied = false;
@@ -67,6 +76,8 @@ class _CompactWhereaboutsDropdownState
       widget.locationUserId == null &&
       widget.holderLabel != null &&
       widget.holderLabel!.trim().isNotEmpty;
+
+  String? get _personalUserId => Supabase.instance.client.auth.currentUser?.id;
 
   @override
   void initState() {
@@ -130,11 +141,10 @@ class _CompactWhereaboutsDropdownState
 
   Future<void> _loadPlaceSuggestions() async {
     final ids = widget.selectedGroupIds;
-    if (ids.isEmpty) {
-      if (mounted) setState(() => _placeSuggestions = []);
-      return;
-    }
-    final places = await HolderPlaceHistoryService.loadForGroups(ids);
+    final places = await HolderPlaceHistoryService.loadForGroups(
+      ids,
+      personalUserId: ids.isEmpty ? _personalUserId : null,
+    );
     if (!mounted) return;
     setState(() => _placeSuggestions = places);
   }
@@ -145,7 +155,7 @@ class _CompactWhereaboutsDropdownState
     }
     if (_isManualHolder || _manualMode) return;
     if (widget.locationUserId != null) return;
-    final me = Supabase.instance.client.auth.currentUser?.id;
+    final me = _meUserId;
     if (me == null) return;
     _defaultApplied = true;
     widget.onChanged(
@@ -159,18 +169,7 @@ class _CompactWhereaboutsDropdownState
       setState(() => _initialLoading = true);
     }
     final me = Supabase.instance.client.auth.currentUser?.id;
-    final seenUserIds = <String>{};
-    final opts = <_MemberOption>[];
-
-    void addUser(String userId, String label) {
-      if (seenUserIds.contains(userId)) return;
-      seenUserIds.add(userId);
-      opts.add(_MemberOption(value: 'user:$userId', label: label));
-    }
-
-    if (me != null) {
-      addUser(me, 'Chez moi');
-    }
+    final groupSections = <_GroupSection>[];
 
     for (final gid in widget.selectedGroupIds) {
       CollectionGroup? g;
@@ -181,96 +180,73 @@ class _CompactWhereaboutsDropdownState
         }
       }
       if (g == null) continue;
-      opts.add(
-        _MemberOption(value: 'hdr:$gid', label: g.name, isHeader: true),
-      );
+      final members = <_MemberOption>[];
       try {
         final rows = await _groupService.fetchMembers(gid);
         for (final row in rows) {
           final pid = row['profile_id'] as String?;
-          if (pid == null || pid.isEmpty) continue;
+          if (pid == null || pid.isEmpty || pid == me) continue;
           final username =
               (row['profiles'] as Map?)?['username'] as String? ?? 'Membre';
-          addUser(pid, username);
+          members.add(_MemberOption(userId: pid, label: username));
         }
       } catch (_) {}
+      groupSections.add(
+        _GroupSection(id: gid, name: g.name, members: members),
+      );
     }
 
+    final friendOpts = <_MemberOption>[];
     try {
       final friends = await _friendService.fetchFriends();
-      final friendOpts = <_MemberOption>[];
       for (final f in friends) {
         final pid = f['profile_id'] as String?;
-        if (pid == null || pid.isEmpty || seenUserIds.contains(pid)) continue;
-        seenUserIds.add(pid);
+        if (pid == null || pid.isEmpty || pid == me) continue;
         friendOpts.add(
           _MemberOption(
-            value: 'user:$pid',
+            userId: pid,
             label: f['username'] as String? ?? 'Ami',
           ),
         );
       }
-      if (friendOpts.isNotEmpty) {
-        opts.add(
-          const _MemberOption(
-            value: 'hdr:friends',
-            label: 'Amis',
-            isHeader: true,
-          ),
-        );
-        opts.addAll(friendOpts);
-      }
     } catch (_) {}
-
-    opts.add(
-      const _MemberOption(value: 'manual', label: 'Autre (saisie libre)'),
-    );
 
     if (!mounted) return;
     setState(() {
-      _options = opts;
+      _meUserId = me;
+      _groupSections = groupSections;
+      _friendOptions = friendOpts;
       _initialLoading = false;
     });
     if (initial) _applyDefaultIfNeeded();
   }
 
-  String? get _dropdownValue {
-    if (_manualMode || _isManualHolder) return 'manual';
-    final uid = widget.locationUserId;
-    if (uid == null) return null;
-    final v = 'user:$uid';
-    final matches = _options.where((o) => !o.isHeader && o.value == v).length;
-    if (matches == 1) return v;
-    return null;
-  }
+  bool _isSelectedUser(String userId) =>
+      !_manualMode && !_isManualHolder && widget.locationUserId == userId;
 
-  void _onDropdownChanged(String? v) {
-    if (v == null || v.startsWith('hdr:')) return;
-    if (v == 'manual') {
-      setState(() {
-        _manualMode = true;
-        if (!_isManualHolder) _manualController.clear();
-      });
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _manualFocusNode.requestFocus();
-      });
-      return;
-    }
+  bool get _isManualSelected => _manualMode || _isManualHolder;
+
+  void _selectUser(String userId, String label) {
+    if (widget.readOnly) return;
     setState(() {
       _manualMode = false;
       _manualFocusNode.unfocus();
     });
-    if (v.startsWith('user:')) {
-      final uid = v.substring(5);
-      final opt = _options.firstWhere(
-        (o) => o.value == v,
-        orElse: () => _MemberOption(value: v, label: 'Membre'),
-      );
-      widget.onChanged(
-        locationUserId: uid,
-        holderLabel: opt.label == 'Chez moi' ? 'Chez moi' : 'Chez ${opt.label}',
-      );
-    }
+    widget.onChanged(
+      locationUserId: userId,
+      holderLabel: label == 'Chez moi' ? 'Chez moi' : 'Chez $label',
+    );
+  }
+
+  void _selectManual() {
+    if (widget.readOnly) return;
+    setState(() {
+      _manualMode = true;
+      if (!_isManualHolder) _manualController.clear();
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _manualFocusNode.requestFocus();
+    });
   }
 
   void _applySuggestion(String raw) {
@@ -312,6 +288,7 @@ class _CompactWhereaboutsDropdownState
     await HolderPlaceHistoryService.saveForGroups(
       widget.selectedGroupIds,
       preview,
+      personalUserId: widget.selectedGroupIds.isEmpty ? _personalUserId : null,
     );
     await _loadPlaceSuggestions();
     if (!mounted) return;
@@ -322,8 +299,39 @@ class _CompactWhereaboutsDropdownState
     await HolderPlaceHistoryService.removeForGroups(
       widget.selectedGroupIds,
       place,
+      personalUserId: widget.selectedGroupIds.isEmpty ? _personalUserId : null,
     );
     await _loadPlaceSuggestions();
+  }
+
+  Widget _selectionTile({
+    required String title,
+    required bool selected,
+    required VoidCallback? onTap,
+    IconData? icon,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    return ListTile(
+      dense: true,
+      visualDensity: VisualDensity.compact,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+      leading: Icon(
+        icon ?? Icons.person_outline,
+        size: 20,
+        color: selected ? scheme.primary : scheme.onSurfaceVariant,
+      ),
+      title: Text(
+        title,
+        style: TextStyle(
+          fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+          color: selected ? scheme.primary : null,
+        ),
+      ),
+      trailing: selected
+          ? Icon(Icons.check_circle, color: scheme.primary, size: 20)
+          : null,
+      onTap: onTap,
+    );
   }
 
   @override
@@ -335,51 +343,103 @@ class _CompactWhereaboutsDropdownState
       );
     }
 
-    final selectable = _options.where((o) => !o.isHeader).toList();
-    final value = _dropdownValue;
-    final validValue = value != null &&
-        selectable.where((o) => o.value == value).length == 1;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         InputDecorator(
-          decoration: InputDecoration(
+          decoration: const InputDecoration(
             labelText: 'Chez qui ?',
             isDense: true,
-            helperText: _isManualHolder && !_manualMode
-                ? widget.holderLabel
-                : null,
           ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              isExpanded: true,
-              value: validValue ? value : null,
-              items: _options.map((o) {
-                if (o.isHeader) {
-                  return DropdownMenuItem<String>(
-                    value: o.value,
-                    enabled: false,
-                    child: Text(
-                      o.label,
-                      style: TextStyle(
-                        fontSize: 12,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_meUserId != null)
+                _selectionTile(
+                  title: 'Chez moi',
+                  selected: _isSelectedUser(_meUserId!),
+                  onTap: widget.readOnly
+                      ? null
+                      : () => _selectUser(_meUserId!, 'Chez moi'),
+                  icon: Icons.home_outlined,
+                ),
+              for (final section in _groupSections)
+                Theme(
+                  data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                  child: ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    childrenPadding: EdgeInsets.zero,
+                    initiallyExpanded: false,
+                    title: Text(
+                      section.name,
+                      style: const TextStyle(
+                        fontSize: 14,
                         fontWeight: FontWeight.w600,
-                        color: Theme.of(context).colorScheme.primary,
                       ),
                     ),
-                  );
-                }
-                return DropdownMenuItem<String>(
-                  value: o.value,
-                  child: Text(o.label),
-                );
-              }).toList(),
-              onChanged: widget.readOnly ? null : _onDropdownChanged,
-            ),
+                    children: section.members.isEmpty
+                        ? [
+                            const Padding(
+                              padding: EdgeInsets.only(left: 16, bottom: 8),
+                              child: Text(
+                                'Aucun autre membre',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                            ),
+                          ]
+                        : section.members
+                            .map(
+                              (m) => _selectionTile(
+                                title: 'Chez ${m.label}',
+                                selected: _isSelectedUser(m.userId),
+                                onTap: widget.readOnly
+                                    ? null
+                                    : () => _selectUser(m.userId, m.label),
+                              ),
+                            )
+                            .toList(),
+                  ),
+                ),
+              if (_friendOptions.isNotEmpty)
+                Theme(
+                  data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                  child: ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    childrenPadding: EdgeInsets.zero,
+                    initiallyExpanded: false,
+                    title: const Text(
+                      'Amis',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    children: _friendOptions
+                        .map(
+                          (m) => _selectionTile(
+                            title: 'Chez ${m.label}',
+                            selected: _isSelectedUser(m.userId),
+                            onTap: widget.readOnly
+                                ? null
+                                : () => _selectUser(m.userId, m.label),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ),
+              _selectionTile(
+                title: 'Autre (personne ou lieu)',
+                selected: _isManualSelected,
+                onTap: widget.readOnly ? null : _selectManual,
+                icon: Icons.edit_outlined,
+              ),
+            ],
           ),
         ),
-        if ((_manualMode || _isManualHolder) && !widget.readOnly) ...[
+        if (_isManualSelected && !widget.readOnly) ...[
           const SizedBox(height: 8),
           if (_placeSuggestions.isNotEmpty) ...[
             Wrap(

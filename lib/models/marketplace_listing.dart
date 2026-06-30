@@ -1,6 +1,5 @@
 import '../models/collection_item.dart';
 import '../utils/marketplace_status.dart';
-import '../utils/supabase_embeds.dart';
 
 /// Annonce visible dans l'Hôtel des Ventes / Échanges.
 class MarketplaceListing {

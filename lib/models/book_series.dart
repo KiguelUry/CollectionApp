@@ -1,5 +1,4 @@
 import 'book_subcategory.dart';
-import 'novel_rating_matrix.dart';
 
 class BookSeries {
   final String id;
@@ -37,9 +36,6 @@ class BookSeries {
   bool get isSubArc => parentSeriesId != null;
 
   bool get isStandalone => metadata['is_standalone'] == true;
-
-  NovelRatingMatrix get novelMatrix =>
-      NovelRatingMatrix.fromMetadata(metadata);
 
   double? get totalNewValue =>
       _parseDouble(metadata['total_value_new']);

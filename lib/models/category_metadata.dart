@@ -1,8 +1,10 @@
 import '../utils/boardgame_display.dart';
 import 'collection_category.dart';
+import '../utils/tech_warranty.dart';
 import 'book_subcategory.dart';
 import 'card_subcategory.dart';
 import 'pokemon_card_lang.dart';
+import 'tech_subcategory.dart';
 import 'collection_item.dart';
 
 enum CardCondition {
@@ -176,6 +178,23 @@ class CategoryMetadata {
         final addr = item.metadata?['address']?.toString();
         if (addr != null && addr.isNotEmpty) return addr;
         return item.metadata?['city']?.toString();
+      case CollectionCategory.tech:
+        final brand = item.metadata?['brand']?.toString();
+        final model = item.metadata?['model']?.toString();
+        final parts = <String>[];
+        if (item.subcategory != null) {
+          parts.add(TechSubcategory.fromDbValue(item.subcategory).label);
+        }
+        if (brand != null && brand.isNotEmpty) {
+          parts.add(model != null && model.isNotEmpty ? '$brand $model' : brand);
+        } else if (model != null && model.isNotEmpty) {
+          parts.add(model);
+        }
+        final warranty = warrantySubtitle(
+          item.metadata?['warranty_end']?.toString(),
+        );
+        if (warranty != null) parts.add(warranty);
+        return parts.isEmpty ? null : parts.join(' · ');
       case CollectionCategory.custom:
         return item.metadata?['custom_type_name']?.toString();
       default:
@@ -335,9 +354,74 @@ class CategoryMetadata {
           rows.add(MapEntry('Réalisateur', m['director'].toString()));
         }
         break;
+      case CollectionCategory.tech:
+        if (item.subcategory != null) {
+          rows.add(MapEntry(
+            'Univers',
+            TechSubcategory.fromDbValue(item.subcategory).label,
+          ));
+        }
+        if ((m['brand'] as String?)?.isNotEmpty == true) {
+          rows.add(MapEntry('Marque', m['brand'].toString()));
+        }
+        if ((m['model'] as String?)?.isNotEmpty == true) {
+          rows.add(MapEntry('Modèle', m['model'].toString()));
+        }
+        if ((m['device_kind'] as String?)?.isNotEmpty == true) {
+          rows.add(MapEntry('Type', _techDeviceKindLabel(m['device_kind'].toString())));
+        }
+        if (m['platform'] != null && m['platform'].toString().isNotEmpty) {
+          rows.add(MapEntry('Plateforme', m['platform'].toString()));
+        }
+        if (m['battery_hours'] != null) {
+          rows.add(MapEntry('Autonomie', '${m['battery_hours']} h'));
+        }
+        if (m['noise_cancelling'] == true) {
+          rows.add(const MapEntry('Réduction de bruit', 'Oui'));
+        }
+        if (m['storage_gb'] != null) {
+          rows.add(MapEntry('Stockage', '${m['storage_gb']} Go'));
+        }
+        if (m['screen_inches'] != null) {
+          rows.add(MapEntry('Écran', '${m['screen_inches']}"'));
+        }
+        if ((m['panel_type'] as String?)?.isNotEmpty == true) {
+          rows.add(MapEntry('Dalle', m['panel_type'].toString().toUpperCase()));
+        }
+        if ((m['merchant'] as String?)?.isNotEmpty == true) {
+          rows.add(MapEntry('Marchand', m['merchant'].toString()));
+        }
+        if ((m['warranty_end'] as String?)?.isNotEmpty == true) {
+          rows.add(MapEntry(
+            'Fin de garantie',
+            warrantySubtitle(m['warranty_end'].toString()) ??
+                m['warranty_end'].toString(),
+          ));
+        }
+        break;
       default:
         break;
     }
     return rows;
   }
+
+  static String _techDeviceKindLabel(String kind) => switch (kind) {
+        'headphone' => 'Casque',
+        'earbud' => 'Écouteurs',
+        'speaker' => 'Enceinte',
+        'turntable' => 'Platine',
+        'console' => 'Console',
+        'controller' => 'Manette',
+        'vr' => 'Casque VR',
+        'mouse' => 'Souris',
+        'keyboard' => 'Clavier',
+        'headset' => 'Casque gaming',
+        'smartphone' => 'Smartphone',
+        'tablet' => 'Tablette',
+        'smartwatch' => 'Montre connectée',
+        'tv' => 'Téléviseur',
+        'projector' => 'Projecteur',
+        'stream_box' => 'Box TV',
+        _ => kind,
+      };
 }

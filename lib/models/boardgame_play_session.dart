@@ -106,6 +106,64 @@ class BoardgamePlaySession {
     return autoWinner;
   }
 
+  /// Ligne scores / joueurs uniquement (sans gagnant).
+  String? get scoresLine {
+    if (trackScores && scoreGrid != null && scoreGrid!.hasScores) {
+      if (useTeams && scoreGrid!.hasTeams) {
+        final tt = scoreGrid!.teamTotals();
+        return tt.entries.map((e) => '${e.key} : ${e.value}').join(' · ');
+      }
+      return scoreGrid!.totalsSummary();
+    }
+    if (scores != null && scores!.isNotEmpty) {
+      return scores!.entries.map((e) => '${e.key} : ${e.value}').join(' · ');
+    }
+    if (players.isNotEmpty) return players.join(', ');
+    return null;
+  }
+
+  /// Ligne gagnant(s) / coop (sans scores).
+  String? get winnerLine {
+    final w = effectiveWinner;
+    if (w != null && w.isNotEmpty) {
+      if (useTeams && scoreGrid != null && scoreGrid!.hasTeams) {
+        final members = <String>[];
+        for (var i = 0; i < scoreGrid!.players.length; i++) {
+          if (scoreGrid!.teams.length > i &&
+              scoreGrid!.teams[i]?.trim() == w.trim()) {
+            final n = scoreGrid!.players[i].trim();
+            if (n.isNotEmpty) members.add(n);
+          }
+        }
+        if (members.isNotEmpty) {
+          return 'Équipe gagnante : $w (Joueurs : ${_formatNameList(members)})';
+        }
+        return 'Gagnant : $w';
+      }
+      if (w.contains('&')) return 'Gagnants : $w';
+      return winCondition == BoardgameWinCondition.cooperative
+          ? 'Coop réussi'
+          : 'Gagnant : $w';
+    }
+    if (scoreGrid != null && scoreGrid!.hasScores) {
+      final names = scoreGrid!.winnerNames(winCondition);
+      if (names.length > 1) return 'Gagnants : ${names.join(' & ')}';
+      if (names.length == 1) return 'Gagnant : ${names.first}';
+    } else if (winCondition == BoardgameWinCondition.cooperative) {
+      if (coopVictory == true) {
+        if (players.isNotEmpty) {
+          return 'Victoire coop (${_formatNameList(players)})';
+        }
+        return 'Victoire coop';
+      }
+      if (coopVictory == false) return 'Défaite coop';
+      if (scoreGrid?.hasScores == true) {
+        return 'Score coop : ${scoreGrid!.columnTotals().fold(0, (a, b) => a + b)}';
+      }
+    }
+    return null;
+  }
+
   String summaryLine() {
     final parts = <String>[];
     if (trackScores && scoreGrid != null && scoreGrid!.hasScores) {

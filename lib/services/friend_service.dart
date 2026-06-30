@@ -207,6 +207,11 @@ class FriendService {
     invalidateFriendCache();
   }
 
+  Future<void> removeFriend(String friendshipId) async {
+    await _client.from('friendships').delete().eq('id', friendshipId);
+    invalidateFriendCache();
+  }
+
   Future<List<Map<String, dynamic>>> fetchFriends() async {
     final userId = _client.auth.currentUser!.id;
     final rows = await _client

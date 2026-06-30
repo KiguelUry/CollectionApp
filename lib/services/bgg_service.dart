@@ -21,6 +21,13 @@ enum BggSearchSort {
   recent,
 }
 
+class _CachedSearch {
+  final List<Map<String, String>> games;
+  final DateTime at;
+
+  const _CachedSearch(this.games, this.at);
+}
+
 class _BggThingMeta {
   final int? rank;
   final String? thumbnail;
@@ -43,9 +50,12 @@ class _BggThingMeta {
 
 class BggService {
   static const _maxSearchResults = 50;
-  static const _maxMetaLookup = 50;
+  /// Moins d'appels /thing (limite BGG ~429 si trop de requêtes).
+  static const _maxMetaLookup = 24;
   static const _thingChunkSize = 8;
   static const _maxPollAttempts = 10;
+  /// Jeux de société + JDR narratifs (ex. Alice is Missing) + extensions.
+  static const _searchTypes = 'boardgame,rpgitem,boardgameexpansion';
 
   /// Sur le web : API JSON `bgg-api` (XML parsé côté serveur).
   static bool get _useWebJsonApi => kIsWeb;
@@ -92,6 +102,10 @@ class BggService {
       }
       final decoded = jsonDecode(response.body);
       if (decoded is! Map<String, dynamic>) return null;
+      final status = decoded['status']?.toString();
+      if (status != null && status.isNotEmpty) {
+        lastSearchStatus = status;
+      }
       final err = decoded['error'];
       if (err != null) {
         lastSearchError = err.toString();
@@ -125,6 +139,20 @@ class BggService {
   /// Dernière erreur recherche (affichée sur le web en release).
   static String? lastSearchError;
 
+  /// Message de progression (recherche, cache, retry 429…).
+  static String? lastSearchStatus;
+
+  /// Titres très courts que l’API search BGG rate souvent (clé = titre normalisé).
+  static const _knownBggIdByNormTitle = <String, String>{
+    'ra': '12',
+  };
+
+  static final _searchCache = <String, _CachedSearch>{};
+  static const _searchCacheTtl = Duration(minutes: 15);
+  static const _searchCacheMaxEntries = 48;
+  static DateTime? _lastBggHttpAt;
+  static const _minBggRequestGap = Duration(milliseconds: 320);
+
   static List<Map<String, String>>? _hotCache;
   static DateTime? _hotCacheAt;
 
@@ -140,6 +168,36 @@ class BggService {
     return headers;
   }
 
+  static String _searchCacheKey(String query, BggSearchSort sort) =>
+      '${sort.name}:${query.toLowerCase().trim()}';
+
+  static void _storeSearchCache(String key, List<Map<String, String>> games) {
+    _searchCache[key] = _CachedSearch(
+      games.map((g) => Map<String, String>.from(g)).toList(),
+      DateTime.now(),
+    );
+    if (_searchCache.length <= _searchCacheMaxEntries) return;
+    String? oldestKey;
+    DateTime? oldestAt;
+    for (final e in _searchCache.entries) {
+      if (oldestAt == null || e.value.at.isBefore(oldestAt)) {
+        oldestAt = e.value.at;
+        oldestKey = e.key;
+      }
+    }
+    if (oldestKey != null) _searchCache.remove(oldestKey);
+  }
+
+  static Future<void> _throttleBggRequest() async {
+    final last = _lastBggHttpAt;
+    if (last != null) {
+      final elapsed = DateTime.now().difference(last);
+      final wait = _minBggRequestGap - elapsed;
+      if (wait > Duration.zero) await Future.delayed(wait);
+    }
+    _lastBggHttpAt = DateTime.now();
+  }
+
   /// L'API XML BGG répond souvent 202 (« Please try again ») : on réessaie.
   static Future<http.Response> _getWithRetry(Uri url) async {
     if (_useWebJsonApi) {
@@ -151,7 +209,18 @@ class BggService {
 
     http.Response? last;
     for (var attempt = 0; attempt < _maxPollAttempts; attempt++) {
+      await _throttleBggRequest();
       last = await http.get(target, headers: headers);
+      if (last.statusCode == 429) {
+        lastSearchStatus =
+            'BGG surchargé — nouvel essai (${attempt + 1}/$_maxPollAttempts)…';
+        lastSearchError =
+            'BGG limite les requêtes (trop d’appels). Nouvel essai automatique…';
+        await Future.delayed(
+          Duration(milliseconds: 900 + attempt * 700),
+        );
+        continue;
+      }
       final pending = last.statusCode == 202 ||
           (last.statusCode == 200 &&
               last.body.contains('Please try again'));
@@ -161,6 +230,196 @@ class BggService {
       );
     }
     return last!;
+  }
+
+  static List<Map<String, String>> _parseSearchXmlItems(String body) {
+    final document = _parseXmlDocument(body);
+    if (document == null) return [];
+    final candidates = <Map<String, String>>[];
+    for (final node in document.findAllElements('item')) {
+      if (candidates.length >= _maxSearchResults) break;
+      final itemType = node.getAttribute('type') ?? '';
+      if (!_isSearchableBggType(itemType)) continue;
+      final id = node.getAttribute('id') ?? '';
+      if (id.isEmpty) continue;
+      final year =
+          node.findElements('yearpublished').firstOrNull?.getAttribute('value') ??
+              '';
+      candidates.add({
+        'id': id,
+        'title': _primaryTitle(node),
+        'year': year,
+        if (itemType.isNotEmpty) 'bgg_type': itemType,
+      });
+    }
+    return candidates;
+  }
+
+  static bool _isSearchableBggType(String type) =>
+      type == 'boardgame' ||
+      type == 'rpgitem' ||
+      type == 'boardgameexpansion';
+
+  static Iterable<String> _exactQueryVariants(String query) sync* {
+    final t = query.trim();
+    if (t.isEmpty) return;
+    yield t;
+    final lower = t.toLowerCase();
+    if (lower != t) yield lower;
+    if (t.length <= 20) {
+      final titleCased = lower.isEmpty
+          ? lower
+          : '${lower[0].toUpperCase()}${lower.substring(1)}';
+      if (titleCased != t && titleCased != lower) yield titleCased;
+    }
+  }
+
+  static Future<List<Map<String, String>>> _fetchExactSearchCandidates(
+    String query, {
+    String type = _searchTypes,
+  }) async {
+    var merged = <Map<String, String>>[];
+    for (final variant in _exactQueryVariants(query)) {
+      final exactUrl = Uri.https('boardgamegeek.com', '/xmlapi2/search', {
+        'query': variant,
+        'type': type,
+        'exact': '1',
+      });
+      final exactResponse = await _getWithRetry(exactUrl);
+      if (exactResponse.statusCode == 200 && exactResponse.body.isNotEmpty) {
+        merged = _mergeSearchCandidates(
+          merged,
+          _parseSearchXmlItems(exactResponse.body),
+        );
+      }
+    }
+    return merged;
+  }
+
+  /// Recherche exacte jeux de société seuls (ex. « Ra » = id 12).
+  static Future<List<Map<String, String>>> _fetchExactBoardgameCandidates(
+    String query,
+  ) =>
+      _fetchExactSearchCandidates(query, type: 'boardgame');
+
+  static Future<List<Map<String, String>>> _fetchKnownTitleHits(
+    String query,
+  ) async {
+    final key = query.toLowerCase().trim();
+    final id = _knownBggIdByNormTitle[key];
+    if (id == null) return [];
+    try {
+      final meta = await _fetchThingMeta([id]);
+      final m = meta[id];
+      final title = m?.title;
+      if (title == null || title.isEmpty) return [];
+      return [
+        {
+          'id': id,
+          'title': title,
+          if (m?.year != null && m!.year!.isNotEmpty) 'year': m.year!,
+          'bgg_type': 'boardgame',
+          if (m?.rank != null) 'bgg_rank': m!.rank.toString(),
+          if (m?.thumbnail != null && m!.thumbnail!.isNotEmpty)
+            'image_url': m.thumbnail!,
+        },
+      ];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static void _pinExactTitleMatches(
+    List<Map<String, String>> items,
+    String query,
+  ) {
+    final q = query.toLowerCase().trim();
+    if (q.isEmpty) return;
+    final exact = <Map<String, String>>[];
+    final rest = <Map<String, String>>[];
+    for (final g in items) {
+      final title = g['title']?.toLowerCase().trim() ?? '';
+      if (title == q) {
+        exact.add(g);
+      } else {
+        rest.add(g);
+      }
+    }
+    if (exact.isEmpty) return;
+    items
+      ..clear()
+      ..addAll(exact)
+      ..addAll(rest);
+  }
+
+  static List<Map<String, String>> _mergeSearchCandidates(
+    List<Map<String, String>> primary,
+    List<Map<String, String>> secondary,
+  ) {
+    final seen = primary.map((g) => g['id']).whereType<String>().toSet();
+    final out = [...primary];
+    for (final g in secondary) {
+      final id = g['id'];
+      if (id == null || id.isEmpty || !seen.add(id)) continue;
+      out.add(g);
+      if (out.length >= _maxSearchResults) break;
+    }
+    return out;
+  }
+
+  /// Recherche xmlapi2 (+ exacte / titres connus pour courts type « Ra »).
+  static Future<List<Map<String, String>>> _fetchSearchCandidates(
+    String query,
+  ) async {
+    var candidates = <Map<String, String>>[];
+
+    // Requêtes ≤3 car. : exact + fallback (évite le bruit et les 429).
+    if (query.length <= 3) {
+      candidates = await _fetchKnownTitleHits(query);
+      candidates = _mergeSearchCandidates(
+        candidates,
+        await _fetchExactBoardgameCandidates(query),
+      );
+      candidates = _mergeSearchCandidates(
+        candidates,
+        await _fetchExactSearchCandidates(query),
+      );
+      return candidates;
+    }
+
+    final url = Uri.https('boardgamegeek.com', '/xmlapi2/search', {
+      'query': query,
+      'type': _searchTypes,
+    });
+    final response = await _getWithRetry(url);
+    if (response.statusCode != 200 || response.body.isEmpty) {
+      if (response.statusCode == 429) {
+        lastSearchError =
+            'BGG limite les requêtes (429). Réessaie dans quelques secondes.';
+      } else if (response.statusCode != 0) {
+        lastSearchError = 'BGG a répondu ${response.statusCode}';
+      }
+      candidates = await _fetchKnownTitleHits(query);
+      if (candidates.isNotEmpty) return candidates;
+      return [];
+    }
+
+    candidates = _parseSearchXmlItems(response.body);
+    if (query.length <= 8) {
+      candidates = _mergeSearchCandidates(
+        await _fetchKnownTitleHits(query),
+        candidates,
+      );
+      candidates = _mergeSearchCandidates(
+        await _fetchExactBoardgameCandidates(query),
+        candidates,
+      );
+      candidates = _mergeSearchCandidates(
+        await _fetchExactSearchCandidates(query),
+        candidates,
+      );
+    }
+    return candidates;
   }
 
   static String _primaryTitle(XmlElement node) {
@@ -181,10 +440,22 @@ class BggService {
     if (trimmed.isEmpty) return [];
 
     lastSearchError = null;
+    lastSearchStatus = 'Recherche sur BoardGameGeek…';
     if (!supportsWebSearch) {
       lastSearchError =
           'Recherche BGG indisponible : configure Supabase (fonction bgg-api).';
+      lastSearchStatus = null;
       return [];
+    }
+
+    final cacheKey = _searchCacheKey(trimmed, sort);
+    final cached = _searchCache[cacheKey];
+    if (cached != null &&
+        DateTime.now().difference(cached.at) < _searchCacheTtl) {
+      lastSearchStatus = 'Résultats en cache (moins d’appels BGG)';
+      return cached.games
+          .map((g) => Map<String, String>.from(g))
+          .toList();
     }
 
     if (_useWebJsonApi) {
@@ -196,46 +467,26 @@ class BggService {
           _ => 'smart',
         },
       });
-      if (data == null) return [];
-      return enrichGameMaps(_gamesFromJsonList(data['games']));
+      if (data == null) {
+        lastSearchStatus = null;
+        return [];
+      }
+      final games = _gamesFromJsonList(data['games']);
+      if (games.isNotEmpty) {
+        _storeSearchCache(cacheKey, games);
+        if (data['cached'] == true) {
+          lastSearchStatus = 'Résultats en cache (moins d’appels BGG)';
+        } else {
+          lastSearchStatus = null;
+        }
+      } else {
+        lastSearchStatus = null;
+      }
+      return games;
     }
 
     try {
-      final url = Uri.https('boardgamegeek.com', '/xmlapi2/search', {
-        'query': trimmed,
-        'type': 'boardgame',
-      });
-      final response = await _getWithRetry(url);
-
-      if (response.statusCode != 200 || response.body.isEmpty) {
-        lastSearchError = response.statusCode == 0
-            ? 'Réseau bloqué (CORS ou connexion). Vérifie le proxy bgg-proxy sur Supabase (JWT désactivé).'
-            : 'BGG a répondu ${response.statusCode}';
-        return [];
-      }
-
-      final document = _parseXmlDocument(response.body);
-      if (document == null) return [];
-      final items = document.findAllElements('item');
-
-      final candidates = <Map<String, String>>[];
-      for (final node in items) {
-        if (candidates.length >= _maxSearchResults) break;
-        final id = node.getAttribute('id') ?? '';
-        if (id.isEmpty) continue;
-        final year =
-            node
-                .findElements('yearpublished')
-                .firstOrNull
-                ?.getAttribute('value') ??
-            '';
-        candidates.add({
-          'id': id,
-          'title': _primaryTitle(node),
-          'year': year,
-        });
-      }
-
+      final candidates = await _fetchSearchCandidates(trimmed);
       if (candidates.isEmpty) return [];
 
       sortByScore(
@@ -262,10 +513,17 @@ class BggService {
       }).toList();
 
       _sortResults(ranked, trimmed, sort, meta);
+      _pinExactTitleMatches(ranked, trimmed);
 
-      return ranked.take(40).toList();
+      final results = ranked.take(40).toList();
+      if (results.isNotEmpty) {
+        _storeSearchCache(cacheKey, results);
+        lastSearchStatus = null;
+      }
+      return results;
     } catch (e) {
       lastSearchError = 'Recherche BGG impossible : $e';
+      lastSearchStatus = null;
       if (kDebugMode) debugPrint('Erreur recherche BGG: $e');
     }
     return [];

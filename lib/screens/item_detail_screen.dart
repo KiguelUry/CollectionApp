@@ -35,6 +35,7 @@ import '../widgets/item_aspect_ratings_section.dart';
 import '../widgets/profile_avatar.dart';
 import '../widgets/restaurant_visits_panel.dart';
 import '../services/boardgame_expansion_service.dart';
+import '../utils/tech_warranty.dart';
 import '../utils/boardgame_display.dart';
 import '../utils/boardgame_collection_visibility.dart';
 import '../utils/boardgame_expansion_flow.dart';
@@ -78,8 +79,10 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
   late final TextEditingController _priceController;
   late final TextEditingController _gamesPlayedController;
   late final TextEditingController _personalRulesController;
+  late final TextEditingController _merchantController;
 
   ItemCondition? _condition;
+  DateTime? _warrantyEnd;
   List<CollectionGroup> _groups = [];
   Set<String> _selectedGroupIds = {};
   Timer? _saveDebounce;
@@ -110,6 +113,13 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     _personalRulesController = TextEditingController(
       text: _item.personalRules ?? '',
     );
+    _merchantController = TextEditingController(
+      text: _item.metadata?['merchant']?.toString() ?? '',
+    );
+    final rawWarranty = _item.metadata?['warranty_end']?.toString();
+    if (rawWarranty != null && rawWarranty.isNotEmpty) {
+      _warrantyEnd = DateTime.tryParse(rawWarranty);
+    }
     _syncGroupSelectionFromItem();
     _loadBggDescription();
     if (!widget.readOnly) {
@@ -117,6 +127,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       _priceController.addListener(_scheduleSave);
       _gamesPlayedController.addListener(_scheduleSave);
       _personalRulesController.addListener(_scheduleSave);
+      _merchantController.addListener(_scheduleSave);
       _loadGroups();
       _loadGroupMembership();
       _reloadItem();
@@ -230,6 +241,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     _priceController.dispose();
     _gamesPlayedController.dispose();
     _personalRulesController.dispose();
+    _merchantController.dispose();
     super.dispose();
   }
 
@@ -375,11 +387,6 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     return meta;
   }
 
-  Map<String, dynamic> _metadataForSave(List<String> groupIds) {
-    return buildWhereaboutsDbFields(_item, groupIds: groupIds)['metadata']
-        as Map<String, dynamic>;
-  }
-
   String? _groupNameById(String id) {
     for (final g in _groups) {
       if (g.id == id) return g.name;
@@ -432,9 +439,45 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     _quantityDebounce = Timer(const Duration(milliseconds: 300), _saveNow);
   }
 
+  Future<void> _pickWarrantyEnd() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _warrantyEnd ?? now,
+      firstDate: DateTime(now.year - 10),
+      lastDate: DateTime(now.year + 15),
+      helpText: 'Fin de garantie',
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _warrantyEnd = picked);
+    _scheduleSave();
+  }
+
+  void _clearWarrantyEnd() {
+    setState(() => _warrantyEnd = null);
+    _scheduleSave();
+  }
+
   Future<void> _save() async {
     final price = double.tryParse(_priceController.text.replaceAll(',', '.'));
     final gamesPlayed = int.tryParse(_gamesPlayedController.text.trim());
+
+    var meta = Map<String, dynamic>.from(_item.metadata ?? {});
+    if (_item.category == CollectionCategory.tech) {
+      final merchant = _merchantController.text.trim();
+      if (merchant.isEmpty) {
+        meta.remove('merchant');
+      } else {
+        meta['merchant'] = merchant;
+      }
+      if (_warrantyEnd != null) {
+        final d = _warrantyEnd!;
+        meta['warranty_end'] =
+            '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+      } else {
+        meta.remove('warranty_end');
+      }
+    }
 
     final groupIds = _selectedGroupIds.toList();
     _item = _item.copyWith(
@@ -449,7 +492,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       locationUserId: _item.locationUserId,
       groupId: groupIds.isEmpty ? null : groupIds.first,
       groupName: groupIds.isEmpty ? null : _groupNameById(groupIds.first),
-      metadata: _metadataForSave(groupIds),
+      metadata: meta,
       isWishlist: _item.isWishlist,
       clearPurchasePrice: _priceController.text.trim().isEmpty,
       clearGamesPlayed: _gamesPlayedController.text.trim().isEmpty,
@@ -623,6 +666,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     final isBoardgame = _item.category == CollectionCategory.boardgame;
     final isBook = _item.category == CollectionCategory.book;
     final isCard = _item.category == CollectionCategory.card;
+    final isTech = _item.category == CollectionCategory.tech;
     final cardSetName = _item.metadata?['set_name']?.toString().trim();
     final canOpenSet = isCard &&
         _item.cardSubcategory?.hasSetBrowser == true &&
@@ -741,6 +785,15 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         ),
                       ),
                     if (ro) const SizedBox(height: 12),
+                    Text(
+                      _item.title,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            height: 1.25,
+                          ),
+                    ),
+                    const SizedBox(height: 12),
                     if (!ro && isBoardgame && _item.isExpansion && expansionOf != null) ...[
                       Card(
                         color: Colors.orange.shade50,
@@ -1295,24 +1348,72 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         ),
                       ),
                     ],
-                    if (!isWishlist) ...[
+                    if (!isWishlist || isTech) ...[
                     CollapsibleSection(
-                      title: 'Valeur & état',
+                      title: isTech ? 'Budget & garantie' : 'Valeur & état',
                       accentColor: _item.category.color,
-                      initiallyExpanded: false,
+                      initiallyExpanded: isTech,
                       child: Column(
                         children: [
+                    if (isTech && _warrantyEnd != null) ...[
+                      _buildWarrantyAlert(),
+                      const SizedBox(height: 12),
+                    ],
                     TextField(
                       controller: _priceController,
                       readOnly: ro,
                       keyboardType: const TextInputType.numberWithOptions(
                         decimal: true,
                       ),
-                      decoration: const InputDecoration(
-                        labelText: 'Prix d\'achat (€)',
-                        border: OutlineInputBorder(),
+                      decoration: InputDecoration(
+                        labelText: isTech
+                            ? 'Prix d\'achat (€)'
+                            : 'Prix d\'achat (€)',
+                        border: const OutlineInputBorder(),
                       ),
                     ),
+                    if (isTech) ...[
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _merchantController,
+                        readOnly: ro,
+                        decoration: const InputDecoration(
+                          labelText: 'Marchand',
+                          hintText: 'LDLC, Amazon, Fnac…',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Fin de garantie'),
+                        subtitle: Text(
+                          _warrantyEnd == null
+                              ? 'Non renseignée'
+                              : warrantySubtitle(
+                                      '${_warrantyEnd!.year}-${_warrantyEnd!.month.toString().padLeft(2, '0')}-${_warrantyEnd!.day.toString().padLeft(2, '0')}') ??
+                                  'Date invalide',
+                        ),
+                        trailing: ro
+                            ? null
+                            : Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (_warrantyEnd != null)
+                                    IconButton(
+                                      tooltip: 'Effacer',
+                                      onPressed: _clearWarrantyEnd,
+                                      icon: const Icon(Icons.clear),
+                                    ),
+                                  IconButton(
+                                    tooltip: 'Choisir une date',
+                                    onPressed: _pickWarrantyEnd,
+                                    icon: const Icon(Icons.event),
+                                  ),
+                                ],
+                              ),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     DropdownButtonFormField<ItemCondition?>(
                       initialValue: _condition,
@@ -1503,6 +1604,50 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
           ),
         ],
       ],
+    );
+  }
+
+  Widget _buildWarrantyAlert() {
+    if (_warrantyEnd == null) return const SizedBox.shrink();
+    final iso =
+        '${_warrantyEnd!.year}-${_warrantyEnd!.month.toString().padLeft(2, '0')}-${_warrantyEnd!.day.toString().padLeft(2, '0')}';
+    final status = warrantyStatus(iso);
+    if (status == TechWarrantyStatus.valid ||
+        status == TechWarrantyStatus.unknown) {
+      return const SizedBox.shrink();
+    }
+    final color = warrantyAccentColor(status);
+    final message = warrantySubtitle(iso) ?? 'Garantie';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.45)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            status == TechWarrantyStatus.expired
+                ? Icons.warning_amber_rounded
+                : Icons.schedule_rounded,
+            color: color,
+            size: 20,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                color: color,
+                fontSize: 13,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

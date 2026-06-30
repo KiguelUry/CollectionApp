@@ -194,9 +194,16 @@ class RiftscribeService {
         'set_id': setId.toUpperCase(),
         'limit': '$limit',
         'offset': '$offset',
-        'sort': 'collector_number',
+        'sort': 'default',
       });
-      if (response.statusCode != 200) return [];
+      if (response.statusCode != 200) {
+        if (kDebugMode) {
+          debugPrint(
+            'RiftScribe cards $setId: HTTP ${response.statusCode} ${response.body}',
+          );
+        }
+        return [];
+      }
 
       final body = jsonDecode(response.body);
       final list = body is List
@@ -270,7 +277,8 @@ class RiftscribeService {
     final name = card['name'] as String?;
     if (name == null || name.isEmpty) return null;
 
-    final id = card['id']?.toString() ?? '';
+    final id =
+        card['id']?.toString() ?? card['card_id']?.toString() ?? '';
     final setId = card['set_id']?.toString().toUpperCase() ?? '';
     final setName = _setNames[setId] ?? setInfo?.displayName ?? setId;
     final blockName = setInfo?.seriesName ??
@@ -281,7 +289,8 @@ class RiftscribeService {
     final imageUrl = image ??
         thumbs?['large']?.toString() ??
         thumbs?['medium']?.toString() ??
-        thumbs?['small']?.toString();
+        thumbs?['small']?.toString() ??
+        card['thumbnail_url']?.toString();
 
     final variant = card['variant']?.toString() ?? '';
     final displayName = variant.isNotEmpty ? '$name ($variant)' : name;

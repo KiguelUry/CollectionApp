@@ -82,6 +82,29 @@ class ItemGroupService {
     }
   }
 
+  /// Ajoute plusieurs objets à un groupe (wishlist ou collection).
+  Future<void> bulkAddItemsToGroup({
+    required String groupId,
+    required List<CollectionItem> items,
+  }) async {
+    for (final item in items) {
+      final ids = await fetchGroupIdsForItem(item.id);
+      if (ids.contains(groupId)) continue;
+      await syncItemGroupsWithItem(item, [...ids, groupId]);
+    }
+  }
+
+  /// Ajoute plusieurs objets à plusieurs groupes.
+  Future<void> bulkAddItemsToGroups({
+    required List<String> groupIds,
+    required List<CollectionItem> items,
+  }) async {
+    final unique = groupIds.toSet();
+    for (final groupId in unique) {
+      await bulkAddItemsToGroup(groupId: groupId, items: items);
+    }
+  }
+
   Future<Set<String>> fetchItemIdsForGroup(String groupId) async {
     try {
       final rows = await _client

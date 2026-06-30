@@ -477,6 +477,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
               totalQuantity: entry.totalQuantity,
               showDuplicateBadge: entry.hasDuplicates,
               showGroupBadge: false,
+              contextGroupId: widget.group.id,
               groupNamesById: {widget.group.id: widget.group.name},
               boardgameQuickEditGroups: category == CollectionCategory.boardgame
                   ? [widget.group]

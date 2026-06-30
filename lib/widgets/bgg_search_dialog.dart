@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../services/bgg_service.dart';
@@ -27,6 +29,8 @@ class _BggSearchDialogState extends State<BggSearchDialog> {
   bool _isLoading = false;
   bool _loadingHot = true;
   String? _lastQuery;
+  String? _statusMessage;
+  String? _errorMessage;
   int _searchGeneration = 0;
   BggSearchSort _sort = BggSearchSort.smart;
 
@@ -62,11 +66,13 @@ class _BggSearchDialogState extends State<BggSearchDialog> {
         _results = [];
         _isLoading = false;
         _lastQuery = null;
+        _statusMessage = null;
+        _errorMessage = null;
       });
       return;
     }
     _debounce.run(
-      delay: const Duration(milliseconds: 400),
+      delay: const Duration(milliseconds: 550),
       action: () => _search(query),
     );
   }
@@ -78,22 +84,31 @@ class _BggSearchDialogState extends State<BggSearchDialog> {
     setState(() {
       _isLoading = true;
       _lastQuery = query;
+      _statusMessage = 'Recherche sur BoardGameGeek…';
+      _errorMessage = null;
+    });
+
+    final statusPoll = Timer.periodic(const Duration(milliseconds: 400), (_) {
+      if (!mounted || generation != _searchGeneration) return;
+      final s = BggService.lastSearchStatus;
+      if (s != null && s.isNotEmpty && s != _statusMessage) {
+        setState(() => _statusMessage = s);
+      }
     });
 
     final res = await BggService.searchGames(query, sort: _sort);
+    statusPoll.cancel();
     if (!mounted || generation != _searchGeneration) return;
+
+    final err = BggService.lastSearchError;
+    final status = BggService.lastSearchStatus;
 
     setState(() {
       _results = res;
       _isLoading = false;
+      _statusMessage = status;
+      _errorMessage = res.isEmpty ? err : null;
     });
-
-    final err = BggService.lastSearchError;
-    if (err != null && res.isEmpty && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(err), duration: const Duration(seconds: 5)),
-      );
-    }
   }
 
   void _setSort(BggSearchSort sort) {
@@ -150,11 +165,86 @@ class _BggSearchDialogState extends State<BggSearchDialog> {
                 ],
               ),
             ],
+            if (_isLoading &&
+                _statusMessage != null &&
+                _statusMessage!.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.orange.shade800,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _statusMessage!,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.orange.shade900,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (!_isLoading &&
+                _statusMessage != null &&
+                _statusMessage!.isNotEmpty &&
+                _results.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  _statusMessage!,
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                ),
+              ),
+            if (_errorMessage != null && _errorMessage!.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange.shade200),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.cloud_off_outlined,
+                        size: 18,
+                        color: Colors.orange.shade800,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _errorMessage!,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.orange.shade900,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             if (_lastQuery != null && _lastQuery!.isNotEmpty && !_isLoading)
               Padding(
                 padding: const EdgeInsets.only(top: 6, bottom: 4),
                 child: Text(
-                  _results.isEmpty
+                  _results.isEmpty && _errorMessage == null
                       ? 'Aucun résultat pour « $_lastQuery »'
                       : '${_results.length} résultat(s)',
                   style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
@@ -261,9 +351,10 @@ class _BggSearchDialogState extends State<BggSearchDialog> {
             if (year != null && year.isNotEmpty) year,
           ].join(' · ')
         : [
+            if (game['bgg_type'] == 'rpgitem') 'Jeu de rôle narratif',
             if (bggRank != null) '#$bggRank sur BGG',
             if (year != null && year.isNotEmpty) year,
-          ].join(' · ');
+          ].where((s) => s.isNotEmpty).join(' · ');
 
     return ListTile(
       leading: _buildLeading(

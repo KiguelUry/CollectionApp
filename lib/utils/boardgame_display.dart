@@ -1,28 +1,4 @@
-/// Libellés joueurs / durée pour les jeux de société.
-
-/// Extrait 1–2 phrases (~240 car.) pour l’accroche BGG, pas le texte complet.
-String? bggShortDescription(String? full) {
-  if (full == null || full.trim().isEmpty) return null;
-  final text = full.trim().replaceAll(RegExp(r'\s+'), ' ');
-
-  final sentenceRe = RegExp(r'(?<=[.!?])\s+(?=[A-ZÀ-ÖØ-Þ«"(\[]|\d)');
-  final parts = text.split(sentenceRe);
-
-  final buffer = StringBuffer();
-  for (var i = 0; i < parts.length && i < 2; i++) {
-    if (buffer.isNotEmpty) buffer.write(' ');
-    buffer.write(parts[i].trim());
-    if (buffer.length >= 160) break;
-  }
-
-  var result = buffer.toString().trim();
-  if (result.isEmpty) {
-    result = text.length > 220 ? '${text.substring(0, 217).trimRight()}…' : text;
-  } else if (result.length > 280) {
-    result = '${result.substring(0, 277).trimRight()}…';
-  }
-  return result;
-}
+// Libellés joueurs / durée pour les jeux de société.
 
 int? parseBggBestPlayers(dynamic raw) {
   if (raw is int) return raw > 0 ? raw : null;

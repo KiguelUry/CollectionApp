@@ -5,10 +5,13 @@ import '../models/bgg_catalog_game.dart';
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../services/bgg_service.dart';
+import '../services/item_group_service.dart';
 import '../services/profile_service.dart';
 import '../services/collection_refresh.dart';
 import '../widgets/add_item_options_dialog.dart';
+import '../utils/whereabouts_persistence.dart';
 import 'boardgame_cover.dart';
+import 'boardgame_display.dart';
 import 'boardgame_expansion_flow.dart';
 
 /// Ajout depuis le catalogue BGG avec dialogue classique (comme les cartes).
@@ -48,12 +51,16 @@ Future<void> quickAddBoardgameFromCatalog(
     details: details,
     catalogUrl: game.imageUrl,
   );
+  final bggAvg = details != null
+      ? parseBggAvgRating(details['bgg_avg_rating'])
+      : null;
 
   await showDialog(
     context: context,
     builder: (dialogContext) => AddItemOptionsDialog(
       itemTitle: game.title,
       itemImageUrl: coverUrl,
+      bggAvgRating: bggAvg,
       onConfirm: (options) async {
         final client = Supabase.instance.client;
         final userId = client.auth.currentUser!.id;
@@ -134,15 +141,35 @@ Future<void> quickAddBoardgameFromCatalog(
                 maxPlayers: details['max_players'] as int?,
                 playingTime: playingTime,
               );
-              await client.from('collection_items').insert(
-                    item.toInsertJson(
-                      isWishlist: options.isWishlist,
-                      locationUserId: options.isWishlist
-                          ? null
-                          : (options.locationUserId ?? userId),
-                      addedBy: userId,
-                    ),
-                  );
+              final payload = buildCollectionItemInsertPayload(
+                item: item,
+                addedBy: userId,
+                isWishlist: options.isWishlist,
+                holderLabel: options.holderLabel,
+                defaultUserId: userId,
+              );
+              final inserted = await client
+                  .from('collection_items')
+                  .insert(payload)
+                  .select()
+                  .single();
+              if (options.groupId != null &&
+                  options.groupId!.isNotEmpty &&
+                  !options.isWishlist) {
+                final saved = CollectionItem.fromJson(
+                  Map<String, dynamic>.from(inserted as Map),
+                ).copyWith(
+                  metadata: Map<String, dynamic>.from(
+                    payload['metadata'] as Map? ?? {},
+                  ),
+                  locationUserId: payload['location_user_id'] as String?,
+                  groupId: options.groupId,
+                );
+                await ItemGroupService().syncItemGroupsWithItem(
+                  saved,
+                  [options.groupId!],
+                );
+              }
               message = options.isWishlist
                   ? '« ${game.title} » ajouté à la wishlist'
                   : '« ${game.title} » ajouté';
@@ -178,15 +205,35 @@ Future<void> quickAddBoardgameFromCatalog(
               maxPlayers: details?['max_players'] as int?,
               playingTime: playingTime,
             );
-            await client.from('collection_items').insert(
-                  item.toInsertJson(
-                    isWishlist: options.isWishlist,
-                    locationUserId: options.isWishlist
-                        ? null
-                        : (options.locationUserId ?? userId),
-                    addedBy: userId,
-                  ),
-                );
+            final payload = buildCollectionItemInsertPayload(
+              item: item,
+              addedBy: userId,
+              isWishlist: options.isWishlist,
+              holderLabel: options.holderLabel,
+              defaultUserId: userId,
+            );
+            final inserted = await client
+                .from('collection_items')
+                .insert(payload)
+                .select()
+                .single();
+            if (options.groupId != null &&
+                options.groupId!.isNotEmpty &&
+                !options.isWishlist) {
+              final saved = CollectionItem.fromJson(
+                Map<String, dynamic>.from(inserted as Map),
+              ).copyWith(
+                metadata: Map<String, dynamic>.from(
+                  payload['metadata'] as Map? ?? {},
+                ),
+                locationUserId: payload['location_user_id'] as String?,
+                groupId: options.groupId,
+              );
+              await ItemGroupService().syncItemGroupsWithItem(
+                saved,
+                [options.groupId!],
+              );
+            }
             message = options.isWishlist
                 ? '« ${game.title} » ajouté à la wishlist'
                 : '« ${game.title} » ajouté';

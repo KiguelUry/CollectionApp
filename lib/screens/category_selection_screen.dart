@@ -17,6 +17,7 @@ import 'media_collection_screen.dart';
 import 'movie_collection_screen.dart';
 import 'stats_screen.dart';
 import 'videogame_collection_screen.dart';
+import 'tech_collection_screen.dart';
 import 'watch_collection_screen.dart';
 import '../theme/app_theme.dart';
 import '../utils/app_haptics.dart';
@@ -48,7 +49,6 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
   bool _loadingCounts = true;
   List<HubTileEntry> _orderedTiles = [];
   List<Recommendation> _recommendationsList = [];
-
   @override
   void initState() {
     super.initState();
@@ -213,6 +213,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
           CollectionCategory.movie => const MovieCollectionScreen(),
           CollectionCategory.wildlife => const WildlifeCollectionScreen(),
           CollectionCategory.restaurant => const RestaurantCollectionScreen(),
+          CollectionCategory.tech => const TechCollectionScreen(),
           _ => HomeScreen(category: category),
         },
       ),

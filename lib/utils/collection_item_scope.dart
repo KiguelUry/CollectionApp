@@ -21,6 +21,14 @@ class CollectionItemScope {
         .or(personalOrFilter(userId));
   }
 
+  /// Tous les objets du compte (perso + partagés en groupe), sans double filtre group_id.
+  static PostgrestFilterBuilder ownedByUser(
+    PostgrestFilterBuilder query, {
+    required String userId,
+  }) {
+    return query.or(personalOrFilter(userId));
+  }
+
   /// Identifiants des groupes dont l'utilisateur est membre.
   static Future<List<String>> myGroupIds(String userId) async {
     final rows = await Supabase.instance.client

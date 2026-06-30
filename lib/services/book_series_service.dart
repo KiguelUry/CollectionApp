@@ -5,7 +5,6 @@ import '../models/book_subcategory.dart';
 import '../models/book_volume.dart';
 import '../models/collection_item.dart';
 import '../models/collection_category.dart';
-import '../models/novel_rating_matrix.dart';
 import '../utils/book_title_parser.dart';
 import 'book_intelligence_service.dart';
 import 'open_library_service.dart';
@@ -101,14 +100,6 @@ class BookSeriesService {
         .update({'wishlist_entire_series': value})
         .eq('id', seriesId)
         .eq('owner_id', _userId);
-  }
-
-  Future<void> saveNovelMatrix(String seriesId, NovelRatingMatrix matrix) async {
-    final series = await fetchSeriesById(seriesId);
-    if (series == null) return;
-    final meta = Map<String, dynamic>.from(series.metadata);
-    meta.addAll(matrix.toMetadataFragment());
-    await updateSeries(series.copyWith(metadata: meta));
   }
 
   Future<List<BookVolume>> fetchVolumes(String seriesId) async {

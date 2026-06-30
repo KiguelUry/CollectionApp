@@ -11,6 +11,7 @@ class CategoryTypeHub extends StatelessWidget {
   final String subtitle;
   final List<CategoryTypeHubItem> items;
   final CategoryTypeHubItem? featuredItem;
+  final CategoryTypeHubItem? secondaryFeaturedItem;
   final VoidCallback? onClassicList;
   final Color? accentColor;
   final Widget? header;
@@ -25,6 +26,7 @@ class CategoryTypeHub extends StatelessWidget {
     required this.subtitle,
     required this.items,
     this.featuredItem,
+    this.secondaryFeaturedItem,
     this.onClassicList,
     this.accentColor,
     this.header,
@@ -103,15 +105,32 @@ class CategoryTypeHub extends StatelessWidget {
             ),
           ),
         ),
-        if (featuredItem != null)
+        if (featuredItem != null || secondaryFeaturedItem != null)
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-              child: _FeaturedTypeCard(item: featuredItem!, accent: accent),
+              child: Column(
+                children: [
+                  if (featuredItem != null)
+                    _FeaturedTypeCard(item: featuredItem!, accent: accent),
+                  if (secondaryFeaturedItem != null) ...[
+                    if (featuredItem != null) const SizedBox(height: 8),
+                    _FeaturedTypeCard(
+                      item: secondaryFeaturedItem!,
+                      accent: secondaryFeaturedItem!.color,
+                    ),
+                  ],
+                ],
+              ),
             ),
           ),
         SliverPadding(
-          padding: EdgeInsets.fromLTRB(16, featuredItem != null ? 4 : 4, 16, 8),
+          padding: EdgeInsets.fromLTRB(
+            16,
+            4,
+            16,
+            8,
+          ),
           sliver: SliverGrid(
             gridDelegate: CollectionGridLayout.gridDelegate(
               context,

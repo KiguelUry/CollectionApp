@@ -89,4 +89,18 @@ class CategoryHubTheme {
           HubSourceChip('Marque & modèle', Icons.edit_outlined),
         ],
       );
+
+  static CategoryHubTheme tech(Color accent) => CategoryHubTheme(
+        accent: accent,
+        watermarkIcon: Icons.devices_other_rounded,
+        tagline:
+            'Casques, consoles, smartphones, TV — fiches techniques & garanties.',
+        searchHint: 'Voir toute la collection',
+        searchSubtitle: 'Saisie manuelle · pas de catalogue externe (V1)',
+        searchIcon: Icons.add_circle_outline_rounded,
+        sourceChips: const [
+          HubSourceChip('Fiches techniques', Icons.tune_rounded),
+          HubSourceChip('Suivi garantie', Icons.verified_user_outlined),
+        ],
+      );
 }

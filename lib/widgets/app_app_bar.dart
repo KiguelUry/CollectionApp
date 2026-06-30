@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../navigation/app_navigation.dart';
+import 'item_title_text.dart';
 
 /// Barre d'app standard : retour (si possible) + accueil Collections.
 class AppAppBar extends StatelessWidget implements PreferredSizeWidget {
@@ -33,7 +34,14 @@ class AppAppBar extends StatelessWidget implements PreferredSizeWidget {
     final showLeading = showBackButton && canPop;
 
     return AppBar(
-      title: Text(title),
+      title: ItemTitleText(
+        title: title,
+        maxLines: 2,
+        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+            ),
+      ),
       bottom: bottom,
       backgroundColor: backgroundColor,
       foregroundColor: foregroundColor,

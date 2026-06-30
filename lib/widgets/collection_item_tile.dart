@@ -7,10 +7,12 @@ import '../utils/boardgame_collection_visibility.dart';
 import '../utils/boardgame_expansions.dart';
 import '../utils/friend_item_overlap.dart';
 import '../utils/holder_label_utils.dart';
+import '../utils/item_group_count.dart';
 import '../utils/tcg_card_display.dart';
 import 'boardgame_tile_inventory_sheets.dart';
 import 'boardgame_tile_sheets.dart';
 import 'bgg_network_image.dart';
+import 'item_title_text.dart';
 
 /// Tuile grille pour un objet de collection (grisée si vendu).
 class CollectionItemTile extends StatelessWidget {
@@ -31,6 +33,8 @@ class CollectionItemTile extends StatelessWidget {
   final List<CollectionGroup>? boardgameQuickEditGroups;
   /// Nombre d'objets par groupe (tri activité décroissante).
   final Map<String, int> groupActivityCounts;
+  /// Groupe affiché (ex. écran détail groupe) — force le badge ≥ 1.
+  final String? contextGroupId;
 
   const CollectionItemTile({
     super.key,
@@ -48,6 +52,7 @@ class CollectionItemTile extends StatelessWidget {
     this.groupNamesById,
     this.boardgameQuickEditGroups,
     this.groupActivityCounts = const {},
+    this.contextGroupId,
   });
 
   bool get _isGrayed =>
@@ -65,7 +70,9 @@ class CollectionItemTile extends StatelessWidget {
   bool get _hasMetaIcons {
     if (_isBoardgame) return true;
     final qty = showDuplicateBadge && _ownedQty > 1;
-    final group = showGroupBadge && _groupCount > 0 && !item.isSold;
+    final group = showGroupBadge &&
+        groupMembershipCount(item, contextGroupId: contextGroupId) > 0 &&
+        !item.isSold;
     final expansions = _isBoardgame && ownedExpansionCount(item) > 0;
     final rating = _isBoardgame && _bggRatingLabel != null;
     final location = _isBoardgame && _locationChipLabel != null;
@@ -115,10 +122,9 @@ class CollectionItemTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  item.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                ItemTitleText(
+                  title: item.title,
+                  maxLines: 2,
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 11,
@@ -152,10 +158,9 @@ class CollectionItemTile extends StatelessWidget {
         else
           Padding(
             padding: const EdgeInsets.only(top: 6),
-            child: Text(
-              item.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            child: ItemTitleText(
+              title: item.title,
+              maxLines: 2,
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontWeight: FontWeight.w600,
@@ -360,10 +365,9 @@ class CollectionItemTile extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  item.title,
+                ItemTitleText(
+                  title: item.title,
                   maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 8,
@@ -454,11 +458,8 @@ class CollectionItemTile extends StatelessWidget {
     return item.locationLabel;
   }
 
-  int get _groupCount {
-    final extra = item.metadata?['group_ids'];
-    if (extra is List && extra.isNotEmpty) return extra.length;
-    return item.groupId != null ? 1 : 0;
-  }
+  int get _groupCount =>
+      groupMembershipCount(item, contextGroupId: contextGroupId);
 
   Future<void> _showQuantitySheet(BuildContext context) {
     return showBoardgameTileQuantitySheet(
@@ -505,7 +506,7 @@ class CollectionItemTile extends StatelessWidget {
   }
 
   Widget _buildIconRowTop(BuildContext context) {
-    final groupCount = showGroupBadge && !item.isSold ? _groupCount : 0;
+    final groupCount = !item.isSold ? _groupCount : 0;
     final expansionCount = ownedExpansionCount(item);
 
     return Row(
@@ -589,7 +590,9 @@ class CollectionItemTile extends StatelessWidget {
     if (!_hasMetaIcons) return null;
 
     final qty = showDuplicateBadge && _ownedQty > 1;
-    final group = showGroupBadge && _groupCount > 0 && !item.isSold;
+    final group = showGroupBadge &&
+        groupMembershipCount(item, contextGroupId: contextGroupId) > 0 &&
+        !item.isSold;
     final expansions = _isBoardgame && ownedExpansionCount(item) > 0;
     final rating = _bggRatingLabel;
     final location = _locationChipLabel;

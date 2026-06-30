@@ -38,7 +38,6 @@ SplashScreen
        │     ├── Onglet « Ma collection » → HomeScreen
        │     ├── Onglet « Découvrir » / catalogue (selon catégorie)
        │     └── Wishlist (selon catégorie)
-       ├── WishlistOverviewScreen (toutes catégories)
        ├── FriendsScreen / GroupsScreen
        ├── StatsScreen / InventoryManageScreen / LoansScreen
        └── SettingsScreen / ProfileEditScreen
@@ -199,7 +198,6 @@ Fichiers : `boardgame_expansion_flow.dart`, `boardgame_expansions_section.dart`,
 - **`TcgSetsBlockScreen`** : sets d’un bloc (logos, codes)
 - **`TcgSetCardsScreen`** : toutes les cartes d’un set + badges possédé + ajout bulk
 - **`TcgGlobalSearchScreen`** : recherche cross-set
-- **`TcgRarityGalleryScreen`** : galerie par rareté
 
 #### Metadata cartes
 - IDs catalogue par TCG, `set_name`, `block_name`, `card_number`, `rarity`, `card_lang`
@@ -315,7 +313,7 @@ Fichiers : `boardgame_expansion_flow.dart`, `boardgame_expansions_section.dart`,
 ### 4.2 Profil utilisateur
 
 - **`ProfileEditScreen`** : avatar (upload storage), bio (280 car.), couleur accent
-- **Trophées** : jusqu’à 6 objets favoris (`favorite_item_ids`) — arbre visuel `TrophyTree`
+- **Trophées** : jusqu’à 6 objets favoris (`favorite_item_ids`) affichés sur le profil
 - **Showcase public** : lien tokenisé (`showcase_token`, `showcase_public`) → `web/showcase.html`
 - **`ShowcaseService`** + RPC `get_public_showcase(token)`
 
@@ -359,7 +357,7 @@ Fichiers : `boardgame_expansion_flow.dart`, `boardgame_expansions_section.dart`,
 ### 4.7 Wishlist
 
 - Flag `is_wishlist` sur chaque item
-- **`WishlistOverviewScreen`** : vue globale par catégorie
+- Wishlist par catégorie (onglet dédié dans chaque hub + `HomeScreen`)
 - **`wishlist_promote.dart`** : convertir wishlist → possédé
 - **`WishlistSuggestionService`** : suggestions jeux BGG basées sur amis
 - Badge compteur sur tuiles hub catégories
@@ -378,7 +376,7 @@ Fichiers : `boardgame_expansion_flow.dart`, `boardgame_expansions_section.dart`,
 - **`TagService`** : CRUD `item_tags` + liaison `collection_item_tags`
 - **`ItemTagsEditor`** sur fiche détail
 - **`LocationService`** : emplacements personnels ou de groupe
-- **`ItemWhereaboutsField`** / **`PersonalWhereaboutsField`**
+- **`CompactWhereaboutsDropdown`** : sélection « chez qui / où » (remplace les anciens champs whereabouts)
 
 ### 4.10 Inventaire et disposition
 
@@ -420,7 +418,6 @@ Fichiers : `boardgame_expansion_flow.dart`, `boardgame_expansions_section.dart`,
 |---------|------|
 | `catalog/models/catalog_entry.dart` | Interface entrée catalogue générique |
 | `catalog/services/user_catalog_service.dart` | Interface owned/wishlist par clé catalogue |
-| `catalog/catalog_owned_state.dart` | État partagé grilles catalogue |
 | `BggCatalogGame implements CatalogEntry` | Premier adaptateur |
 | `UserBoardgameCollectionService implements UserCatalogService` | Premier service adapté |
 
@@ -592,7 +589,7 @@ Politiques principales (post `schema_rls_fix_live.sql`) :
 #### Social
 - `friends_screen.dart`, `friend_collection_screen.dart`
 - `groups_screen.dart`, `group_detail_screen.dart`, `group_edit_screen.dart`
-- `loans_screen.dart`, `wishlist_overview_screen.dart`, `shake_pick_screen.dart`
+- `loans_screen.dart`, `shake_pick_screen.dart`
 
 #### Boardgames
 - `boardgame/boardgames_collection_screen.dart`
@@ -608,7 +605,7 @@ Politiques principales (post `schema_rls_fix_live.sql`) :
 - `cards_collection_screen.dart`
 - `tcg/pokemon_series_blocks_screen.dart`, `tcg/tcg_series_blocks_screen.dart`
 - `tcg/tcg_sets_block_screen.dart`, `tcg/tcg_set_cards_screen.dart`
-- `tcg/tcg_global_search_screen.dart`, `tcg/tcg_rarity_gallery_screen.dart`
+- `tcg/tcg_global_search_screen.dart`
 
 #### Autres catégories
 - `media_collection_screen.dart`, `media_artist_albums_screen.dart`
@@ -625,7 +622,7 @@ Politiques principales (post `schema_rls_fix_live.sql`) :
 
 ### 7.3 Modèles (28 fichiers)
 
-`collection_category`, `collection_item`, `category_metadata`, `collection_list_filters`, `card_subcategory`, `book_subcategory`, `book_series`, `book_volume`, `book_author_group`, `novel_rating_matrix`, `series_search_hit`, `bgg_catalog_game`, `bgg_expansion`, `tcg_set_info`, `pokemon_card_lang`, `lego_build_kind`, `media_format_ui`, `user_collection_type`, `user_profile`, `collection_group`, `group_icon`, `activity_event`, `collection_summary`, `category_stat`, `collection_view_mode`, `item_tag`, `storage_location`, `item_condition`
+`collection_category`, `collection_item`, `category_metadata`, `collection_list_filters`, `card_subcategory`, `book_subcategory`, `book_series`, `book_volume`, `book_author_group`, `series_search_hit`, `bgg_catalog_game`, `bgg_expansion`, `tcg_set_info`, `pokemon_card_lang`, `lego_build_kind`, `media_format_ui`, `user_collection_type`, `user_profile`, `collection_group`, `group_icon`, `activity_event`, `collection_summary`, `category_stat`, `collection_view_mode`, `item_tag`, `storage_location`, `item_condition`
 
 ### 7.4 Widgets notables (68 fichiers)
 
@@ -645,9 +642,7 @@ Politiques principales (post `schema_rls_fix_live.sql`) :
 | `wishlist_suggestions_banner.dart` | Suggestions BGG |
 | `loan_item_dialog.dart` | Prêt |
 | `create_custom_collection_dialog.dart` | Collection perso |
-| `collapsible_collection_overview.dart` | Résumé hub |
 | `share_collection_sheet.dart` | Export/partage |
-| `profile/trophy_tree.dart` | Trophées profil |
 | `category_metadata_fields.dart` | Formulaires metadata |
 | `cover_preview_sheet.dart` | Preview HD |
 
@@ -655,9 +650,9 @@ Politiques principales (post `schema_rls_fix_live.sql`) :
 
 Boardgame : `boardgame_quick_add`, `boardgame_bulk_add`, `boardgame_expansion_flow`, `boardgame_expansions`, `boardgame_genres`, `boardgame_display`, `boardgame_cover`, `boardgame_collection_visibility`, `boardgame_expansion_reconcile`
 
-TCG : `card_quick_add`, `tcg_bulk_add`, `tcg_card_display`, `tcg_rarity_order`, `navigate_to_card_set`, `onepiece_card_utils`, `tcgdex_assets`, `tcg_set_image_url`, `tcg_premium_rarities`
+TCG : `card_quick_add`, `tcg_bulk_add`, `tcg_card_display`, `tcg_rarity_order`, `navigate_to_card_set`, `onepiece_card_utils`, `tcgdex_assets`, `tcg_set_image_url`
 
-Books : `book_add_actions`, `book_title_parser`, `book_volume_cover`
+Books : `book_add_actions`, `book_title_parser`
 
 Core : `collection_item_scope`, `collection_grid_grouper`, `collection_grid_layout`, `collection_item_filters`, `category_hub_order`, `catalog_hit_metadata`, `catalog_http`, `cover_image_url`, `web_image_proxy`
 

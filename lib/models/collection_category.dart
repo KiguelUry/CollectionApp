@@ -14,6 +14,7 @@ enum CollectionCategory {
   movie,
   wildlife,
   restaurant,
+  tech,
   custom;
 
   /// Valeur stockée en base (`animal` pour la catégorie Nature / Pokédex).
@@ -36,6 +37,7 @@ enum CollectionCategory {
         CollectionCategory.movie => 'Films (physique)',
         CollectionCategory.wildlife => 'Animaux observés',
         CollectionCategory.restaurant => 'Restaurants',
+        CollectionCategory.tech => 'High-Tech',
         CollectionCategory.custom => 'Collection perso',
       };
 
@@ -53,6 +55,7 @@ enum CollectionCategory {
         CollectionCategory.movie => 'Blu-ray, DVD, coffrets',
         CollectionCategory.wildlife => 'Carnet Pokédex · iNaturalist',
         CollectionCategory.restaurant => 'Journal culinaire & carte',
+        CollectionCategory.tech => 'Audio, gaming, GSM, TV & garanties',
         CollectionCategory.custom => 'Type personnalisé',
       };
 
@@ -70,6 +73,7 @@ enum CollectionCategory {
         CollectionCategory.movie => Icons.movie,
         CollectionCategory.wildlife => Icons.pets,
         CollectionCategory.restaurant => Icons.restaurant,
+        CollectionCategory.tech => Icons.devices_other_rounded,
         CollectionCategory.custom => Icons.folder_special_outlined,
       };
 
@@ -87,6 +91,7 @@ enum CollectionCategory {
         CollectionCategory.movie => Colors.pink,
         CollectionCategory.wildlife => const Color(0xFF39FF14),
         CollectionCategory.restaurant => const Color(0xFFD84315),
+        CollectionCategory.tech => const Color(0xFF3949AB),
         CollectionCategory.custom => Colors.blueGrey,
       };
 
@@ -105,7 +110,8 @@ enum CollectionCategory {
         CollectionCategory.videogame ||
         CollectionCategory.movie ||
         CollectionCategory.wildlife ||
-        CollectionCategory.restaurant =>
+        CollectionCategory.restaurant ||
+        CollectionCategory.tech =>
           true,
         _ => false,
       };
@@ -152,6 +158,7 @@ enum CollectionCategory {
         CollectionCategory.movie => ('film', 'films'),
         CollectionCategory.wildlife => ('espèce', 'espèces'),
         CollectionCategory.restaurant => ('resto', 'restos'),
+        CollectionCategory.tech => ('appareil', 'appareils'),
         CollectionCategory.custom => ('objet', 'objets'),
       };
     if (total == 1) return '1 ${unit.$1}';

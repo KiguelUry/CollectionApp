@@ -4,6 +4,7 @@ import '../models/book_subcategory.dart';
 import '../models/card_subcategory.dart';
 import '../models/category_metadata.dart';
 import '../models/collection_category.dart';
+import '../models/tech_subcategory.dart';
 import 'category_metadata_fields.dart';
 
 class AddItemManualDialog extends StatefulWidget {
@@ -12,6 +13,7 @@ class AddItemManualDialog extends StatefulWidget {
   final CardSubcategory? initialCardSubcategory;
   final MediaFormat? initialMediaFormat;
   final LegoBuildKind? initialLegoKind;
+  final TechSubcategory? initialTechSubcategory;
   final bool lockSubcategory;
 
   const AddItemManualDialog({
@@ -21,6 +23,7 @@ class AddItemManualDialog extends StatefulWidget {
     this.initialCardSubcategory,
     this.initialMediaFormat,
     this.initialLegoKind,
+    this.initialTechSubcategory,
     this.lockSubcategory = false,
   });
 
@@ -95,12 +98,15 @@ class _AddItemManualDialogState extends State<AddItemManualDialog> {
                   initialCardSubcategory: widget.initialCardSubcategory,
                   initialMediaFormat: widget.initialMediaFormat,
                   initialLegoKind: widget.initialLegoKind,
+                  initialTechSubcategory: widget.initialTechSubcategory,
                   lockCardSubcategory: widget.lockSubcategory &&
                       widget.category == CollectionCategory.card,
                   lockMediaFormat: widget.lockSubcategory &&
                       widget.category == CollectionCategory.media,
                   lockLegoKind: widget.lockSubcategory &&
                       widget.category == CollectionCategory.lego,
+                  lockTechSubcategory: widget.lockSubcategory &&
+                      widget.category == CollectionCategory.tech,
                 ),
               ],
             ],

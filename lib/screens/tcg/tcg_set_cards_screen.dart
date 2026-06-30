@@ -45,6 +45,7 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
   bool _loading = true;
   bool _enrichingRarities = false;
   bool _ownedOnly = false;
+  bool _missingOnly = false;
   String _query = '';
   final Set<String> _rarityFilters = {};
   final Set<String> _typeFilters = {};
@@ -255,6 +256,8 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
     var list = _cards;
     if (_ownedOnly) {
       list = list.where((c) => _ownedIds.contains(_catalogKey(c))).toList();
+    } else if (_missingOnly) {
+      list = list.where((c) => !_ownedIds.contains(_catalogKey(c))).toList();
     }
     final q = _query.trim().toLowerCase();
     if (q.isNotEmpty) {
@@ -302,11 +305,40 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
     final ownedInSet =
         _cards.where((c) => _ownedIds.contains(_catalogKey(c))).length;
     final total = widget.set.totalCards ?? _cards.length;
+    final progress = total > 0 ? ownedInSet / total : 0.0;
 
     return Scaffold(
       appBar: AppAppBar(title: widget.set.displayName),
       body: Column(
         children: [
+          if (total > 0)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: LinearProgressIndicator(
+                      value: progress.clamp(0.0, 1.0),
+                      minHeight: 8,
+                      backgroundColor: widget.subcategory.color
+                          .withValues(alpha: 0.12),
+                      color: widget.subcategory.color,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${(progress * 100).round()} % · $ownedInSet / $total cartes',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
             child: Column(
@@ -321,13 +353,35 @@ class _TcgSetCardsScreenState extends State<TcgSetCardsScreen> {
                   onChanged: (v) => setState(() => _query = v),
                 ),
                 const SizedBox(height: 8),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      FilterChip(
+                        label: Text('Possédées $ownedInSet/$total'),
+                        selected: _ownedOnly,
+                        onSelected: (v) => setState(() {
+                          _ownedOnly = v;
+                          if (v) _missingOnly = false;
+                        }),
+                      ),
+                      const SizedBox(width: 6),
+                      FilterChip(
+                        label: Text(
+                          'Manquantes ${total - ownedInSet}',
+                        ),
+                        selected: _missingOnly,
+                        onSelected: (v) => setState(() {
+                          _missingOnly = v;
+                          if (v) _ownedOnly = false;
+                        }),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 4),
                 Row(
                   children: [
-                    FilterChip(
-                      label: Text('Possédées $ownedInSet/$total'),
-                      selected: _ownedOnly,
-                      onSelected: (v) => setState(() => _ownedOnly = v),
-                    ),
                     const Spacer(),
                     if (_enrichingRarities)
                       Padding(

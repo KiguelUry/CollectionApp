@@ -3,6 +3,7 @@ import '../models/card_subcategory.dart';
 import '../models/collection_list_filters.dart';
 import '../models/item_tag.dart';
 import '../models/storage_location.dart';
+import '../utils/holder_filter.dart';
 class GroupFilterOption {
   final String id;
   final String label;
@@ -31,6 +32,8 @@ class CollectionFilterBar extends StatelessWidget {
   final List<String> pokemonTypes;
   final List<CardSubcategory> cardSubcategoryOptions;
   final List<GroupFilterOption> groupOptions;
+  final List<HolderFilterOption> holderFilterOptions;
+  final bool useHolderLocationFilter;
   final TextEditingController? searchController;
 
   const CollectionFilterBar({
@@ -52,6 +55,8 @@ class CollectionFilterBar extends StatelessWidget {
     this.pokemonTypes = const [],
     this.cardSubcategoryOptions = const [],
     this.groupOptions = const [],
+    this.holderFilterOptions = const [],
+    this.useHolderLocationFilter = false,
   });
 
   @override
@@ -95,448 +100,456 @@ class CollectionFilterBar extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                if (showFocusFilter)
-                  _focusMenuButton(context),
-                PopupMenuButton<CollectionSort>(
-                  tooltip: 'Trier',
-                  initialValue: filters.sort,
-                  onSelected: (s) {
-                    if (s == CollectionSort.ratingDesc &&
-                        filters.sort == CollectionSort.ratingDesc) {
-                      onChanged(
-                        filters.copyWith(
-                          ratingAscending: !filters.ratingAscending,
-                        ),
-                      );
-                    } else if (s == CollectionSort.bggRatingDesc &&
-                        filters.sort == CollectionSort.bggRatingDesc) {
-                      onChanged(
-                        filters.copyWith(
-                          bggRatingAscending: !filters.bggRatingAscending,
-                        ),
-                      );
-                    } else {
-                      onChanged(
-                        filters.copyWith(
-                          sort: s,
-                          ratingAscending: false,
-                          bggRatingAscending: false,
-                        ),
-                      );
-                    }
-                  },
-                  itemBuilder: (context) => [
-                    const PopupMenuItem(
-                      value: CollectionSort.titleAsc,
-                      child: Text('Titre A → Z'),
-                    ),
-                    const PopupMenuItem(
-                      value: CollectionSort.titleDesc,
-                      child: Text('Titre Z → A'),
-                    ),
-                    const PopupMenuItem(
-                      value: CollectionSort.newestFirst,
-                      child: Text('Plus récents'),
-                    ),
-                    const PopupMenuItem(
-                      value: CollectionSort.oldestFirst,
-                      child: Text('Plus anciens'),
-                    ),
-                    const PopupMenuItem(
-                      value: CollectionSort.ratingDesc,
-                      child: Text('Ma note'),
-                    ),
-                    if (showBoardgameGenreFilter)
-                      const PopupMenuItem(
-                        value: CollectionSort.bggRatingDesc,
-                        child: Text('Note communautaire'),
-                      ),
-                    const PopupMenuItem(
-                      value: CollectionSort.quantityDesc,
-                      child: Text('Quantité'),
-                    ),
-                  ],
-                  child: Padding(
-                    padding: const EdgeInsets.all(8),
-                    child: Icon(
-                      Icons.sort,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
-                  ),
-                ),
-                if (showBoardgameGenreFilter && boardgameGenres.isNotEmpty)
-                  IconButton(
-                    tooltip: 'Filtrer par genres',
-                    onPressed: () => _openBoardgameGenreFilters(context),
-                    icon: Badge(
-                      isLabelVisible: filters.boardgameGenres.isNotEmpty,
-                      label: Text('${filters.boardgameGenres.length}'),
-                      child: Icon(
-                        Icons.category_outlined,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                    ),
-                  ),
-                if (showCardFilter &&
-                    (cardRarities.isNotEmpty ||
-                        pokemonTypes.isNotEmpty ||
-                        cardSubcategoryOptions.isNotEmpty))
-                  IconButton(
-                    tooltip: 'Filtres cartes',
-                    onPressed: () => _openCardFilters(context),
-                    icon: Badge(
-                      isLabelVisible: filters.cardRarities.isNotEmpty ||
-                          filters.pokemonTypes.isNotEmpty ||
-                          filters.cardSubcategories.isNotEmpty,
-                      label: Text(
-                        '${filters.cardRarities.length + filters.pokemonTypes.length + filters.cardSubcategories.length}',
-                      ),
-                      child: Icon(
-                        Icons.style_outlined,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                    ),
-                  ),
-                if (filters.hasActiveFilters)
-                  IconButton(
-                    tooltip: 'Réinitialiser',
-                    onPressed: () => onChanged(CollectionListFilters()),
-                    icon: const Icon(Icons.filter_alt_off, size: 22),
-                  ),
+                _sortMenuButton(context),
+                const SizedBox(width: 4),
+                _filterMenuButton(context),
               ],
             ),
-            if (showLocationFilter && locations.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              _horizontalChips(
-                children: [
-                  _locationChip(context, label: 'Tous les lieux', id: null),
-                  ...locations.map(
-                    (loc) =>
-                        _locationChip(context, label: loc.label, id: loc.id),
-                  ),
-                ],
-              ),
-            ],
-            if (showTagFilter && tags.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              _horizontalChips(
-                height: 36,
-                children: [
-                  _tagChip(context, label: 'Tous tags', id: null),
-                  ...tags.map(
-                    (t) => _tagChip(
-                      context,
-                      label: t.label,
-                      id: t.id,
-                      color: t.color,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-            if (showCardSubcategoryFilter &&
-                cardSubcategoryOptions.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              _horizontalChips(
-                height: 36,
-                children: [
-                  _cardSubcategoryChip(context, label: 'Tous les univers', id: null),
-                  ...cardSubcategoryOptions.map(
-                    (sub) => _cardSubcategoryChip(
-                      context,
-                      label: sub.label,
-                      id: sub.dbValue,
-                      color: sub.color,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-            if (showCardUniverseDetailFilters) ...[
-              if (cardRarities.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                _horizontalChips(
-                  height: 36,
-                  children: [
-                    _cardRarityChip(context, label: 'Toutes raretés', id: null),
-                    for (final r in cardRarities)
-                      _cardRarityChip(context, label: r, id: r),
-                  ],
-                ),
-              ],
-              if (pokemonTypes.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                _horizontalChips(
-                  height: 36,
-                  children: [
-                    _pokemonTypeChip(context, label: 'Tous types', id: null),
-                    for (final t in pokemonTypes)
-                      _pokemonTypeChip(context, label: t, id: t),
-                  ],
-                ),
-              ],
-            ],
           ],
         ),
       ),
     );
   }
 
-  bool get _focusIsActive =>
-      filters.ownershipView != CollectionOwnershipView.all ||
-      (filters.focusGroupId != null && filters.focusGroupId!.isNotEmpty);
-
-  String get _focusTooltip {
-    if (filters.ownershipView == CollectionOwnershipView.personal) {
-      return 'Focus : moi uniquement';
-    }
-    if (filters.focusGroupId != null) {
-      final name = groupOptions
-          .where((g) => g.id == filters.focusGroupId)
-          .map((g) => g.label)
-          .firstOrNull;
-      return 'Focus : ${name ?? 'groupe'}';
-    }
-    if (filters.ownershipView == CollectionOwnershipView.groups) {
-      return 'Focus : groupes';
-    }
-    return 'Focus : tout afficher';
-  }
-
-  Widget _focusMenuButton(BuildContext context) {
-    return PopupMenuButton<String>(
-      tooltip: _focusTooltip,
-      onSelected: (value) {
-        if (value == '__all__') {
+  Widget _sortMenuButton(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final sortActive = filters.sort != CollectionSort.titleAsc;
+    return PopupMenuButton<CollectionSort>(
+      tooltip: 'Trier',
+      initialValue: filters.sort,
+      onSelected: (s) {
+        if (s == CollectionSort.ratingDesc &&
+            filters.sort == CollectionSort.ratingDesc) {
           onChanged(
-            filters.copyWith(
-              ownershipView: CollectionOwnershipView.all,
-              clearFocusGroup: true,
-              clearGroups: true,
-            ),
+            filters.copyWith(ratingAscending: !filters.ratingAscending),
           );
-        } else if (value == '__personal__') {
+        } else if (s == CollectionSort.bggRatingDesc &&
+            filters.sort == CollectionSort.bggRatingDesc) {
           onChanged(
-            filters.copyWith(
-              ownershipView: CollectionOwnershipView.personal,
-              clearFocusGroup: true,
-              clearGroups: true,
-            ),
+            filters.copyWith(bggRatingAscending: !filters.bggRatingAscending),
+          );
+        } else if (s == CollectionSort.locationAsc &&
+            filters.sort == CollectionSort.locationAsc) {
+          onChanged(
+            filters.copyWith(locationAscending: !filters.locationAscending),
           );
         } else {
           onChanged(
             filters.copyWith(
-              ownershipView: CollectionOwnershipView.groups,
-              focusGroupId: value,
-              groupIds: {value},
+              sort: s,
+              ratingAscending: false,
+              bggRatingAscending: false,
+              locationAscending: false,
             ),
           );
         }
       },
       itemBuilder: (context) => [
-        CheckedPopupMenuItem(
-          value: '__all__',
-          checked: filters.ownershipView == CollectionOwnershipView.all,
-          child: const Text('Tout afficher'),
+        const PopupMenuItem(
+          value: CollectionSort.titleAsc,
+          child: Text('Titre A → Z'),
         ),
-        CheckedPopupMenuItem(
-          value: '__personal__',
-          checked: filters.ownershipView == CollectionOwnershipView.personal,
-          child: const Text('Moi uniquement'),
+        const PopupMenuItem(
+          value: CollectionSort.titleDesc,
+          child: Text('Titre Z → A'),
         ),
-        if (groupOptions.isNotEmpty) const PopupMenuDivider(),
-        ...groupOptions.map(
-          (g) => CheckedPopupMenuItem(
-            value: g.id,
-            checked: filters.focusGroupId == g.id,
-            child: Text(g.label),
+        const PopupMenuItem(
+          value: CollectionSort.newestFirst,
+          child: Text('Plus récents'),
+        ),
+        const PopupMenuItem(
+          value: CollectionSort.oldestFirst,
+          child: Text('Plus anciens'),
+        ),
+        const PopupMenuItem(
+          value: CollectionSort.ratingDesc,
+          child: Text('Ma note'),
+        ),
+        if (showBoardgameGenreFilter)
+          const PopupMenuItem(
+            value: CollectionSort.bggRatingDesc,
+            child: Text('Note communautaire'),
           ),
+        const PopupMenuItem(
+          value: CollectionSort.locationAsc,
+          child: Text('Localisation'),
+        ),
+        const PopupMenuItem(
+          value: CollectionSort.quantityDesc,
+          child: Text('Quantité'),
         ),
       ],
-      child: Padding(
-        padding: const EdgeInsets.all(8),
-        child: Badge(
-          isLabelVisible: _focusIsActive,
-          backgroundColor: Theme.of(context).colorScheme.primary,
-          child: Icon(
-            Icons.groups_outlined,
-            size: 22,
-            color: _focusIsActive
-                ? Theme.of(context).colorScheme.primary
-                : Colors.grey.shade700,
-          ),
+      child: OutlinedButton.icon(
+        onPressed: null,
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          visualDensity: VisualDensity.compact,
+          foregroundColor: sortActive ? scheme.primary : null,
         ),
+        icon: Icon(Icons.sort, size: 18, color: scheme.primary),
+        label: const Text('Tri', style: TextStyle(fontSize: 13)),
       ),
     );
   }
 
-  Widget _horizontalChips({
-    required List<Widget> children,
-    double height = 40,
+  Widget _filterMenuButton(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final active = filters.hasActiveFilterCriteria;
+    return Badge(
+      isLabelVisible: active,
+      backgroundColor: scheme.primary,
+      child: OutlinedButton.icon(
+        onPressed: () => _openFilterSheet(context),
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          visualDensity: VisualDensity.compact,
+          foregroundColor: active ? scheme.primary : null,
+        ),
+        icon: Icon(Icons.filter_list, size: 18, color: scheme.primary),
+        label: const Text('Filtre', style: TextStyle(fontSize: 13)),
+      ),
+    );
+  }
+
+  Future<void> _openFilterSheet(BuildContext context) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) {
+        var sheetFilters = filters;
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            void apply(CollectionListFilters next) {
+              sheetFilters = next;
+              onChanged(next);
+              setSheetState(() {});
+            }
+
+            return DraggableScrollableSheet(
+              expand: false,
+              initialChildSize: 0.55,
+              minChildSize: 0.35,
+              maxChildSize: 0.9,
+              builder: (context, scrollController) {
+                return ListView(
+                  controller: scrollController,
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                  children: [
+                    Text(
+                      'Filtres',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (useHolderLocationFilter &&
+                        holderFilterOptions.isNotEmpty)
+                      _filterSection(
+                        context,
+                        title: 'Localisation',
+                        icon: Icons.place_outlined,
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            _sheetChip(
+                              context,
+                              label: 'Tous les lieux',
+                              selected: sheetFilters.holderKey == null,
+                              onTap: () => apply(
+                                sheetFilters.copyWith(clearHolder: true),
+                              ),
+                            ),
+                            for (final opt in holderFilterOptions)
+                              _sheetChip(
+                                context,
+                                label: '${opt.label} (${opt.count})',
+                                selected: sheetFilters.holderKey == opt.key,
+                                onTap: () => apply(
+                                  sheetFilters.copyWith(holderKey: opt.key),
+                                ),
+                              ),
+                          ],
+                        ),
+                      )
+                    else if (showLocationFilter && locations.isNotEmpty)
+                      _filterSection(
+                        context,
+                        title: 'Localisation',
+                        icon: Icons.place_outlined,
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            _sheetChip(
+                              context,
+                              label: 'Tous les lieux',
+                              selected: sheetFilters.locationId == null,
+                              onTap: () => apply(
+                                sheetFilters.copyWith(clearLocation: true),
+                              ),
+                            ),
+                            for (final loc in locations)
+                              _sheetChip(
+                                context,
+                                label: loc.label,
+                                selected: sheetFilters.locationId == loc.id,
+                                onTap: () => apply(
+                                  sheetFilters.copyWith(locationId: loc.id),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    if (showFocusFilter)
+                      _filterSection(
+                        context,
+                        title: 'Partage & groupes',
+                        icon: Icons.groups_outlined,
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            _sheetChip(
+                              context,
+                              label: 'Tout afficher',
+                              selected: sheetFilters.ownershipView ==
+                                  CollectionOwnershipView.all,
+                              onTap: () => apply(
+                                sheetFilters.copyWith(
+                                  ownershipView: CollectionOwnershipView.all,
+                                  clearFocusGroup: true,
+                                  clearGroups: true,
+                                ),
+                              ),
+                            ),
+                            _sheetChip(
+                              context,
+                              label: 'Moi uniquement',
+                              selected: sheetFilters.ownershipView ==
+                                  CollectionOwnershipView.personal,
+                              onTap: () => apply(
+                                sheetFilters.copyWith(
+                                  ownershipView:
+                                      CollectionOwnershipView.personal,
+                                  clearFocusGroup: true,
+                                  clearGroups: true,
+                                ),
+                              ),
+                            ),
+                            for (final g in groupOptions)
+                              _sheetChip(
+                                context,
+                                label: g.label,
+                                selected: sheetFilters.focusGroupId == g.id,
+                                onTap: () => apply(
+                                  sheetFilters.copyWith(
+                                    ownershipView:
+                                        CollectionOwnershipView.groups,
+                                    focusGroupId: g.id,
+                                    groupIds: {g.id},
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    _filterSection(
+                      context,
+                      title: 'Type',
+                      icon: Icons.category_outlined,
+                      child: _buildTypeFilterContent(
+                        context,
+                        sheetFilters,
+                        apply,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    OutlinedButton.icon(
+                      onPressed: sheetFilters.hasActiveFilterCriteria
+                          ? () {
+                              apply(
+                                CollectionListFilters(
+                                  sort: sheetFilters.sort,
+                                  ratingAscending: sheetFilters.ratingAscending,
+                                  bggRatingAscending:
+                                      sheetFilters.bggRatingAscending,
+                                  locationAscending:
+                                      sheetFilters.locationAscending,
+                                ),
+                              );
+                              Navigator.pop(context);
+                            }
+                          : null,
+                      icon: const Icon(Icons.filter_alt_off),
+                      label: const Text('Annuler les filtres'),
+                    ),
+                  ],
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildTypeFilterContent(
+    BuildContext context,
+    CollectionListFilters activeFilters,
+    ValueChanged<CollectionListFilters> apply,
+  ) {
+    if (showBoardgameGenreFilter && boardgameGenres.isNotEmpty) {
+      return Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          _sheetChip(
+            context,
+            label: 'Tous genres',
+            selected: activeFilters.boardgameGenres.isEmpty,
+            onTap: () => apply(activeFilters.copyWith(clearBoardgameGenre: true)),
+          ),
+          for (final genre in boardgameGenres)
+            _sheetChip(
+              context,
+              label: genre,
+              selected: activeFilters.boardgameGenres.contains(genre),
+              onTap: () {
+                final next = Set<String>.from(activeFilters.boardgameGenres);
+                if (next.contains(genre)) {
+                  next.remove(genre);
+                } else {
+                  next.add(genre);
+                }
+                apply(
+                  activeFilters.copyWith(
+                    boardgameGenres: next,
+                    clearBoardgameGenre: next.isEmpty,
+                  ),
+                );
+              },
+            ),
+        ],
+      );
+    }
+    if (showCardFilter &&
+        (cardRarities.isNotEmpty ||
+            pokemonTypes.isNotEmpty ||
+            cardSubcategoryOptions.isNotEmpty)) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextButton.icon(
+            onPressed: () => _openCardFilters(context),
+            icon: const Icon(Icons.style_outlined, size: 18),
+            label: const Text('Ouvrir filtres cartes…'),
+          ),
+        ],
+      );
+    }
+    if (showTagFilter && tags.isNotEmpty) {
+      return Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          _sheetChip(
+            context,
+            label: 'Tous tags',
+            selected: activeFilters.tagId == null,
+            onTap: () => apply(activeFilters.copyWith(clearTag: true)),
+          ),
+          for (final t in tags)
+            _sheetChip(
+              context,
+              label: t.label,
+              selected: activeFilters.tagId == t.id,
+              onTap: () => apply(activeFilters.copyWith(tagId: t.id)),
+              color: t.color,
+            ),
+        ],
+      );
+    }
+    if (showCardSubcategoryFilter && cardSubcategoryOptions.isNotEmpty) {
+      return Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          _sheetChip(
+            context,
+            label: 'Tous les univers',
+            selected: activeFilters.cardSubcategories.isEmpty,
+            onTap: () => apply(activeFilters.copyWith(clearCardFilters: true)),
+          ),
+          for (final sub in cardSubcategoryOptions)
+            _sheetChip(
+              context,
+              label: sub.label,
+              selected: activeFilters.cardSubcategories.contains(sub.dbValue),
+              onTap: () => apply(
+                activeFilters.copyWith(
+                  cardSubcategories: {sub.dbValue},
+                  cardRarities: {},
+                  pokemonTypes: {},
+                ),
+              ),
+              color: sub.color,
+            ),
+        ],
+      );
+    }
+    return Text(
+      'Aucun filtre de type disponible.',
+      style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+    );
+  }
+
+  Widget _filterSection(
+    BuildContext context, {
+    required String title,
+    required IconData icon,
+    required Widget child,
   }) {
-    return SizedBox(
-      height: height,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: children.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 6),
-        itemBuilder: (context, index) => children[index],
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18),
+              const SizedBox(width: 6),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          child,
+        ],
       ),
     );
   }
 
-  Widget _filterChip({
+  Widget _sheetChip(
+    BuildContext context, {
     required String label,
     required bool selected,
     required VoidCallback onTap,
-    IconData? icon,
-    Color? backgroundColor,
+    Color? color,
   }) {
     return FilterChip(
-      label: Text(
-        label,
-        style: const TextStyle(fontSize: 12),
-        overflow: TextOverflow.ellipsis,
-      ),
-      avatar: icon != null
-          ? Icon(icon, size: 16, color: selected ? null : Colors.grey.shade700)
-          : null,
+      label: Text(label, style: const TextStyle(fontSize: 12)),
       selected: selected,
       onSelected: (_) => onTap(),
       showCheckmark: false,
       visualDensity: VisualDensity.compact,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      backgroundColor: backgroundColor,
-    );
-  }
-
-  Widget _locationChip(
-    BuildContext context, {
-    required String label,
-    required String? id,
-  }) {
-    final selected = filters.locationId == id;
-    return _filterChip(
-      label: label,
-      selected: selected,
-      onTap: () => onChanged(
-        filters.copyWith(
-          locationId: id,
-          clearLocation: id == null,
-        ),
-      ),
-    );
-  }
-
-  Widget _tagChip(
-    BuildContext context, {
-    required String label,
-    required String? id,
-    Color? color,
-  }) {
-    final selected = filters.tagId == id;
-    return _filterChip(
-      label: label,
-      selected: selected,
-      onTap: () => onChanged(
-        filters.copyWith(tagId: id, clearTag: id == null),
-      ),
       backgroundColor: color?.withValues(alpha: 0.15),
-    );
-  }
-
-  Widget _cardSubcategoryChip(
-    BuildContext context, {
-    required String label,
-    required String? id,
-    Color? color,
-  }) {
-    final selected = id == null
-        ? filters.cardSubcategories.isEmpty
-        : filters.cardSubcategories.contains(id);
-    return _filterChip(
-      label: label,
-      selected: selected,
-      onTap: () {
-        if (id == null) {
-          onChanged(
-            filters.copyWith(
-              cardSubcategories: {},
-              clearCardFilters: true,
-            ),
-          );
-          return;
-        }
-        final already = filters.cardSubcategories.length == 1 &&
-            filters.cardSubcategories.contains(id);
-        if (already) {
-          onChanged(filters.copyWith(clearCardFilters: true));
-        } else {
-          onChanged(
-            filters.copyWith(
-              cardSubcategories: {id},
-              cardRarities: {},
-              pokemonTypes: {},
-            ),
-          );
-        }
-      },
-      backgroundColor: color?.withValues(alpha: 0.15),
-    );
-  }
-
-  Widget _cardRarityChip(
-    BuildContext context, {
-    required String label,
-    required String? id,
-  }) {
-    final selected = id == null
-        ? filters.cardRarities.isEmpty
-        : filters.cardRarities.contains(id);
-    return _filterChip(
-      label: label,
-      selected: selected,
-      onTap: () {
-        if (id == null) {
-          onChanged(filters.copyWith(cardRarities: {}));
-          return;
-        }
-        final next = Set<String>.from(filters.cardRarities);
-        if (next.contains(id)) {
-          next.remove(id);
-        } else {
-          next.add(id);
-        }
-        onChanged(filters.copyWith(cardRarities: next));
-      },
-    );
-  }
-
-  Widget _pokemonTypeChip(
-    BuildContext context, {
-    required String label,
-    required String? id,
-  }) {
-    final selected = id == null
-        ? filters.pokemonTypes.isEmpty
-        : filters.pokemonTypes.contains(id);
-    return _filterChip(
-      label: label,
-      selected: selected,
-      onTap: () {
-        if (id == null) {
-          onChanged(filters.copyWith(pokemonTypes: {}));
-          return;
-        }
-        final next = Set<String>.from(filters.pokemonTypes);
-        if (next.contains(id)) {
-          next.remove(id);
-        } else {
-          next.add(id);
-        }
-        onChanged(filters.copyWith(pokemonTypes: next));
-      },
     );
   }
 
@@ -675,66 +688,6 @@ class CollectionFilterBar extends StatelessWidget {
         clearCardFilters: result.rarities.isEmpty &&
             result.types.isEmpty &&
             result.subs.isEmpty,
-      ),
-    );
-  }
-
-  Future<void> _openBoardgameGenreFilters(BuildContext context) async {
-    if (!showBoardgameGenreFilter || boardgameGenres.isEmpty) return;
-    final current = Set<String>.from(filters.boardgameGenres);
-    final selected = await showDialog<Set<String>>(
-      context: context,
-      builder: (ctx) {
-        final tmp = Set<String>.from(current);
-        return StatefulBuilder(
-          builder: (context, setStateDialog) => AlertDialog(
-            title: const Text('Genres BGG'),
-            content: SizedBox(
-              width: 420,
-              child: SingleChildScrollView(
-                child: Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    for (final genre in boardgameGenres)
-                      FilterChip(
-                        label: Text(genre),
-                        selected: tmp.contains(genre),
-                        onSelected: (on) => setStateDialog(() {
-                          if (on) {
-                            tmp.add(genre);
-                          } else {
-                            tmp.remove(genre);
-                          }
-                        }),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, <String>{}),
-                child: const Text('Effacer'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Annuler'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(ctx, tmp),
-                child: const Text('Appliquer'),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-    if (selected == null) return;
-    onChanged(
-      filters.copyWith(
-        boardgameGenres: selected,
-        clearBoardgameGenre: selected.isEmpty,
       ),
     );
   }

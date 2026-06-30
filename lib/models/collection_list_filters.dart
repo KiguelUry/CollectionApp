@@ -13,6 +13,7 @@ enum CollectionSort {
   newestFirst,
   oldestFirst,
   genreAsc,
+  locationAsc,
 }
 
 enum CollectionScopeFilter {
@@ -59,6 +60,8 @@ class CollectionListFilters {
   bool ratingAscending;
   /// Tri note communautaire : false = meilleures d'abord, true = moins bonnes d'abord.
   bool bggRatingAscending;
+  /// Tri localisation : false = A→Z, true = Z→A.
+  bool locationAscending;
 
   CollectionListFilters({
     this.searchQuery = '',
@@ -77,6 +80,7 @@ class CollectionListFilters {
     Set<String>? cardSubcategories,
     this.ratingAscending = false,
     this.bggRatingAscending = false,
+    this.locationAscending = false,
   })  : groupIds = groupIds ?? <String>{},
         boardgameGenres = boardgameGenres ?? <String>{},
         cardRarities = cardRarities ?? <String>{},
@@ -98,6 +102,22 @@ class CollectionListFilters {
       pokemonTypes.isNotEmpty ||
       cardSubcategories.isNotEmpty ||
       sort != CollectionSort.titleAsc;
+
+  /// Filtres actifs hors tri (pour badge bouton Filtre).
+  bool get hasActiveFilterCriteria =>
+      searchQuery.trim().isNotEmpty ||
+      scope != CollectionScopeFilter.all ||
+      status != CollectionStatusFilter.all ||
+      locationId != null ||
+      tagId != null ||
+      holderKey != null ||
+      ownershipView != CollectionOwnershipView.all ||
+      focusGroupId != null ||
+      groupIds.isNotEmpty ||
+      boardgameGenres.isNotEmpty ||
+      cardRarities.isNotEmpty ||
+      pokemonTypes.isNotEmpty ||
+      cardSubcategories.isNotEmpty;
 
   CollectionListFilters copyWith({
     String? searchQuery,
@@ -123,12 +143,14 @@ class CollectionListFilters {
     bool clearCardFilters = false,
     bool? ratingAscending,
     bool? bggRatingAscending,
+    bool? locationAscending,
   }) {
     return CollectionListFilters(
       searchQuery: searchQuery ?? this.searchQuery,
       sort: sort ?? this.sort,
       ratingAscending: ratingAscending ?? this.ratingAscending,
       bggRatingAscending: bggRatingAscending ?? this.bggRatingAscending,
+      locationAscending: locationAscending ?? this.locationAscending,
       scope: scope ?? this.scope,
       status: status ?? this.status,
       locationId: clearLocation ? null : (locationId ?? this.locationId),
@@ -286,6 +308,11 @@ class CollectionListFilters {
         final ga = primaryBoardgameGenre(a) ?? 'zzz';
         final gb = primaryBoardgameGenre(b) ?? 'zzz';
         final cmp = ga.toLowerCase().compareTo(gb.toLowerCase());
+        return cmp != 0 ? cmp : a.title.compareTo(b.title);
+      case CollectionSort.locationAsc:
+        final la = holderLabelForItem(a).toLowerCase();
+        final lb = holderLabelForItem(b).toLowerCase();
+        final cmp = locationAscending ? lb.compareTo(la) : la.compareTo(lb);
         return cmp != 0 ? cmp : a.title.compareTo(b.title);
     }
   }

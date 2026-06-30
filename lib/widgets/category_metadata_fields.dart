@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/tech_subcategory.dart';
 import '../models/card_subcategory.dart';
 import '../models/category_metadata.dart';
 import '../models/lego_build_kind.dart';
@@ -14,15 +15,20 @@ class CategoryMetadataFields extends StatefulWidget {
   final bool lockMediaFormat;
   final bool lockLegoKind;
 
+  final TechSubcategory? initialTechSubcategory;
+  final bool lockTechSubcategory;
+
   const CategoryMetadataFields({
     super.key,
     required this.category,
     this.initialCardSubcategory,
     this.initialMediaFormat,
     this.initialLegoKind,
+    this.initialTechSubcategory,
     this.lockCardSubcategory = false,
     this.lockMediaFormat = false,
     this.lockLegoKind = false,
+    this.lockTechSubcategory = false,
   });
 
   @override
@@ -79,6 +85,19 @@ class CategoryMetadataFieldsState extends State<CategoryMetadataFields> {
   final _movieDirectorController = TextEditingController();
   String _movieKind = 'movie';
 
+  // High-Tech
+  late TechSubcategory _techSub =
+      widget.initialTechSubcategory ?? TechSubcategory.audio;
+  final _techBrandController = TextEditingController();
+  final _techModelController = TextEditingController();
+  final _techPlatformController = TextEditingController();
+  final _techBatteryController = TextEditingController();
+  final _techStorageController = TextEditingController();
+  final _techScreenController = TextEditingController();
+  String _techDeviceKind = 'headphone';
+  String _techPanelType = 'oled';
+  bool _techNoiseCancelling = false;
+
   @override
   void dispose() {
     _gradeController.dispose();
@@ -100,12 +119,29 @@ class CategoryMetadataFieldsState extends State<CategoryMetadataFields> {
     _gameYearController.dispose();
     _movieYearController.dispose();
     _movieDirectorController.dispose();
+    _techBrandController.dispose();
+    _techModelController.dispose();
+    _techPlatformController.dispose();
+    _techBatteryController.dispose();
+    _techStorageController.dispose();
+    _techScreenController.dispose();
     super.dispose();
   }
 
   String? get subcategory {
     if (widget.category == CollectionCategory.card) return _cardType.dbValue;
+    if (widget.category == CollectionCategory.tech) return _techSub.dbValue;
     return null;
+  }
+
+  Map<String, dynamic> _techMetadataBase() {
+    return {
+      if (_techBrandController.text.trim().isNotEmpty)
+        'brand': _techBrandController.text.trim(),
+      if (_techModelController.text.trim().isNotEmpty)
+        'model': _techModelController.text.trim(),
+      'device_kind': _techDeviceKind,
+    };
   }
 
   Map<String, dynamic> buildMetadata() {
@@ -184,6 +220,33 @@ class CategoryMetadataFieldsState extends State<CategoryMetadataFields> {
           if (_movieDirectorController.text.trim().isNotEmpty)
             'director': _movieDirectorController.text.trim(),
         };
+      case CollectionCategory.tech:
+        return switch (_techSub) {
+          TechSubcategory.audio => {
+              ..._techMetadataBase(),
+              if (_techBatteryController.text.trim().isNotEmpty)
+                'battery_hours':
+                    int.tryParse(_techBatteryController.text.trim()),
+              'noise_cancelling': _techNoiseCancelling,
+            },
+          TechSubcategory.gaming => {
+              ..._techMetadataBase(),
+              if (_techPlatformController.text.trim().isNotEmpty)
+                'platform': _techPlatformController.text.trim(),
+            },
+          TechSubcategory.mobile => {
+              ..._techMetadataBase(),
+              if (_techStorageController.text.trim().isNotEmpty)
+                'storage_gb': int.tryParse(_techStorageController.text.trim()),
+            },
+          TechSubcategory.tvVideo => {
+              ..._techMetadataBase(),
+              if (_techScreenController.text.trim().isNotEmpty)
+                'screen_inches':
+                    int.tryParse(_techScreenController.text.trim()),
+              'panel_type': _techPanelType,
+            },
+        };
       default:
         return {};
     }
@@ -202,6 +265,7 @@ class CategoryMetadataFieldsState extends State<CategoryMetadataFields> {
         CollectionCategory.watch => _watchFields(),
         CollectionCategory.videogame => _gameFields(),
         CollectionCategory.movie => _movieFields(),
+        CollectionCategory.tech => _techFields(),
         _ => const [],
       },
     );
@@ -462,4 +526,163 @@ class CategoryMetadataFieldsState extends State<CategoryMetadataFields> {
           decoration: const InputDecoration(labelText: 'Réalisateur / créateur'),
         ),
       ];
+
+  List<Widget> _techFields() => [
+        if (widget.lockTechSubcategory)
+          InputDecorator(
+            decoration: const InputDecoration(labelText: 'Univers'),
+            child: Text(_techSub.label),
+          )
+        else
+          DropdownButtonFormField<TechSubcategory>(
+            initialValue: _techSub,
+            decoration: const InputDecoration(labelText: 'Univers'),
+            items: TechSubcategory.values
+                .map(
+                  (s) => DropdownMenuItem(value: s, child: Text(s.label)),
+                )
+                .toList(),
+            onChanged: (v) => setState(() {
+              _techSub = v ?? _techSub;
+              _techDeviceKind = _defaultDeviceKind(_techSub);
+            }),
+          ),
+        const SizedBox(height: 12),
+        ..._techKindSpecificFields(),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _techBrandController,
+          decoration: const InputDecoration(labelText: 'Marque'),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _techModelController,
+          decoration: const InputDecoration(labelText: 'Modèle'),
+        ),
+      ];
+
+  String _defaultDeviceKind(TechSubcategory sub) => switch (sub) {
+        TechSubcategory.audio => 'headphone',
+        TechSubcategory.gaming => 'controller',
+        TechSubcategory.mobile => 'smartphone',
+        TechSubcategory.tvVideo => 'tv',
+      };
+
+  List<Widget> _techKindSpecificFields() {
+    return switch (_techSub) {
+      TechSubcategory.audio => [
+          DropdownButtonFormField<String>(
+            initialValue: _techDeviceKind,
+            decoration: const InputDecoration(labelText: 'Type'),
+            items: const [
+              DropdownMenuItem(value: 'headphone', child: Text('Casque')),
+              DropdownMenuItem(value: 'earbud', child: Text('Écouteurs')),
+              DropdownMenuItem(value: 'speaker', child: Text('Enceinte')),
+              DropdownMenuItem(value: 'turntable', child: Text('Platine')),
+            ],
+            onChanged: (v) =>
+                setState(() => _techDeviceKind = v ?? _techDeviceKind),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _techBatteryController,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'Autonomie (h)',
+              hintText: 'Optionnel',
+            ),
+          ),
+          const SizedBox(height: 8),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Réduction de bruit active'),
+            value: _techNoiseCancelling,
+            onChanged: (v) => setState(() => _techNoiseCancelling = v),
+          ),
+        ],
+      TechSubcategory.gaming => [
+          DropdownButtonFormField<String>(
+            initialValue: _techDeviceKind,
+            decoration: const InputDecoration(labelText: 'Type'),
+            items: const [
+              DropdownMenuItem(value: 'console', child: Text('Console')),
+              DropdownMenuItem(value: 'controller', child: Text('Manette')),
+              DropdownMenuItem(value: 'vr', child: Text('Casque VR')),
+              DropdownMenuItem(value: 'mouse', child: Text('Souris')),
+              DropdownMenuItem(value: 'keyboard', child: Text('Clavier')),
+              DropdownMenuItem(value: 'headset', child: Text('Casque gaming')),
+              DropdownMenuItem(value: 'other', child: Text('Autre')),
+            ],
+            onChanged: (v) =>
+                setState(() => _techDeviceKind = v ?? _techDeviceKind),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _techPlatformController,
+            decoration: const InputDecoration(
+              labelText: 'Plateforme / usage',
+              hintText: 'PS5, PC, Xbox…',
+            ),
+          ),
+        ],
+      TechSubcategory.mobile => [
+          DropdownButtonFormField<String>(
+            initialValue: _techDeviceKind,
+            decoration: const InputDecoration(labelText: 'Type'),
+            items: const [
+              DropdownMenuItem(value: 'smartphone', child: Text('Smartphone')),
+              DropdownMenuItem(value: 'tablet', child: Text('Tablette')),
+              DropdownMenuItem(
+                value: 'smartwatch',
+                child: Text('Montre connectée'),
+              ),
+            ],
+            onChanged: (v) =>
+                setState(() => _techDeviceKind = v ?? _techDeviceKind),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _techStorageController,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'Stockage (Go)',
+              hintText: '128, 256…',
+            ),
+          ),
+        ],
+      TechSubcategory.tvVideo => [
+          DropdownButtonFormField<String>(
+            initialValue: _techDeviceKind,
+            decoration: const InputDecoration(labelText: 'Type'),
+            items: const [
+              DropdownMenuItem(value: 'tv', child: Text('Téléviseur')),
+              DropdownMenuItem(value: 'projector', child: Text('Projecteur')),
+              DropdownMenuItem(value: 'stream_box', child: Text('Box TV')),
+            ],
+            onChanged: (v) =>
+                setState(() => _techDeviceKind = v ?? _techDeviceKind),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _techScreenController,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'Taille écran (pouces)',
+            ),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            initialValue: _techPanelType,
+            decoration: const InputDecoration(labelText: 'Dalle / technologie'),
+            items: const [
+              DropdownMenuItem(value: 'oled', child: Text('OLED')),
+              DropdownMenuItem(value: 'qled', child: Text('QLED')),
+              DropdownMenuItem(value: 'led', child: Text('LED')),
+              DropdownMenuItem(value: 'other', child: Text('Autre')),
+            ],
+            onChanged: (v) => setState(() => _techPanelType = v ?? _techPanelType),
+          ),
+        ],
+    };
+  }
 }

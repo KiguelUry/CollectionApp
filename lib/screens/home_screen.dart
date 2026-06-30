@@ -15,23 +15,18 @@ import '../services/book_catalog_service.dart';
 import '../services/card_catalog_service.dart';
 import '../services/media_catalog_service.dart';
 import '../services/profile_service.dart';
-import '../utils/boardgame_genres.dart';
 import '../utils/boardgame_expansion_flow.dart';
 import '../utils/boardgame_expansion_reconcile.dart';
 import '../utils/boardgame_collection_visibility.dart';
 import '../utils/boardgame_display.dart';
-import '../utils/collection_grid_grouper.dart';
-import '../utils/collection_grid_layout.dart';
 import '../utils/collection_item_filters.dart';
 import '../utils/owned_quantity_index.dart';
-import '../utils/collection_count_label.dart';
+import '../utils/debounced_runner.dart';
+import '../utils/holder_filter.dart';
 import '../utils/supabase_embeds.dart';
-import '../utils/card_item_metadata.dart';
-import '../utils/tcg_rarity_order.dart';
 import '../utils/whereabouts_persistence.dart';
 import '../utils/wishlist_promote.dart';
 import '../services/global_play_history_service.dart';
-import '../models/collection_list_filters.dart';
 import '../models/collection_view_mode.dart';
 import '../models/item_tag.dart';
 import '../models/storage_location.dart';
@@ -40,13 +35,9 @@ import '../services/group_service.dart';
 import '../services/location_service.dart';
 import '../services/collection_refresh.dart';
 import '../services/tag_service.dart';
+import '../widgets/category_collection_tab_pane.dart';
 import '../widgets/category_collection_header.dart';
 import '../widgets/category_collection_shell.dart';
-import '../widgets/collection_filter_bar.dart';
-import '../widgets/wishlist_suggestions_banner.dart';
-import '../widgets/collection_item_list_tile.dart';
-import '../widgets/collection_item_tile.dart';
-import '../widgets/cover_preview_sheet.dart';
 import '../widgets/isbn_scan_sheet.dart';
 import 'global_play_history_screen.dart';
 import 'shake_pick_screen.dart';
@@ -58,6 +49,7 @@ import '../widgets/card_search_dialog.dart' show showCardSearch;
 import '../widgets/media_search_dialog.dart' show showMediaSearch;
 import '../widgets/ui/add_option_tile.dart';
 import '../models/lego_build_kind.dart';
+import '../models/tech_subcategory.dart';
 import '../services/lego_catalog_service.dart';
 import '../services/movie_catalog_service.dart';
 import '../services/videogame_catalog_service.dart';
@@ -67,8 +59,6 @@ import '../widgets/book_subcategory_picker.dart';
 import '../widgets/catalog_search_sheet.dart';
 import 'book/book_collection_screen.dart';
 import 'book_wishlist_tab.dart';
-import 'item_detail_screen.dart';
-import 'media_artist_albums_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final CollectionCategory category;
@@ -80,6 +70,7 @@ class HomeScreen extends StatefulWidget {
   final String? customTypeId;
   final String? customTypeName;
   final LegoBuildKind? fixedLegoKind;
+  final TechSubcategory? fixedTechSubcategory;
   final Map<String, String>? pendingCatalogHit;
   /// Wishlist seule (évite la liste plate collection livres).
   final bool bookWishlistOnly;
@@ -94,6 +85,7 @@ class HomeScreen extends StatefulWidget {
     this.customTypeId,
     this.customTypeName,
     this.fixedLegoKind,
+    this.fixedTechSubcategory,
     this.pendingCatalogHit,
     this.bookWishlistOnly = false,
   });
@@ -105,8 +97,6 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
   final _tagService = TagService();
-  final _collectionSearch = TextEditingController();
-  final _wishlistSearch = TextEditingController();
   late final TabController _tabController;
 
   late final String _userId;
@@ -117,8 +107,6 @@ class _HomeScreenState extends State<HomeScreen>
   int _enrichGeneration = 0;
   List<CollectionItem>? _enrichedItems;
   bool _expansionReconcileDone = false;
-  CollectionListFilters _collectionFilters = CollectionListFilters();
-  CollectionListFilters _wishlistFilters = CollectionListFilters();
   CollectionViewMode _viewMode = CollectionViewMode.grid;
   bool _mediaGroupByArtist = false;
   List<StorageLocation> _locations = [];
@@ -127,6 +115,18 @@ class _HomeScreenState extends State<HomeScreen>
   Map<String, String> _groupNamesById = {};
   Set<String> _myGroupIds = {};
   bool _bggRatingEnrichInFlight = false;
+  final _reloadDebounce = DebouncedRunner();
+  static const _reloadDebounceDelay = Duration(milliseconds: 300);
+
+  void _scheduleReloadItemsFromDb() {
+    _reloadDebounce.run(
+      delay: _reloadDebounceDelay,
+      action: () {
+        if (!mounted) return;
+        unawaited(_reloadItemsFromDb());
+      },
+    );
+  }
 
   @override
   void initState() {
@@ -138,8 +138,8 @@ class _HomeScreenState extends State<HomeScreen>
         .stream(primaryKey: ['id'])
         .eq('category', widget.category.dbValue);
     _itemsStream = rawStream.map(_filterAndScopeRows);
-    _itemsSub = _itemsStream.listen((_) => _reloadItemsFromDb());
-    CollectionRefresh.instance.addListener(_reloadItemsFromDb);
+    _itemsSub = _itemsStream.listen((_) => _scheduleReloadItemsFromDb());
+    CollectionRefresh.instance.addListener(_scheduleReloadItemsFromDb);
     _reloadItemsFromDb();
     _loadFilterData();
     if (widget.pendingCatalogHit != null) {
@@ -220,10 +220,9 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void dispose() {
     _itemsSub?.cancel();
-    CollectionRefresh.instance.removeListener(_reloadItemsFromDb);
+    _reloadDebounce.dispose();
+    CollectionRefresh.instance.removeListener(_scheduleReloadItemsFromDb);
     _tabController.dispose();
-    _collectionSearch.dispose();
-    _wishlistSearch.dispose();
     super.dispose();
   }
 
@@ -321,7 +320,7 @@ class _HomeScreenState extends State<HomeScreen>
             .eq('id', item.id);
         changed = true;
       }
-      if (changed && mounted) _reloadItemsFromDb();
+      if (changed && mounted) _scheduleReloadItemsFromDb();
     } finally {
       _bggRatingEnrichInFlight = false;
     }
@@ -343,7 +342,7 @@ class _HomeScreenState extends State<HomeScreen>
           _groupNamesById = {for (final g in groups) g.id: g.name};
           _myGroupIds = groups.map((g) => g.id).toSet();
         });
-        _reloadItemsFromDb();
+        _scheduleReloadItemsFromDb();
       }
     } catch (_) {}
   }
@@ -863,6 +862,12 @@ class _HomeScreenState extends State<HomeScreen>
         return k == legoKind.dbValue;
       }).toList();
     }
+    final techSub = widget.fixedTechSubcategory;
+    if (techSub != null) {
+      return items
+          .where((i) => i.subcategory == techSub.dbValue)
+          .toList();
+    }
     return items;
   }
 
@@ -870,6 +875,7 @@ class _HomeScreenState extends State<HomeScreen>
     CardSubcategory? cardSubcategory,
     MediaFormat? mediaFormat,
     LegoBuildKind? legoKind,
+    TechSubcategory? techSubcategory,
   }) async {
     final draft = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -880,9 +886,11 @@ class _HomeScreenState extends State<HomeScreen>
             cardSubcategory ?? widget.fixedCardSubcategory,
         initialMediaFormat: mediaFormat ?? widget.fixedMediaFormat,
         initialLegoKind: legoKind ?? widget.fixedLegoKind,
+        initialTechSubcategory: techSubcategory ?? widget.fixedTechSubcategory,
         lockSubcategory: widget.fixedCardSubcategory != null ||
             widget.fixedMediaFormat != null ||
-            widget.fixedLegoKind != null,
+            widget.fixedLegoKind != null ||
+            widget.fixedTechSubcategory != null,
       ),
     );
     if (draft == null || !mounted) return;
@@ -1039,6 +1047,9 @@ class _HomeScreenState extends State<HomeScreen>
         }
         if (widget.fixedLegoKind != null && !meta.containsKey('lego_kind')) {
           meta['lego_kind'] = widget.fixedLegoKind!.dbValue;
+        }
+        if (widget.fixedTechSubcategory != null && subcategory == null) {
+          subcategory = widget.fixedTechSubcategory!.dbValue;
         }
         if (widget.customTypeName != null) {
           meta['custom_type_name'] = widget.customTypeName;
@@ -1245,7 +1256,7 @@ class _HomeScreenState extends State<HomeScreen>
           ),
           CategoryQuickAction(
             label: 'Historique parties',
-            icon: Icons.history,
+            icon: Icons.history_edu,
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(
@@ -1305,14 +1316,6 @@ class _HomeScreenState extends State<HomeScreen>
     };
   }
 
-  String _buildCountLabel(List<CollectionItem> items, List<CollectionItem> filtered) {
-    if (filtered.length != items.length) {
-      return '${filtered.length} sur ${items.length}';
-    }
-    final inGroup = items.where((i) => i.isGroupOwned).length;
-    return formatCollectionCountLabel(total: items.length, inGroup: inGroup);
-  }
-
   Map<String, int> _groupActivityCounts(List<CollectionItem> items) {
     final counts = <String, int>{};
     for (final item in items) {
@@ -1331,6 +1334,29 @@ class _HomeScreenState extends State<HomeScreen>
     return counts;
   }
 
+  List<CollectionItem>? _derivedCacheSource;
+  Map<String, int> _collectionGroupActivity = const {};
+  Map<String, int> _wishlistGroupActivity = const {};
+  List<HolderFilterOption> _collectionHolderOptions = const [];
+
+  void _syncDerivedCaches(
+    List<CollectionItem> collection,
+    List<CollectionItem> wishlist,
+  ) {
+    final source = _enrichedItems;
+    if (identical(_derivedCacheSource, source)) return;
+    _derivedCacheSource = source;
+    if (widget.category == CollectionCategory.boardgame) {
+      _collectionGroupActivity = _groupActivityCounts(collection);
+      _wishlistGroupActivity = _groupActivityCounts(wishlist);
+      _collectionHolderOptions = buildHolderFilterOptions(collection);
+    } else {
+      _collectionGroupActivity = const {};
+      _wishlistGroupActivity = const {};
+      _collectionHolderOptions = const [];
+    }
+  }
+
   Widget _buildCollectionTabs() {
     final allItems = _enrichedItems ?? _parseItems(_itemRows);
     final scoped = _filterHubScope(allItems);
@@ -1340,390 +1366,64 @@ class _HomeScreenState extends State<HomeScreen>
     final collection = _visibleCollectionItems(rawCollection);
     final wishlist = scoped.where((item) => item.isWishlist).toList();
     final ownedIndex = buildOwnedQuantityIndex(scoped);
+    _syncDerivedCaches(collection, wishlist);
 
     return TabBarView(
       controller: _tabController,
       children: [
-        _buildTab(
+        CategoryCollectionTabPane(
+          category: widget.category,
+          fixedCardSubcategory: widget.fixedCardSubcategory,
           items: collection,
           ownedQuantityIndex: ownedIndex,
-          filters: _collectionFilters,
-          searchController: _collectionSearch,
-          onFiltersChanged: (f) {
-            setState(() => _collectionFilters = f);
-            if (widget.category == CollectionCategory.boardgame &&
-                f.sort == CollectionSort.bggRatingDesc) {
-              _enrichBggRatingsForSort(_filterHubScope(_parseItems(_itemRows)));
-            }
-          },
+          groupActivityCounts: _collectionGroupActivity,
+          holderFilterOptions: _collectionHolderOptions,
+          groupNamesById: _groupNamesById,
+          boardgameGroups: _groups,
+          locations: _locations,
+          tags: _tags,
+          viewMode: _viewMode,
+          mediaGroupByArtist: _mediaGroupByArtist,
+          onMediaGroupByArtistChanged: (v) =>
+              setState(() => _mediaGroupByArtist = v),
           emptyHint: 'Ta collection est vide ici.',
           showFocusFilter: true,
           showLocationFilter: widget.category != CollectionCategory.boardgame,
           showTagFilter: widget.category != CollectionCategory.boardgame,
+          onReload: _reloadItemsFromDb,
+          onDeleteItem: _confirmDeleteItem,
+          onBggRatingSortEnrich: widget.category == CollectionCategory.boardgame
+              ? () => _enrichBggRatingsForSort(
+                    _filterHubScope(_parseItems(_itemRows)),
+                  )
+              : null,
         ),
-        _buildTab(
+        CategoryCollectionTabPane(
+          category: widget.category,
+          fixedCardSubcategory: widget.fixedCardSubcategory,
           items: wishlist,
           ownedQuantityIndex: ownedIndex,
-          filters: _wishlistFilters,
-          searchController: _wishlistSearch,
-          onFiltersChanged: (f) => setState(() => _wishlistFilters = f),
+          groupActivityCounts: _wishlistGroupActivity,
+          holderFilterOptions: const [],
+          groupNamesById: _groupNamesById,
+          boardgameGroups: _groups,
+          locations: _locations,
+          tags: _tags,
+          viewMode: _viewMode,
+          mediaGroupByArtist: _mediaGroupByArtist,
+          onMediaGroupByArtistChanged: (v) =>
+              setState(() => _mediaGroupByArtist = v),
           emptyHint: 'Rien en wishlist pour cette catégorie.',
           showFocusFilter: true,
           showLocationFilter: widget.category != CollectionCategory.boardgame,
           showTagFilter: widget.category != CollectionCategory.boardgame,
           showWishlistSuggestions:
               widget.category == CollectionCategory.boardgame,
+          enableBulkGroupAssign: true,
+          onReload: _reloadItemsFromDb,
+          onDeleteItem: _confirmDeleteItem,
         ),
       ],
-    );
-  }
-
-  Widget _buildTab({
-    required List<CollectionItem> items,
-    required Map<String, int> ownedQuantityIndex,
-    required CollectionListFilters filters,
-    required TextEditingController searchController,
-    required ValueChanged<CollectionListFilters> onFiltersChanged,
-    required String emptyHint,
-    bool showFocusFilter = true,
-    bool showLocationFilter = true,
-    bool showTagFilter = true,
-    bool showWishlistSuggestions = false,
-  }) {
-    final filtered = filters.apply(items);
-    final countLabel = _buildCountLabel(items, filtered);
-    final groupOptions = _groupNamesById.entries
-        .map(
-          (e) => GroupFilterOption(id: e.key, label: e.value),
-        )
-        .toList()
-      ..sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
-
-    final cardSubcategoryOptions = widget.category == CollectionCategory.card &&
-            widget.fixedCardSubcategory == null
-        ? distinctCardSubcategories(items)
-        : const <CardSubcategory>[];
-    final selectedUniverse = widget.fixedCardSubcategory?.dbValue ??
-        (filters.cardSubcategories.length == 1
-            ? filters.cardSubcategories.first
-            : null);
-    final universeSub = selectedUniverse != null
-        ? CardSubcategory.fromDbValue(selectedUniverse)
-        : null;
-    final universeScoped = selectedUniverse != null
-        ? items
-            .where((i) => i.subcategory == selectedUniverse)
-            .toList()
-        : items;
-    final cardRarityOptions = widget.category == CollectionCategory.card &&
-            universeSub != null
-        ? sortRarityLabels(
-            distinctCardRarities(universeScoped).toList(),
-            universeSub,
-          )
-        : const <String>[];
-    final pokemonTypeOptions = widget.category == CollectionCategory.card &&
-            universeSub == CardSubcategory.pokemon
-        ? (distinctPokemonTypes(universeScoped).toList()
-          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())))
-        : const <String>[];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (showWishlistSuggestions)
-          WishlistSuggestionsBanner(category: widget.category),
-        if (widget.category == CollectionCategory.media)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: FilterChip(
-                label: const Text('Par artiste'),
-                selected: _mediaGroupByArtist,
-                onSelected: (v) => setState(() => _mediaGroupByArtist = v),
-                avatar: const Icon(Icons.person_outline, size: 18),
-              ),
-            ),
-          ),
-        CollectionFilterBar(
-          filters: filters,
-          onChanged: onFiltersChanged,
-          searchController: searchController,
-          locations: _locations,
-          tags: _tags,
-          showFocusFilter: showFocusFilter,
-          showLocationFilter: showLocationFilter,
-          showTagFilter: showTagFilter,
-          showBoardgameGenreFilter:
-              widget.category == CollectionCategory.boardgame,
-          boardgameGenres: widget.category == CollectionCategory.boardgame
-              ? distinctBoardgameGenres(items)
-              : const [],
-          showCardFilter: false,
-          showCardSubcategoryFilter: cardSubcategoryOptions.isNotEmpty,
-          showCardUniverseDetailFilters: universeSub != null,
-          cardRarities: cardRarityOptions,
-          pokemonTypes: pokemonTypeOptions,
-          cardSubcategoryOptions: cardSubcategoryOptions,
-          groupOptions: groupOptions,
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-          child: Text(
-            countLabel,
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey.shade600,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ),
-        Expanded(
-          child: widget.category == CollectionCategory.media &&
-                  _mediaGroupByArtist
-              ? _buildMediaArtistList(filtered, emptyHint: emptyHint)
-              : _viewMode == CollectionViewMode.grid
-                  ? _buildItemGrid(
-                      filtered,
-                      ownedQuantityIndex: ownedQuantityIndex,
-                      emptyHint: emptyHint,
-                      filters: filters,
-                      onClearFilters: () {
-                        searchController.clear();
-                        onFiltersChanged(CollectionListFilters());
-                      },
-                    )
-                  : _buildItemList(
-                      filtered,
-                      ownedQuantityIndex: ownedQuantityIndex,
-                      emptyHint: emptyHint,
-                      filters: filters,
-                      onClearFilters: () {
-                        searchController.clear();
-                        onFiltersChanged(CollectionListFilters());
-                      },
-                    ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildMediaArtistList(
-    List<CollectionItem> items, {
-    required String emptyHint,
-  }) {
-    if (items.isEmpty) {
-      return Center(child: Text(emptyHint));
-    }
-
-    final byArtist = <String, List<CollectionItem>>{};
-    for (final item in items) {
-      final raw = item.metadata?['artist']?.toString().trim();
-      final key =
-          raw != null && raw.isNotEmpty ? raw : 'Artiste inconnu';
-      byArtist.putIfAbsent(key, () => []).add(item);
-    }
-    final artists = byArtist.keys.toList()
-      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-
-    return ListView.separated(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      itemCount: artists.length,
-      separatorBuilder: (_, _) => const Divider(height: 1),
-      itemBuilder: (context, index) {
-        final name = artists[index];
-        final albums = byArtist[name]!;
-        return ListTile(
-          leading: CircleAvatar(
-            backgroundColor: widget.category.color.withValues(alpha: 0.2),
-            child: Icon(Icons.person, color: widget.category.color),
-          ),
-          title: Text(name, style: const TextStyle(fontWeight: FontWeight.w700)),
-          subtitle: Text(
-            '${albums.length} album${albums.length > 1 ? 's' : ''}',
-          ),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (ctx) => MediaArtistAlbumsScreen(
-                artist: name,
-                items: albums,
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildItemGrid(
-    List<CollectionItem> items, {
-    required Map<String, int> ownedQuantityIndex,
-    required String emptyHint,
-    required CollectionListFilters filters,
-    required VoidCallback onClearFilters,
-  }) {
-    if (items.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.inventory_2_outlined,
-                  size: 48, color: Colors.grey.shade400),
-              const SizedBox(height: 12),
-              Text(
-                emptyHint,
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey.shade600),
-              ),
-              if (filters.hasActiveFilters) ...[
-                const SizedBox(height: 12),
-                TextButton(
-                  onPressed: onClearFilters,
-                  child: const Text('Réinitialiser les filtres'),
-                ),
-              ],
-            ],
-          ),
-        ),
-      );
-    }
-
-    final grouped = CollectionGridGrouper.group(items);
-    final groupActivity = _groupActivityCounts(items);
-
-    return Builder(
-      builder: (context) {
-        final grid = GridView.builder(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: CollectionGridLayout.crossAxisCount(context),
-            crossAxisSpacing: CollectionGridLayout.gridCrossSpacing,
-            mainAxisSpacing: CollectionGridLayout.gridMainSpacing,
-            childAspectRatio:
-                CollectionGridLayout.aspectRatio(widget.category, context),
-          ),
-          itemCount: grouped.length,
-          itemBuilder: (context, index) {
-            final entry = grouped[index];
-            final item = entry.item;
-
-            return CollectionItemTile(
-              key: ValueKey(item.id),
-              item: item,
-              category: widget.category,
-              totalQuantity: entry.totalQuantity,
-              ownedQuantity: ownedQuantityFor(item, ownedQuantityIndex),
-              showDuplicateBadge: entry.hasDuplicates,
-              groupNamesById: _groupNamesById,
-              boardgameQuickEditGroups:
-                  widget.category == CollectionCategory.boardgame
-                      ? _groups
-                      : null,
-              groupActivityCounts: groupActivity,
-              onDelete: () => _confirmDeleteItem(item),
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => ItemDetailScreen(
-                    item: item.copyWith(quantity: entry.totalQuantity),
-                    ownedQuantity: ownedQuantityFor(item, ownedQuantityIndex),
-                  ),
-                ),
-              ),
-              onLongPress: item.imageUrl != null &&
-                      item.imageUrl!.trim().isNotEmpty
-                  ? () => showCoverPreview(
-                        context,
-                        imageUrl: item.imageUrl,
-                        title: item.title,
-                        bookCover:
-                            widget.category == CollectionCategory.book,
-                      )
-                  : null,
-            );
-          },
-        );
-
-        return CollectionGridLayout.constrainOnWebDesktop(
-          context: context,
-          child: RefreshIndicator(
-            onRefresh: _reloadItemsFromDb,
-            child: grid,
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildItemList(
-    List<CollectionItem> items, {
-    required Map<String, int> ownedQuantityIndex,
-    required String emptyHint,
-    required CollectionListFilters filters,
-    required VoidCallback onClearFilters,
-  }) {
-    if (items.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.inventory_2_outlined,
-                  size: 48, color: Colors.grey.shade400),
-              const SizedBox(height: 12),
-              Text(
-                emptyHint,
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey.shade600),
-              ),
-              if (filters.hasActiveFilters) ...[
-                const SizedBox(height: 12),
-                TextButton(
-                  onPressed: onClearFilters,
-                  child: const Text('Réinitialiser les filtres'),
-                ),
-              ],
-            ],
-          ),
-        ),
-      );
-    }
-
-    final grouped = CollectionGridGrouper.group(items);
-
-    return RefreshIndicator(
-      onRefresh: _reloadItemsFromDb,
-      child: ListView.builder(
-      padding: const EdgeInsets.only(bottom: 88),
-      itemCount: grouped.length,
-      itemBuilder: (context, index) {
-        final entry = grouped[index];
-        final item = entry.item;
-        return CollectionItemListTile(
-          key: ValueKey(item.id),
-          item: item,
-          category: widget.category,
-          totalQuantity: entry.totalQuantity,
-          ownedQuantity: ownedQuantityFor(item, ownedQuantityIndex),
-          onDelete: () => _confirmDeleteItem(item),
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => ItemDetailScreen(
-                item: item.copyWith(quantity: entry.totalQuantity),
-                ownedQuantity: ownedQuantityFor(item, ownedQuantityIndex),
-              ),
-            ),
-          ),
-        );
-      },
-      ),
     );
   }
 }
@@ -1733,3 +1433,4 @@ int? _positivePlayingTime(dynamic value) {
   final parsed = int.tryParse('$value');
   return parsed != null && parsed > 0 ? parsed : null;
 }
+

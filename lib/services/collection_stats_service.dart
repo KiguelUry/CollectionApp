@@ -15,7 +15,7 @@ class CollectionStatsService {
     final userId = CollectionItemScope.currentUserId;
     if (userId == null) return const CollectionSummary();
 
-    final rows = await CollectionItemScope.personal(
+    final rows = await CollectionItemScope.ownedByUser(
       _client.from('collection_items').select(
         'purchase_price, quantity, is_wishlist, is_sold, is_for_sale',
       ),
@@ -106,9 +106,9 @@ class CollectionStatsService {
     final userId = CollectionItemScope.currentUserId;
     if (userId == null) return [];
 
-    final rows = await CollectionItemScope.personal(
+    final rows = await CollectionItemScope.ownedByUser(
       _client.from('collection_items').select(
-        'category, quantity, purchase_price, is_wishlist, is_sold, is_for_sale',
+        'category, quantity, purchase_price, is_wishlist, is_sold, is_for_sale, is_expansion',
       ),
       userId: userId,
     );
@@ -122,7 +122,8 @@ class CollectionStatsService {
       final isWishlist = row['is_wishlist'] as bool? ?? false;
       final isSold = row['is_sold'] as bool? ?? false;
       final isForSale = row['is_for_sale'] as bool? ?? false;
-      if (isWishlist || isSold || isForSale) continue;
+      final isExpansion = row['is_expansion'] as bool? ?? false;
+      if (isWishlist || isSold || isForSale || isExpansion) continue;
 
       final cat = CollectionCategory.fromDbValue(row['category'] as String);
       final qty = (row['quantity'] as int?) ?? 1;
@@ -148,7 +149,7 @@ class CollectionStatsService {
     final userId = CollectionItemScope.currentUserId;
     if (userId == null) return [];
 
-    final rows = await CollectionItemScope.personal(
+    final rows = await CollectionItemScope.ownedByUser(
       _client
           .from('collection_items')
           .select()

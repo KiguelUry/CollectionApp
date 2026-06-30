@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import 'profile/retro_avatar.dart';
+import '../utils/preset_avatars.dart';
+import 'preset_avatar_image.dart';
 
 /// Avatar utilisateur (photo ou initiale sur fond coloré).
 class ProfileAvatar extends StatelessWidget {
@@ -35,6 +37,30 @@ class ProfileAvatar extends StatelessWidget {
         : '?';
 
     if (avatarUrl != null && avatarUrl!.isNotEmpty) {
+      final presetPath = presetAvatarAssetPath(avatarUrl);
+      if (presetPath != null) {
+        return ClipOval(
+          child: SizedBox(
+            width: radius * 2,
+            height: radius * 2,
+            child: ColoredBox(
+              color: accent.withValues(alpha: 0.12),
+              child: isPresetAvatarRaster(presetPath)
+                  ? Image.asset(
+                      presetPath,
+                      fit: BoxFit.cover,
+                      width: radius * 2,
+                      height: radius * 2,
+                    )
+                  : Padding(
+                      padding: EdgeInsets.all(radius * 0.22),
+                      child: PresetAvatarImage(assetPath: presetPath),
+                    ),
+            ),
+          ),
+        );
+      }
+
       return ClipOval(
         child: SizedBox(
           width: radius * 2,

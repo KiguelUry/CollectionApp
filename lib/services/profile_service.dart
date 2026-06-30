@@ -9,6 +9,7 @@ import 'image_compression_service.dart';
 import '../widgets/avatar_crop_sheet.dart';
 import '../models/collection_item.dart';
 import '../models/user_profile.dart';
+import '../utils/preset_avatars.dart';
 import '../utils/picked_image_bytes.dart';
 import '../utils/collection_item_filters.dart';
 import '../utils/supabase_embeds.dart';
@@ -227,6 +228,20 @@ class ProfileService {
         .from('profiles')
         .update({'avatar_url': null})
         .eq('id', id);
+  }
+
+  Future<UserProfile> setPresetAvatar(String assetPath) async {
+    final id = _userId;
+    if (id == null) throw Exception('Non connecté');
+
+    final url = presetAvatarUrl(assetPath);
+    final row = await _client
+        .from('profiles')
+        .update({'avatar_url': url})
+        .eq('id', id)
+        .select()
+        .single();
+    return UserProfile.fromJson(Map<String, dynamic>.from(row));
   }
 
   Future<void> updateShareWishlist(bool share) async {

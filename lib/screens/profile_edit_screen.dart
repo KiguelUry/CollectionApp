@@ -8,7 +8,9 @@ import '../services/quick_log_service.dart';
 import '../widgets/profile/favorites_showcase.dart';
 import '../widgets/profile/quick_log_timeline.dart';
 import '../widgets/profile/trophy_picker_sheet.dart';
+import '../widgets/preset_avatar_picker_sheet.dart';
 import '../widgets/profile_avatar.dart';
+import '../utils/preset_avatars.dart';
 
 class ProfileEditScreen extends StatefulWidget {
   const ProfileEditScreen({super.key});
@@ -83,6 +85,35 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   }
 
   Future<void> _changeAvatar() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Photo depuis la galerie'),
+              onTap: () => Navigator.pop(ctx, 'photo'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.face_retouching_natural_outlined),
+              title: const Text('Avatar illustré'),
+              subtitle: const Text('Images SVG ou PNG dans l\'app'),
+              onTap: () => Navigator.pop(ctx, 'preset'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+
+    if (choice == 'preset') {
+      await _pickPresetAvatar();
+      return;
+    }
+
     setState(() => _uploadingAvatar = true);
     try {
       final url = await _service.pickAndUploadAvatar(cropContext: context);
@@ -94,6 +125,31 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Photo mise à jour')),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _uploadingAvatar = false);
+    }
+  }
+
+  Future<void> _pickPresetAvatar() async {
+    final asset = await showPresetAvatarPickerSheet(context);
+    if (asset == null || !mounted) return;
+
+    setState(() => _uploadingAvatar = true);
+    try {
+      final saved = await _service.setPresetAvatar(asset);
+      if (!mounted) return;
+      setState(() => _profile = saved);
+      await ProfileCacheService.instance.apply(saved);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Avatar mis à jour')),
       );
     } catch (e) {
       if (mounted) {
@@ -399,7 +455,11 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                   if (_profile?.avatarUrl != null)
                     TextButton(
                       onPressed: _uploadingAvatar ? null : _removeAvatar,
-                      child: const Text('Supprimer la photo'),
+                      child: Text(
+                        isPresetAvatarUrl(_profile?.avatarUrl)
+                            ? 'Retirer l\'avatar'
+                            : 'Supprimer la photo',
+                      ),
                     ),
                   const SizedBox(height: 24),
                   TextField(

@@ -9,6 +9,7 @@ import '../models/collection_item.dart';
 import '../services/bgg_service.dart';
 import '../services/global_play_history_service.dart';
 import '../widgets/boardgame_play_history_panel.dart';
+import '../widgets/boardgame_ranking_panel.dart';
 import '../widgets/bgg_network_image.dart';
 
 /// Historique global des parties (tous jeux confondus).
@@ -24,6 +25,8 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
   final _service = GlobalPlayHistoryService();
   final _searchController = TextEditingController();
   bool _loading = true;
+  int _tabIndex = 0;
+  List<GlobalPlayHistoryEntry> _entries = [];
   List<GlobalPlayHistoryGroup> _groups = [];
   final _expanded = <String>{};
 
@@ -53,6 +56,7 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
     final entries = await _service.loadAllEntries();
     if (!mounted) return;
     setState(() {
+      _entries = entries;
       _groups = groupPlayHistoryEntries(entries);
       _loading = false;
     });
@@ -169,18 +173,42 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
   @override
   Widget build(BuildContext context) {
     final dateFmt = DateFormat('d MMM yyyy', 'fr_FR');
+    final allSessions = _entries.map((e) => e.session).toList();
+
     return Scaffold(
       appBar: AppBar(title: const Text('Historique des parties')),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _addSession,
-        icon: const Icon(Icons.add),
-        label: const Text('Partie'),
-      ),
+      floatingActionButton: _tabIndex == 0
+          ? FloatingActionButton.extended(
+              onPressed: _addSession,
+              icon: const Icon(Icons.add),
+              label: const Text('Partie'),
+            )
+          : null,
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                if (_groups.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                  child: SegmentedButton<int>(
+                    segments: const [
+                      ButtonSegment(
+                        value: 0,
+                        label: Text('Historique'),
+                        icon: Icon(Icons.history_edu, size: 18),
+                      ),
+                      ButtonSegment(
+                        value: 1,
+                        label: Text('Classement'),
+                        icon: Icon(Icons.emoji_events_outlined, size: 18),
+                      ),
+                    ],
+                    selected: {_tabIndex},
+                    onSelectionChanged: (s) =>
+                        setState(() => _tabIndex = s.first),
+                  ),
+                ),
+                if (_tabIndex == 0 && _groups.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
                     child: TextField(
@@ -204,78 +232,122 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
                     ),
                   ),
                 Expanded(
-                  child: _groups.isEmpty
-                      ? Center(
-                          child: Text(
-                            'Aucune partie enregistrée.',
-                            style: TextStyle(color: Colors.grey.shade600),
-                          ),
-                        )
-                      : _visibleGroups.isEmpty
-                          ? Center(
-                              child: Text(
-                                'Aucun jeu ne correspond à « ${_searchController.text.trim()} ».',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(color: Colors.grey.shade600),
-                              ),
-                            )
-                          : RefreshIndicator(
-                              onRefresh: _load,
-                              child: ListView.builder(
-                                padding:
-                                    const EdgeInsets.fromLTRB(12, 12, 12, 88),
-                                itemCount: _visibleGroups.length,
-                                itemBuilder: (context, index) {
-                                  final group = _visibleGroups[index];
-                      final expanded = _expanded.contains(group.groupKey);
-
-                      if (group.isStreak && !expanded) {
-                        return _StreakTile(
-                          group: group,
-                          onTap: () =>
-                              setState(() => _expanded.add(group.groupKey)),
-                        );
-                      }
-
-                      if (group.isStreak && expanded) {
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            _StreakTile(
-                              group: group,
-                              expanded: true,
-                              onTap: () => setState(
-                                () => _expanded.remove(group.groupKey),
-                              ),
-                            ),
-                            for (final entry in group.entries)
-                              _EntryTile(
-                                entry: entry,
-                                dateFmt: dateFmt,
-                                title: group.title,
-                                nested: true,
-                                onTap: () => _openEntry(entry),
-                                onDelete: () => _deleteEntry(entry),
-                              ),
-                          ],
-                        );
-                      }
-
-                      final entry = group.entries.first;
-                      return _EntryTile(
-                        entry: entry,
-                        dateFmt: dateFmt,
-                        title: group.title,
-                        imageUrl: group.imageUrl,
-                        onTap: () => _openEntry(entry),
-                        onDelete: () => _deleteEntry(entry),
-                      );
-                    },
-                  ),
-                ),
+                  child: _tabIndex == 1
+                      ? _buildAllTimeRanking(allSessions)
+                      : _buildHistoryList(dateFmt),
                 ),
               ],
             ),
+    );
+  }
+
+  Widget _buildAllTimeRanking(List<BoardgamePlaySession> sessions) {
+    if (sessions.isEmpty) {
+      return Center(
+        child: Text(
+          'Aucune partie enregistrée.',
+          style: TextStyle(color: Colors.grey.shade600),
+        ),
+      );
+    }
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+        children: [
+          Text(
+            'Classement général (All-Time)',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Tous jeux confondus — victoires cumulées, départagées par taux de victoire.',
+            style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+          ),
+          const SizedBox(height: 16),
+          BoardgameRankingPanel(
+            sessions: sessions,
+            onOpenSession: (index) {
+              if (index >= 0 && index < _entries.length) {
+                _openEntry(_entries[index]);
+              }
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHistoryList(DateFormat dateFmt) {
+    if (_groups.isEmpty) {
+      return Center(
+        child: Text(
+          'Aucune partie enregistrée.',
+          style: TextStyle(color: Colors.grey.shade600),
+        ),
+      );
+    }
+    if (_visibleGroups.isEmpty) {
+      return Center(
+        child: Text(
+          'Aucun jeu ne correspond à « ${_searchController.text.trim()} ».',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.grey.shade600),
+        ),
+      );
+    }
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView.builder(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
+        itemCount: _visibleGroups.length,
+        itemBuilder: (context, index) {
+          final group = _visibleGroups[index];
+          final expanded = _expanded.contains(group.groupKey);
+
+          if (group.isStreak && !expanded) {
+            return _StreakTile(
+              group: group,
+              onTap: () => setState(() => _expanded.add(group.groupKey)),
+            );
+          }
+
+          if (group.isStreak && expanded) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _StreakTile(
+                  group: group,
+                  expanded: true,
+                  onTap: () =>
+                      setState(() => _expanded.remove(group.groupKey)),
+                ),
+                for (final entry in group.entries)
+                  _EntryTile(
+                    entry: entry,
+                    dateFmt: dateFmt,
+                    title: group.title,
+                    nested: true,
+                    onTap: () => _openEntry(entry),
+                    onDelete: () => _deleteEntry(entry),
+                  ),
+              ],
+            );
+          }
+
+          final entry = group.entries.first;
+          return _EntryTile(
+            entry: entry,
+            dateFmt: dateFmt,
+            title: group.title,
+            imageUrl: group.imageUrl,
+            onTap: () => _openEntry(entry),
+            onDelete: () => _deleteEntry(entry),
+          );
+        },
+      ),
     );
   }
 }
@@ -566,30 +638,73 @@ class _EntryTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final winner = entry.session.effectiveWinner;
+    final session = entry.session;
+    final scores = session.scoresLine;
+    final winner = session.winnerLine;
+    final scheme = Theme.of(context).colorScheme;
+
     return Card(
       margin: EdgeInsets.only(bottom: 8, left: nested ? 16 : 0),
-      child: ListTile(
-        leading: nested ? null : _historyThumb(imageUrl),
-        title: Text(nested ? dateFmt.format(entry.session.date) : title),
-        subtitle: Text(
-          [
-            if (!nested) dateFmt.format(entry.session.date),
-            if (entry.session.summaryLine().isNotEmpty)
-              entry.session.summaryLine().replaceAll('\n', ' · '),
-            if (winner != null && winner.isNotEmpty) 'Gagnant : $winner',
-          ].where((s) => s.isNotEmpty).join('\n'),
-          maxLines: 3,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: onDelete == null
-            ? null
-            : IconButton(
-                icon: const Icon(Icons.delete_outline),
-                tooltip: 'Supprimer',
-                onPressed: onDelete,
-              ),
+      child: InkWell(
         onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (!nested) ...[
+                _historyThumb(imageUrl),
+                const SizedBox(width: 12),
+              ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      nested ? dateFmt.format(session.date) : title,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    if (!nested) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        dateFmt.format(session.date),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                    if (scores != null && scores.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        scores,
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                    ],
+                    if (winner != null && winner.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        winner,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: scheme.primary,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (onDelete != null)
+                IconButton(
+                  icon: const Icon(Icons.delete_outline),
+                  tooltip: 'Supprimer',
+                  onPressed: onDelete,
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
