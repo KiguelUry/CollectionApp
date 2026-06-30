@@ -105,6 +105,39 @@ class ItemGroupService {
     }
   }
 
+  /// Retire plusieurs objets d'un groupe.
+  Future<void> bulkRemoveItemsFromGroup({
+    required String groupId,
+    required List<CollectionItem> items,
+  }) async {
+    for (final item in items) {
+      final ids = await fetchGroupIdsForItem(item.id);
+      if (!ids.contains(groupId)) continue;
+      final next = ids.where((id) => id != groupId).toList();
+      await syncItemGroupsWithItem(item, next);
+    }
+  }
+
+  /// Retire plusieurs objets de plusieurs groupes.
+  Future<void> bulkRemoveItemsFromGroups({
+    required List<String> groupIds,
+    required List<CollectionItem> items,
+  }) async {
+    final unique = groupIds.toSet();
+    for (final groupId in unique) {
+      await bulkRemoveItemsFromGroup(groupId: groupId, items: items);
+    }
+  }
+
+  /// Groupes auxquels au moins un des objets appartient.
+  Future<Set<String>> groupIdsForItems(Iterable<CollectionItem> items) async {
+    final out = <String>{};
+    for (final item in items) {
+      out.addAll(await fetchGroupIdsForItem(item.id));
+    }
+    return out;
+  }
+
   Future<Set<String>> fetchItemIdsForGroup(String groupId) async {
     try {
       final rows = await _client

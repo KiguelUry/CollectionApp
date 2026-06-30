@@ -458,6 +458,28 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  Future<void> _confirmBulkDeleteItems(List<CollectionItem> items) async {
+    for (final item in items) {
+      if (item.category == CollectionCategory.boardgame) {
+        await GlobalPlayHistoryService().archivePlaysFromDeletedItem(item);
+      }
+      await Supabase.instance.client
+          .from('collection_items')
+          .delete()
+          .eq('id', item.id);
+    }
+    CollectionRefresh.instance.bump();
+    if (!mounted) return;
+    final count = items.length;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '$count objet${count > 1 ? 's' : ''} supprimé${count > 1 ? 's' : ''}',
+        ),
+      ),
+    );
+  }
+
   void _onAddPressed() {
     if (widget.category.supportsBggSearch) {
       _showBoardgameAddChooser();
@@ -1371,7 +1393,8 @@ class _HomeScreenState extends State<HomeScreen>
     return TabBarView(
       controller: _tabController,
       children: [
-        CategoryCollectionTabPane(
+        RepaintBoundary(
+          child: CategoryCollectionTabPane(
           category: widget.category,
           fixedCardSubcategory: widget.fixedCardSubcategory,
           items: collection,
@@ -1390,15 +1413,20 @@ class _HomeScreenState extends State<HomeScreen>
           showFocusFilter: true,
           showLocationFilter: widget.category != CollectionCategory.boardgame,
           showTagFilter: widget.category != CollectionCategory.boardgame,
+          enableBulkSelection: true,
+          currentUserId: _userId,
           onReload: _reloadItemsFromDb,
           onDeleteItem: _confirmDeleteItem,
+          onBulkDeleteItems: _confirmBulkDeleteItems,
           onBggRatingSortEnrich: widget.category == CollectionCategory.boardgame
               ? () => _enrichBggRatingsForSort(
                     _filterHubScope(_parseItems(_itemRows)),
                   )
               : null,
         ),
-        CategoryCollectionTabPane(
+        ),
+        RepaintBoundary(
+          child: CategoryCollectionTabPane(
           category: widget.category,
           fixedCardSubcategory: widget.fixedCardSubcategory,
           items: wishlist,
@@ -1419,9 +1447,13 @@ class _HomeScreenState extends State<HomeScreen>
           showTagFilter: widget.category != CollectionCategory.boardgame,
           showWishlistSuggestions:
               widget.category == CollectionCategory.boardgame,
-          enableBulkGroupAssign: true,
+          enableBulkSelection: true,
+          defaultWishlistMineFilter: true,
+          currentUserId: _userId,
           onReload: _reloadItemsFromDb,
           onDeleteItem: _confirmDeleteItem,
+          onBulkDeleteItems: _confirmBulkDeleteItems,
+        ),
         ),
       ],
     );

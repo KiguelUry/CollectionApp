@@ -55,15 +55,82 @@ Future<bool> showBulkGroupAssignSheet(
   }
 }
 
+/// Retire plusieurs objets d'un ou plusieurs groupes.
+Future<bool> showBulkGroupRemoveSheet(
+  BuildContext context, {
+  required List<CollectionItem> items,
+  required List<CollectionGroup> groups,
+  Map<String, int> groupActivityCounts = const {},
+}) async {
+  if (items.isEmpty || groups.isEmpty) return false;
+
+  final service = ItemGroupService();
+  final memberGroupIds = await service.groupIdsForItems(items);
+  final eligible = groups.where((g) => memberGroupIds.contains(g.id)).toList();
+  if (eligible.isEmpty) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Aucun des objets sélectionnés n\'est dans un groupe.'),
+        ),
+      );
+    }
+    return false;
+  }
+
+  final pickedIds = await showModalBottomSheet<List<String>>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (ctx) => _BulkGroupPickSheet(
+      itemCount: items.length,
+      groups: eligible,
+      groupActivityCounts: groupActivityCounts,
+      removeMode: true,
+    ),
+  );
+  if (pickedIds == null || pickedIds.isEmpty || !context.mounted) {
+    return false;
+  }
+
+  final namesById = {for (final g in groups) g.id: g.name};
+  try {
+    await service.bulkRemoveItemsFromGroups(groupIds: pickedIds, items: items);
+    if (context.mounted) {
+      final groupLabel = pickedIds.length == 1
+          ? '« ${namesById[pickedIds.first] ?? 'groupe'} »'
+          : '${pickedIds.length} groupes';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${items.length} objet${items.length > 1 ? 's' : ''} '
+            'retiré${items.length > 1 ? 's' : ''} de $groupLabel',
+          ),
+        ),
+      );
+    }
+    return true;
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e')),
+      );
+    }
+    return false;
+  }
+}
+
 class _BulkGroupPickSheet extends StatefulWidget {
   final int itemCount;
   final List<CollectionGroup> groups;
   final Map<String, int> groupActivityCounts;
+  final bool removeMode;
 
   const _BulkGroupPickSheet({
     required this.itemCount,
     required this.groups,
     required this.groupActivityCounts,
+    this.removeMode = false,
   });
 
   @override
@@ -108,8 +175,11 @@ class _BulkGroupPickSheetState extends State<_BulkGroupPickSheet> {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
               child: Text(
-                'Ajouter ${widget.itemCount} objet'
-                '${widget.itemCount > 1 ? 's' : ''} au(x) groupe(s)',
+                widget.removeMode
+                    ? 'Retirer ${widget.itemCount} objet'
+                        '${widget.itemCount > 1 ? 's' : ''} du/des groupe(s)'
+                    : 'Ajouter ${widget.itemCount} objet'
+                        '${widget.itemCount > 1 ? 's' : ''} au(x) groupe(s)',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
@@ -118,7 +188,9 @@ class _BulkGroupPickSheetState extends State<_BulkGroupPickSheet> {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
               child: Text(
-                'Coche un ou plusieurs groupes',
+                widget.removeMode
+                    ? 'Coche les groupes à quitter'
+                    : 'Coche un ou plusieurs groupes',
                 style: TextStyle(
                   fontSize: 13,
                   color: Colors.grey.shade600,
@@ -164,8 +236,11 @@ class _BulkGroupPickSheetState extends State<_BulkGroupPickSheet> {
                 child: Text(
                   _selected.isEmpty
                       ? 'Choisir au moins un groupe'
-                      : 'Ajouter à ${_selected.length} groupe'
-                          '${_selected.length > 1 ? 's' : ''}',
+                      : widget.removeMode
+                          ? 'Retirer de ${_selected.length} groupe'
+                              '${_selected.length > 1 ? 's' : ''}'
+                          : 'Ajouter à ${_selected.length} groupe'
+                              '${_selected.length > 1 ? 's' : ''}',
                 ),
               ),
             ),

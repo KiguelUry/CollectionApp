@@ -63,6 +63,10 @@ class CollectionListFilters {
   /// Tri localisation : false = A→Z, true = Z→A.
   bool locationAscending;
 
+  /// Wishlist perso : objets ajoutés par moi, même s'ils sont dans un groupe.
+  bool wishlistMineOnly;
+  String? wishlistMineUserId;
+
   CollectionListFilters({
     this.searchQuery = '',
     this.sort = CollectionSort.titleAsc,
@@ -81,6 +85,8 @@ class CollectionListFilters {
     this.ratingAscending = false,
     this.bggRatingAscending = false,
     this.locationAscending = false,
+    this.wishlistMineOnly = false,
+    this.wishlistMineUserId,
   })  : groupIds = groupIds ?? <String>{},
         boardgameGenres = boardgameGenres ?? <String>{},
         cardRarities = cardRarities ?? <String>{},
@@ -101,6 +107,7 @@ class CollectionListFilters {
       cardRarities.isNotEmpty ||
       pokemonTypes.isNotEmpty ||
       cardSubcategories.isNotEmpty ||
+      wishlistMineOnly ||
       sort != CollectionSort.titleAsc;
 
   /// Filtres actifs hors tri (pour badge bouton Filtre).
@@ -117,7 +124,8 @@ class CollectionListFilters {
       boardgameGenres.isNotEmpty ||
       cardRarities.isNotEmpty ||
       pokemonTypes.isNotEmpty ||
-      cardSubcategories.isNotEmpty;
+      cardSubcategories.isNotEmpty ||
+      wishlistMineOnly;
 
   CollectionListFilters copyWith({
     String? searchQuery,
@@ -144,6 +152,9 @@ class CollectionListFilters {
     bool? ratingAscending,
     bool? bggRatingAscending,
     bool? locationAscending,
+    bool? wishlistMineOnly,
+    String? wishlistMineUserId,
+    bool clearWishlistMine = false,
   }) {
     return CollectionListFilters(
       searchQuery: searchQuery ?? this.searchQuery,
@@ -172,6 +183,12 @@ class CollectionListFilters {
       cardSubcategories: clearCardFilters
           ? <String>{}
           : (cardSubcategories ?? this.cardSubcategories),
+      wishlistMineOnly: clearWishlistMine
+          ? false
+          : (wishlistMineOnly ?? this.wishlistMineOnly),
+      wishlistMineUserId: clearWishlistMine
+          ? null
+          : (wishlistMineUserId ?? this.wishlistMineUserId),
     );
   }
 
@@ -239,6 +256,11 @@ class CollectionListFilters {
 
     if (focusGroupId != null && focusGroupId!.isNotEmpty) {
       result = result.where((i) => i.groupId == focusGroupId).toList();
+    } else if (wishlistMineOnly && wishlistMineUserId != null) {
+      final uid = wishlistMineUserId!;
+      result = result
+          .where((i) => i.addedBy == uid || i.groupId == null)
+          .toList();
     } else if (ownershipView == CollectionOwnershipView.personal) {
       result = result.where((i) => !i.isGroupOwned).toList();
     } else if (ownershipView == CollectionOwnershipView.groups) {
