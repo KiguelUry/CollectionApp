@@ -35,6 +35,8 @@ class CollectionItemTile extends StatelessWidget {
   final Map<String, int> groupActivityCounts;
   /// Groupe affiché (ex. écran détail groupe) — force le badge ≥ 1.
   final String? contextGroupId;
+  /// Grille / liste : couverture légère (URL + cache mémoire).
+  final bool compactCover;
 
   const CollectionItemTile({
     super.key,
@@ -53,6 +55,7 @@ class CollectionItemTile extends StatelessWidget {
     this.boardgameQuickEditGroups,
     this.groupActivityCounts = const {},
     this.contextGroupId,
+    this.compactCover = false,
   });
 
   bool get _isGrayed =>
@@ -726,13 +729,26 @@ class CollectionItemTile extends StatelessWidget {
       final isBook = category == CollectionCategory.book;
       final isCard = category == CollectionCategory.card;
       final isBoardgame = category == CollectionCategory.boardgame;
-      image = BggNetworkImage(
-        key: ValueKey(item.id),
-        url: item.imageUrl!,
-        fit: isCard ? BoxFit.contain : BoxFit.cover,
-        bookCover: isBook,
-        boxedCover: isBoardgame,
-        largeSource: !isBook && !isCard,
+      final useLarge = !compactCover && !isBook && !isCard;
+      image = LayoutBuilder(
+        builder: (context, constraints) {
+          final side = constraints.maxWidth.isFinite && constraints.maxWidth > 0
+              ? constraints.maxWidth
+              : constraints.maxHeight.isFinite && constraints.maxHeight > 0
+                  ? constraints.maxHeight
+                  : null;
+          return BggNetworkImage(
+            key: ValueKey(item.id),
+            url: item.imageUrl!,
+            width: compactCover ? side : null,
+            height: compactCover ? side : null,
+            fit: isCard ? BoxFit.contain : BoxFit.cover,
+            bookCover: isBook,
+            boxedCover: isBoardgame,
+            largeSource: useLarge,
+            compact: compactCover,
+          );
+        },
       );
     } else {
       image = ColoredBox(

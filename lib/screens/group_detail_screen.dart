@@ -476,6 +476,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
               category: category,
               totalQuantity: entry.totalQuantity,
               showDuplicateBadge: entry.hasDuplicates,
+              compactCover: true,
               showGroupBadge: false,
               contextGroupId: widget.group.id,
               groupNamesById: {widget.group.id: widget.group.name},

@@ -35,6 +35,8 @@ class CollectionCoverImage extends StatelessWidget {
   /// Affiche l'image entière (jeux de société, boîtes…) sans rognage.
   final bool boxedCover;
   final bool largeSource;
+  /// Grille / liste : URL vignette + qualité réduite (web : garde <img> natif pour BGG).
+  final bool compact;
   final Widget? placeholder;
 
   const CollectionCoverImage({
@@ -46,6 +48,7 @@ class CollectionCoverImage extends StatelessWidget {
     this.bookCover = false,
     this.boxedCover = false,
     this.largeSource = false,
+    this.compact = false,
     this.placeholder,
   });
 
@@ -68,7 +71,7 @@ class CollectionCoverImage extends StatelessWidget {
         width: w,
         height: h,
         fit: imageFit,
-        filterQuality: FilterQuality.medium,
+        filterQuality: compact ? FilterQuality.low : FilterQuality.medium,
         webHtmlElementStrategy: WebHtmlElementStrategy.prefer,
         loadingBuilder: (context, child, progress) {
           if (progress == null) return child;
@@ -97,7 +100,7 @@ class CollectionCoverImage extends StatelessWidget {
         width: w,
         height: h,
         fit: imageFit,
-        filterQuality: FilterQuality.medium,
+        filterQuality: compact ? FilterQuality.low : FilterQuality.medium,
         memCacheWidth: cacheW,
         memCacheHeight: cacheH,
         maxWidthDiskCache: cacheW,

@@ -11,6 +11,7 @@ class BggNetworkImage extends StatelessWidget {
   final bool bookCover;
   final bool boxedCover;
   final bool largeSource;
+  final bool compact;
 
   const BggNetworkImage({
     super.key,
@@ -21,6 +22,7 @@ class BggNetworkImage extends StatelessWidget {
     this.bookCover = false,
     this.boxedCover = false,
     this.largeSource = false,
+    this.compact = false,
   });
 
   @override
@@ -33,6 +35,7 @@ class BggNetworkImage extends StatelessWidget {
       bookCover: bookCover,
       boxedCover: boxedCover,
       largeSource: largeSource,
+      compact: compact,
     );
   }
 }

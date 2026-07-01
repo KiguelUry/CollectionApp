@@ -25,6 +25,15 @@ String openLibraryAuthorPhotoUrl(String authorOlid, {CoverSize size = CoverSize.
 String coverUrlForDisplay(String url, {required bool large}) {
   var resolved = url;
 
+  // Grilles / listes : vignettes BGG plus légères.
+  if (!large && resolved.contains('geekdo-images.com') &&
+      resolved.contains('/fit-in/')) {
+    resolved = resolved.replaceFirst(
+      RegExp(r'/fit-in/\d+x\d+/'),
+      '/fit-in/320x320/',
+    );
+  }
+
   if (large && resolved.contains('geekdo-images.com')) {
     resolved = bggLargeImageUrl(resolved);
     if (resolved.contains('/fit-in/')) {

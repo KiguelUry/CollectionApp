@@ -382,6 +382,7 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
             totalQuantity: totalQuantity,
             ownedQuantity: ownedQuantityFor(item, ownedIndex),
             showDuplicateBadge: showDuplicateBadge,
+            compactCover: true,
             groupNamesById: widget.groupNamesById,
             boardgameQuickEditGroups:
                 widget.category == CollectionCategory.boardgame &&
@@ -715,7 +716,7 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
           GridView.builder(
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
             cacheExtent: 480,
-            addRepaintBoundaries: true,
+            addRepaintBoundaries: false,
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: CollectionGridLayout.crossAxisCount(context),
               crossAxisSpacing: CollectionGridLayout.gridCrossSpacing,
@@ -755,7 +756,7 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
       child: _withMarqueeOverlay(
         ListView.builder(
           cacheExtent: 480,
-          addRepaintBoundaries: true,
+          addRepaintBoundaries: false,
           padding: const EdgeInsets.only(bottom: 88),
           itemCount: grouped.length,
           itemBuilder: (context, index) {
