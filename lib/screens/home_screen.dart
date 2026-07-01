@@ -1393,8 +1393,7 @@ class _HomeScreenState extends State<HomeScreen>
     return TabBarView(
       controller: _tabController,
       children: [
-        RepaintBoundary(
-          child: CategoryCollectionTabPane(
+        CategoryCollectionTabPane(
           category: widget.category,
           fixedCardSubcategory: widget.fixedCardSubcategory,
           items: collection,
@@ -1424,9 +1423,7 @@ class _HomeScreenState extends State<HomeScreen>
                   )
               : null,
         ),
-        ),
-        RepaintBoundary(
-          child: CategoryCollectionTabPane(
+        CategoryCollectionTabPane(
           category: widget.category,
           fixedCardSubcategory: widget.fixedCardSubcategory,
           items: wishlist,
@@ -1453,7 +1450,6 @@ class _HomeScreenState extends State<HomeScreen>
           onReload: _reloadItemsFromDb,
           onDeleteItem: _confirmDeleteItem,
           onBulkDeleteItems: _confirmBulkDeleteItems,
-        ),
         ),
       ],
     );

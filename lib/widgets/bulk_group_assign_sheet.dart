@@ -4,141 +4,155 @@ import '../models/collection_group.dart';
 import '../models/collection_item.dart';
 import '../services/item_group_service.dart';
 
-/// Choisit un ou plusieurs groupes et y rattache plusieurs objets d'un coup.
+/// Gère l'appartenance aux groupes (cocher = ajouter, décocher = retirer).
+Future<bool> showBulkGroupManageSheet(
+  BuildContext context, {
+  required List<CollectionItem> items,
+  required List<CollectionGroup> groups,
+  Map<String, int> groupActivityCounts = const {},
+}) async {
+  if (items.isEmpty || groups.isEmpty) return false;
+
+  final service = ItemGroupService();
+  final membership = await service.fetchMembershipMap(
+    items.map((i) => i.id).toList(),
+  );
+  if (!context.mounted) return false;
+
+  final result = await showModalBottomSheet<_BulkGroupManageResult>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (ctx) => _BulkGroupManageSheet(
+      items: items,
+      groups: groups,
+      membership: membership,
+      groupActivityCounts: groupActivityCounts,
+    ),
+  );
+  if (result == null || !context.mounted) return false;
+  if (!result.hasChanges) return false;
+
+  try {
+    await service.bulkApplyGroupMembershipChanges(
+      items: items,
+      addGroupIds: result.addTo,
+      removeGroupIds: result.removeFrom,
+    );
+    if (context.mounted) {
+      final parts = <String>[];
+      if (result.addTo.isNotEmpty) {
+        parts.add(
+          'ajouté${items.length > 1 ? 's' : ''} à '
+          '${result.addTo.length} groupe${result.addTo.length > 1 ? 's' : ''}',
+        );
+      }
+      if (result.removeFrom.isNotEmpty) {
+        parts.add(
+          'retiré${items.length > 1 ? 's' : ''} de '
+          '${result.removeFrom.length} groupe${result.removeFrom.length > 1 ? 's' : ''}',
+        );
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${items.length} objet${items.length > 1 ? 's' : ''} ${parts.join(' et ')}',
+          ),
+        ),
+      );
+    }
+    return true;
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e')),
+      );
+    }
+    return false;
+  }
+}
+
+@Deprecated('Utiliser showBulkGroupManageSheet')
 Future<bool> showBulkGroupAssignSheet(
   BuildContext context, {
   required List<CollectionItem> items,
   required List<CollectionGroup> groups,
   Map<String, int> groupActivityCounts = const {},
-}) async {
-  if (items.isEmpty || groups.isEmpty) return false;
-
-  final pickedIds = await showModalBottomSheet<List<String>>(
-    context: context,
-    showDragHandle: true,
-    isScrollControlled: true,
-    builder: (ctx) => _BulkGroupPickSheet(
-      itemCount: items.length,
+}) =>
+    showBulkGroupManageSheet(
+      context,
+      items: items,
       groups: groups,
       groupActivityCounts: groupActivityCounts,
-    ),
-  );
-  if (pickedIds == null || pickedIds.isEmpty || !context.mounted) {
-    return false;
-  }
+    );
 
-  final service = ItemGroupService();
-  final namesById = {for (final g in groups) g.id: g.name};
-  try {
-    await service.bulkAddItemsToGroups(groupIds: pickedIds, items: items);
-    if (context.mounted) {
-      final groupLabel = pickedIds.length == 1
-          ? '« ${namesById[pickedIds.first] ?? 'groupe'} »'
-          : '${pickedIds.length} groupes';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '${items.length} objet${items.length > 1 ? 's' : ''} '
-            'ajouté${items.length > 1 ? 's' : ''} à $groupLabel',
-          ),
-        ),
-      );
-    }
-    return true;
-  } catch (e) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e')),
-      );
-    }
-    return false;
-  }
-}
-
-/// Retire plusieurs objets d'un ou plusieurs groupes.
+@Deprecated('Utiliser showBulkGroupManageSheet')
 Future<bool> showBulkGroupRemoveSheet(
   BuildContext context, {
   required List<CollectionItem> items,
   required List<CollectionGroup> groups,
   Map<String, int> groupActivityCounts = const {},
-}) async {
-  if (items.isEmpty || groups.isEmpty) return false;
-
-  final service = ItemGroupService();
-  final memberGroupIds = await service.groupIdsForItems(items);
-  final eligible = groups.where((g) => memberGroupIds.contains(g.id)).toList();
-  if (eligible.isEmpty) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Aucun des objets sélectionnés n\'est dans un groupe.'),
-        ),
-      );
-    }
-    return false;
-  }
-
-  final pickedIds = await showModalBottomSheet<List<String>>(
-    context: context,
-    showDragHandle: true,
-    isScrollControlled: true,
-    builder: (ctx) => _BulkGroupPickSheet(
-      itemCount: items.length,
-      groups: eligible,
+}) =>
+    showBulkGroupManageSheet(
+      context,
+      items: items,
+      groups: groups,
       groupActivityCounts: groupActivityCounts,
-      removeMode: true,
-    ),
-  );
-  if (pickedIds == null || pickedIds.isEmpty || !context.mounted) {
-    return false;
-  }
+    );
 
-  final namesById = {for (final g in groups) g.id: g.name};
-  try {
-    await service.bulkRemoveItemsFromGroups(groupIds: pickedIds, items: items);
-    if (context.mounted) {
-      final groupLabel = pickedIds.length == 1
-          ? '« ${namesById[pickedIds.first] ?? 'groupe'} »'
-          : '${pickedIds.length} groupes';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '${items.length} objet${items.length > 1 ? 's' : ''} '
-            'retiré${items.length > 1 ? 's' : ''} de $groupLabel',
-          ),
-        ),
-      );
-    }
-    return true;
-  } catch (e) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e')),
-      );
-    }
-    return false;
-  }
+class _BulkGroupManageResult {
+  final Set<String> addTo;
+  final Set<String> removeFrom;
+
+  const _BulkGroupManageResult({
+    required this.addTo,
+    required this.removeFrom,
+  });
+
+  bool get hasChanges => addTo.isNotEmpty || removeFrom.isNotEmpty;
 }
 
-class _BulkGroupPickSheet extends StatefulWidget {
-  final int itemCount;
+class _BulkGroupManageSheet extends StatefulWidget {
+  final List<CollectionItem> items;
   final List<CollectionGroup> groups;
+  final Map<String, Set<String>> membership;
   final Map<String, int> groupActivityCounts;
-  final bool removeMode;
 
-  const _BulkGroupPickSheet({
-    required this.itemCount,
+  const _BulkGroupManageSheet({
+    required this.items,
     required this.groups,
+    required this.membership,
     required this.groupActivityCounts,
-    this.removeMode = false,
   });
 
   @override
-  State<_BulkGroupPickSheet> createState() => _BulkGroupPickSheetState();
+  State<_BulkGroupManageSheet> createState() => _BulkGroupManageSheetState();
 }
 
-class _BulkGroupPickSheetState extends State<_BulkGroupPickSheet> {
-  final Set<String> _selected = {};
+class _BulkGroupManageSheetState extends State<_BulkGroupManageSheet> {
+  late final Map<String, bool?> _initial;
+  late final Map<String, bool?> _state;
+
+  @override
+  void initState() {
+    super.initState();
+    _initial = {
+      for (final g in widget.groups) g.id: _membershipState(g.id),
+    };
+    _state = Map<String, bool?>.from(_initial);
+  }
+
+  bool? _membershipState(String groupId) {
+    var inCount = 0;
+    for (final item in widget.items) {
+      if (widget.membership[item.id]?.contains(groupId) ?? false) {
+        inCount++;
+      }
+    }
+    if (inCount == 0) return false;
+    if (inCount == widget.items.length) return true;
+    return null;
+  }
 
   List<CollectionGroup> get _sorted {
     final list = List<CollectionGroup>.from(widget.groups);
@@ -151,18 +165,34 @@ class _BulkGroupPickSheetState extends State<_BulkGroupPickSheet> {
     return list;
   }
 
-  void _toggle(String groupId, bool? checked) {
+  void _toggle(String groupId) {
     setState(() {
-      if (checked == true) {
-        _selected.add(groupId);
+      final current = _state[groupId];
+      if (current == true) {
+        _state[groupId] = false;
       } else {
-        _selected.remove(groupId);
+        _state[groupId] = true;
       }
     });
   }
 
+  _BulkGroupManageResult _buildResult() {
+    final addTo = <String>{};
+    final removeFrom = <String>{};
+    for (final entry in _state.entries) {
+      final initial = _initial[entry.key];
+      final desired = entry.value;
+      if (desired == initial) continue;
+      if (desired == true) addTo.add(entry.key);
+      if (desired == false) removeFrom.add(entry.key);
+    }
+    return _BulkGroupManageResult(addTo: addTo, removeFrom: removeFrom);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final count = widget.items.length;
+    final result = _buildResult();
     return DraggableScrollableSheet(
       expand: false,
       initialChildSize: 0.55,
@@ -175,11 +205,7 @@ class _BulkGroupPickSheetState extends State<_BulkGroupPickSheet> {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
               child: Text(
-                widget.removeMode
-                    ? 'Retirer ${widget.itemCount} objet'
-                        '${widget.itemCount > 1 ? 's' : ''} du/des groupe(s)'
-                    : 'Ajouter ${widget.itemCount} objet'
-                        '${widget.itemCount > 1 ? 's' : ''} au(x) groupe(s)',
+                'Groupes — $count objet${count > 1 ? 's' : ''}',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
@@ -188,9 +214,7 @@ class _BulkGroupPickSheetState extends State<_BulkGroupPickSheet> {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
               child: Text(
-                widget.removeMode
-                    ? 'Coche les groupes à quitter'
-                    : 'Coche un ou plusieurs groupes',
+                'Coche pour ajouter au groupe, décoche pour retirer',
                 style: TextStyle(
                   fontSize: 13,
                   color: Colors.grey.shade600,
@@ -206,13 +230,14 @@ class _BulkGroupPickSheetState extends State<_BulkGroupPickSheet> {
                 itemBuilder: (context, index) {
                   final g = _sorted[index];
                   final count = widget.groupActivityCounts[g.id] ?? 0;
-                  final checked = _selected.contains(g.id);
+                  final value = _state[g.id];
                   return CheckboxListTile(
-                    value: checked,
-                    onChanged: (v) => _toggle(g.id, v),
+                    tristate: true,
+                    value: value,
+                    onChanged: (_) => _toggle(g.id),
                     secondary: Icon(
                       Icons.groups_outlined,
-                      color: checked
+                      color: value == true
                           ? Theme.of(context).colorScheme.primary
                           : null,
                     ),
@@ -230,17 +255,13 @@ class _BulkGroupPickSheetState extends State<_BulkGroupPickSheet> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
               child: FilledButton(
-                onPressed: _selected.isEmpty
-                    ? null
-                    : () => Navigator.pop(context, _selected.toList()),
+                onPressed: result.hasChanges
+                    ? () => Navigator.pop(context, result)
+                    : null,
                 child: Text(
-                  _selected.isEmpty
-                      ? 'Choisir au moins un groupe'
-                      : widget.removeMode
-                          ? 'Retirer de ${_selected.length} groupe'
-                              '${_selected.length > 1 ? 's' : ''}'
-                          : 'Ajouter à ${_selected.length} groupe'
-                              '${_selected.length > 1 ? 's' : ''}',
+                  result.hasChanges
+                      ? 'Appliquer'
+                      : 'Modifier au moins un groupe',
                 ),
               ),
             ),

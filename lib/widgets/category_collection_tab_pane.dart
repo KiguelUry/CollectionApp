@@ -21,6 +21,7 @@ import '../utils/tcg_rarity_order.dart';
 import 'collection_filter_bar.dart';
 import 'collection_item_list_tile.dart';
 import 'collection_item_tile.dart';
+import 'cover_preview_sheet.dart';
 import 'wishlist_suggestions_banner.dart';
 import 'bulk_group_assign_sheet.dart';
 
@@ -92,9 +93,11 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
   final _searchController = TextEditingController();
   bool _selectionMode = false;
   final Set<String> _selectedIds = {};
-  bool _dragSelectActive = false;
-  bool _dragSelectAdding = true;
   final Map<String, GlobalKey> _tileKeys = {};
+  Offset? _marqueePointerDown;
+  Offset? _marqueeCurrent;
+  bool _marqueeDragging = false;
+  Set<String> _marqueeBaseSelection = {};
 
   @override
   void initState() {
@@ -129,6 +132,10 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
     setState(() {
       _selectionMode = false;
       _selectedIds.clear();
+      _tileKeys.clear();
+      _marqueePointerDown = null;
+      _marqueeCurrent = null;
+      _marqueeDragging = false;
     });
   }
 
@@ -142,78 +149,77 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
     });
   }
 
-  void _setSelected(String itemId, bool selected) {
-    if (selected) {
-      _selectedIds.add(itemId);
-    } else {
-      _selectedIds.remove(itemId);
-    }
-  }
-
   void _selectAll(List<CollectionItem> filtered) {
     for (final item in filtered) {
       _selectedIds.add(item.id);
     }
   }
 
-  void _beginDragSelect(String itemId) {
-    setState(() {
-      _selectionMode = true;
-      _dragSelectActive = true;
-      _dragSelectAdding = !_selectedIds.contains(itemId);
-      _setSelected(itemId, _dragSelectAdding);
-    });
+  Rect? get _marqueeRect {
+    if (_marqueePointerDown == null || _marqueeCurrent == null) return null;
+    return Rect.fromPoints(_marqueePointerDown!, _marqueeCurrent!);
   }
 
-  void _endDragSelect() {
-    if (_dragSelectActive) {
-      setState(() => _dragSelectActive = false);
-    }
-  }
-
-  void _hitTestTileAt(Offset globalPos) {
-    if (!_dragSelectActive) return;
+  Set<String> _itemIdsInMarquee(Rect rect) {
+    final ids = <String>{};
     for (final entry in _tileKeys.entries) {
       final ctx = entry.value.currentContext;
       if (ctx == null) continue;
       final box = ctx.findRenderObject() as RenderBox?;
       if (box == null || !box.hasSize) continue;
-      final local = box.globalToLocal(globalPos);
-      if (box.size.contains(local)) {
-        final id = entry.key;
-        final changed = _dragSelectAdding
-            ? !_selectedIds.contains(id)
-            : _selectedIds.contains(id);
-        if (changed) {
-          setState(() => _setSelected(id, _dragSelectAdding));
-        }
-        return;
-      }
+      final topLeft = box.localToGlobal(Offset.zero);
+      final tileRect = topLeft & box.size;
+      if (rect.overlaps(tileRect)) ids.add(entry.key);
     }
+    return ids;
+  }
+
+  void _onSelectionPointerDown(PointerDownEvent event) {
+    if (!_selectionMode) return;
+    _marqueePointerDown = event.position;
+    _marqueeCurrent = event.position;
+    _marqueeDragging = false;
+    _marqueeBaseSelection = Set<String>.from(_selectedIds);
+  }
+
+  void _onSelectionPointerMove(PointerMoveEvent event) {
+    if (!_selectionMode || _marqueePointerDown == null) return;
+    if (!_marqueeDragging &&
+        (event.position - _marqueePointerDown!).distance > 10) {
+      _marqueeDragging = true;
+    }
+    if (!_marqueeDragging) return;
+    final rect = Rect.fromPoints(_marqueePointerDown!, event.position);
+    final inRect = _itemIdsInMarquee(rect);
+    setState(() {
+      _marqueeCurrent = event.position;
+      _selectedIds
+        ..clear()
+        ..addAll(_marqueeBaseSelection)
+        ..addAll(inRect);
+    });
+  }
+
+  void _onSelectionPointerUp(PointerEvent event) {
+    _onSelectionPointerEnd();
+  }
+
+  void _onSelectionPointerEnd() {
+    if (!_selectionMode) return;
+    setState(() {
+      _marqueePointerDown = null;
+      _marqueeCurrent = null;
+      _marqueeDragging = false;
+    });
   }
 
   List<CollectionItem> _selectedItems(List<CollectionItem> filtered) =>
       filtered.where((i) => _selectedIds.contains(i.id)).toList();
 
-  Future<void> _assignSelectedToGroup(List<CollectionItem> filtered) async {
-    final selected = filtered.where((i) => _selectedIds.contains(i.id)).toList();
-    if (selected.isEmpty) return;
-    final ok = await showBulkGroupAssignSheet(
-      context,
-      items: selected,
-      groups: widget.boardgameGroups,
-      groupActivityCounts: widget.groupActivityCounts,
-    );
-    if (ok && mounted) {
-      _exitSelectionMode();
-      await widget.onReload();
-    }
-  }
-
-  Future<void> _removeSelectedFromGroup(List<CollectionItem> filtered) async {
+  Future<void> _manageSelectedGroups(List<CollectionItem> filtered) async {
     final selected = _selectedItems(filtered);
     if (selected.isEmpty) return;
-    final ok = await showBulkGroupRemoveSheet(
+    final ok = await showBulkGroupManageSheet(
       context,
       items: selected,
       groups: widget.boardgameGroups,
@@ -299,22 +305,14 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            if (hasGroups) ...[
+            if (hasGroups)
               IconButton(
-                tooltip: 'Retirer du groupe',
+                tooltip: 'Groupes',
                 onPressed: _selectedIds.isEmpty
                     ? null
-                    : () => _removeSelectedFromGroup(filtered),
-                icon: const Icon(Icons.group_remove_outlined, size: 22),
+                    : () => _manageSelectedGroups(filtered),
+                icon: const Icon(Icons.groups_outlined, size: 22),
               ),
-              IconButton(
-                tooltip: 'Ajouter au groupe',
-                onPressed: _selectedIds.isEmpty
-                    ? null
-                    : () => _assignSelectedToGroup(filtered),
-                icon: const Icon(Icons.group_add_outlined, size: 22),
-              ),
-            ],
             IconButton(
               tooltip: 'Supprimer',
               onPressed: _selectedIds.isEmpty
@@ -364,27 +362,122 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
     );
   }
 
-  Widget _wrapTileInteraction({
-    required Widget child,
-    required String itemId,
-    required VoidCallback? onOpenDetail,
+  Widget _buildTile({
+    required CollectionItem item,
+    required int totalQuantity,
+    required bool showDuplicateBadge,
+    required Map<String, int> ownedIndex,
+    required Map<String, int> groupActivity,
+    required bool isGrid,
   }) {
-    final tileKey = _tileKeys.putIfAbsent(itemId, GlobalKey.new);
-    Widget wrapped = KeyedSubtree(
-      key: tileKey,
-      child: child,
-    );
-    wrapped = _wrapSelectable(wrapped, itemId);
+    if (_selectionMode) {
+      _tileKeys.putIfAbsent(item.id, GlobalKey.new);
+    }
 
-    return GestureDetector(
-      onLongPressEnd: (_) => _endDragSelect(),
-      onTap: _selectionMode
-          ? () => _toggleSelection(itemId)
-          : onOpenDetail,
-      onLongPress: _selectionMode
-          ? () => _toggleSelection(itemId)
-          : () => _beginDragSelect(itemId),
-      child: wrapped,
+    final tile = isGrid
+        ? CollectionItemTile(
+            key: ValueKey(item.id),
+            item: item,
+            category: widget.category,
+            totalQuantity: totalQuantity,
+            ownedQuantity: ownedQuantityFor(item, ownedIndex),
+            showDuplicateBadge: showDuplicateBadge,
+            groupNamesById: widget.groupNamesById,
+            boardgameQuickEditGroups:
+                widget.category == CollectionCategory.boardgame &&
+                        !_selectionMode
+                    ? widget.boardgameGroups
+                    : null,
+            groupActivityCounts: groupActivity,
+            onDelete: _selectionMode ? null : () => widget.onDeleteItem(item),
+            onTap: _selectionMode
+                ? () => _toggleSelection(item.id)
+                : () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => ItemDetailScreen(
+                          item: item.copyWith(quantity: totalQuantity),
+                          ownedQuantity: ownedQuantityFor(item, ownedIndex),
+                        ),
+                      ),
+                    ),
+            onLongPress: _selectionMode
+                ? null
+                : item.imageUrl != null && item.imageUrl!.trim().isNotEmpty
+                    ? () => showCoverPreview(
+                          context,
+                          imageUrl: item.imageUrl,
+                          title: item.title,
+                          bookCover:
+                              widget.category == CollectionCategory.book,
+                        )
+                    : null,
+          )
+        : CollectionItemListTile(
+            key: ValueKey(item.id),
+            item: item,
+            category: widget.category,
+            totalQuantity: totalQuantity,
+            ownedQuantity: ownedQuantityFor(item, ownedIndex),
+            boardgameQuickEditGroups:
+                widget.category == CollectionCategory.boardgame &&
+                        !_selectionMode
+                    ? widget.boardgameGroups
+                    : null,
+            groupActivityCounts: groupActivity,
+            onDelete: _selectionMode ? null : () => widget.onDeleteItem(item),
+            onTap: _selectionMode
+                ? () => _toggleSelection(item.id)
+                : () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => ItemDetailScreen(
+                          item: item.copyWith(quantity: totalQuantity),
+                          ownedQuantity: ownedQuantityFor(item, ownedIndex),
+                        ),
+                      ),
+                    ),
+          );
+
+    final keyed = _selectionMode
+        ? KeyedSubtree(key: _tileKeys[item.id], child: tile)
+        : tile;
+
+    return _wrapSelectable(keyed, item.id);
+  }
+
+  Widget _withMarqueeOverlay(Widget child) {
+    if (!_selectionMode) return child;
+    return Stack(
+      children: [
+        Listener(
+          behavior: HitTestBehavior.translucent,
+          onPointerDown: _onSelectionPointerDown,
+          onPointerMove: _onSelectionPointerMove,
+          onPointerUp: _onSelectionPointerUp,
+          onPointerCancel: _onSelectionPointerUp,
+          child: child,
+        ),
+        if (_marqueeRect case final rect?)
+          Positioned.fill(
+            child: Builder(
+              builder: (context) {
+                final box = context.findRenderObject() as RenderBox?;
+                if (box == null) return const SizedBox.shrink();
+                final localRect = Rect.fromPoints(
+                  box.globalToLocal(rect.topLeft),
+                  box.globalToLocal(rect.bottomRight),
+                );
+                return IgnorePointer(
+                  child: CustomPaint(
+                    size: box.size,
+                    painter: _MarqueePainter(rect: localRect),
+                  ),
+                );
+              },
+            ),
+          ),
+      ],
     );
   }
 
@@ -618,15 +711,11 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
       context: context,
       child: RefreshIndicator(
         onRefresh: widget.onReload,
-        child: Listener(
-          onPointerMove: (e) => _hitTestTileAt(e.position),
-          onPointerUp: (_) => _endDragSelect(),
-          onPointerCancel: (_) => _endDragSelect(),
-          child: GridView.builder(
+        child: _withMarqueeOverlay(
+          GridView.builder(
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
-            cacheExtent: 720,
+            cacheExtent: 480,
             addRepaintBoundaries: true,
-            addAutomaticKeepAlives: false,
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: CollectionGridLayout.crossAxisCount(context),
               crossAxisSpacing: CollectionGridLayout.gridCrossSpacing,
@@ -639,35 +728,13 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
               final entry = grouped[index];
               final item = entry.item;
               return RepaintBoundary(
-                child: _wrapTileInteraction(
-                  itemId: item.id,
-                  onOpenDetail: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => ItemDetailScreen(
-                        item: item.copyWith(quantity: entry.totalQuantity),
-                        ownedQuantity: ownedQuantityFor(item, ownedIndex),
-                      ),
-                    ),
-                  ),
-                  child: CollectionItemTile(
-                    key: ValueKey(item.id),
-                    item: item,
-                    category: widget.category,
-                    totalQuantity: entry.totalQuantity,
-                    ownedQuantity: ownedQuantityFor(item, ownedIndex),
-                    showDuplicateBadge: entry.hasDuplicates,
-                    groupNamesById: widget.groupNamesById,
-                    boardgameQuickEditGroups:
-                        widget.category == CollectionCategory.boardgame &&
-                                !_selectionMode
-                            ? widget.boardgameGroups
-                            : null,
-                    groupActivityCounts: groupActivity,
-                    onDelete: _selectionMode
-                        ? null
-                        : () => widget.onDeleteItem(item),
-                  ),
+                child: _buildTile(
+                  item: item,
+                  totalQuantity: entry.totalQuantity,
+                  showDuplicateBadge: entry.hasDuplicates,
+                  ownedIndex: ownedIndex,
+                  groupActivity: groupActivity,
+                  isGrid: true,
                 ),
               );
             },
@@ -685,47 +752,23 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
 
     return RefreshIndicator(
       onRefresh: widget.onReload,
-      child: Listener(
-        onPointerMove: (e) => _hitTestTileAt(e.position),
-        onPointerUp: (_) => _endDragSelect(),
-        onPointerCancel: (_) => _endDragSelect(),
-        child: ListView.builder(
-          cacheExtent: 720,
+      child: _withMarqueeOverlay(
+        ListView.builder(
+          cacheExtent: 480,
           addRepaintBoundaries: true,
-          addAutomaticKeepAlives: false,
           padding: const EdgeInsets.only(bottom: 88),
           itemCount: grouped.length,
           itemBuilder: (context, index) {
             final entry = grouped[index];
             final item = entry.item;
             return RepaintBoundary(
-              child: _wrapTileInteraction(
-                itemId: item.id,
-                onOpenDetail: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => ItemDetailScreen(
-                      item: item.copyWith(quantity: entry.totalQuantity),
-                      ownedQuantity: ownedQuantityFor(item, ownedIndex),
-                    ),
-                  ),
-                ),
-                child: CollectionItemListTile(
-                  key: ValueKey(item.id),
-                  item: item,
-                  category: widget.category,
-                  totalQuantity: entry.totalQuantity,
-                  ownedQuantity: ownedQuantityFor(item, ownedIndex),
-                  boardgameQuickEditGroups:
-                      widget.category == CollectionCategory.boardgame &&
-                              !_selectionMode
-                          ? widget.boardgameGroups
-                          : null,
-                  groupActivityCounts: groupActivity,
-                  onDelete: _selectionMode
-                      ? null
-                      : () => widget.onDeleteItem(item),
-                ),
+              child: _buildTile(
+                item: item,
+                totalQuantity: entry.totalQuantity,
+                showDuplicateBadge: entry.hasDuplicates,
+                ownedIndex: ownedIndex,
+                groupActivity: groupActivity,
+                isGrid: false,
               ),
             );
           },
@@ -733,4 +776,27 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
       ),
     );
   }
+}
+
+class _MarqueePainter extends CustomPainter {
+  final Rect rect;
+
+  _MarqueePainter({required this.rect});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final fill = Paint()
+      ..color = const Color(0x332196F3)
+      ..style = PaintingStyle.fill;
+    final border = Paint()
+      ..color = const Color(0xFF2196F3)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+    canvas.drawRect(rect, fill);
+    canvas.drawRect(rect, border);
+  }
+
+  @override
+  bool shouldRepaint(covariant _MarqueePainter oldDelegate) =>
+      oldDelegate.rect != rect;
 }
