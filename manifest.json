@@ -1,6 +1,6 @@
 {
-    "name": "collection_app",
-    "short_name": "collection_app",
+    "name": "Palomnia",
+    "short_name": "Palomnia",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
