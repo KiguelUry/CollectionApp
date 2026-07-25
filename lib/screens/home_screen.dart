@@ -10,6 +10,8 @@ import '../models/collection_item.dart';
 import '../models/card_subcategory.dart';
 import '../models/category_metadata.dart';
 import '../models/media_format_ui.dart';
+import '../services/boardgame_collection_preferences.dart';
+import '../services/boardgame_market_service.dart';
 import '../services/bgg_service.dart';
 import '../services/book_catalog_service.dart';
 import '../services/card_catalog_service.dart';
@@ -115,6 +117,9 @@ class _HomeScreenState extends State<HomeScreen>
   Map<String, String> _groupNamesById = {};
   Set<String> _myGroupIds = {};
   bool _bggRatingEnrichInFlight = false;
+  bool _wishlistMarketEnrichInFlight = false;
+  bool _showOwnedExpansions = false;
+  Set<String> _boardgamePreferredLanguages = {'fr'};
   final _reloadDebounce = DebouncedRunner();
   static const _reloadDebounceDelay = Duration(milliseconds: 300);
 
@@ -150,8 +155,32 @@ class _HomeScreenState extends State<HomeScreen>
     if (widget.category == CollectionCategory.boardgame) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _maybeReconcileExpansions();
+        unawaited(_loadBoardgameDisplayPrefs());
       });
+      _tabController.addListener(_onTabChanged);
     }
+  }
+
+  void _onTabChanged() {
+    if (!_tabController.indexIsChanging &&
+        _tabController.index == 1 &&
+        widget.category == CollectionCategory.boardgame) {
+      final wishlist = _filterHubScope(_parseItems(_itemRows))
+          .where((i) => i.isWishlist)
+          .toList();
+      unawaited(_enrichWishlistMarketData(wishlist));
+    }
+  }
+
+  Future<void> _loadBoardgameDisplayPrefs() async {
+    await BoardgameCollectionPreferences.instance.load();
+    if (!mounted) return;
+    setState(() {
+      _showOwnedExpansions =
+          BoardgameCollectionPreferences.instance.showOwnedExpansions;
+      _boardgamePreferredLanguages =
+          BoardgameCollectionPreferences.instance.preferredLanguages;
+    });
   }
 
   Future<void> _maybeReconcileExpansions() async {
@@ -219,6 +248,9 @@ class _HomeScreenState extends State<HomeScreen>
 
   @override
   void dispose() {
+    if (widget.category == CollectionCategory.boardgame) {
+      _tabController.removeListener(_onTabChanged);
+    }
     _itemsSub?.cancel();
     _reloadDebounce.dispose();
     CollectionRefresh.instance.removeListener(_scheduleReloadItemsFromDb);
@@ -260,9 +292,57 @@ class _HomeScreenState extends State<HomeScreen>
 
   List<CollectionItem> _visibleCollectionItems(List<CollectionItem> scoped) {
     if (widget.category != CollectionCategory.boardgame) return scoped;
-    return scoped
-        .where((item) => !isBoardgameHiddenInGlobalCollection(item, scoped))
+    final hydrated = _hydrateExpansionFallbackStats(scoped);
+    return hydrated
+        .where(
+          (item) => !isBoardgameHiddenInGlobalCollection(
+            item,
+            hydrated,
+            showOwnedExpansions: _showOwnedExpansions,
+          ),
+        )
         .toList();
+  }
+
+  List<CollectionItem> _hydrateExpansionFallbackStats(List<CollectionItem> items) {
+    final byId = {for (final item in items) item.id: item};
+    return items.map((item) {
+      if (!item.isExpansion && (item.parentGameId == null || item.parentGameId!.isEmpty)) {
+        return item;
+      }
+      if ((item.minPlayers ?? item.maxPlayers ?? item.playingTime) != null) {
+        return item;
+      }
+      final parentId = item.parentGameId;
+      final base = parentId == null ? null : byId[parentId];
+      if (base == null) return item;
+      return item.copyWith(
+        minPlayers: item.minPlayers ?? base.minPlayers,
+        maxPlayers: item.maxPlayers ?? base.maxPlayers,
+        playingTime: item.playingTime ?? base.playingTime,
+      );
+    }).toList();
+  }
+
+  Future<void> _enrichWishlistMarketData(List<CollectionItem> items) async {
+    if (_wishlistMarketEnrichInFlight || items.isEmpty) return;
+    _wishlistMarketEnrichInFlight = true;
+    try {
+      final missing = items
+          .where(
+            (i) =>
+                (i.metadata?['market_prices_fetched_at'] == null ||
+                    i.metadata?['bgg_expansion_count'] == null) &&
+                (i.metadata?['bgg_id']?.toString().isNotEmpty ?? false),
+          )
+          .take(12)
+          .toList();
+      if (missing.isEmpty) return;
+      await BoardgameMarketService.enrichWishlistBatch(missing);
+      if (mounted) await _reloadItemsFromDb();
+    } finally {
+      _wishlistMarketEnrichInFlight = false;
+    }
   }
 
   bool get _addingToWishlist => _tabController.index == 1;
@@ -1422,6 +1502,22 @@ class _HomeScreenState extends State<HomeScreen>
                     _filterHubScope(_parseItems(_itemRows)),
                   )
               : null,
+          showExpansionVisibilityToggle:
+              widget.category == CollectionCategory.boardgame,
+          showOwnedExpansions: _showOwnedExpansions,
+          onShowOwnedExpansionsChanged: (v) async {
+            await BoardgameCollectionPreferences.instance
+                .setShowOwnedExpansions(v);
+            if (!mounted) return;
+            setState(() => _showOwnedExpansions = v);
+          },
+          boardgamePreferredLanguages: _boardgamePreferredLanguages,
+          onBoardgamePreferredLanguagesChanged: (langs) async {
+            await BoardgameCollectionPreferences.instance
+                .setPreferredLanguages(langs);
+            if (!mounted) return;
+            setState(() => _boardgamePreferredLanguages = langs);
+          },
         ),
         CategoryCollectionTabPane(
           category: widget.category,
@@ -1450,6 +1546,17 @@ class _HomeScreenState extends State<HomeScreen>
           onReload: _reloadItemsFromDb,
           onDeleteItem: _confirmDeleteItem,
           onBulkDeleteItems: _confirmBulkDeleteItems,
+          showWishlistBudgetBanner:
+              widget.category == CollectionCategory.boardgame,
+          showWishlistSortOptions:
+              widget.category == CollectionCategory.boardgame,
+          boardgamePreferredLanguages: _boardgamePreferredLanguages,
+          onBoardgamePreferredLanguagesChanged: (langs) async {
+            await BoardgameCollectionPreferences.instance
+                .setPreferredLanguages(langs);
+            if (!mounted) return;
+            setState(() => _boardgamePreferredLanguages = langs);
+          },
         ),
       ],
     );

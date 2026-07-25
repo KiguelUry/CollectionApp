@@ -127,6 +127,8 @@ Future<void> quickAddBoardgameFromCatalog(
                 final v = details[key];
                 if (v != null) meta[key] = v;
               }
+              if (options.isWishlist) {
+              }
               final item = CollectionItem(
                 id: '',
                 title: game.title.trim(),

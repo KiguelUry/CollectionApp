@@ -10,8 +10,10 @@ import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../utils/boardgame_display.dart';
 import '../utils/collection_item_filters.dart';
+import '../utils/supabase_embeds.dart';
 import '../utils/collection_item_scope.dart';
 import '../utils/french_plural.dart';
+import '../utils/holder_filter.dart';
 import '../utils/shake_pick_filters.dart';
 import '../widgets/app_app_bar.dart';
 import '../widgets/bgg_network_image.dart';
@@ -45,6 +47,9 @@ class _ShakePickScreenState extends State<ShakePickScreen>
       .where(_filters.matches)
       .toList();
 
+  List<HolderFilterOption> get _holderOptions =>
+      buildHolderFilterOptions(_allCandidates);
+
   @override
   void initState() {
     super.initState();
@@ -76,7 +81,7 @@ class _ShakePickScreenState extends State<ShakePickScreen>
       var personalQuery = CollectionItemScope.personal(
         Supabase.instance.client
             .from('collection_items')
-            .select()
+            .select(SupabaseEmbeds.collectionItemList)
             .eq('is_wishlist', false)
             .eq('is_sold', false)
             .eq('is_for_sale', false),
@@ -97,7 +102,7 @@ class _ShakePickScreenState extends State<ShakePickScreen>
       if (groupIds.isNotEmpty) {
         var groupQuery = Supabase.instance.client
             .from('collection_items')
-            .select()
+            .select(SupabaseEmbeds.collectionItemList)
             .inFilter('group_id', groupIds)
             .eq('is_wishlist', false)
             .eq('is_sold', false)
@@ -211,7 +216,12 @@ class _ShakePickScreenState extends State<ShakePickScreen>
             textAlign: TextAlign.center,
           ),
         ),
-        Expanded(child: Center(child: _buildPickArea())),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Center(child: _buildPickArea()),
+          ),
+        ),
         if (!kIsWeb)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -251,15 +261,10 @@ class _ShakePickScreenState extends State<ShakePickScreen>
         if (_picked != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 16),
-            child: OutlinedButton.icon(
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (ctx) => ItemDetailScreen(item: _picked!),
-                ),
-              ),
-              icon: const Icon(Icons.open_in_new),
-              label: const Text('Voir la fiche'),
+            child: Text(
+              'Appuie sur le jeu pour ouvrir la fiche',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
             ),
           ),
       ],
@@ -330,11 +335,38 @@ class _ShakePickScreenState extends State<ShakePickScreen>
                 _filters = ShakePickFilters(
                   playerCount: v,
                   duration: _filters.duration,
+                  holderKey: _filters.holderKey,
                 );
                 _picked = null;
               }),
             ),
             const SizedBox(height: 10),
+            if (_holderOptions.isNotEmpty)
+              DropdownButtonFormField<String?>(
+                initialValue: _filters.holderKey,
+                decoration: const InputDecoration(
+                  labelText: 'Localisation',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                items: [
+                  const DropdownMenuItem(
+                    value: null,
+                    child: Text('Toutes les localisations'),
+                  ),
+                  for (final o in _holderOptions)
+                    DropdownMenuItem(value: o.key, child: Text(o.label)),
+                ],
+                onChanged: (v) => setState(() {
+                  _filters = ShakePickFilters(
+                    playerCount: _filters.playerCount,
+                    duration: _filters.duration,
+                    holderKey: v,
+                  );
+                  _picked = null;
+                }),
+              ),
+            if (_holderOptions.isNotEmpty) const SizedBox(height: 10),
             DropdownButtonFormField<ShakePickDuration>(
               initialValue: _filters.duration,
               decoration: const InputDecoration(
@@ -366,6 +398,7 @@ class _ShakePickScreenState extends State<ShakePickScreen>
                   _filters = ShakePickFilters(
                     playerCount: _filters.playerCount,
                     duration: v,
+                    holderKey: _filters.holderKey,
                   );
                   _picked = null;
                 });
@@ -427,11 +460,19 @@ class _ShakePickScreenState extends State<ShakePickScreen>
     return Card(
       elevation: 6,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (ctx) => ItemDetailScreen(item: item),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
               child: SizedBox(
@@ -457,7 +498,7 @@ class _ShakePickScreenState extends State<ShakePickScreen>
             if (players != null || time != null) ...[
               const SizedBox(height: 6),
               Text(
-                [if (players != null) players, if (time != null) time]
+                [?players, ?time]
                     .join(' · '),
                 style: TextStyle(color: Colors.grey.shade600),
               ),
@@ -474,6 +515,7 @@ class _ShakePickScreenState extends State<ShakePickScreen>
             ],
           ],
         ),
+      ),
       ),
     );
   }

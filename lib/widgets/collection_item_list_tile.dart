@@ -6,6 +6,7 @@ import '../utils/boardgame_display.dart';
 import 'bgg_network_image.dart';
 import 'boardgame_tile_meta_icons.dart';
 import 'item_title_text.dart';
+import 'wishlist/wishlist_tile_meta_icons.dart';
 
 /// Ligne liste (vue dense type Libib).
 class CollectionItemListTile extends StatelessWidget {
@@ -17,6 +18,7 @@ class CollectionItemListTile extends StatelessWidget {
   final Map<String, int> groupActivityCounts;
   final VoidCallback? onTap;
   final VoidCallback? onDelete;
+  final Future<void> Function(CollectionItem base)? onExpansionBaseFocus;
 
   const CollectionItemListTile({
     super.key,
@@ -28,6 +30,7 @@ class CollectionItemListTile extends StatelessWidget {
     this.groupActivityCounts = const {},
     this.onTap,
     this.onDelete,
+    this.onExpansionBaseFocus,
   });
 
   bool get _isBoardgame => category == CollectionCategory.boardgame;
@@ -93,12 +96,15 @@ class CollectionItemListTile extends StatelessWidget {
                     ],
                     if (_isBoardgame && boardgameQuickEditGroups != null) ...[
                       const SizedBox(height: 8),
-                      BoardgameTileMetaIcons(
-                        item: item,
-                        ownedQuantity: _ownedQty,
-                        groups: boardgameQuickEditGroups!,
-                        groupActivityCounts: groupActivityCounts,
-                      ),
+                      item.isWishlist
+                          ? WishlistTileMetaIcons(item: item)
+                          : BoardgameTileMetaIcons(
+                              item: item,
+                              ownedQuantity: _ownedQty,
+                              groups: boardgameQuickEditGroups!,
+                              groupActivityCounts: groupActivityCounts,
+                              onExpansionBaseFocus: onExpansionBaseFocus,
+                            ),
                     ] else ...[
                       if (_whereLine != null) ...[
                         const SizedBox(height: 2),

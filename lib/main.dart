@@ -11,6 +11,7 @@ import 'screens/profile_edit_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/splash_screen.dart';
 import 'config/app_env.dart';
+import 'config/app_brand.dart';
 import 'services/settings_service.dart';
 import 'theme/app_theme.dart';
 
@@ -63,7 +64,7 @@ class _MyAppState extends State<MyApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Collectingo',
+      title: kAppDisplayName,
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: _settings.themeMode,

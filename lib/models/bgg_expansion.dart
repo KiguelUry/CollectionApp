@@ -7,6 +7,8 @@ class BggExpansion {
   final String? summary;
   /// Classement BGG « boardgame » (plus petit = plus populaire).
   final int? bggRank;
+  /// Note moyenne BGG /10.
+  final double? avgRating;
 
   const BggExpansion({
     required this.bggId,
@@ -15,5 +17,6 @@ class BggExpansion {
     this.year,
     this.summary,
     this.bggRank,
+    this.avgRating,
   });
 }

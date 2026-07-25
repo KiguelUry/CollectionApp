@@ -9,6 +9,7 @@ import '../services/boardgame_expansion_service.dart';
 import '../services/bgg_service.dart';
 import '../services/collection_refresh.dart';
 import '../services/item_group_service.dart';
+import '../utils/boardgame_display.dart';
 import '../utils/boardgame_expansions.dart';
 import '../utils/item_stock_persistence.dart';
 import '../utils/transaction_history.dart';
@@ -809,16 +810,31 @@ class _BoardgameTileExpansionSheet extends StatefulWidget {
 class _BoardgameTileExpansionSheetState
     extends State<_BoardgameTileExpansionSheet> {
   final _expansionService = BoardgameExpansionService();
+  final _searchController = TextEditingController();
   List<BggExpansion>? _expansions;
   late Set<String> _owned;
   bool _loading = true;
   bool _syncing = false;
+  bool _showSearch = false;
+  String _searchQuery = '';
 
   @override
   void initState() {
     super.initState();
     _owned = ownedExpansionBggIds(widget.item.metadata).toSet();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<BggExpansion> _filter(List<BggExpansion> list) {
+    final q = _searchQuery.trim().toLowerCase();
+    if (q.isEmpty) return list;
+    return list.where((e) => e.title.toLowerCase().contains(q)).toList();
   }
 
   Future<void> _load() async {
@@ -928,6 +944,12 @@ class _BoardgameTileExpansionSheetState
         overflow: TextOverflow.ellipsis,
         style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
       ),
+      subtitle: exp.avgRating == null
+          ? null
+          : Text(
+              '★ ${formatBggRatingChipLabel(exp.avgRating)} / 5 BGG',
+              style: TextStyle(fontSize: 11, color: Colors.amber.shade800),
+            ),
       trailing: widget.readOnly
           ? Icon(
               owned ? Icons.check_circle : Icons.circle_outlined,
@@ -954,13 +976,37 @@ class _BoardgameTileExpansionSheetState
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-            child: Text(
-              'Extensions',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Extensions',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
                   ),
+                ),
+                IconButton(
+                  tooltip: 'Rechercher une extension',
+                  onPressed: () => setState(() => _showSearch = !_showSearch),
+                  icon: Icon(_showSearch ? Icons.search_off : Icons.search),
+                ),
+              ],
             ),
           ),
+          if (_showSearch)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: TextField(
+                controller: _searchController,
+                decoration: const InputDecoration(
+                  labelText: 'Nom d’extension',
+                  prefixIcon: Icon(Icons.search, size: 20),
+                  isDense: true,
+                ),
+                onChanged: (v) => setState(() => _searchQuery = v),
+              ),
+            ),
           if (_loading)
             const Padding(
               padding: EdgeInsets.all(24),
@@ -980,10 +1026,12 @@ class _BoardgameTileExpansionSheetState
                 child: Builder(
                   builder: (context) {
                     final all = _expansions!;
-                    final ownedList =
-                        all.where((e) => _owned.contains(e.bggId)).toList();
-                    final missingList =
-                        all.where((e) => !_owned.contains(e.bggId)).toList();
+                    final ownedList = _filter(
+                      all.where((e) => _owned.contains(e.bggId)).toList(),
+                    );
+                    final missingList = _filter(
+                      all.where((e) => !_owned.contains(e.bggId)).toList(),
+                    );
 
                     return ListView(
                       padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),

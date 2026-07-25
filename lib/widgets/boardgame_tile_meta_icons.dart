@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 
 import '../models/collection_group.dart';
 import '../models/collection_item.dart';
+import '../screens/item_detail_screen.dart';
+import '../services/boardgame_expansion_service.dart';
 import '../utils/boardgame_display.dart';
 import '../utils/boardgame_expansions.dart';
 import '../utils/holder_label_utils.dart';
 import '../utils/item_group_count.dart';
 import 'boardgame_tile_inventory_sheets.dart';
 import 'boardgame_tile_sheets.dart';
+import 'wishlist/wishlist_tile_meta_icons.dart';
 
 /// Cinq icônes interactives (quantité, groupe, extensions, lieu, note BGG).
 class BoardgameTileMetaIcons extends StatelessWidget {
@@ -18,6 +21,7 @@ class BoardgameTileMetaIcons extends StatelessWidget {
   final Map<String, int> groupActivityCounts;
   final bool readOnly;
   final String? contextGroupId;
+  final Future<void> Function(CollectionItem base)? onExpansionBaseFocus;
 
   const BoardgameTileMetaIcons({
     super.key,
@@ -28,6 +32,7 @@ class BoardgameTileMetaIcons extends StatelessWidget {
     this.groupActivityCounts = const {},
     this.readOnly = false,
     this.contextGroupId,
+    this.onExpansionBaseFocus,
   });
 
   int get _groupCount =>
@@ -76,6 +81,38 @@ class BoardgameTileMetaIcons extends StatelessWidget {
     );
   }
 
+  Future<void> _openExpansionContext(BuildContext context) async {
+    if (!(item.isExpansion ||
+        (item.parentGameId != null && item.parentGameId!.isNotEmpty) ||
+        item.metadata?['bgg_is_expansion'] == true)) {
+      return _showExpansionSheet(context);
+    }
+    final service = BoardgameExpansionService();
+    CollectionItem? base;
+    final parentId = item.parentGameId;
+    if (parentId != null && parentId.isNotEmpty) {
+      base = await service.findBaseByItemId(parentId);
+    }
+    base ??= await service.findBaseByBggId(
+      item.metadata?['base_game_bgg_id']?.toString() ??
+          item.metadata?['expansion_of_bgg_id']?.toString() ??
+          '',
+    );
+    if (!context.mounted || base == null) return;
+    if (onExpansionBaseFocus != null) {
+      await onExpansionBaseFocus!(base);
+      return;
+    }
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ItemDetailScreen(item: base!)),
+    );
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Extension liée à « ${base.title} »')),
+    );
+  }
+
   Future<void> _showRatingSheet(BuildContext context) {
     return showBoardgameTileRatingSheet(
       context,
@@ -95,10 +132,17 @@ class BoardgameTileMetaIcons extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (item.isWishlist) {
+      return WishlistTileMetaIcons(item: item, readOnly: readOnly);
+    }
+
     final groupCount = !item.isSold ? _groupCount : 0;
     final expansionCount = ownedExpansionCount(item);
     final location = _locationChipLabel;
     final rating = _bggRatingLabel;
+    final isExpansionTile = item.isExpansion ||
+        (item.parentGameId != null && item.parentGameId!.isNotEmpty) ||
+        item.metadata?['bgg_is_expansion'] == true;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -131,12 +175,16 @@ class BoardgameTileMetaIcons extends StatelessWidget {
             const SizedBox(width: 4),
             Expanded(
               child: GestureDetector(
-                onTap: () => _showExpansionSheet(context),
+                onTap: () => _openExpansionContext(context),
                 behavior: HitTestBehavior.opaque,
                 child: _metaChip(
-                  icon: Icons.extension_outlined,
-                  suffix: '$expansionCount',
-                  color: Colors.green.shade600,
+                  icon: isExpansionTile
+                      ? Icons.subdirectory_arrow_right
+                      : Icons.extension_outlined,
+                  suffix: isExpansionTile ? 'Ext' : '$expansionCount',
+                  color: isExpansionTile
+                      ? Colors.deepPurple.shade500
+                      : Colors.green.shade600,
                 ),
               ),
             ),

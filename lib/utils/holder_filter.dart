@@ -27,18 +27,26 @@ String? holderKeyForItem(CollectionItem item) {
   if (custom != null && custom.trim().isNotEmpty) {
     return 'custom:${custom.trim().toLowerCase()}';
   }
+  if (item.locationId != null && item.locationId!.isNotEmpty) {
+    return 'loc:${item.locationId}';
+  }
   return null;
 }
 
 String holderLabelForItem(CollectionItem item) {
   if (item.isOnLoan) return 'Prêté → ${item.loaneeDisplayName}';
-  final label = item.locationLabel?.trim();
-  if (label != null && label.isNotEmpty && label != '—') {
-    return label;
+  if (item.locationUserId != null && item.locationUserId!.isNotEmpty) {
+    final label = item.locationLabel?.trim();
+    if (label != null && label.isNotEmpty && label != '—') return label;
+    return 'Membre';
   }
   final custom = item.metadata?['holder_label'] as String?;
   if (custom != null && custom.trim().isNotEmpty) {
     return formatManualHolderLabel(custom.trim());
+  }
+  final label = item.locationLabel?.trim();
+  if (label != null && label.isNotEmpty && label != '—') {
+    return label;
   }
   return 'Non renseigné';
 }

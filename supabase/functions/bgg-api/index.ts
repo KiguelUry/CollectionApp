@@ -405,6 +405,10 @@ function parseExpansions(xml: string): Array<Record<string, unknown>> {
     const desc = inner.match(/<description>([\s\S]*?)<\/description>/i)?.[1];
     const clean = stripHtml(desc);
     const summary = clean.length > 140 ? `${clean.slice(0, 137)}…` : clean;
+    const avgRaw = inner.match(
+      /<average[^>]*value="([^"]*)"/i,
+    )?.[1];
+    const avgRating = avgRaw ? parseFloat(avgRaw) : undefined;
 
     expansions.push({
       bggId: id,
@@ -413,6 +417,9 @@ function parseExpansions(xml: string): Array<Record<string, unknown>> {
       ...(year != null && !Number.isNaN(year) ? { year } : {}),
       ...(summary ? { summary } : {}),
       ...(bggRank != null ? { bggRank } : {}),
+      ...(avgRating != null && !Number.isNaN(avgRating) && avgRating > 0
+        ? { avgRating }
+        : {}),
     });
   }
 
@@ -778,6 +785,26 @@ async function handleExpansions(id: string): Promise<Response> {
   return json({ expansions: parseExpansions(baseXml + detailXml) });
 }
 
+async function handlePrices(eid: string): Promise<Response> {
+  const id = eid.trim();
+  if (!id) return json({ error: "Missing eid" }, 400);
+  const pricesUrl = new URL("https://boardgameprices.com/api/info");
+  pricesUrl.searchParams.set("eid", id);
+  pricesUrl.searchParams.set("currency", "EUR");
+  pricesUrl.searchParams.set("destination", "FR");
+  pricesUrl.searchParams.set("sitename", "collectingo.app");
+  pricesUrl.searchParams.set("locale", "fr");
+  pricesUrl.searchParams.set("sort", "CHEAP2");
+  const res = await fetch(pricesUrl.toString(), {
+    headers: { Accept: "application/json" },
+  });
+  if (!res.ok) {
+    return json({ error: `BoardGamePrices ${res.status}` }, res.status);
+  }
+  const body = await res.json();
+  return json(body);
+}
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -818,6 +845,10 @@ Deno.serve(async (req) => {
       case "expansions": {
         const id = url.searchParams.get("id") ?? "";
         return await handleExpansions(id);
+      }
+      case "prices": {
+        const eid = url.searchParams.get("eid") ?? "";
+        return await handlePrices(eid);
       }
       default:
         return json({ error: "Unknown action" }, 400);

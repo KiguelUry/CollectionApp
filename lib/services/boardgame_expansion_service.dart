@@ -6,6 +6,7 @@ import '../services/bgg_service.dart';
 import '../services/collection_refresh.dart';
 import '../utils/boardgame_cover.dart';
 import '../utils/boardgame_expansions.dart';
+import '../utils/whereabouts_apply.dart';
 
 /// Gestion extensions BGG via `is_expansion` + `parent_game_id`.
 class BoardgameExpansionService {
@@ -225,14 +226,22 @@ class BoardgameExpansionService {
     final existingChild = await _findChildByBggId(base.id, expansionBggId);
     if (existingChild != null) {
       if (existingChild.parentGameId == base.id) return existingChild;
+      final meta = _expansionMeta(
+        bggId: expansionBggId,
+        details: bggDetails,
+      );
       await _client.from('collection_items').update({
         'is_expansion': true,
         'parent_game_id': base.id,
+        ..._inheritedWhereaboutsFields(base, meta),
       }).eq('id', existingChild.id);
       CollectionRefresh.instance.bump();
       return existingChild.copyWith(
         isExpansion: true,
         parentGameId: base.id,
+        locationUserId: base.locationUserId,
+        locationId: base.locationId,
+        groupId: base.groupId,
       );
     }
 
@@ -246,7 +255,6 @@ class BoardgameExpansionService {
         .insert({
           'title': title.trim(),
           'category': CollectionCategory.boardgame.dbValue,
-          'metadata': meta,
           'image_url': boardgameStorageImageUrl(
             details: bggDetails,
             catalogUrl: imageUrl,
@@ -254,12 +262,12 @@ class BoardgameExpansionService {
           'is_wishlist': false,
           'quantity': 1,
           'added_by': userId,
-          'location_user_id': userId,
           'is_expansion': true,
           'parent_game_id': base.id,
           'min_players': minPlayers,
           'max_players': maxPlayers,
           'playing_time': playingTime,
+          ..._inheritedWhereaboutsFields(base, meta),
         })
         .select()
         .single();
@@ -312,7 +320,7 @@ class BoardgameExpansionService {
       if (baseTitle != null && baseTitle.isNotEmpty)
         'expansion_of_title': baseTitle,
       'base_game_bgg_id': baseBggId,
-      if (baseTitle != null) 'base_game_title': baseTitle,
+      'base_game_title': ?baseTitle,
     };
 
     final inserted = await _client
@@ -476,5 +484,36 @@ class BoardgameExpansionService {
       }
     }
     return meta;
+  }
+
+  Map<String, dynamic> _inheritedWhereaboutsFields(
+    CollectionItem base,
+    Map<String, dynamic> expansionMeta,
+  ) {
+    final draft = base.copyWith(metadata: expansionMeta);
+    if (base.locationUserId != null && base.locationUserId!.isNotEmpty) {
+      return {
+        'location_user_id': base.locationUserId,
+        'location_id': base.locationId,
+        'group_id': base.groupId,
+        'metadata': whereaboutsMetadataForSave(draft),
+      };
+    }
+    final meta = Map<String, dynamic>.from(expansionMeta);
+    final holder = base.metadata?['holder_label']?.toString().trim();
+    if (holder != null && holder.isNotEmpty) {
+      meta['holder_label'] = holder;
+    }
+    final withHolder = draft.copyWith(
+      metadata: meta,
+      clearLocationUserId: base.locationUserId == null,
+      locationUserId: null,
+    );
+    return {
+      'location_user_id': null,
+      'location_id': base.locationId,
+      'group_id': base.groupId,
+      'metadata': whereaboutsMetadataForSave(withHolder),
+    };
   }
 }

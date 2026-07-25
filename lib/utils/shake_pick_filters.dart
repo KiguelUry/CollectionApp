@@ -1,4 +1,5 @@
 import '../models/collection_item.dart';
+import 'holder_filter.dart';
 
 enum ShakePickDuration {
   any,
@@ -10,14 +11,19 @@ enum ShakePickDuration {
 class ShakePickFilters {
   final int? playerCount;
   final ShakePickDuration duration;
+  /// Clé filtre localisation (`holderKeyForItem` / `custom:…` / user id).
+  final String? holderKey;
 
   const ShakePickFilters({
     this.playerCount,
     this.duration = ShakePickDuration.any,
+    this.holderKey,
   });
 
   bool get hasActive =>
-      playerCount != null || duration != ShakePickDuration.any;
+      playerCount != null ||
+      duration != ShakePickDuration.any ||
+      (holderKey != null && holderKey!.isNotEmpty);
 
   bool matches(CollectionItem item) {
     if (playerCount != null) {
@@ -42,6 +48,10 @@ class ShakePickFilters {
         case ShakePickDuration.any:
           break;
       }
+    }
+
+    if (holderKey != null && holderKey!.isNotEmpty) {
+      if (!itemMatchesHolderKey(item, holderKey)) return false;
     }
 
     return true;

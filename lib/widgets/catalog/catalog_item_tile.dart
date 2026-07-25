@@ -7,6 +7,7 @@ class CatalogItemTile extends StatelessWidget {
   final String name;
   final String? imageUrl;
   final String? subtitle;
+  final String? metaLine;
   final Color accent;
   final bool owned;
   final bool inWishlist;
@@ -24,6 +25,7 @@ class CatalogItemTile extends StatelessWidget {
     required this.name,
     this.imageUrl,
     this.subtitle,
+    this.metaLine,
     required this.accent,
     this.owned = false,
     this.inWishlist = false,
@@ -192,6 +194,20 @@ class CatalogItemTile extends StatelessWidget {
                             fontSize: 8.5,
                             height: 1.1,
                             color: Colors.grey.shade600,
+                          ),
+                        ),
+                      ],
+                      if (metaLine != null && metaLine!.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          metaLine!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 8,
+                            fontWeight: FontWeight.w700,
+                            color: accent.withValues(alpha: 0.9),
                           ),
                         ),
                       ],

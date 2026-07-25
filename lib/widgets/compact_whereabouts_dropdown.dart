@@ -244,9 +244,6 @@ class _CompactWhereaboutsDropdownState
       _manualMode = true;
       if (!_isManualHolder) _manualController.clear();
     });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _manualFocusNode.requestFocus();
-    });
   }
 
   void _applySuggestion(String raw) {

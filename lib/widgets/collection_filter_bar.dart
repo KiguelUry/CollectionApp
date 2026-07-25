@@ -34,6 +34,13 @@ class CollectionFilterBar extends StatelessWidget {
   final List<GroupFilterOption> groupOptions;
   final List<HolderFilterOption> holderFilterOptions;
   final bool useHolderLocationFilter;
+  final bool showWishlistMineToggle;
+  final bool showWishlistSortOptions;
+  final bool showExpansionVisibilityToggle;
+  final bool showOwnedExpansions;
+  final ValueChanged<bool>? onShowOwnedExpansionsChanged;
+  final Set<String> boardgamePreferredLanguages;
+  final ValueChanged<Set<String>>? onBoardgamePreferredLanguagesChanged;
   final TextEditingController? searchController;
 
   const CollectionFilterBar({
@@ -57,6 +64,13 @@ class CollectionFilterBar extends StatelessWidget {
     this.groupOptions = const [],
     this.holderFilterOptions = const [],
     this.useHolderLocationFilter = false,
+    this.showWishlistMineToggle = false,
+    this.showWishlistSortOptions = false,
+    this.showExpansionVisibilityToggle = false,
+    this.showOwnedExpansions = false,
+    this.onShowOwnedExpansionsChanged,
+    this.boardgamePreferredLanguages = const {},
+    this.onBoardgamePreferredLanguagesChanged,
   });
 
   @override
@@ -154,14 +168,6 @@ class CollectionFilterBar extends StatelessWidget {
           child: Text('Titre Z → A'),
         ),
         const PopupMenuItem(
-          value: CollectionSort.newestFirst,
-          child: Text('Plus récents'),
-        ),
-        const PopupMenuItem(
-          value: CollectionSort.oldestFirst,
-          child: Text('Plus anciens'),
-        ),
-        const PopupMenuItem(
           value: CollectionSort.ratingDesc,
           child: Text('Ma note'),
         ),
@@ -178,6 +184,11 @@ class CollectionFilterBar extends StatelessWidget {
           value: CollectionSort.quantityDesc,
           child: Text('Quantité'),
         ),
+        if (showWishlistSortOptions)
+          const PopupMenuItem(
+            value: CollectionSort.estimatedValueAsc,
+            child: Text('Coût estimé'),
+          ),
       ],
       child: OutlinedButton.icon(
         onPressed: null,
@@ -212,6 +223,7 @@ class CollectionFilterBar extends StatelessWidget {
   }
 
   Future<void> _openFilterSheet(BuildContext context) async {
+    var localShowExpansions = showOwnedExpansions;
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -299,6 +311,107 @@ class CollectionFilterBar extends StatelessWidget {
                                   sheetFilters.copyWith(locationId: loc.id),
                                 ),
                               ),
+                          ],
+                        ),
+                      ),
+                    if (showWishlistMineToggle)
+                      _filterSection(
+                        context,
+                        title: 'Wishlist',
+                        icon: Icons.favorite_border,
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            _sheetChip(
+                              context,
+                              label: 'Wishlist complète',
+                              selected: !sheetFilters.wishlistMineOnly,
+                              onTap: () => apply(
+                                sheetFilters.copyWith(clearWishlistMine: true),
+                              ),
+                            ),
+                            _sheetChip(
+                              context,
+                              label: 'Ma wishlist',
+                              selected: sheetFilters.wishlistMineOnly,
+                              onTap: () => apply(
+                                sheetFilters.copyWith(
+                                  wishlistMineOnly: true,
+                                  wishlistMineUserId:
+                                      sheetFilters.wishlistMineUserId,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    if (showBoardgameGenreFilter &&
+                        onBoardgamePreferredLanguagesChanged != null)
+                      _filterSection(
+                        context,
+                        title: 'Langues d’édition',
+                        icon: Icons.translate_rounded,
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            _sheetChip(
+                              context,
+                              label: 'Toutes',
+                              selected: boardgamePreferredLanguages.isEmpty,
+                              onTap: () =>
+                                  onBoardgamePreferredLanguagesChanged?.call({}),
+                            ),
+                            _sheetChip(
+                              context,
+                              label: 'Français',
+                              selected: boardgamePreferredLanguages.length == 1 &&
+                                  boardgamePreferredLanguages.contains('fr'),
+                              onTap: () =>
+                                  onBoardgamePreferredLanguagesChanged?.call({'fr'}),
+                            ),
+                            _sheetChip(
+                              context,
+                              label: 'FR + EN',
+                              selected: boardgamePreferredLanguages.contains('fr') &&
+                                  boardgamePreferredLanguages.contains('en') &&
+                                  boardgamePreferredLanguages.length == 2,
+                              onTap: () => onBoardgamePreferredLanguagesChanged
+                                  ?.call({'fr', 'en'}),
+                            ),
+                          ],
+                        ),
+                      ),
+                    if (showExpansionVisibilityToggle)
+                      _filterSection(
+                        context,
+                        title: 'Extensions',
+                        icon: Icons.extension_outlined,
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            _sheetChip(
+                              context,
+                              label: 'Masquer extensions possédées',
+                              selected: !localShowExpansions,
+                              onTap: () {
+                                localShowExpansions = false;
+                                onShowOwnedExpansionsChanged?.call(false);
+                                setSheetState(() {});
+                              },
+                            ),
+                            _sheetChip(
+                              context,
+                              label: 'Afficher extensions possédées',
+                              selected: localShowExpansions,
+                              onTap: () {
+                                localShowExpansions = true;
+                                onShowOwnedExpansionsChanged?.call(true);
+                                setSheetState(() {});
+                              },
+                            ),
                           ],
                         ),
                       ),

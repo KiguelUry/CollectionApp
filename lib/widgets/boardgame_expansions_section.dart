@@ -4,6 +4,7 @@ import '../models/bgg_expansion.dart';
 import '../models/collection_item.dart';
 import '../services/bgg_service.dart';
 import '../services/boardgame_expansion_service.dart';
+import '../utils/boardgame_display.dart';
 import '../utils/boardgame_expansions.dart';
 import 'boardgame_expansion_detail_sheet.dart';
 import 'bgg_network_image.dart';
@@ -34,6 +35,9 @@ class _BoardgameExpansionsSectionState extends State<BoardgameExpansionsSection>
   late Set<String> _owned;
   bool _showAll = false;
   bool _syncing = false;
+  bool _showSearch = false;
+  String _searchQuery = '';
+  final _searchController = TextEditingController();
   final Set<String> _pendingUncheck = {};
   int _refreshGeneration = 0;
 
@@ -65,6 +69,20 @@ class _BoardgameExpansionsSectionState extends State<BoardgameExpansionsSection>
         fromMeta.any((id) => !_owned.contains(id))) {
       setState(() => _owned = fromMeta);
     }
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<BggExpansion> _filterExpansions(List<BggExpansion> list) {
+    final q = _searchQuery.trim().toLowerCase();
+    if (q.isEmpty) return list;
+    return list
+        .where((e) => e.title.toLowerCase().contains(q))
+        .toList();
   }
 
   Future<void> _refreshOwnedFromDb() async {
@@ -216,21 +234,50 @@ class _BoardgameExpansionsSectionState extends State<BoardgameExpansionsSection>
     }
 
     final accent = Colors.orange.shade800;
-    final ownedList =
-        expansions.where((e) => _owned.contains(e.bggId)).toList();
-    final otherList =
-        expansions.where((e) => !_owned.contains(e.bggId)).toList();
+    final ownedList = _filterExpansions(
+      expansions.where((e) => _owned.contains(e.bggId)).toList(),
+    );
+    final otherList = _filterExpansions(
+      expansions.where((e) => !_owned.contains(e.bggId)).toList(),
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _sectionHeader(
-          'Extensions',
-          subtitle: ownedList.isEmpty
-              ? '${expansions.length} sur BGG — coche celles que tu possèdes.'
-              : '${ownedList.length} possédée${ownedList.length > 1 ? 's' : ''} · '
-                  '${otherList.length} autre${otherList.length > 1 ? 's' : ''}',
+        Row(
+          children: [
+            Expanded(
+              child: _sectionHeader(
+                'Extensions',
+                subtitle: ownedList.isEmpty
+                    ? '${expansions.length} sur BGG — coche celles que tu possèdes.'
+                    : '${ownedList.length} possédée${ownedList.length > 1 ? 's' : ''} · '
+                        '${otherList.length} autre${otherList.length > 1 ? 's' : ''}',
+              ),
+            ),
+            IconButton(
+              tooltip: 'Rechercher une extension',
+              onPressed: () => setState(() => _showSearch = !_showSearch),
+              icon: Icon(
+                _showSearch ? Icons.search_off : Icons.search,
+                size: 20,
+              ),
+            ),
+          ],
         ),
+        if (_showSearch) ...[
+          const SizedBox(height: 6),
+          TextField(
+            controller: _searchController,
+            decoration: const InputDecoration(
+              labelText: 'Nom d’extension',
+              prefixIcon: Icon(Icons.search, size: 20),
+              isDense: true,
+            ),
+            onChanged: (v) => setState(() => _searchQuery = v),
+          ),
+          const SizedBox(height: 8),
+        ],
         if (ownedList.isNotEmpty) ...[
           const SizedBox(height: 10),
           for (final exp in ownedList) ...[
@@ -380,6 +427,17 @@ class _ExpansionRow extends StatelessWidget {
                           ),
                         ),
                       ),
+                      if (expansion.avgRating != null) ...[
+                        const SizedBox(width: 6),
+                        Text(
+                          formatBggRatingChipLabel(expansion.avgRating) ?? '—',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.amber.shade800,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),

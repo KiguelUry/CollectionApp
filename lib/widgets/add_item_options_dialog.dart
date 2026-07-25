@@ -213,6 +213,16 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                               : 'Quantité : $_quantity',
                         ),
                       ),
+                    if (_isWishlist) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'Tu pourras comparer les prix depuis la wishlist.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
                     if (!_isWishlist) ...[
                       const Divider(),
                       SwitchListTile(
@@ -226,7 +236,7 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                       ),
                       if (_shareWithGroup && _groups.isNotEmpty)
                         DropdownButtonFormField<String>(
-                          value: _selectedGroupId,
+                          initialValue: _selectedGroupId,
                           isExpanded: true,
                           decoration: const InputDecoration(
                             labelText: 'Groupe',

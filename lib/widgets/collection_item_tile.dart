@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../models/collection_category.dart';
 import '../models/collection_group.dart';
 import '../models/collection_item.dart';
+import '../screens/item_detail_screen.dart';
+import '../services/boardgame_expansion_service.dart';
 import '../utils/boardgame_display.dart';
 import '../utils/boardgame_collection_visibility.dart';
 import '../utils/boardgame_expansions.dart';
@@ -13,6 +15,7 @@ import 'boardgame_tile_inventory_sheets.dart';
 import 'boardgame_tile_sheets.dart';
 import 'bgg_network_image.dart';
 import 'item_title_text.dart';
+import 'wishlist/wishlist_tile_meta_icons.dart';
 
 /// Tuile grille pour un objet de collection (grisée si vendu).
 class CollectionItemTile extends StatelessWidget {
@@ -35,6 +38,8 @@ class CollectionItemTile extends StatelessWidget {
   final Map<String, int> groupActivityCounts;
   /// Groupe affiché (ex. écran détail groupe) — force le badge ≥ 1.
   final String? contextGroupId;
+  /// Si défini, un tap sur l’icône « Ext » d’une extension remonte au jeu de base dans la grille.
+  final Future<void> Function(CollectionItem base)? onExpansionBaseFocus;
   /// Grille / liste : couverture légère (URL + cache mémoire).
   final bool compactCover;
 
@@ -56,6 +61,7 @@ class CollectionItemTile extends StatelessWidget {
     this.groupActivityCounts = const {},
     this.contextGroupId,
     this.compactCover = false,
+    this.onExpansionBaseFocus,
   });
 
   bool get _isGrayed =>
@@ -97,7 +103,7 @@ class CollectionItemTile extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             image,
-            if (footer != null) footer,
+            ?footer,
           ],
         );
       }
@@ -110,7 +116,7 @@ class CollectionItemTile extends StatelessWidget {
             onLongPress: onLongPress,
             child: image,
           ),
-          if (footer != null) footer,
+          ?footer,
         ],
       );
     }
@@ -214,17 +220,27 @@ class CollectionItemTile extends StatelessWidget {
               ),
             ),
           const SizedBox(height: 2),
-          SizedBox(
-            height: _metaRowHeight,
-            width: double.infinity,
-            child: _buildIconRowTop(context),
-          ),
-          const SizedBox(height: 2),
-          SizedBox(
-            height: _metaRowHeight,
-            width: double.infinity,
-            child: _buildIconRowBottom(context),
-          ),
+          if (item.isWishlist)
+            SizedBox(
+              width: double.infinity,
+              child: WishlistTileMetaIcons(
+                item: item,
+                readOnly: boardgameQuickEditGroups == null,
+              ),
+            )
+          else ...[
+            SizedBox(
+              height: _metaRowHeight,
+              width: double.infinity,
+              child: _buildIconRowTop(context),
+            ),
+            const SizedBox(height: 2),
+            SizedBox(
+              height: _metaRowHeight,
+              width: double.infinity,
+              child: _buildIconRowBottom(context),
+            ),
+          ],
         ],
       ),
     );
@@ -285,7 +301,7 @@ class CollectionItemTile extends StatelessWidget {
             right: 4,
             child: _quickDeleteButton(),
           ),
-        if (_overlapBadge != null) _overlapBadge!,
+        ?_overlapBadge,
         if (item.isOnLoan && !item.isSold)
           Positioned(
             top: 4,
@@ -353,7 +369,7 @@ class CollectionItemTile extends StatelessWidget {
                     right: 4,
                     child: _quickDeleteButton(),
                   ),
-                if (_overlapBadge != null) _overlapBadge!,
+                ?_overlapBadge,
               ],
             ),
           ),
@@ -491,6 +507,34 @@ class CollectionItemTile extends StatelessWidget {
     );
   }
 
+  Future<void> _openExpansionContext(BuildContext context) async {
+    if (!_isOwnedExpansionTile) return _showExpansionSheet(context);
+    final service = BoardgameExpansionService();
+    CollectionItem? base;
+    final parentId = item.parentGameId;
+    if (parentId != null && parentId.isNotEmpty) {
+      base = await service.findBaseByItemId(parentId);
+    }
+    base ??= await service.findBaseByBggId(
+      item.metadata?['base_game_bgg_id']?.toString() ??
+          item.metadata?['expansion_of_bgg_id']?.toString() ??
+          '',
+    );
+    if (!context.mounted || base == null) return;
+    if (onExpansionBaseFocus != null) {
+      await onExpansionBaseFocus!(base);
+      return;
+    }
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ItemDetailScreen(item: base!)),
+    );
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Extension liée à « ${base.title} »')),
+    );
+  }
+
   Future<void> _showRatingSheet(BuildContext context) {
     return showBoardgameTileRatingSheet(
       context,
@@ -507,6 +551,13 @@ class CollectionItemTile extends StatelessWidget {
       readOnly: boardgameQuickEditGroups == null,
     );
   }
+
+  bool get _isOwnedExpansionTile =>
+      !item.isWishlist &&
+      _isBoardgame &&
+      (item.isExpansion ||
+          (item.parentGameId != null && item.parentGameId!.isNotEmpty) ||
+          item.metadata?['bgg_is_expansion'] == true);
 
   Widget _buildIconRowTop(BuildContext context) {
     final groupCount = !item.isSold ? _groupCount : 0;
@@ -540,12 +591,16 @@ class CollectionItemTile extends StatelessWidget {
         const SizedBox(width: 4),
         Expanded(
           child: GestureDetector(
-            onTap: () => _showExpansionSheet(context),
+            onTap: () => _openExpansionContext(context),
             behavior: HitTestBehavior.opaque,
             child: _metaChip(
-              icon: Icons.extension_outlined,
-              suffix: '$expansionCount',
-              color: Colors.green.shade600,
+              icon: _isOwnedExpansionTile
+                  ? Icons.subdirectory_arrow_right
+                  : Icons.extension_outlined,
+              suffix: _isOwnedExpansionTile ? 'Ext' : '$expansionCount',
+              color: _isOwnedExpansionTile
+                  ? Colors.deepPurple.shade500
+                  : Colors.green.shade600,
             ),
           ),
         ),
@@ -625,12 +680,16 @@ class CollectionItemTile extends StatelessWidget {
           const SizedBox(width: 4),
         if (expansions)
           GestureDetector(
-            onTap: () => _showExpansionSheet(context),
+            onTap: () => _openExpansionContext(context),
             behavior: HitTestBehavior.opaque,
             child: _metaChip(
-              icon: Icons.extension_outlined,
-              suffix: '${ownedExpansionCount(item)}',
-              color: Colors.green.shade600,
+              icon: _isOwnedExpansionTile
+                  ? Icons.subdirectory_arrow_right
+                  : Icons.extension_outlined,
+              suffix: _isOwnedExpansionTile ? 'Ext' : '${ownedExpansionCount(item)}',
+              color: _isOwnedExpansionTile
+                  ? Colors.deepPurple.shade500
+                  : Colors.green.shade600,
             ),
           ),
         if (expansions && (rating != null || location != null))

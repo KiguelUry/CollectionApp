@@ -142,12 +142,15 @@ class CollectionItem {
     final hasCustomHolder =
         customHolder != null && customHolder.trim().isNotEmpty;
 
-    if (hasCustomHolder) {
-      locLabel = formatManualHolderLabel(customHolder.trim());
-    } else if (locationUserId != null &&
+    if (locationUserId != null &&
+        locationUserId.isNotEmpty &&
         holder is Map &&
         holder['username'] != null) {
       locLabel = 'Chez ${holder['username']}';
+    } else if (hasCustomHolder) {
+      locLabel = formatManualHolderLabel(customHolder.trim());
+    } else if (locLabel == null && loc is Map) {
+      locLabel = loc['label'] as String?;
     }
 
     return CollectionItem(
@@ -298,6 +301,9 @@ class CollectionItem {
     bool clearLocation = false,
     bool clearLocationUserId = false,
     String? locationUserId,
+    int? minPlayers,
+    int? maxPlayers,
+    int? playingTime,
     Map<String, dynamic>? metadata,
     List<ItemTag>? tags,
     String? seriesId,
@@ -330,9 +336,9 @@ class CollectionItem {
       loanedToId: clearLoan ? null : (loanedToId ?? this.loanedToId),
       loanedToName: clearLoan ? null : (loanedToName ?? this.loanedToName),
       loanedAt: clearLoan ? null : (loanedAt ?? this.loanedAt),
-      minPlayers: minPlayers,
-      maxPlayers: maxPlayers,
-      playingTime: playingTime,
+      minPlayers: minPlayers ?? this.minPlayers,
+      maxPlayers: maxPlayers ?? this.maxPlayers,
+      playingTime: playingTime ?? this.playingTime,
       rating: clearRating ? null : (rating ?? this.rating),
       review: review ?? this.review,
       purchasePrice:

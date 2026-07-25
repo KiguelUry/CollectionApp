@@ -960,19 +960,19 @@ class BggService {
     final avgRating = double.tryParse(avgRaw ?? '');
 
     return {
-      if (bggId != null) 'bgg_id': bggId,
+      'bgg_id': ?bggId,
       if (image != null && image.isNotEmpty) 'image_url': image,
-      if (year != null) 'year_published': year,
-      if (minAge != null) 'min_age': minAge,
+      'year_published': ?year,
+      'min_age': ?minAge,
       'min_players': parseAttr('minplayers'),
       'max_players': parseAttr('maxplayers'),
       'playing_time': _positivePlayingTime(playingTime),
       if (categories.isNotEmpty) 'bgg_categories': categories,
       if (desc.isNotEmpty) 'bgg_description': desc,
       if (avgRating != null && avgRating > 0) 'bgg_avg_rating': avgRating,
-      if (bestPlayers != null) 'bgg_best_players': bestPlayers,
+      'bgg_best_players': ?bestPlayers,
       if (isExpansion) 'bgg_is_expansion': true,
-      if (baseBggId != null) 'base_game_bgg_id': baseBggId,
+      'base_game_bgg_id': ?baseBggId,
       if (baseTitle != null && baseTitle.isNotEmpty)
         'base_game_title': baseTitle,
     };
@@ -1113,6 +1113,9 @@ class BggService {
           bggRank: e['bggRank'] is int
               ? e['bggRank'] as int
               : int.tryParse('${e['bggRank']}'),
+          avgRating: e['avgRating'] is num
+              ? (e['avgRating'] as num).toDouble()
+              : double.tryParse('${e['avgRating']}'),
         );
       }).where((e) => e.bggId.isNotEmpty).toList();
     }
@@ -1179,6 +1182,10 @@ class BggService {
             rank = int.tryParse(rawRank);
           }
 
+          final avgRaw =
+              item.findAllElements('average').firstOrNull?.getAttribute('value');
+          final avgRating = double.tryParse(avgRaw ?? '');
+
           expansions.add(
             BggExpansion(
               bggId: id,
@@ -1187,6 +1194,8 @@ class BggService {
               year: year,
               summary: _expansionSummary(item),
               bggRank: rank,
+              avgRating:
+                  avgRating != null && avgRating > 0 ? avgRating : null,
             ),
           );
         }

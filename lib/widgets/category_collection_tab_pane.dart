@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../models/card_subcategory.dart';
@@ -11,6 +13,7 @@ import '../models/storage_location.dart';
 import '../screens/item_detail_screen.dart';
 import '../screens/media_artist_albums_screen.dart';
 import '../utils/boardgame_genres.dart';
+import '../utils/boardgame_language.dart';
 import '../utils/card_item_metadata.dart';
 import '../utils/collection_count_label.dart';
 import '../utils/collection_grid_grouper.dart';
@@ -23,6 +26,7 @@ import 'collection_item_list_tile.dart';
 import 'collection_item_tile.dart';
 import 'cover_preview_sheet.dart';
 import 'wishlist_suggestions_banner.dart';
+import 'wishlist/wishlist_budget_banner.dart';
 import 'bulk_group_assign_sheet.dart';
 
 /// Onglet Collection ou Wishlist isolé (filtres locaux → moins de rebuilds).
@@ -52,6 +56,13 @@ class CategoryCollectionTabPane extends StatefulWidget {
   final Future<void> Function(CollectionItem item) onDeleteItem;
   final Future<void> Function(List<CollectionItem> items)? onBulkDeleteItems;
   final VoidCallback? onBggRatingSortEnrich;
+  final bool showExpansionVisibilityToggle;
+  final bool showOwnedExpansions;
+  final ValueChanged<bool>? onShowOwnedExpansionsChanged;
+  final bool showWishlistBudgetBanner;
+  final bool showWishlistSortOptions;
+  final Set<String> boardgamePreferredLanguages;
+  final ValueChanged<Set<String>>? onBoardgamePreferredLanguagesChanged;
 
   const CategoryCollectionTabPane({
     super.key,
@@ -80,6 +91,13 @@ class CategoryCollectionTabPane extends StatefulWidget {
     this.currentUserId,
     this.onBulkDeleteItems,
     this.onBggRatingSortEnrich,
+    this.showExpansionVisibilityToggle = false,
+    this.showOwnedExpansions = false,
+    this.onShowOwnedExpansionsChanged,
+    this.showWishlistBudgetBanner = false,
+    this.showWishlistSortOptions = false,
+    this.boardgamePreferredLanguages = const {},
+    this.onBoardgamePreferredLanguagesChanged,
   });
 
   @override
@@ -94,6 +112,8 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
   bool _selectionMode = false;
   final Set<String> _selectedIds = {};
   final Map<String, GlobalKey> _tileKeys = {};
+  String? _highlightItemId;
+  Timer? _highlightTimer;
   Offset? _marqueePointerDown;
   Offset? _marqueeCurrent;
   bool _marqueeDragging = false;
@@ -116,8 +136,36 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
 
   @override
   void dispose() {
+    _highlightTimer?.cancel();
     _searchController.dispose();
     super.dispose();
+  }
+
+  Future<void> _focusExpansionBase(CollectionItem base) async {
+    _tileKeys.putIfAbsent(base.id, GlobalKey.new);
+    setState(() => _highlightItemId = base.id);
+    _highlightTimer?.cancel();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _tileKeys[base.id]?.currentContext;
+      if (ctx != null && ctx.mounted) {
+        Scrollable.ensureVisible(
+          ctx,
+          duration: const Duration(milliseconds: 480),
+          curve: Curves.easeInOutCubic,
+          alignment: 0.2,
+        );
+      }
+    });
+    _highlightTimer = Timer(const Duration(milliseconds: 2400), () {
+      if (mounted) setState(() => _highlightItemId = null);
+    });
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Extension de « ${base.title} »'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   String _countLabel(List<CollectionItem> items, List<CollectionItem> filtered) {
@@ -370,9 +418,13 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
     required Map<String, int> groupActivity,
     required bool isGrid,
   }) {
-    if (_selectionMode) {
+    final trackKeys = widget.category == CollectionCategory.boardgame &&
+        !_selectionMode;
+    if (_selectionMode || trackKeys) {
       _tileKeys.putIfAbsent(item.id, GlobalKey.new);
     }
+
+    final expansionFocus = trackKeys ? _focusExpansionBase : null;
 
     final tile = isGrid
         ? CollectionItemTile(
@@ -390,6 +442,7 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
                     ? widget.boardgameGroups
                     : null,
             groupActivityCounts: groupActivity,
+            onExpansionBaseFocus: expansionFocus,
             onDelete: _selectionMode ? null : () => widget.onDeleteItem(item),
             onTap: _selectionMode
                 ? () => _toggleSelection(item.id)
@@ -426,6 +479,7 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
                     ? widget.boardgameGroups
                     : null,
             groupActivityCounts: groupActivity,
+            onExpansionBaseFocus: expansionFocus,
             onDelete: _selectionMode ? null : () => widget.onDeleteItem(item),
             onTap: _selectionMode
                 ? () => _toggleSelection(item.id)
@@ -440,9 +494,31 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
                     ),
           );
 
-    final keyed = _selectionMode
+    Widget keyed = (_selectionMode || trackKeys)
         ? KeyedSubtree(key: _tileKeys[item.id], child: tile)
         : tile;
+
+    if (_highlightItemId == item.id) {
+      keyed = AnimatedContainer(
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOut,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: Colors.deepPurple.shade400,
+            width: 2.5,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.deepPurple.withValues(alpha: 0.35),
+              blurRadius: 14,
+              spreadRadius: 1,
+            ),
+          ],
+        ),
+        child: keyed,
+      );
+    }
 
     return _wrapSelectable(keyed, item.id);
   }
@@ -486,7 +562,18 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
   Widget build(BuildContext context) {
     super.build(context);
     final items = widget.items;
-    final filtered = _filters.apply(items);
+    var filtered = _filters.apply(items);
+    if (widget.category == CollectionCategory.boardgame &&
+        widget.boardgamePreferredLanguages.isNotEmpty) {
+      filtered = filtered
+          .where(
+            (i) => itemMatchesBoardgameLanguages(
+              i.metadata,
+              widget.boardgamePreferredLanguages,
+            ),
+          )
+          .toList();
+    }
     final countLabel = _countLabel(items, filtered);
     final groupOptions = widget.groupNamesById.entries
         .map((e) => GroupFilterOption(id: e.key, label: e.value))
@@ -570,36 +657,16 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
               : const [],
           useHolderLocationFilter:
               widget.category == CollectionCategory.boardgame,
+          showWishlistMineToggle: widget.defaultWishlistMineFilter,
+          showExpansionVisibilityToggle: widget.showExpansionVisibilityToggle,
+          showOwnedExpansions: widget.showOwnedExpansions,
+          onShowOwnedExpansionsChanged: widget.onShowOwnedExpansionsChanged,
+          showWishlistSortOptions: widget.showWishlistSortOptions,
+          boardgamePreferredLanguages: widget.boardgamePreferredLanguages,
+          onBoardgamePreferredLanguagesChanged:
+              widget.onBoardgamePreferredLanguagesChanged,
         ),
-        if (widget.defaultWishlistMineFilter)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: FilterChip(
-                label: Text(
-                  _filters.wishlistMineOnly
-                      ? 'Ma wishlist'
-                      : 'Wishlist complète',
-                ),
-                selected: _filters.wishlistMineOnly,
-                onSelected: (v) => setState(() {
-                  _filters = _filters.copyWith(
-                    wishlistMineOnly: v,
-                    wishlistMineUserId: widget.currentUserId,
-                    clearWishlistMine: !v,
-                  );
-                }),
-                avatar: Icon(
-                  _filters.wishlistMineOnly
-                      ? Icons.person_outline
-                      : Icons.groups_outlined,
-                  size: 18,
-                ),
-              ),
-            ),
-          ),
-        if (_buildBulkSelectionBar(filtered) case final bar?) bar,
+        ?_buildBulkSelectionBar(filtered),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
           child: Text(
@@ -612,12 +679,26 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
           ),
         ),
         Expanded(
-          child: widget.category == CollectionCategory.media &&
-                  widget.mediaGroupByArtist
-              ? _buildMediaArtistList(filtered)
-              : widget.viewMode == CollectionViewMode.grid
-                  ? _buildGrid(filtered)
-                  : _buildList(filtered),
+          child: widget.showWishlistBudgetBanner
+              ? Column(
+                  children: [
+                    Expanded(
+                      child: widget.category == CollectionCategory.media &&
+                              widget.mediaGroupByArtist
+                          ? _buildMediaArtistList(filtered)
+                          : widget.viewMode == CollectionViewMode.grid
+                              ? _buildGrid(filtered)
+                              : _buildList(filtered),
+                    ),
+                    WishlistBudgetBanner(items: filtered),
+                  ],
+                )
+              : widget.category == CollectionCategory.media &&
+                      widget.mediaGroupByArtist
+                  ? _buildMediaArtistList(filtered)
+                  : widget.viewMode == CollectionViewMode.grid
+                      ? _buildGrid(filtered)
+                      : _buildList(filtered),
         ),
       ],
     );

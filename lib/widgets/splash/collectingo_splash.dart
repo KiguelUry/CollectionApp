@@ -2,11 +2,12 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../config/app_brand.dart';
 import '../../models/collection_category.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/splash_audio.dart';
 
-/// Splash « Collectingo » : icônes de collection en orbite, titre animé.
+/// Splash Palomnia : icônes de collection en orbite, titre animé.
 class CollectingoSplash extends StatefulWidget {
   const CollectingoSplash({
     super.key,
@@ -78,38 +79,54 @@ class _CollectingoSplashState extends State<CollectingoSplash>
             return DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
                   colors: [
                     Color.lerp(
-                      const Color(0xFF1A1033),
-                      AppTheme.seed,
-                      t * 0.35,
+                      const Color(0xFF0F2027),
+                      const Color(0xFF203A43),
+                      t,
                     )!,
                     Color.lerp(
-                      const Color(0xFF2D1B4E),
-                      const Color(0xFF7E57C2),
-                      t * 0.5,
+                      const Color(0xFF2C5364),
+                      const Color(0xFFFF6B6B),
+                      t * 0.55,
                     )!,
-                    const Color(0xFFEDE7F6),
+                    Color.lerp(
+                      const Color(0xFFFFE66D),
+                      const Color(0xFFFFF8E7),
+                      t * 0.85,
+                    )!,
                   ],
-                  stops: const [0.0, 0.55, 1.0],
+                  stops: const [0.0, 0.52, 1.0],
                 ),
               ),
               child: SafeArea(
                 child: Stack(
                   children: [
+                    ..._buildParticles(t),
                     ..._buildOrbitIcons(t),
                     Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _buildLogoMark(t),
-                          const SizedBox(height: 28),
-                          _buildTitle(t),
-                          const SizedBox(height: 10),
-                          _buildTagline(t),
-                        ],
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 28,
+                          vertical: 22,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.22),
+                          borderRadius: BorderRadius.circular(28),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.12),
+                          ),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _buildLogoMark(t),
+                            const SizedBox(height: 24),
+                            _buildTitle(t),
+                          ],
+                        ),
                       ),
                     ),
                     Positioned(
@@ -153,21 +170,46 @@ class _CollectingoSplashState extends State<CollectingoSplash>
     );
   }
 
+  List<Widget> _buildParticles(double t) {
+    final size = MediaQuery.sizeOf(context);
+    return List.generate(18, (i) {
+      final seed = i * 1.618;
+      final x = (math.sin(seed * 3.1 + t * 2) * 0.5 + 0.5) * size.width;
+      final y = (math.cos(seed * 2.7 + t * 1.6) * 0.5 + 0.5) * size.height;
+      final s = 3.0 + (i % 4);
+      return Positioned(
+        left: x,
+        top: y,
+        child: Opacity(
+          opacity: (0.15 + 0.35 * math.sin(t * math.pi + seed)).clamp(0.0, 0.5),
+          child: Container(
+            width: s,
+            height: s,
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+            ),
+          ),
+        ),
+      );
+    });
+  }
+
   List<Widget> _buildOrbitIcons(double t) {
     final size = MediaQuery.sizeOf(context);
     final cx = size.width / 2;
-    final cy = size.height * 0.42;
-    final radius = math.min(size.width, size.height) * 0.36;
+    final cy = size.height * 0.38;
+    final radius = math.min(size.width, size.height) * 0.44;
 
     return List.generate(_orbitCategories.length, (i) {
       final cat = _orbitCategories[i];
       final angle =
           (i / _orbitCategories.length) * math.pi * 2 + t * math.pi * 0.85;
-      final r = radius * (0.72 + 0.12 * math.sin(t * math.pi * 2 + i));
+      final r = radius * (0.88 + 0.08 * math.sin(t * math.pi * 2 + i));
       final x = cx + math.cos(angle) * r;
-      final y = cy + math.sin(angle) * r * 0.55;
+      final y = cy + math.sin(angle) * r * 0.52;
       final iconT = ((t - i * 0.06) * 2.2).clamp(0.0, 1.0);
-      final scale = 0.5 + iconT * 0.5;
+      final scale = 0.52 + iconT * 0.48;
 
       return Positioned(
         left: x - 28,
@@ -180,18 +222,21 @@ class _CollectingoSplashState extends State<CollectingoSplash>
               width: 56,
               height: 56,
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.14),
+                color: Colors.white.withValues(alpha: 0.18),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.white30),
+                border: Border.all(
+                  color: cat.color.withValues(alpha: 0.55),
+                  width: 1.5,
+                ),
                 boxShadow: [
                   BoxShadow(
-                    color: cat.color.withValues(alpha: 0.35),
-                    blurRadius: 16,
+                    color: cat.color.withValues(alpha: 0.45),
+                    blurRadius: 18,
                     spreadRadius: 1,
                   ),
                 ],
               ),
-              child: Icon(cat.icon, color: Colors.white, size: 28),
+              child: Icon(cat.icon, color: cat.color, size: 28),
             ),
           ),
         ),
@@ -227,10 +272,13 @@ class _CollectingoSplashState extends State<CollectingoSplash>
         child: Stack(
           alignment: Alignment.center,
           children: [
-            Icon(
-              Icons.inventory_2_rounded,
-              size: 44,
-              color: AppTheme.seed.withValues(alpha: 0.9),
+            Transform.rotate(
+              angle: t * math.pi * 0.25,
+              child: Icon(
+                Icons.casino_rounded,
+                size: 44,
+                color: const Color(0xFF2C5364).withValues(alpha: 0.9),
+              ),
             ),
             Positioned(
               right: 14,
@@ -257,8 +305,8 @@ class _CollectingoSplashState extends State<CollectingoSplash>
           shaderCallback: (bounds) => const LinearGradient(
             colors: [Colors.white, Color(0xFFE1BEE7)],
           ).createShader(bounds),
-          child: const Text(
-            'Collectingo',
+          child: Text(
+            kAppDisplayName,
             style: TextStyle(
               fontSize: 42,
               fontWeight: FontWeight.w800,
@@ -267,21 +315,6 @@ class _CollectingoSplashState extends State<CollectingoSplash>
               height: 1.05,
             ),
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTagline(double t) {
-    return Opacity(
-      opacity: ((t - 0.35) / 0.45).clamp(0.0, 1.0),
-      child: const Text(
-        'Secoue. Collectionne. Joue.',
-        style: TextStyle(
-          fontSize: 15,
-          fontWeight: FontWeight.w600,
-          color: Colors.white70,
-          letterSpacing: 1.2,
         ),
       ),
     );

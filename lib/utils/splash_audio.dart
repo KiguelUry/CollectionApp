@@ -4,13 +4,15 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-/// Son court au démarrage (piano ~2,5 s avec fondu, bip système en secours).
+/// Son court au démarrage (arpège doux ~1 s, bip système en secours).
 class SplashAudio {
   static final AudioPlayer _player = AudioPlayer();
   static bool _played = false;
   static Timer? _fadeTimer;
 
   static const _assetCandidates = [
+    'audio/splash_guitar_soft.wav',
+    'audio/splash_welcome.wav',
     'audio/splash_chime.wav',
     'audio/splash_chime.mp3',
   ];
@@ -22,7 +24,7 @@ class SplashAudio {
       try {
         await _player.setVolume(1);
         await _player.play(AssetSource(asset));
-        _scheduleFadeOut(const Duration(milliseconds: 2200));
+        _scheduleFadeOut(const Duration(milliseconds: 2800));
         return;
       } catch (e) {
         if (kDebugMode) debugPrint('Splash audio ($asset): $e');

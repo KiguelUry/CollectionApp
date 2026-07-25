@@ -3,6 +3,7 @@ import '../utils/boardgame_display.dart';
 import '../utils/boardgame_genres.dart';
 import '../utils/card_item_metadata.dart';
 import '../utils/holder_filter.dart';
+import '../utils/wishlist_market_metadata.dart';
 
 enum CollectionSort {
   titleAsc,
@@ -10,8 +11,7 @@ enum CollectionSort {
   ratingDesc,
   bggRatingDesc,
   quantityDesc,
-  newestFirst,
-  oldestFirst,
+  estimatedValueAsc,
   genreAsc,
   locationAsc,
 }
@@ -316,15 +316,14 @@ class CollectionListFilters {
       case CollectionSort.quantityDesc:
         final cmp = b.quantity.compareTo(a.quantity);
         return cmp != 0 ? cmp : a.title.compareTo(b.title);
-      case CollectionSort.newestFirst:
-        final da = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-        final db = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-        final cmp = db.compareTo(da);
-        return cmp != 0 ? cmp : a.title.compareTo(b.title);
-      case CollectionSort.oldestFirst:
-        final da = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-        final db = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-        final cmp = da.compareTo(db);
+      case CollectionSort.estimatedValueAsc:
+        final va = marketSecondhandPriceFromMetadata(a.metadata) ??
+            marketNewPriceMinFromMetadata(a.metadata) ??
+            double.infinity;
+        final vb = marketSecondhandPriceFromMetadata(b.metadata) ??
+            marketNewPriceMinFromMetadata(b.metadata) ??
+            double.infinity;
+        final cmp = va.compareTo(vb);
         return cmp != 0 ? cmp : a.title.compareTo(b.title);
       case CollectionSort.genreAsc:
         final ga = primaryBoardgameGenre(a) ?? 'zzz';
