@@ -1,9 +1,16 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/collection_item.dart';
+import '../services/collection_refresh.dart';
 import '../utils/collection_item_scope.dart';
+import '../utils/whereabouts_apply.dart';
+import '../utils/whereabouts_persistence.dart';
 
 /// Passe un objet de la wishlist vers la collection possédée.
+///
+/// - `is_wishlist` → false
+/// - quantité au moins 1
+/// - localisation « Chez moi » (détenteur = utilisateur courant)
 Future<bool> promoteWishlistToCollection(CollectionItem item) async {
   if (!item.isWishlist || item.id.isEmpty) return false;
 
@@ -11,12 +18,33 @@ Future<bool> promoteWishlistToCollection(CollectionItem item) async {
   final userId = client.auth.currentUser?.id;
   if (userId == null) return false;
 
+  final qty = item.quantity < 1 ? 1 : item.quantity.clamp(1, 9999);
+  final atHome = applyWhereaboutsChange(
+    item.copyWith(isWishlist: false, quantity: qty),
+    locationUserId: userId,
+    holderLabel: 'Chez moi',
+  );
+
+  final groupIds = item.groupId != null && item.groupId!.isNotEmpty
+      ? [item.groupId!]
+      : <String>[];
+  final whereabouts = buildWhereaboutsDbFields(
+    atHome,
+    groupIds: groupIds.isEmpty ? null : groupIds,
+  );
+  var meta = Map<String, dynamic>.from(
+    whereabouts['metadata'] as Map<String, dynamic>,
+  );
+  meta = finalizeMetadataPayload(atHome, meta);
+
   await client.from('collection_items').update({
     'is_wishlist': false,
-    'quantity': item.quantity.clamp(0, 9999),
-    'location_user_id': userId,
+    'quantity': qty,
+    'location_user_id': whereabouts['location_user_id'],
+    'metadata': meta,
   }).eq('id', item.id);
 
+  CollectionRefresh.instance.bump();
   return true;
 }
 

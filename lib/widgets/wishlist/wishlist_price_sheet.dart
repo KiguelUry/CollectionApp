@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/collection_item.dart';
 import '../../services/boardgame_market_service.dart';
+import '../../services/collection_refresh.dart';
+import '../../utils/picked_image_bytes.dart';
 import '../../utils/wishlist_market_metadata.dart';
 
 enum WishlistPriceFocus { secondhand, newPrice }
@@ -73,6 +77,153 @@ class _WishlistPriceSheetState extends State<_WishlistPriceSheet> {
     }
   }
 
+  Future<void> _persistMetadata(Map<String, dynamic> meta) async {
+    await Supabase.instance.client.from('collection_items').update({
+      'metadata': meta,
+    }).eq('id', _item.id);
+    CollectionRefresh.instance.bump();
+  }
+
+  Future<void> _addSighting() async {
+    if (widget.readOnly || _item.id.isEmpty) return;
+    final priceCtrl = TextEditingController();
+    final placeCtrl = TextEditingController();
+    final urlCtrl = TextEditingController();
+    String? photoUrl;
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: const Text('Vu a...'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: priceCtrl,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Prix (EUR)',
+                    hintText: '24.90',
+                  ),
+                ),
+                TextField(
+                  controller: placeCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Magasin / contact',
+                    hintText: 'Philibert, ami, brocante...',
+                  ),
+                ),
+                TextField(
+                  controller: urlCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'URL annonce (optionnel)',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    try {
+                      final picked = await ImagePicker().pickImage(
+                        source: ImageSource.gallery,
+                        maxWidth: 1600,
+                      );
+                      if (picked == null) return;
+                      final bytes = await readPickedImageBytes(picked);
+                      final userId =
+                          Supabase.instance.client.auth.currentUser?.id;
+                      if (userId == null) return;
+                      final path =
+                          '$userId/price_sightings/${_item.id}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+                      await Supabase.instance.client.storage
+                          .from('avatars')
+                          .uploadBinary(
+                            path,
+                            bytes,
+                            fileOptions:
+                                const FileOptions(contentType: 'image/jpeg'),
+                          );
+                      photoUrl = Supabase.instance.client.storage
+                          .from('avatars')
+                          .getPublicUrl(path);
+                      setLocal(() {});
+                    } catch (_) {}
+                  },
+                  icon: Icon(
+                    photoUrl == null
+                        ? Icons.add_photo_alternate_outlined
+                        : Icons.check_circle,
+                  ),
+                  label: Text(
+                    photoUrl == null
+                        ? 'Photo / capture d annonce'
+                        : 'Photo ajoutee',
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Annuler'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Enregistrer'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (saved != true || !mounted) return;
+    final price = double.tryParse(
+      priceCtrl.text.replaceAll(',', '.').replaceAll('EUR', '').trim(),
+    );
+    final place = placeCtrl.text.trim();
+    if (price == null || price <= 0 || place.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Prix et lieu sont obligatoires')),
+      );
+      return;
+    }
+
+    final sightings = [
+      PriceSighting(
+        id: '${DateTime.now().millisecondsSinceEpoch}',
+        priceEur: price,
+        place: place,
+        url: urlCtrl.text.trim().isEmpty ? null : urlCtrl.text.trim(),
+        photoUrl: photoUrl,
+        seenAt: DateTime.now(),
+      ),
+      ...priceSightingsFromMetadata(_item.metadata),
+    ];
+    final meta = metadataWithPriceSightings(_item.metadata, sightings);
+    setState(() => _item = _item.copyWith(metadata: meta));
+    try {
+      await _persistMetadata(meta);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur : $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _removeSighting(PriceSighting sighting) async {
+    final next = priceSightingsFromMetadata(_item.metadata)
+        .where((s) => s.id != sighting.id)
+        .toList();
+    final meta = metadataWithPriceSightings(_item.metadata, next);
+    setState(() => _item = _item.copyWith(metadata: meta));
+    await _persistMetadata(meta);
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -80,6 +231,7 @@ class _WishlistPriceSheetState extends State<_WishlistPriceSheet> {
     final neu = marketNewPriceMinFromMetadata(_item.metadata);
     final stores = storesPricesFromMetadata(_item.metadata);
     final history = marketHistoryFromMetadata(_item.metadata);
+    final sightings = priceSightingsFromMetadata(_item.metadata);
     return SafeArea(
       child: Padding(
         padding: EdgeInsets.only(
@@ -121,13 +273,88 @@ class _WishlistPriceSheetState extends State<_WishlistPriceSheet> {
                 ),
               ],
               const SizedBox(height: 12),
+              _sectionTitle('Mes observations', Icons.storefront_outlined),
+              const SizedBox(height: 6),
+              if (sightings.isEmpty)
+                Text(
+                  'Aucune encore — ajoute un prix vu en magasin ou en ligne.',
+                  style: TextStyle(
+                    color: scheme.onSurfaceVariant,
+                    fontSize: 13,
+                  ),
+                )
+              else
+                ...sightings.map(
+                  (s) => Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: ListTile(
+                      tileColor: scheme.surfaceContainerHighest
+                          .withValues(alpha: 0.45),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 2,
+                      ),
+                      leading: s.photoUrl == null
+                          ? Icon(Icons.euro, color: scheme.primary)
+                          : ClipRRect(
+                              borderRadius: BorderRadius.circular(6),
+                              child: Image.network(
+                                s.photoUrl!,
+                                width: 40,
+                                height: 40,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, _, _) =>
+                                    Icon(Icons.euro, color: scheme.primary),
+                              ),
+                            ),
+                      title: Text(
+                        '${formatEuroChip(s.priceEur, compact: false)} chez ${s.place}',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      subtitle: s.url == null
+                          ? null
+                          : Text(
+                              s.url!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (s.url != null)
+                            IconButton(
+                              icon: const Icon(Icons.open_in_new, size: 20),
+                              onPressed: () => launchUrl(Uri.parse(s.url!)),
+                            ),
+                          if (!widget.readOnly)
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, size: 20),
+                              onPressed: () => _removeSighting(s),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              if (!widget.readOnly) ...[
+                const SizedBox(height: 4),
+                OutlinedButton.icon(
+                  onPressed: _addSighting,
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Vu a X EUR chez...'),
+                ),
+              ],
+              const SizedBox(height: 16),
               _sectionTitle('Occasion (estimation)', Icons.recycling_rounded),
               const SizedBox(height: 6),
               _priceCard(
-                label: 'Cote moyenne estimée',
+                label: 'Cote moyenne estimee',
                 value: formatEuroChip(used, compact: false),
                 hint:
-                    'Estimation ~52 % du meilleur prix neuf constaté (BGG GeekMarket fermé). Compare avec Vinted, Leboncoin, etc.',
+                    'Estimation ~52 % du meilleur prix neuf constate (BGG GeekMarket ferme). Compare avec Vinted, Leboncoin, etc.',
                 accent: Colors.teal.shade700,
               ),
               if (history.isNotEmpty) ...[
@@ -168,7 +395,7 @@ class _WishlistPriceSheetState extends State<_WishlistPriceSheet> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Text(
-                      'Pas de boutique en ligne trouvée pour ce jeu.',
+                      'Pas de boutique en ligne trouvee pour ce jeu.',
                       style: TextStyle(
                         color: scheme.onSurfaceVariant,
                         fontSize: 13,
@@ -323,7 +550,7 @@ class _PriceSparkline extends StatelessWidget {
   Widget build(BuildContext context) {
     if (points.length < 2) {
       return Text(
-        'Historique en cours de collecte (1 point par jour d’actualisation).',
+        'Historique en cours de collecte (1 point par jour d actualisation).',
         style: TextStyle(
           fontSize: 11,
           color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -386,7 +613,8 @@ class _SparklinePainter extends CustomPainter {
     final path = Path();
     for (var i = 0; i < values.length; i++) {
       final x = size.width * (i / (values.length - 1));
-      final y = size.height - ((values[i] - minV) / span) * (size.height - 8) - 4;
+      final y =
+          size.height - ((values[i] - minV) / span) * (size.height - 8) - 4;
       if (i == 0) {
         path.moveTo(x, y);
       } else {

@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/login_screen.dart';
+import 'screens/reset_password_screen.dart';
 import 'screens/category_selection_screen.dart';
 import 'screens/friends_screen.dart';
 import 'screens/groups_screen.dart';
@@ -45,15 +48,28 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   final _settings = SettingsService.instance;
+  final _navigatorKey = GlobalKey<NavigatorState>();
+  StreamSubscription<AuthState>? _authSub;
 
   @override
   void initState() {
     super.initState();
     _settings.addListener(_rebuild);
+    _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+      if (data.event == AuthChangeEvent.passwordRecovery) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _navigatorKey.currentState?.pushNamedAndRemoveUntil(
+            '/reset-password',
+            (_) => false,
+          );
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
+    _authSub?.cancel();
     _settings.removeListener(_rebuild);
     super.dispose();
   }
@@ -63,6 +79,7 @@ class _MyAppState extends State<MyApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: _navigatorKey,
       debugShowCheckedModeBanner: false,
       title: kAppDisplayName,
       theme: AppTheme.light,
@@ -86,6 +103,7 @@ class _MyAppState extends State<MyApp> {
         '/profile': (context) => const ProfileEditScreen(),
         '/settings': (context) => const SettingsScreen(),
         '/login': (context) => const LoginScreen(),
+        '/reset-password': (context) => const ResetPasswordScreen(),
       },
     );
   }

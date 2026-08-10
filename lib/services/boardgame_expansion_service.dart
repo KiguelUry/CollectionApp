@@ -49,6 +49,7 @@ class BoardgameExpansionService {
     }
     return null;
   }
+
   Future<CollectionItem?> findExpansionByBggId(String expansionBggId) async {
     if (expansionBggId.isEmpty) return null;
     final userId = _userId;
@@ -77,19 +78,17 @@ class BoardgameExpansionService {
     if (item.isExpansion) return true;
     if (item.metadata?['bgg_is_expansion'] == true) return true;
     final bggId = item.metadata?['bgg_id']?.toString();
-    final baseBggId = item.metadata?['base_game_bgg_id']?.toString() ??
+    final baseBggId =
+        item.metadata?['base_game_bgg_id']?.toString() ??
         item.metadata?['expansion_of_bgg_id']?.toString();
-    if (baseBggId != null &&
-        baseBggId.isNotEmpty &&
-        baseBggId != bggId) {
+    if (baseBggId != null && baseBggId.isNotEmpty && baseBggId != bggId) {
       return true;
     }
     return false;
   }
 
   /// Jeu de base — parent possible, jamais enfant d'une extension.
-  static bool itemActsAsBase(CollectionItem item) =>
-      !itemActsAsExpansion(item);
+  static bool itemActsAsBase(CollectionItem item) => !itemActsAsExpansion(item);
 
   /// Résout le couple parent/enfant (base = parent, expansion = enfant).
   static ({CollectionItem base, CollectionItem expansion}) resolveLinkPair(
@@ -126,15 +125,15 @@ class BoardgameExpansionService {
     if (resolvedBase.id == resolvedExpansion.id) return;
     if (itemActsAsExpansion(resolvedBase)) return;
 
-    await _client.from('collection_items').update({
-      'is_expansion': false,
-      'parent_game_id': null,
-    }).eq('id', resolvedBase.id);
+    await _client
+        .from('collection_items')
+        .update({'is_expansion': false, 'parent_game_id': null})
+        .eq('id', resolvedBase.id);
 
-    await _client.from('collection_items').update({
-      'is_expansion': true,
-      'parent_game_id': resolvedBase.id,
-    }).eq('id', resolvedExpansion.id);
+    await _client
+        .from('collection_items')
+        .update({'is_expansion': true, 'parent_game_id': resolvedBase.id})
+        .eq('id', resolvedExpansion.id);
 
     final expBggId = resolvedExpansion.metadata?['bgg_id']?.toString();
     if (expBggId != null && expBggId.isNotEmpty) {
@@ -148,7 +147,8 @@ class BoardgameExpansionService {
     required CollectionItem base,
     required String expansionBggId,
   }) async {
-    final owned = ownedExpansionBggIds(base.metadata).toSet()..add(expansionBggId);
+    final owned = ownedExpansionBggIds(base.metadata).toSet()
+      ..add(expansionBggId);
     final meta = metadataWithOwnedExpansions(base.metadata, owned.toList());
     await _client
         .from('collection_items')
@@ -218,23 +218,23 @@ class BoardgameExpansionService {
       throw StateError('Le parent ne peut pas être une extension');
     }
 
-    await _client.from('collection_items').update({
-      'is_expansion': false,
-      'parent_game_id': null,
-    }).eq('id', base.id);
+    await _client
+        .from('collection_items')
+        .update({'is_expansion': false, 'parent_game_id': null})
+        .eq('id', base.id);
 
     final existingChild = await _findChildByBggId(base.id, expansionBggId);
     if (existingChild != null) {
       if (existingChild.parentGameId == base.id) return existingChild;
-      final meta = _expansionMeta(
-        bggId: expansionBggId,
-        details: bggDetails,
-      );
-      await _client.from('collection_items').update({
-        'is_expansion': true,
-        'parent_game_id': base.id,
-        ..._inheritedWhereaboutsFields(base, meta),
-      }).eq('id', existingChild.id);
+      final meta = _expansionMeta(bggId: expansionBggId, details: bggDetails);
+      await _client
+          .from('collection_items')
+          .update({
+            'is_expansion': true,
+            'parent_game_id': base.id,
+            ..._inheritedWhereaboutsFields(base, meta),
+          })
+          .eq('id', existingChild.id);
       CollectionRefresh.instance.bump();
       return existingChild.copyWith(
         isExpansion: true,
@@ -245,10 +245,7 @@ class BoardgameExpansionService {
       );
     }
 
-    final meta = _expansionMeta(
-      bggId: expansionBggId,
-      details: bggDetails,
-    );
+    final meta = _expansionMeta(bggId: expansionBggId, details: bggDetails);
 
     final inserted = await _client
         .from('collection_items')
@@ -356,7 +353,8 @@ class BoardgameExpansionService {
   Future<CollectionItem> promoteOrphanToBase({
     required CollectionItem orphan,
   }) async {
-    final baseBggId = orphan.metadata?['expansion_of_bgg_id']?.toString() ??
+    final baseBggId =
+        orphan.metadata?['expansion_of_bgg_id']?.toString() ??
         orphan.metadata?['base_game_bgg_id']?.toString();
     if (baseBggId == null || baseBggId.isEmpty) {
       throw StateError('Extension sans jeu de base BGG');
@@ -366,10 +364,10 @@ class BoardgameExpansionService {
     base ??= await _createBaseFromBgg(baseBggId, orphan);
 
     final expBggId = orphan.metadata?['bgg_id']?.toString() ?? '';
-    await _client.from('collection_items').update({
-      'is_expansion': true,
-      'parent_game_id': base.id,
-    }).eq('id', orphan.id);
+    await _client
+        .from('collection_items')
+        .update({'is_expansion': true, 'parent_game_id': base.id})
+        .eq('id', orphan.id);
 
     if (expBggId.isNotEmpty) {
       await syncLegacyOwnedIds(base);
@@ -420,7 +418,8 @@ class BoardgameExpansionService {
   ) async {
     final userId = _userId!;
     final details = await BggService.getGameFullDetails(baseBggId);
-    final title = orphanHint.parentGameTitle ??
+    final title =
+        orphanHint.parentGameTitle ??
         details?['base_game_title']?.toString() ??
         orphanHint.metadata?['expansion_of_title']?.toString() ??
         'Jeu de base';
@@ -434,6 +433,7 @@ class BoardgameExpansionService {
         'bgg_short_description',
         'bgg_avg_rating',
         'bgg_best_players',
+        'bgg_gallery_urls',
       ]) {
         final v = details[key];
         if (v != null) meta[key] = v;
@@ -478,6 +478,7 @@ class BoardgameExpansionService {
         'bgg_short_description',
         'bgg_avg_rating',
         'bgg_best_players',
+        'bgg_gallery_urls',
       ]) {
         final v = details[key];
         if (v != null) meta[key] = v;

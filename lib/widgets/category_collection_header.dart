@@ -43,30 +43,34 @@ class CategoryCollectionHeader extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(4, 4, 12, 0),
-                child: Row(
-                  children: [
-                    if (Navigator.canPop(context))
-                      IconButton(
-                        icon: Icon(Icons.arrow_back_rounded, color: onAccent),
-                        onPressed: () => Navigator.maybePop(context),
-                      )
-                    else
-                      const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                          color: onAccent,
-                          height: 1.15,
+                padding: const EdgeInsets.fromLTRB(4, 0, 8, 0),
+                child: SizedBox(
+                  height: 40,
+                  child: Row(
+                    children: [
+                      if (Navigator.canPop(context))
+                        IconButton(
+                          visualDensity: VisualDensity.compact,
+                          icon: Icon(Icons.arrow_back_rounded, color: onAccent),
+                          onPressed: () => Navigator.maybePop(context),
+                        )
+                      else
+                        const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                            color: onAccent,
+                            height: 1.1,
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
               TabBar(
@@ -75,33 +79,37 @@ class CategoryCollectionHeader extends StatelessWidget {
                 labelColor: onAccent,
                 unselectedLabelColor: onAccent.withValues(alpha: 0.65),
                 dividerColor: Colors.transparent,
+                labelPadding: const EdgeInsets.symmetric(horizontal: 8),
                 tabs: const [
-                  Tab(text: 'Collection'),
-                  Tab(text: 'Wishlist'),
+                  Tab(height: 36, text: 'Collection'),
+                  Tab(height: 36, text: 'Wishlist'),
                 ],
               ),
               if (hasToolbar)
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
-                  child: Row(
-                    children: [
-                      if (showCollectionsHome)
-                        _ToolbarIcon(
-                          tooltip: 'Collections',
-                          icon: Icons.grid_view_rounded,
-                          color: onAccent,
-                          onTap: () => AppNavigation.openCollections(context),
-                        ),
-                      for (final action in quickActions)
-                        _ToolbarIcon(
-                          tooltip: action.label,
-                          icon: action.icon,
-                          color: onAccent,
-                          onTap: action.onTap,
-                        ),
-                      const Spacer(),
-                      ...extraActions,
-                    ],
+                  padding: const EdgeInsets.fromLTRB(2, 0, 2, 2),
+                  child: SizedBox(
+                    height: 36,
+                    child: Row(
+                      children: [
+                        if (showCollectionsHome)
+                          _ToolbarIcon(
+                            tooltip: 'Accueil collections',
+                            icon: Icons.home_rounded,
+                            color: onAccent,
+                            onTap: () => AppNavigation.openCollections(context),
+                          ),
+                        for (final action in quickActions)
+                          _ToolbarIcon(
+                            tooltip: action.label,
+                            icon: action.icon,
+                            color: onAccent,
+                            onTap: action.onTap,
+                          ),
+                        const Spacer(),
+                        ...extraActions,
+                      ],
+                    ),
                   ),
                 ),
             ],

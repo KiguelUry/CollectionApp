@@ -5,6 +5,7 @@ import '../models/bgg_catalog_game.dart';
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../services/bgg_service.dart';
+import '../services/collection_change_history_service.dart';
 import '../services/item_group_service.dart';
 import '../services/profile_service.dart';
 import '../services/collection_refresh.dart';
@@ -88,9 +89,7 @@ Future<void> quickAddBoardgameFromCatalog(
 
         try {
           String message;
-          if (!options.isWishlist &&
-              game.bggId.isNotEmpty &&
-              details != null) {
+          if (!options.isWishlist && game.bggId.isNotEmpty && details != null) {
             if (!context.mounted) return;
             final expansionMsg = await insertBoardgameWithExpansionRules(
               context: context,
@@ -123,12 +122,12 @@ Future<void> quickAddBoardgameFromCatalog(
                 'bgg_short_description',
                 'bgg_avg_rating',
                 'bgg_best_players',
+                'bgg_gallery_urls',
               ]) {
                 final v = details[key];
                 if (v != null) meta[key] = v;
               }
-              if (options.isWishlist) {
-              }
+              if (options.isWishlist) {}
               final item = CollectionItem(
                 id: '',
                 title: game.title.trim(),
@@ -155,22 +154,23 @@ Future<void> quickAddBoardgameFromCatalog(
                   .insert(payload)
                   .select()
                   .single();
+              final created = CollectionItem.fromJson(
+                Map<String, dynamic>.from(inserted as Map),
+              );
+              await CollectionChangeHistoryService.instance.recordAdded(created);
               if (options.groupId != null &&
                   options.groupId!.isNotEmpty &&
                   !options.isWishlist) {
-                final saved = CollectionItem.fromJson(
-                  Map<String, dynamic>.from(inserted as Map),
-                ).copyWith(
+                final saved = created.copyWith(
                   metadata: Map<String, dynamic>.from(
                     payload['metadata'] as Map? ?? {},
                   ),
                   locationUserId: payload['location_user_id'] as String?,
                   groupId: options.groupId,
                 );
-                await ItemGroupService().syncItemGroupsWithItem(
-                  saved,
-                  [options.groupId!],
-                );
+                await ItemGroupService().syncItemGroupsWithItem(saved, [
+                  options.groupId!,
+                ]);
               }
               message = options.isWishlist
                   ? '« ${game.title} » ajouté à la wishlist'
@@ -188,6 +188,7 @@ Future<void> quickAddBoardgameFromCatalog(
                 'bgg_short_description',
                 'bgg_avg_rating',
                 'bgg_best_players',
+                'bgg_gallery_urls',
               ]) {
                 final v = details[key];
                 if (v != null) meta[key] = v;
@@ -219,22 +220,23 @@ Future<void> quickAddBoardgameFromCatalog(
                 .insert(payload)
                 .select()
                 .single();
+            final created = CollectionItem.fromJson(
+              Map<String, dynamic>.from(inserted as Map),
+            );
+            await CollectionChangeHistoryService.instance.recordAdded(created);
             if (options.groupId != null &&
                 options.groupId!.isNotEmpty &&
                 !options.isWishlist) {
-              final saved = CollectionItem.fromJson(
-                Map<String, dynamic>.from(inserted as Map),
-              ).copyWith(
+              final saved = created.copyWith(
                 metadata: Map<String, dynamic>.from(
                   payload['metadata'] as Map? ?? {},
                 ),
                 locationUserId: payload['location_user_id'] as String?,
                 groupId: options.groupId,
               );
-              await ItemGroupService().syncItemGroupsWithItem(
-                saved,
-                [options.groupId!],
-              );
+              await ItemGroupService().syncItemGroupsWithItem(saved, [
+                options.groupId!,
+              ]);
             }
             message = options.isWishlist
                 ? '« ${game.title} » ajouté à la wishlist'
@@ -243,9 +245,9 @@ Future<void> quickAddBoardgameFromCatalog(
           CollectionRefresh.instance.bump();
           if (dialogContext.mounted) Navigator.pop(dialogContext);
           if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(message)),
-            );
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text(message)));
           }
         } on PostgrestException catch (e) {
           if (context.mounted) {

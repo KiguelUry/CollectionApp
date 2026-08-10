@@ -226,6 +226,7 @@ function parseThingItem(xml: string, id: string): Record<string, unknown> | null
   const image =
     inner.match(/<image>([^<]*)<\/image>/i)?.[1]?.trim() ??
     inner.match(/<thumbnail>([^<]*)<\/thumbnail>/i)?.[1]?.trim();
+  const galleryUrls = imageUrlsFromThingXml(inner, image);
 
   const attr = (tag: string): number | undefined => {
     const v = inner.match(
@@ -281,6 +282,7 @@ function parseThingItem(xml: string, id: string): Record<string, unknown> | null
   return {
     bgg_id: id,
     ...(image ? { image_url: image } : {}),
+    ...(galleryUrls.length ? { bgg_gallery_urls: galleryUrls } : {}),
     ...(attr("yearpublished") != null
       ? { year_published: attr("yearpublished") }
       : {}),
@@ -299,6 +301,31 @@ function parseThingItem(xml: string, id: string): Record<string, unknown> | null
     ...(baseBggId ? { base_game_bgg_id: baseBggId } : {}),
     ...(baseTitle ? { base_game_title: baseTitle } : {}),
   };
+}
+
+// XML API2 usually supplies only a cover, but preserve extra image URLs when
+// BGG includes them in image elements or link attributes. This does not crawl.
+function imageUrlsFromThingXml(inner: string, cover?: string): string[] {
+  const urls = new Set<string>();
+  const add = (raw?: string) => {
+    const url = raw?.trim();
+    if (/^https?:\/\//i.test(url ?? "")) urls.add(url!);
+  };
+
+  add(cover);
+  const imageRe = /<image>([^<]*)<\/image>/gi;
+  let imageMatch: RegExpExecArray | null;
+  while ((imageMatch = imageRe.exec(inner)) !== null) add(imageMatch[1]);
+
+  const linkRe = /<link\b([^>]*)\/?>/gi;
+  let linkMatch: RegExpExecArray | null;
+  while ((linkMatch = linkRe.exec(inner)) !== null) {
+    const attrs = linkMatch[1];
+    for (const attr of ["url", "href", "image"]) {
+      add(attrs.match(new RegExp(`\\b${attr}="([^"]*)"`, "i"))?.[1]);
+    }
+  }
+  return [...urls];
 }
 
 function stripHtml(html: string | undefined): string {

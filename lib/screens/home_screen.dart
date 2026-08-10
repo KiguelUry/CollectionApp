@@ -11,6 +11,7 @@ import '../models/card_subcategory.dart';
 import '../models/category_metadata.dart';
 import '../models/media_format_ui.dart';
 import '../services/boardgame_collection_preferences.dart';
+import '../services/collection_display_preferences.dart';
 import '../services/boardgame_market_service.dart';
 import '../services/bgg_service.dart';
 import '../services/book_catalog_service.dart';
@@ -29,6 +30,7 @@ import '../utils/supabase_embeds.dart';
 import '../utils/whereabouts_persistence.dart';
 import '../utils/wishlist_promote.dart';
 import '../services/global_play_history_service.dart';
+import '../services/collection_change_history_service.dart';
 import '../models/collection_view_mode.dart';
 import '../models/item_tag.dart';
 import '../models/storage_location.dart';
@@ -41,6 +43,7 @@ import '../widgets/category_collection_tab_pane.dart';
 import '../widgets/category_collection_header.dart';
 import '../widgets/category_collection_shell.dart';
 import '../widgets/isbn_scan_sheet.dart';
+import 'collection_change_history_screen.dart';
 import 'global_play_history_screen.dart';
 import 'shake_pick_screen.dart';
 import '../widgets/add_item_manual_dialog.dart';
@@ -74,6 +77,7 @@ class HomeScreen extends StatefulWidget {
   final LegoBuildKind? fixedLegoKind;
   final TechSubcategory? fixedTechSubcategory;
   final Map<String, String>? pendingCatalogHit;
+
   /// Wishlist seule (évite la liste plate collection livres).
   final bool bookWishlistOnly;
 
@@ -119,7 +123,7 @@ class _HomeScreenState extends State<HomeScreen>
   bool _bggRatingEnrichInFlight = false;
   bool _wishlistMarketEnrichInFlight = false;
   bool _showOwnedExpansions = false;
-  Set<String> _boardgamePreferredLanguages = {'fr'};
+  int _gridMobileColumns = 3;
   final _reloadDebounce = DebouncedRunner();
   static const _reloadDebounceDelay = Duration(milliseconds: 300);
 
@@ -147,6 +151,7 @@ class _HomeScreenState extends State<HomeScreen>
     CollectionRefresh.instance.addListener(_scheduleReloadItemsFromDb);
     _reloadItemsFromDb();
     _loadFilterData();
+    unawaited(_loadGridDisplayPrefs());
     if (widget.pendingCatalogHit != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _openFromCatalogHit(widget.pendingCatalogHit!);
@@ -165,11 +170,20 @@ class _HomeScreenState extends State<HomeScreen>
     if (!_tabController.indexIsChanging &&
         _tabController.index == 1 &&
         widget.category == CollectionCategory.boardgame) {
-      final wishlist = _filterHubScope(_parseItems(_itemRows))
-          .where((i) => i.isWishlist)
-          .toList();
+      final wishlist = _filterHubScope(
+        _parseItems(_itemRows),
+      ).where((i) => i.isWishlist).toList();
       unawaited(_enrichWishlistMarketData(wishlist));
     }
+  }
+
+  Future<void> _loadGridDisplayPrefs() async {
+    await CollectionDisplayPreferences.instance.load();
+    if (!mounted) return;
+    setState(() {
+      _gridMobileColumns =
+          CollectionDisplayPreferences.instance.gridMobileColumns;
+    });
   }
 
   Future<void> _loadBoardgameDisplayPrefs() async {
@@ -178,8 +192,6 @@ class _HomeScreenState extends State<HomeScreen>
     setState(() {
       _showOwnedExpansions =
           BoardgameCollectionPreferences.instance.showOwnedExpansions;
-      _boardgamePreferredLanguages =
-          BoardgameCollectionPreferences.instance.preferredLanguages;
     });
   }
 
@@ -204,9 +216,9 @@ class _HomeScreenState extends State<HomeScreen>
         '${result.mergedCount} extension${result.mergedCount > 1 ? 's' : ''} rattachée${result.mergedCount > 1 ? 's' : ''}',
       );
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(parts.join(' · '))),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(parts.join(' · '))));
   }
 
   List<Map<String, dynamic>> _filterAndScopeRows(
@@ -231,8 +243,7 @@ class _HomeScreenState extends State<HomeScreen>
     return filtered;
   }
 
-  Color get _accentColor =>
-      widget.accentOverride ?? widget.category.color;
+  Color get _accentColor => widget.accentOverride ?? widget.category.color;
 
   void _openFromCatalogHit(Map<String, String> hit) {
     var meta = metadataFromCatalogHit(hit, widget.category);
@@ -304,10 +315,13 @@ class _HomeScreenState extends State<HomeScreen>
         .toList();
   }
 
-  List<CollectionItem> _hydrateExpansionFallbackStats(List<CollectionItem> items) {
+  List<CollectionItem> _hydrateExpansionFallbackStats(
+    List<CollectionItem> items,
+  ) {
     final byId = {for (final item in items) item.id: item};
     return items.map((item) {
-      if (!item.isExpansion && (item.parentGameId == null || item.parentGameId!.isEmpty)) {
+      if (!item.isExpansion &&
+          (item.parentGameId == null || item.parentGameId!.isEmpty)) {
         return item;
       }
       if ((item.minPlayers ?? item.maxPlayers ?? item.playingTime) != null) {
@@ -339,7 +353,7 @@ class _HomeScreenState extends State<HomeScreen>
           .toList();
       if (missing.isEmpty) return;
       await BoardgameMarketService.enrichWishlistBatch(missing);
-      if (mounted) await _reloadItemsFromDb();
+      if (mounted) _scheduleReloadItemsFromDb();
     } finally {
       _wishlistMarketEnrichInFlight = false;
     }
@@ -386,6 +400,7 @@ class _HomeScreenState extends State<HomeScreen>
           'bgg_avg_rating',
           'bgg_short_description',
           'bgg_best_players',
+          'bgg_gallery_urls',
         ]) {
           final v = details[key];
           if (v == null || meta[key] == v) continue;
@@ -399,8 +414,16 @@ class _HomeScreenState extends State<HomeScreen>
             .update({'metadata': meta})
             .eq('id', item.id);
         changed = true;
+        if (_enrichedItems != null) {
+          final idx = _enrichedItems!.indexWhere((i) => i.id == item.id);
+          if (idx >= 0) {
+            _enrichedItems![idx] = _enrichedItems![idx].copyWith(
+              metadata: meta,
+            );
+          }
+        }
       }
-      if (changed && mounted) _scheduleReloadItemsFromDb();
+      if (changed && mounted) setState(() {});
     } finally {
       _bggRatingEnrichInFlight = false;
     }
@@ -477,7 +500,9 @@ class _HomeScreenState extends State<HomeScreen>
 
     _showOptionsDialog(
       title: book['title']!,
-      imageUrl: book['image_url']?.isNotEmpty == true ? book['image_url'] : null,
+      imageUrl: book['image_url']?.isNotEmpty == true
+          ? book['image_url']
+          : null,
       subcategory: subcategory.dbValue,
       metadata: BookCatalogService.metadataFromLookup(book),
     );
@@ -519,6 +544,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
     if (confirm != true || !mounted) return;
 
+    await CollectionChangeHistoryService.instance.recordDeleted(item);
     if (item.category == CollectionCategory.boardgame) {
       await GlobalPlayHistoryService().archivePlaysFromDeletedItem(item);
     }
@@ -532,7 +558,9 @@ class _HomeScreenState extends State<HomeScreen>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          isGroup ? '« ${item.title} » retiré du groupe' : '« ${item.title} » supprimé',
+          isGroup
+              ? '« ${item.title} » retiré du groupe'
+              : '« ${item.title} » supprimé',
         ),
       ),
     );
@@ -540,6 +568,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   Future<void> _confirmBulkDeleteItems(List<CollectionItem> items) async {
     for (final item in items) {
+      await CollectionChangeHistoryService.instance.recordDeleted(item);
       if (item.category == CollectionCategory.boardgame) {
         await GlobalPlayHistoryService().archivePlaysFromDeletedItem(item);
       }
@@ -583,14 +612,11 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void _showCardAddChooser() {
-    final sub =
-        widget.fixedCardSubcategory ?? CardSubcategory.other;
+    final sub = widget.fixedCardSubcategory ?? CardSubcategory.other;
     final canSearch = CardCatalogService.supportsSearch(sub);
 
     if (!canSearch) {
-      _showManualAddFlow(
-        cardSubcategory: sub,
-      );
+      _showManualAddFlow(cardSubcategory: sub);
       return;
     }
 
@@ -606,9 +632,9 @@ class _HomeScreenState extends State<HomeScreen>
             children: [
               Text(
                 'Ajouter — ${sub.label}',
-                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
+                style: Theme.of(
+                  ctx,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 12),
               AddOptionTile(
@@ -648,7 +674,9 @@ class _HomeScreenState extends State<HomeScreen>
       if (card == null || !mounted) return;
       _showOptionsDialog(
         title: card['title']!,
-        imageUrl: card['image_url']?.isNotEmpty == true ? card['image_url'] : null,
+        imageUrl: card['image_url']?.isNotEmpty == true
+            ? card['image_url']
+            : null,
         subcategory: sub.dbValue,
         metadata: CardCatalogService.metadataFromResult(card, sub),
       );
@@ -670,9 +698,9 @@ class _HomeScreenState extends State<HomeScreen>
             children: [
               Text(
                 'Ajouter — ${format.label}',
-                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
+                style: Theme.of(
+                  ctx,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 12),
               AddOptionTile(
@@ -713,7 +741,9 @@ class _HomeScreenState extends State<HomeScreen>
       final meta = MediaCatalogService.metadataFromLookup(album, format);
       _showOptionsDialog(
         title: album['title']!,
-        imageUrl: album['image_url']?.isNotEmpty == true ? album['image_url'] : null,
+        imageUrl: album['image_url']?.isNotEmpty == true
+            ? album['image_url']
+            : null,
         metadata: meta,
       );
     });
@@ -736,9 +766,9 @@ class _HomeScreenState extends State<HomeScreen>
             children: [
               Text(
                 'Ajouter — $label',
-                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
+                style: Theme.of(
+                  ctx,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 12),
               AddOptionTile(
@@ -821,9 +851,8 @@ class _HomeScreenState extends State<HomeScreen>
           apiHint: LegoCatalogService.catalogLabel,
           search: LegoCatalogService.search,
           accent: _accentColor,
-          onManualEntry: () => _showManualAddFlow(
-            legoKind: widget.fixedLegoKind,
-          ),
+          onManualEntry: () =>
+              _showManualAddFlow(legoKind: widget.fixedLegoKind),
         ).then((hit) {
           if (hit != null && mounted) _openFromCatalogHit(hit);
         });
@@ -966,9 +995,7 @@ class _HomeScreenState extends State<HomeScreen>
     }
     final techSub = widget.fixedTechSubcategory;
     if (techSub != null) {
-      return items
-          .where((i) => i.subcategory == techSub.dbValue)
-          .toList();
+      return items.where((i) => i.subcategory == techSub.dbValue).toList();
     }
     return items;
   }
@@ -984,12 +1011,12 @@ class _HomeScreenState extends State<HomeScreen>
       builder: (context) => AddItemManualDialog(
         categoryLabel: widget.screenTitle ?? widget.category.label,
         category: widget.category,
-        initialCardSubcategory:
-            cardSubcategory ?? widget.fixedCardSubcategory,
+        initialCardSubcategory: cardSubcategory ?? widget.fixedCardSubcategory,
         initialMediaFormat: mediaFormat ?? widget.fixedMediaFormat,
         initialLegoKind: legoKind ?? widget.fixedLegoKind,
         initialTechSubcategory: techSubcategory ?? widget.fixedTechSubcategory,
-        lockSubcategory: widget.fixedCardSubcategory != null ||
+        lockSubcategory:
+            widget.fixedCardSubcategory != null ||
             widget.fixedMediaFormat != null ||
             widget.fixedLegoKind != null ||
             widget.fixedTechSubcategory != null,
@@ -1055,11 +1082,13 @@ class _HomeScreenState extends State<HomeScreen>
         .insert(payload)
         .select()
         .single();
+    final savedItem = CollectionItem.fromJson(
+      Map<String, dynamic>.from(inserted as Map),
+    );
+    await CollectionChangeHistoryService.instance.recordAdded(savedItem);
     final groupId = options.groupId;
     if (groupId != null && groupId.isNotEmpty && !options.isWishlist) {
-      final saved = CollectionItem.fromJson(
-        Map<String, dynamic>.from(inserted as Map),
-      ).copyWith(
+      final saved = savedItem.copyWith(
         metadata: Map<String, dynamic>.from(
           payload['metadata'] as Map? ?? {},
         ),
@@ -1142,6 +1171,7 @@ class _HomeScreenState extends State<HomeScreen>
             'bgg_short_description',
             'bgg_avg_rating',
             'bgg_best_players',
+            'bgg_gallery_urls',
           ]) {
             final v = bggDetails[key];
             if (v != null) meta[key] = v;
@@ -1190,8 +1220,9 @@ class _HomeScreenState extends State<HomeScreen>
               quantity: options.quantity,
               locationId: options.locationId,
               groupId: options.groupId,
-              locationUserId:
-                  options.isWishlist ? null : options.locationUserId,
+              locationUserId: options.isWishlist
+                  ? null
+                  : options.locationUserId,
               minPlayers: resolvedMin,
               maxPlayers: resolvedMax,
               playingTime: resolvedTime,
@@ -1241,24 +1272,24 @@ class _HomeScreenState extends State<HomeScreen>
         Navigator.pop(context);
       }
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     } on PostgrestException catch (e) {
       if (mounted) {
         final msg = ProfileService.isMissingProfileFk(e)
             ? ProfileService.missingProfileUserMessage()
             : 'Impossible d\'ajouter : $e';
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(msg)),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(msg)));
       }
       rethrow;
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Impossible d\'ajouter : $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Impossible d\'ajouter : $e')));
       }
       rethrow;
     }
@@ -1270,29 +1301,55 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   List<Widget> get _headerActions => [
-        IconButton(
-          icon: Icon(
-            _viewMode == CollectionViewMode.grid
-                ? Icons.view_list_rounded
-                : Icons.grid_view_rounded,
-            color: _onAccent,
-          ),
-          tooltip: _viewMode == CollectionViewMode.grid
-              ? 'Vue liste'
-              : 'Vue grille',
-          onPressed: () => setState(() {
-            _viewMode = _viewMode == CollectionViewMode.grid
-                ? CollectionViewMode.list
-                : CollectionViewMode.grid;
-          }),
+    if (_viewMode == CollectionViewMode.grid)
+      IconButton(
+        icon: Icon(
+          _gridMobileColumns == 2
+              ? Icons.view_agenda_outlined
+              : Icons.dashboard_outlined,
+          color: _onAccent,
         ),
-        if (widget.category.supportsOpenLibrarySearch)
-          IconButton(
-            icon: Icon(Icons.qr_code_scanner_rounded, color: _onAccent),
-            tooltip: 'Scanner ISBN',
-            onPressed: _scanIsbnAndAdd,
-          ),
-      ];
+        tooltip: _gridMobileColumns == 2
+            ? 'Grille dense (3 colonnes)'
+            : 'Grandes pochettes (2 colonnes)',
+        onPressed: () async {
+          await CollectionDisplayPreferences.instance.toggleGridMobileColumns();
+          if (!mounted) return;
+          setState(() {
+            _gridMobileColumns =
+                CollectionDisplayPreferences.instance.gridMobileColumns;
+          });
+        },
+      ),
+    IconButton(
+      icon: Icon(
+        _viewMode == CollectionViewMode.grid
+            ? Icons.view_list_rounded
+            : Icons.grid_on_rounded,
+        color: _onAccent,
+      ),
+      tooltip: _viewMode == CollectionViewMode.grid
+          ? 'Vue liste'
+          : 'Vue grille',
+      onPressed: () => setState(() {
+        _viewMode = _viewMode == CollectionViewMode.grid
+            ? CollectionViewMode.list
+            : CollectionViewMode.grid;
+      }),
+    ),
+    if (widget.category.supportsOpenLibrarySearch)
+      IconButton(
+        icon: Icon(Icons.qr_code_scanner_rounded, color: _onAccent),
+        tooltip: 'Scanner ISBN',
+        onPressed: _scanIsbnAndAdd,
+      ),
+  ];
+
+  double _headerPreferredHeight(BuildContext context) {
+    final top = MediaQuery.paddingOf(context).top;
+    // SafeArea in header + title + tabs + toolbar
+    return top + 40 + 36 + 36;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1313,107 +1370,134 @@ class _HomeScreenState extends State<HomeScreen>
     final title = widget.screenTitle ?? widget.category.label;
 
     return Scaffold(
-        floatingActionButton: FloatingActionButton(
-          onPressed: _onAddPressed,
-          backgroundColor: _accentColor,
-          foregroundColor: _onAccent,
-          tooltip: 'Ajouter',
-          child: const Icon(Icons.add_rounded),
-        ),
-        floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-        body: Column(
-          children: [
-            CategoryCollectionHeader(
-              category: widget.category,
-              title: title,
-              tabController: _tabController,
-              accentOverride: widget.accentOverride,
-              quickActions: _quickActions(),
-              extraActions: _headerActions,
+      floatingActionButton: FloatingActionButton(
+        onPressed: _onAddPressed,
+        backgroundColor: _accentColor,
+        foregroundColor: _onAccent,
+        tooltip: 'Ajouter',
+        child: const Icon(Icons.add_rounded),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      body: NestedScrollView(
+        floatHeaderSlivers: true,
+        headerSliverBuilder: (context, innerBoxIsScrolled) {
+          return [
+            SliverAppBar(
+              floating: true,
+              snap: true,
+              pinned: false,
+              primary: true,
+              forceElevated: innerBoxIsScrolled,
+              automaticallyImplyLeading: false,
+              backgroundColor: _accentColor,
+              elevation: 0,
+              scrolledUnderElevation: 0,
+              toolbarHeight: 0,
+              bottom: PreferredSize(
+                preferredSize: Size.fromHeight(_headerPreferredHeight(context)),
+                child: CategoryCollectionHeader(
+                  category: widget.category,
+                  title: title,
+                  tabController: _tabController,
+                  accentOverride: widget.accentOverride,
+                  quickActions: _quickActions(),
+                  extraActions: _headerActions,
+                ),
+              ),
             ),
-            Expanded(
-              child: _itemsLoading && _enrichedItems == null
-                  ? const Center(child: CircularProgressIndicator())
-                  : _buildCollectionTabs(),
-            ),
-          ],
-        ),
+          ];
+        },
+        body: _itemsLoading && _enrichedItems == null
+            ? const Center(child: CircularProgressIndicator())
+            : _buildCollectionTabs(),
+      ),
     );
   }
 
   List<CategoryQuickAction> _quickActions() {
     return switch (widget.category) {
       CollectionCategory.boardgame => [
-          CategoryQuickAction(
-            label: 'Tirage au sort',
-            icon: Icons.casino_outlined,
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (ctx) => const ShakePickScreen(
-                  category: CollectionCategory.boardgame,
-                ),
+        CategoryQuickAction(
+          label: 'Tirage au sort',
+          icon: Icons.casino_outlined,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (ctx) =>
+                  const ShakePickScreen(category: CollectionCategory.boardgame),
+            ),
+          ),
+        ),
+        CategoryQuickAction(
+          label: 'Historique parties',
+          icon: Icons.history_edu,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (ctx) => const GlobalPlayHistoryScreen(),
+            ),
+          ),
+        ),
+        CategoryQuickAction(
+          label: 'Historique collection',
+          icon: Icons.restore_rounded,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (ctx) => const CollectionChangeHistoryScreen(
+                category: CollectionCategory.boardgame,
               ),
             ),
           ),
-          CategoryQuickAction(
-            label: 'Historique parties',
-            icon: Icons.history_edu,
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (ctx) => const GlobalPlayHistoryScreen(),
-              ),
-            ),
-          ),
-        ],
+        ),
+      ],
       CollectionCategory.book => [
-          CategoryQuickAction(
-            label: 'Rechercher',
-            icon: Icons.menu_book_rounded,
-            onTap: _showBookSearchDialog,
-          ),
-          CategoryQuickAction(
-            label: 'Scan ISBN',
-            icon: Icons.qr_code_scanner_rounded,
-            onTap: _scanIsbnAndAdd,
-          ),
-        ],
+        CategoryQuickAction(
+          label: 'Rechercher',
+          icon: Icons.menu_book_rounded,
+          onTap: _showBookSearchDialog,
+        ),
+        CategoryQuickAction(
+          label: 'Scan ISBN',
+          icon: Icons.qr_code_scanner_rounded,
+          onTap: _scanIsbnAndAdd,
+        ),
+      ],
       CollectionCategory.card => [
-          CategoryQuickAction(
-            label: 'Chercher une carte',
-            icon: Icons.search_rounded,
-            onTap: _showCardAddChooser,
-          ),
-        ],
+        CategoryQuickAction(
+          label: 'Chercher une carte',
+          icon: Icons.search_rounded,
+          onTap: _showCardAddChooser,
+        ),
+      ],
       CollectionCategory.media => [
-          CategoryQuickAction(
-            label: 'Chercher / scanner',
-            icon: Icons.album_rounded,
-            onTap: _showMediaAddChooser,
-          ),
-        ],
+        CategoryQuickAction(
+          label: 'Chercher / scanner',
+          icon: Icons.album_rounded,
+          onTap: _showMediaAddChooser,
+        ),
+      ],
       CollectionCategory.movie => [
-          CategoryQuickAction(
-            label: 'Chercher',
-            icon: Icons.search_rounded,
-            onTap: _showMovieAddChooser,
-          ),
-        ],
+        CategoryQuickAction(
+          label: 'Chercher',
+          icon: Icons.search_rounded,
+          onTap: _showMovieAddChooser,
+        ),
+      ],
       CollectionCategory.videogame => [
-          CategoryQuickAction(
-            label: 'Chercher',
-            icon: Icons.search_rounded,
-            onTap: _showVideogameAddChooser,
-          ),
-        ],
+        CategoryQuickAction(
+          label: 'Chercher',
+          icon: Icons.search_rounded,
+          onTap: _showVideogameAddChooser,
+        ),
+      ],
       CollectionCategory.lego => [
-          CategoryQuickAction(
-            label: 'Chercher un set',
-            icon: Icons.search_rounded,
-            onTap: _showLegoAddChooser,
-          ),
-        ],
+        CategoryQuickAction(
+          label: 'Chercher un set',
+          icon: Icons.search_rounded,
+          onTap: _showLegoAddChooser,
+        ),
+      ],
       _ => const <CategoryQuickAction>[],
     };
   }
@@ -1499,8 +1583,8 @@ class _HomeScreenState extends State<HomeScreen>
           onBulkDeleteItems: _confirmBulkDeleteItems,
           onBggRatingSortEnrich: widget.category == CollectionCategory.boardgame
               ? () => _enrichBggRatingsForSort(
-                    _filterHubScope(_parseItems(_itemRows)),
-                  )
+                  _filterHubScope(_parseItems(_itemRows)),
+                )
               : null,
           showExpansionVisibilityToggle:
               widget.category == CollectionCategory.boardgame,
@@ -1511,13 +1595,7 @@ class _HomeScreenState extends State<HomeScreen>
             if (!mounted) return;
             setState(() => _showOwnedExpansions = v);
           },
-          boardgamePreferredLanguages: _boardgamePreferredLanguages,
-          onBoardgamePreferredLanguagesChanged: (langs) async {
-            await BoardgameCollectionPreferences.instance
-                .setPreferredLanguages(langs);
-            if (!mounted) return;
-            setState(() => _boardgamePreferredLanguages = langs);
-          },
+          gridMobileColumns: _gridMobileColumns,
         ),
         CategoryCollectionTabPane(
           category: widget.category,
@@ -1546,17 +1624,9 @@ class _HomeScreenState extends State<HomeScreen>
           onReload: _reloadItemsFromDb,
           onDeleteItem: _confirmDeleteItem,
           onBulkDeleteItems: _confirmBulkDeleteItems,
-          showWishlistBudgetBanner:
-              widget.category == CollectionCategory.boardgame,
           showWishlistSortOptions:
               widget.category == CollectionCategory.boardgame,
-          boardgamePreferredLanguages: _boardgamePreferredLanguages,
-          onBoardgamePreferredLanguagesChanged: (langs) async {
-            await BoardgameCollectionPreferences.instance
-                .setPreferredLanguages(langs);
-            if (!mounted) return;
-            setState(() => _boardgamePreferredLanguages = langs);
-          },
+          gridMobileColumns: _gridMobileColumns,
         ),
       ],
     );
@@ -1568,4 +1638,3 @@ int? _positivePlayingTime(dynamic value) {
   final parsed = int.tryParse('$value');
   return parsed != null && parsed > 0 ? parsed : null;
 }
-

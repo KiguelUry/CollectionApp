@@ -111,6 +111,7 @@ class CollectionListFilters {
       sort != CollectionSort.titleAsc;
 
   /// Filtres actifs hors tri (pour badge bouton Filtre).
+  /// `wishlistMineOnly` est un scope par défaut wishlist, pas un filtre « utilisateur ».
   bool get hasActiveFilterCriteria =>
       searchQuery.trim().isNotEmpty ||
       scope != CollectionScopeFilter.all ||
@@ -124,8 +125,7 @@ class CollectionListFilters {
       boardgameGenres.isNotEmpty ||
       cardRarities.isNotEmpty ||
       pokemonTypes.isNotEmpty ||
-      cardSubcategories.isNotEmpty ||
-      wishlistMineOnly;
+      cardSubcategories.isNotEmpty;
 
   CollectionListFilters copyWith({
     String? searchQuery,

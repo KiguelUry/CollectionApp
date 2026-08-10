@@ -114,8 +114,11 @@ class _BoardgameTileQuantitySheetState
       builder: (ctx) => AlertDialog(
         title: const Text('Wishlist'),
         content: const Text(
-          'Le jeu a été ajouté à ta collection.\n\n'
-          'Enlever cet objet de la wishlist ?',
+          'Un exemplaire a été ajouté en collection '
+          '(la fiche wishlist reste séparée).\n\n'
+          'Retirer aussi la ligne wishlist ?\n'
+          'Astuce : sur la fiche détail, « Je l’ai » convertit la wishlist '
+          'directement en collection.',
         ),
         actions: [
           TextButton(

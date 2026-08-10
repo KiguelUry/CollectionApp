@@ -17,15 +17,7 @@ class BoardgameMarketService {
   static const _siteName = 'collectingo.app';
   static const _historyMax = 40;
   static const _secondhandRatio = 0.52;
-  static const _preferredCountries = {
-    'FR',
-    'BE',
-    'NL',
-    'DE',
-    'GB',
-    'ES',
-    'IT',
-  };
+  static const _preferredCountries = {'FR', 'BE', 'NL', 'DE', 'GB', 'ES', 'IT'};
   static const _trustedStoreHosts = {
     'philibertnet.com',
     'ludum.fr',
@@ -89,8 +81,7 @@ class BoardgameMarketService {
       newMin: market.newMinEur,
     );
     if (nextHistory.isNotEmpty) {
-      patch[kMarketPriceHistory] =
-          nextHistory.map((e) => e.toJson()).toList();
+      patch[kMarketPriceHistory] = nextHistory.map((e) => e.toJson()).toList();
     }
 
     return patch;
@@ -103,7 +94,8 @@ class BoardgameMarketService {
     final fetchedAt = item.metadata?[kMarketPricesFetchedAt]?.toString();
     if (fetchedAt != null) {
       final at = DateTime.tryParse(fetchedAt);
-      final hasPrices = marketSecondhandPriceFromMetadata(item.metadata) != null ||
+      final hasPrices =
+          marketSecondhandPriceFromMetadata(item.metadata) != null ||
           marketNewPriceMinFromMetadata(item.metadata) != null;
       if (at != null &&
           hasPrices &&
@@ -112,10 +104,7 @@ class BoardgameMarketService {
       }
     }
 
-    final patch = await fetchMarketPatch(
-      bggId: bggId,
-      existing: item.metadata,
-    );
+    final patch = await fetchMarketPatch(bggId: bggId, existing: item.metadata);
     if (patch.isEmpty) return;
 
     final meta = mergeMarketMetadataPatch(item.metadata, patch);
@@ -126,7 +115,9 @@ class BoardgameMarketService {
     CollectionRefresh.instance.bump();
   }
 
-  static Future<void> enrichWishlistBatch(Iterable<CollectionItem> items) async {
+  static Future<void> enrichWishlistBatch(
+    Iterable<CollectionItem> items,
+  ) async {
     for (final item in items) {
       if (!item.isWishlist) continue;
       try {
@@ -167,11 +158,7 @@ class BoardgameMarketService {
     final base = SupabasePublicConfig.url.replaceAll(RegExp(r'/+$'), '');
     final anon = AppEnv.supabaseAnonKey;
     final uri = Uri.parse('$base/functions/v1/bgg-api').replace(
-      queryParameters: {
-        'action': 'prices',
-        'eid': bggId,
-        'apikey': anon,
-      },
+      queryParameters: {'action': 'prices', 'eid': bggId, 'apikey': anon},
     );
     final res = await http.get(uri, headers: {'apikey': anon});
     if (res.statusCode != 200) return null;
@@ -180,18 +167,14 @@ class BoardgameMarketService {
   }
 
   static Future<Map<String, dynamic>?> _fetchDirect(String bggId) async {
-    final uri = Uri.https(
-      'boardgameprices.com',
-      '/api/info',
-      {
-        'eid': bggId,
-        'currency': 'EUR',
-        'destination': 'FR',
-        'sitename': _siteName,
-        'locale': 'fr',
-        'sort': 'CHEAP2',
-      },
-    );
+    final uri = Uri.https('boardgameprices.com', '/api/info', {
+      'eid': bggId,
+      'currency': 'EUR',
+      'destination': 'FR',
+      'sitename': _siteName,
+      'locale': 'fr',
+      'sort': 'CHEAP2',
+    });
     final res = await http.get(uri);
     if (res.statusCode != 200) return null;
     final decoded = jsonDecode(res.body);
@@ -232,9 +215,7 @@ class BoardgameMarketService {
         final inStock = stock == 'Y';
         final country = p['country']?.toString();
         final link = p['link']?.toString();
-        if (link != null &&
-            link.isNotEmpty &&
-            !_isTrustedStore(link)) {
+        if (link != null && link.isNotEmpty && !_isTrustedStore(link)) {
           continue;
         }
         if (country != null &&
@@ -271,7 +252,9 @@ class BoardgameMarketService {
     }
 
     if (stores.isEmpty) return null;
-    stores.sort((a, b) => a.productEur?.compareTo(b.productEur ?? a.priceEur) ?? 0);
+    stores.sort(
+      (a, b) => a.productEur?.compareTo(b.productEur ?? a.priceEur) ?? 0,
+    );
 
     final deduped = <String, StorePriceEntry>{};
     for (final s in stores) {
@@ -280,9 +263,8 @@ class BoardgameMarketService {
     }
     var uniqueStores = deduped.values.toList()
       ..sort(
-        (a, b) => (a.productEur ?? a.priceEur).compareTo(
-          b.productEur ?? b.priceEur,
-        ),
+        (a, b) =>
+            (a.productEur ?? a.priceEur).compareTo(b.productEur ?? b.priceEur),
       );
     final filteredStores = uniqueStores
         .where(
@@ -297,8 +279,9 @@ class BoardgameMarketService {
     }
 
     final newMin = minInStock ?? minAny;
-    final secondhand =
-        newMin != null ? (newMin * _secondhandRatio * 10).round() / 10 : null;
+    final secondhand = newMin != null
+        ? (newMin * _secondhandRatio * 10).round() / 10
+        : null;
 
     return _MarketFetchResult(
       newMinEur: newMin,
@@ -316,8 +299,12 @@ class BoardgameMarketService {
   }
 
   static String vintedSearchUrl(String title) {
-    final q = Uri.encodeQueryComponent(title.trim());
-    return 'https://www.vinted.fr/catalog?search_text=$q';
+    // Vinted does not document a stable board-game catalog ID; keep only its
+    // public query parameters and never infer listings by scraping.
+    return Uri.https('www.vinted.fr', '/catalog', {
+      'search_text': title.trim(),
+      'order': 'relevance',
+    }).toString();
   }
 
   static String leboncoinSearchUrl(String title) {
@@ -326,7 +313,9 @@ class BoardgameMarketService {
   }
 
   static String _storeLabel({String? country, String? lang, String? url}) {
-    final host = url == null ? '' : (Uri.tryParse(url)?.host.toLowerCase() ?? '');
+    final host = url == null
+        ? ''
+        : (Uri.tryParse(url)?.host.toLowerCase() ?? '');
     if (host.contains('philibert')) return 'Philibert';
     if (host.contains('ludum')) return 'Ludum';
     if (host.contains('amazon')) return 'Amazon';

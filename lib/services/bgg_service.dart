@@ -50,18 +50,21 @@ class _BggThingMeta {
 
 class BggService {
   static const _maxSearchResults = 50;
+
   /// Moins d'appels /thing (limite BGG ~429 si trop de requêtes).
   static const _maxMetaLookup = 24;
   static const _thingChunkSize = 8;
   static const _maxPollAttempts = 10;
+
   /// Jeux de société + JDR narratifs (ex. Alice is Missing) + extensions.
   static const _searchTypes = 'boardgame,rpgitem,boardgameexpansion';
 
-  /// Sur le web : API JSON `bgg-api` (XML parsé côté serveur).
-  static bool get _useWebJsonApi => kIsWeb;
+  /// Prefer edge `bgg-api` when Supabase is configured (web + native).
+  /// Native XML direct hits BGG hard on search (no thumbs) and 429s easily.
+  static bool get _useWebJsonApi => _webProxyReady;
 
-  /// Recherche BGG : web via `bgg-api`, app native en direct.
-  static bool get supportsWebSearch => !_useWebJsonApi || _webProxyReady;
+  /// Recherche BGG via `bgg-api` si configuré, sinon XML natif.
+  static bool get supportsWebSearch => _useWebJsonApi || !kIsWeb;
 
   static bool get _webProxyReady {
     return AppEnv.supabaseUrl.isNotEmpty && AppEnv.supabaseAnonKey.isNotEmpty;
@@ -71,9 +74,9 @@ class BggService {
 
   static Uri _jsonApiUri(String action, Map<String, String> params) {
     final base = SupabasePublicConfig.url.replaceAll(RegExp(r'/+$'), '');
-    return Uri.parse('$base/functions/v1/bgg-api').replace(
-      queryParameters: {'action': action, ...params},
-    );
+    return Uri.parse(
+      '$base/functions/v1/bgg-api',
+    ).replace(queryParameters: {'action': action, ...params});
   }
 
   static Future<Map<String, dynamic>?> _jsonApiGet(
@@ -87,11 +90,12 @@ class BggService {
       // apikey en query + header suffit pour les Edge Functions publiques.
       final uri = _jsonApiUri(action, {
         ...params,
-        if (_useWebJsonApi) 'apikey': anon,
+        'apikey': anon,
       });
       final headers = <String, String>{
         'Accept': 'application/json',
-        if (_useWebJsonApi) 'apikey': anon,
+        'apikey': anon,
+        'Authorization': 'Bearer $anon',
       };
       final response = await http.get(uri, headers: headers);
       if (response.statusCode != 200 || response.body.isEmpty) {
@@ -130,6 +134,13 @@ class BggService {
               (map['thumbnail_url'] ?? '').isNotEmpty) {
             map['image_url'] = map['thumbnail_url']!;
           }
+          // BGG renvoie parfois des URLs protocol-relative.
+          for (final key in ['image_url', 'thumbnail_url']) {
+            final v = map[key];
+            if (v != null && v.startsWith('//')) {
+              map[key] = 'https:$v';
+            }
+          }
           return map;
         })
         .where((g) => g['id']?.isNotEmpty == true)
@@ -143,9 +154,7 @@ class BggService {
   static String? lastSearchStatus;
 
   /// Titres très courts que l’API search BGG rate souvent (clé = titre normalisé).
-  static const _knownBggIdByNormTitle = <String, String>{
-    'ra': '12',
-  };
+  static const _knownBggIdByNormTitle = <String, String>{'ra': '12'};
 
   static final _searchCache = <String, _CachedSearch>{};
   static const _searchCacheTtl = Duration(minutes: 15);
@@ -216,18 +225,14 @@ class BggService {
             'BGG surchargé — nouvel essai (${attempt + 1}/$_maxPollAttempts)…';
         lastSearchError =
             'BGG limite les requêtes (trop d’appels). Nouvel essai automatique…';
-        await Future.delayed(
-          Duration(milliseconds: 900 + attempt * 700),
-        );
+        await Future.delayed(Duration(milliseconds: 900 + attempt * 700));
         continue;
       }
-      final pending = last.statusCode == 202 ||
-          (last.statusCode == 200 &&
-              last.body.contains('Please try again'));
+      final pending =
+          last.statusCode == 202 ||
+          (last.statusCode == 200 && last.body.contains('Please try again'));
       if (!pending) return last;
-      await Future.delayed(
-        Duration(milliseconds: 400 + attempt * 250),
-      );
+      await Future.delayed(Duration(milliseconds: 400 + attempt * 250));
     }
     return last!;
   }
@@ -243,8 +248,11 @@ class BggService {
       final id = node.getAttribute('id') ?? '';
       if (id.isEmpty) continue;
       final year =
-          node.findElements('yearpublished').firstOrNull?.getAttribute('value') ??
-              '';
+          node
+              .findElements('yearpublished')
+              .firstOrNull
+              ?.getAttribute('value') ??
+          '';
       candidates.add({
         'id': id,
         'title': _primaryTitle(node),
@@ -256,9 +264,7 @@ class BggService {
   }
 
   static bool _isSearchableBggType(String type) =>
-      type == 'boardgame' ||
-      type == 'rpgitem' ||
-      type == 'boardgameexpansion';
+      type == 'boardgame' || type == 'rpgitem' || type == 'boardgameexpansion';
 
   static Iterable<String> _exactQueryVariants(String query) sync* {
     final t = query.trim();
@@ -299,8 +305,7 @@ class BggService {
   /// Recherche exacte jeux de société seuls (ex. « Ra » = id 12).
   static Future<List<Map<String, String>>> _fetchExactBoardgameCandidates(
     String query,
-  ) =>
-      _fetchExactSearchCandidates(query, type: 'boardgame');
+  ) => _fetchExactSearchCandidates(query, type: 'boardgame');
 
   static Future<List<Map<String, String>>> _fetchKnownTitleHits(
     String query,
@@ -453,9 +458,14 @@ class BggService {
     if (cached != null &&
         DateTime.now().difference(cached.at) < _searchCacheTtl) {
       lastSearchStatus = 'Résultats en cache (moins d’appels BGG)';
-      return cached.games
-          .map((g) => Map<String, String>.from(g))
-          .toList();
+      final games =
+          cached.games.map((g) => Map<String, String>.from(g)).toList();
+      final needsImages =
+          games.any((g) => (g['image_url'] ?? '').trim().isEmpty);
+      if (needsImages) {
+        return enrichGameMaps(games);
+      }
+      return games;
     }
 
     if (_useWebJsonApi) {
@@ -472,8 +482,9 @@ class BggService {
         return [];
       }
       final games = _gamesFromJsonList(data['games']);
-      if (games.isNotEmpty) {
-        _storeSearchCache(cacheKey, games);
+      final enriched = games.isEmpty ? games : await enrichGameMaps(games);
+      if (enriched.isNotEmpty) {
+        _storeSearchCache(cacheKey, enriched);
         if (data['cached'] == true) {
           lastSearchStatus = 'Résultats en cache (moins d’appels BGG)';
         } else {
@@ -482,17 +493,14 @@ class BggService {
       } else {
         lastSearchStatus = null;
       }
-      return games;
+      return enriched;
     }
 
     try {
       final candidates = await _fetchSearchCandidates(trimmed);
       if (candidates.isEmpty) return [];
 
-      sortByScore(
-        candidates,
-        (g) => titleRelevanceScore(g['title']!, trimmed),
-      );
+      sortByScore(candidates, (g) => titleRelevanceScore(g['title']!, trimmed));
 
       final top = candidates.take(_maxMetaLookup).toList();
       Map<String, _BggThingMeta> meta = {};
@@ -509,6 +517,8 @@ class BggService {
           if (m?.rank != null) 'bgg_rank': m!.rank.toString(),
           if (m?.thumbnail != null && m!.thumbnail!.isNotEmpty)
             'image_url': m.thumbnail!,
+          if (m?.avgRating != null)
+            'avg_rating': m!.avgRating!.toStringAsFixed(1),
         };
       }).toList();
 
@@ -555,8 +565,7 @@ class BggService {
   ) {
     int rankOf(Map<String, String> g) => meta[g['id']]?.rank ?? 999_999;
 
-    int yearOf(Map<String, String> g) =>
-        int.tryParse(g['year'] ?? '') ?? 0;
+    int yearOf(Map<String, String> g) => int.tryParse(g['year'] ?? '') ?? 0;
 
     switch (sort) {
       case BggSearchSort.recent:
@@ -569,21 +578,20 @@ class BggService {
         items.sort((a, b) {
           final r = rankOf(a).compareTo(rankOf(b));
           if (r != 0) return r;
-          return titleRelevanceScore(b['title']!, query)
-              .compareTo(titleRelevanceScore(a['title']!, query));
+          return titleRelevanceScore(
+            b['title']!,
+            query,
+          ).compareTo(titleRelevanceScore(a['title']!, query));
         });
       case BggSearchSort.smart:
-        sortByScore(
-          items,
-          (g) {
-            final rel = titleRelevanceScore(g['title']!, query);
-            final rank = rankOf(g);
-            final popularityBonus = rank < 999_999
-                ? (3000 - rank.clamp(0, 3000))
-                : 0;
-            return rel * 6 + popularityBonus;
-          },
-        );
+        sortByScore(items, (g) {
+          final rel = titleRelevanceScore(g['title']!, query);
+          final rank = rankOf(g);
+          final popularityBonus = rank < 999_999
+              ? (3000 - rank.clamp(0, 3000))
+              : 0;
+          return rel * 6 + popularityBonus;
+        });
     }
   }
 
@@ -611,8 +619,7 @@ class BggService {
 
     if (_hotCache != null &&
         _hotCacheAt != null &&
-        DateTime.now().difference(_hotCacheAt!) <
-            const Duration(minutes: 30)) {
+        DateTime.now().difference(_hotCacheAt!) < const Duration(minutes: 30)) {
       return _hotCache!;
     }
 
@@ -692,30 +699,33 @@ class BggService {
           if ((g['id'] ?? '').isNotEmpty) g['id']!: g,
       };
       return _fillMissingImages(
-        unique
-            .map((id) => byId[id] ?? {'id': id, 'title': ''})
-            .toList(),
+        unique.map((id) => byId[id] ?? {'id': id, 'title': ''}).toList(),
       );
     }
 
     final meta = await _fetchThingMeta(unique);
     return _fillMissingImages(
-      unique.map((id) {
-      final m = meta[id];
-      final imageUrl = (m?.image != null && m!.image!.isNotEmpty)
-          ? m.image!
-          : (m?.thumbnail ?? '');
-      return {
-        'id': id,
-        'title': m?.title ?? '',
-        if (m?.year != null && m!.year!.isNotEmpty) 'year': m.year!,
-        if (m?.rank != null) 'bgg_rank': m!.rank.toString(),
-        if (imageUrl.isNotEmpty) 'image_url': imageUrl,
-        if (m?.categories.isNotEmpty == true)
-          'bgg_categories': m!.categories.join('|'),
-        if (m?.avgRating != null) 'avg_rating': m!.avgRating!.toStringAsFixed(1),
-      };
-    }).where((g) => g['id']!.isNotEmpty).toList());
+      unique
+          .map((id) {
+            final m = meta[id];
+            final imageUrl = (m?.image != null && m!.image!.isNotEmpty)
+                ? m.image!
+                : (m?.thumbnail ?? '');
+            return {
+              'id': id,
+              'title': m?.title ?? '',
+              if (m?.year != null && m!.year!.isNotEmpty) 'year': m.year!,
+              if (m?.rank != null) 'bgg_rank': m!.rank.toString(),
+              if (imageUrl.isNotEmpty) 'image_url': imageUrl,
+              if (m?.categories.isNotEmpty == true)
+                'bgg_categories': m!.categories.join('|'),
+              if (m?.avgRating != null)
+                'avg_rating': m!.avgRating!.toStringAsFixed(1),
+            };
+          })
+          .where((g) => g['id']!.isNotEmpty)
+          .toList(),
+    );
   }
 
   /// Complète les couvertures via fiche BGG si meta/hot n'en ont pas.
@@ -777,7 +787,9 @@ class BggService {
           final avg = double.tryParse(g['avg_rating'] ?? '');
           result[id] = _BggThingMeta(
             rank: rank,
-            thumbnail: thumbAlt != null && thumbAlt.isNotEmpty ? thumbAlt : null,
+            thumbnail: thumbAlt != null && thumbAlt.isNotEmpty
+                ? thumbAlt
+                : null,
             image: imageUrl,
             title: title != null && title.isNotEmpty ? title : null,
             year: year != null && year.isNotEmpty ? year : null,
@@ -806,9 +818,9 @@ class BggService {
           final id = item.getAttribute('id');
           if (id == null) continue;
 
-          final rankEl = item.findAllElements('rank').where(
-            (r) => r.getAttribute('name') == 'boardgame',
-          );
+          final rankEl = item
+              .findAllElements('rank')
+              .where((r) => r.getAttribute('name') == 'boardgame');
           final rawRank = rankEl.isNotEmpty
               ? rankEl.first.getAttribute('value')
               : null;
@@ -817,14 +829,21 @@ class BggService {
             rank = int.tryParse(rawRank);
           }
 
-          final fullImage =
-              item.findAllElements('image').firstOrNull?.innerText;
-          final thumb = item.findAllElements('thumbnail').firstOrNull?.innerText;
+          final fullImage = item
+              .findAllElements('image')
+              .firstOrNull
+              ?.innerText;
+          final thumb = item
+              .findAllElements('thumbnail')
+              .firstOrNull
+              ?.innerText;
           final imageUrl = (fullImage != null && fullImage.isNotEmpty)
               ? fullImage
               : thumb;
-          final year =
-              item.findElements('yearpublished').firstOrNull?.getAttribute('value');
+          final year = item
+              .findElements('yearpublished')
+              .firstOrNull
+              ?.getAttribute('value');
           final categories = item
               .findAllElements('link')
               .where((l) => l.getAttribute('type') == 'boardgamecategory')
@@ -858,7 +877,7 @@ class BggService {
     return result;
   }
 
-  /// Complète rang BGG + vignettes manquantes (web via bgg-api/meta).
+  /// Complète rang, note communautaire et vignettes via l'API BGG.
   static Future<List<Map<String, String>>> enrichGameMaps(
     List<Map<String, String>> games,
   ) async {
@@ -869,8 +888,9 @@ class BggService {
       if (id.isEmpty) return false;
       final noImg = (g['image_url'] ?? '').isEmpty;
       final noRank = (g['bgg_rank'] ?? '').isEmpty;
+      final noRating = (g['avg_rating'] ?? '').isEmpty;
       final noTitle = (g['title'] ?? '').isEmpty;
-      return noImg || noRank || noTitle;
+      return noImg || noRank || noRating || noTitle;
     }).toList();
 
     if (needMeta.isEmpty) return games;
@@ -891,7 +911,9 @@ class BggService {
       }
       return {
         ...g,
-        if ((g['title'] ?? '').isEmpty && m.title != null && m.title!.isNotEmpty)
+        if ((g['title'] ?? '').isEmpty &&
+            m.title != null &&
+            m.title!.isNotEmpty)
           'title': m.title!,
         if ((g['year'] ?? '').isEmpty && m.year != null && m.year!.isNotEmpty)
           'year': m.year!,
@@ -910,6 +932,7 @@ class BggService {
     final image =
         item.findAllElements('image').firstOrNull?.innerText ??
         item.findAllElements('thumbnail').firstOrNull?.innerText;
+    final galleryUrls = _galleryUrlsFromThingItem(item, coverUrl: image);
 
     int? parseAttr(String tag) {
       final raw =
@@ -920,7 +943,8 @@ class BggService {
     final bggId = item.getAttribute('id');
     final year = parseAttr('yearpublished');
     final minAge = parseAttr('minage');
-    final playingTime = parseAttr('playingtime') ??
+    final playingTime =
+        parseAttr('playingtime') ??
         parseAttr('maxplaytime') ??
         parseAttr('minplaytime');
 
@@ -955,13 +979,16 @@ class BggService {
       item.findElements('description').firstOrNull?.innerText,
     );
     final bestPlayers = _parseBestPlayerCount(item);
-    final avgRaw =
-        item.findAllElements('average').firstOrNull?.getAttribute('value');
+    final avgRaw = item
+        .findAllElements('average')
+        .firstOrNull
+        ?.getAttribute('value');
     final avgRating = double.tryParse(avgRaw ?? '');
 
     return {
       'bgg_id': ?bggId,
       if (image != null && image.isNotEmpty) 'image_url': image,
+      if (galleryUrls.isNotEmpty) 'bgg_gallery_urls': galleryUrls,
       'year_published': ?year,
       'min_age': ?minAge,
       'min_players': parseAttr('minplayers'),
@@ -976,6 +1003,33 @@ class BggService {
       if (baseTitle != null && baseTitle.isNotEmpty)
         'base_game_title': baseTitle,
     };
+  }
+
+  /// XML API2 normally exposes the cover only; retain any additional image
+  /// URLs provided by an item or its links without requiring a gallery scrape.
+  static List<String> _galleryUrlsFromThingItem(
+    XmlElement item, {
+    String? coverUrl,
+  }) {
+    final urls = <String>{};
+
+    void addUrl(String? raw) {
+      final url = raw?.trim();
+      if (url != null && Uri.tryParse(url)?.hasScheme == true) {
+        urls.add(url);
+      }
+    }
+
+    addUrl(coverUrl);
+    for (final image in item.findAllElements('image')) {
+      addUrl(image.innerText);
+    }
+    for (final link in item.findAllElements('link')) {
+      addUrl(link.getAttribute('url'));
+      addUrl(link.getAttribute('href'));
+      addUrl(link.getAttribute('image'));
+    }
+    return urls.toList();
   }
 
   /// Fiche BGG du jeu (règles, fichiers, forum).
@@ -1047,8 +1101,7 @@ class BggService {
 
       for (final result in results.findElements('result')) {
         if (result.getAttribute('value') != 'Best') continue;
-        final votes =
-            int.tryParse(result.getAttribute('numvotes') ?? '') ?? 0;
+        final votes = int.tryParse(result.getAttribute('numvotes') ?? '') ?? 0;
         if (votes > maxVotes) {
           maxVotes = votes;
           bestCount = numPlayers;
@@ -1096,28 +1149,36 @@ class BggService {
   }
 
   /// Extensions BGG du jeu de base (`inbound="true"` sur le lien expansion).
-  static Future<List<BggExpansion>> fetchExpansions(String baseGameBggId) async {
+  static Future<List<BggExpansion>> fetchExpansions(
+    String baseGameBggId,
+  ) async {
     if (baseGameBggId.isEmpty) return [];
     if (_useWebJsonApi) {
       if (!_webProxyReady) return [];
       final data = await _jsonApiGet('expansions', {'id': baseGameBggId});
       final raw = data?['expansions'];
       if (raw is! List) return [];
-      return raw.whereType<Map>().map((e) {
-        return BggExpansion(
-          bggId: e['bggId']?.toString() ?? '',
-          title: e['title']?.toString() ?? '',
-          imageUrl: e['imageUrl']?.toString(),
-          year: e['year'] is int ? e['year'] as int : int.tryParse('${e['year']}'),
-          summary: e['summary']?.toString(),
-          bggRank: e['bggRank'] is int
-              ? e['bggRank'] as int
-              : int.tryParse('${e['bggRank']}'),
-          avgRating: e['avgRating'] is num
-              ? (e['avgRating'] as num).toDouble()
-              : double.tryParse('${e['avgRating']}'),
-        );
-      }).where((e) => e.bggId.isNotEmpty).toList();
+      return raw
+          .whereType<Map>()
+          .map((e) {
+            return BggExpansion(
+              bggId: e['bggId']?.toString() ?? '',
+              title: e['title']?.toString() ?? '',
+              imageUrl: e['imageUrl']?.toString(),
+              year: e['year'] is int
+                  ? e['year'] as int
+                  : int.tryParse('${e['year']}'),
+              summary: e['summary']?.toString(),
+              bggRank: e['bggRank'] is int
+                  ? e['bggRank'] as int
+                  : int.tryParse('${e['bggRank']}'),
+              avgRating: e['avgRating'] is num
+                  ? (e['avgRating'] as num).toDouble()
+                  : double.tryParse('${e['avgRating']}'),
+            );
+          })
+          .where((e) => e.bggId.isNotEmpty)
+          .toList();
     }
 
     try {
@@ -1167,13 +1228,15 @@ class BggService {
           final image =
               item.findAllElements('image').firstOrNull?.innerText ??
               item.findAllElements('thumbnail').firstOrNull?.innerText;
-          final yearRaw =
-              item.findElements('yearpublished').firstOrNull?.getAttribute('value');
+          final yearRaw = item
+              .findElements('yearpublished')
+              .firstOrNull
+              ?.getAttribute('value');
           final year = int.tryParse(yearRaw ?? '');
 
-          final rankEl = item.findAllElements('rank').where(
-            (r) => r.getAttribute('name') == 'boardgame',
-          );
+          final rankEl = item
+              .findAllElements('rank')
+              .where((r) => r.getAttribute('name') == 'boardgame');
           final rawRank = rankEl.isNotEmpty
               ? rankEl.first.getAttribute('value')
               : null;
@@ -1182,8 +1245,10 @@ class BggService {
             rank = int.tryParse(rawRank);
           }
 
-          final avgRaw =
-              item.findAllElements('average').firstOrNull?.getAttribute('value');
+          final avgRaw = item
+              .findAllElements('average')
+              .firstOrNull
+              ?.getAttribute('value');
           final avgRating = double.tryParse(avgRaw ?? '');
 
           expansions.add(
@@ -1194,8 +1259,7 @@ class BggService {
               year: year,
               summary: _expansionSummary(item),
               bggRank: rank,
-              avgRating:
-                  avgRating != null && avgRating > 0 ? avgRating : null,
+              avgRating: avgRating != null && avgRating > 0 ? avgRating : null,
             ),
           );
         }
@@ -1232,7 +1296,9 @@ class BggService {
     return null;
   }
 
-  static Future<Map<String, dynamic>?> _fetchThingXmlDetails(String bggId) async {
+  static Future<Map<String, dynamic>?> _fetchThingXmlDetails(
+    String bggId,
+  ) async {
     final url = Uri.https('boardgamegeek.com', '/xmlapi2/thing', {
       'id': bggId,
       'stats': '1',

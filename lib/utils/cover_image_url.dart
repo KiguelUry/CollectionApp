@@ -23,7 +23,10 @@ String openLibraryAuthorPhotoUrl(String authorOlid, {CoverSize size = CoverSize.
 
 /// Choisit une URL plus nette pour l'affichage (listes vs fiche détail).
 String coverUrlForDisplay(String url, {required bool large}) {
-  var resolved = url;
+  var resolved = url.trim();
+  if (resolved.startsWith('//')) {
+    resolved = 'https:$resolved';
+  }
 
   // Grilles / listes : vignettes BGG plus légères.
   if (!large && resolved.contains('geekdo-images.com') &&

@@ -96,7 +96,10 @@ class _BggSearchDialogState extends State<BggSearchDialog> {
       }
     });
 
-    final res = await BggService.searchGames(query, sort: _sort);
+    final searched = await BggService.searchGames(query, sort: _sort);
+    // Les réponses /search n'incluent pas toujours les statistiques. Complète
+    // le lot visible via /thing?stats=1 avant de l'afficher.
+    final res = await BggService.enrichGameMaps(searched);
     statusPoll.cancel();
     if (!mounted || generation != _searchGeneration) return;
 
@@ -299,8 +302,11 @@ class _BggSearchDialogState extends State<BggSearchDialog> {
             padding: const EdgeInsets.only(top: 8, bottom: 4),
             child: Row(
               children: [
-                Icon(Icons.local_fire_department,
-                    size: 18, color: Colors.orange.shade700),
+                Icon(
+                  Icons.local_fire_department,
+                  size: 18,
+                  color: Colors.orange.shade700,
+                ),
                 const SizedBox(width: 6),
                 Text(
                   'Tendances BGG',
@@ -344,17 +350,43 @@ class _BggSearchDialogState extends State<BggSearchDialog> {
     final hotRank = game['hot_rank'];
     final year = game['year'];
     final imageUrl = game['image_url'];
+    final avgRating = game['avg_rating'];
 
-    final subtitle = isHot
-        ? [
-            if (hotRank != null) 'Tendance #$hotRank',
-            if (year != null && year.isNotEmpty) year,
-          ].join(' · ')
-        : [
-            if (game['bgg_type'] == 'rpgitem') 'Jeu de rôle narratif',
-            if (bggRank != null) '#$bggRank sur BGG',
-            if (year != null && year.isNotEmpty) year,
-          ].where((s) => s.isNotEmpty).join(' · ');
+    final Widget? subtitle;
+    if (isHot) {
+      final line1 = [
+        if (hotRank != null) 'Tendance #$hotRank',
+        if (year != null && year.isNotEmpty) year,
+      ].join(' · ');
+      final line2 = (avgRating != null && avgRating.isNotEmpty)
+          ? '★ $avgRating'
+          : null;
+      subtitle = line1.isEmpty && line2 == null
+          ? null
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (line1.isNotEmpty)
+                  Text(line1, style: TextStyle(color: Colors.grey.shade700)),
+                if (line2 != null)
+                  Text(
+                    line2,
+                    style: TextStyle(
+                      color: Colors.amber.shade800,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+              ],
+            );
+    } else {
+      final text = [
+        if (game['bgg_type'] == 'rpgitem') 'Jeu de rôle narratif',
+        if (avgRating != null && avgRating.isNotEmpty) '★ $avgRating',
+        if (bggRank != null) '#$bggRank sur BGG',
+        if (year != null && year.isNotEmpty) year,
+      ].where((s) => s.isNotEmpty).join(' · ');
+      subtitle = text.isEmpty ? null : Text(text);
+    }
 
     return ListTile(
       leading: _buildLeading(
@@ -364,7 +396,7 @@ class _BggSearchDialogState extends State<BggSearchDialog> {
         bggRank: bggRank,
       ),
       title: Text(game['title']!),
-      subtitle: subtitle.isEmpty ? null : Text(subtitle),
+      subtitle: subtitle,
       onTap: () => widget.onGameSelected(game),
     );
   }

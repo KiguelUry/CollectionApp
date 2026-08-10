@@ -24,6 +24,7 @@ import '../widgets/assign_book_series_sheet.dart';
 import '../widgets/item_tags_editor.dart';
 import '../widgets/boardgame_expansions_section.dart';
 import '../widgets/bgg_community_rating_panel.dart';
+import '../widgets/bgg_network_image.dart';
 import '../models/boardgame_play_session.dart';
 import '../widgets/boardgame_play_history_panel.dart';
 import '../widgets/collapsible_section.dart';
@@ -42,6 +43,7 @@ import '../utils/boardgame_expansion_flow.dart';
 import '../utils/boardgame_expansions.dart';
 import '../services/bgg_service.dart';
 import '../services/global_play_history_service.dart';
+import '../services/collection_change_history_service.dart';
 import '../utils/copy_friend_item.dart';
 import '../utils/friend_item_overlap.dart';
 import '../utils/whereabouts_apply.dart';
@@ -49,6 +51,7 @@ import '../utils/whereabouts_persistence.dart';
 import '../utils/owned_quantity_index.dart';
 import '../utils/navigate_to_card_set.dart';
 import '../utils/wishlist_promote.dart';
+import '../utils/app_page_route.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class ItemDetailScreen extends StatefulWidget {
@@ -100,8 +103,8 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
   void initState() {
     super.initState();
     _item = widget.item;
-    _ownedDisplayQty = widget.ownedQuantity ??
-        (_item.isWishlist ? 0 : _item.quantity);
+    _ownedDisplayQty =
+        widget.ownedQuantity ?? (_item.isWishlist ? 0 : _item.quantity);
     _condition = _item.itemCondition;
     _reviewController = TextEditingController(text: _item.review ?? '');
     _priceController = TextEditingController(
@@ -143,7 +146,9 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     try {
       final rows = await Supabase.instance.client
           .from('collection_items')
-          .select('title, category, subcategory, metadata, quantity, is_wishlist, is_sold')
+          .select(
+            'title, category, subcategory, metadata, quantity, is_wishlist, is_sold',
+          )
           .eq('category', _item.category.dbValue);
       final items = (rows as List)
           .map((r) => CollectionItem.fromJson(Map<String, dynamic>.from(r)))
@@ -169,9 +174,14 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     }
 
     final shortFromMeta = meta?['bgg_short_description']?.toString().trim();
+    final galleryFromMeta = _bggGalleryUrls(meta);
     if (shortFromMeta != null && shortFromMeta.isNotEmpty) {
       if (mounted) setState(() => _bggDescription = shortFromMeta);
-      if (bestFromMeta != null && avgFromMeta != null) return;
+      if (bestFromMeta != null &&
+          avgFromMeta != null &&
+          galleryFromMeta.isNotEmpty) {
+        return;
+      }
     }
 
     final bggId = meta?['bgg_id']?.toString();
@@ -205,6 +215,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       'bgg_short_description',
       'bgg_avg_rating',
       'bgg_best_players',
+      'bgg_gallery_urls',
     ]) {
       final v = details[key];
       if (v == null) continue;
@@ -274,9 +285,8 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       ),
                       child: Text(
                         'Choisir un ou plusieurs groupes',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.bold),
                       ),
                     ),
                     Flexible(
@@ -351,6 +361,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
         } else {
           _item = reloaded;
         }
+        _ownedDisplayQty = _item.isWishlist ? 0 : _item.quantity.clamp(0, 9999);
         _syncGroupSelectionFromItem();
       });
     }
@@ -368,10 +379,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     // Répare les anciennes lignes avec group_ids sans group_id en base.
     if (_item.groupId == null && _selectedGroupIds.isNotEmpty) {
       final first = _selectedGroupIds.first;
-      _item = _item.copyWith(
-        groupId: first,
-        groupName: _groupNameById(first),
-      );
+      _item = _item.copyWith(groupId: first, groupName: _groupNameById(first));
     }
   }
 
@@ -535,12 +543,15 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
           SnackBar(content: Text('« ${_item.title} » est dans ta collection')),
         );
         await _reloadItem();
+        if (mounted && !_item.isWishlist && _ownedDisplayQty < 1) {
+          setState(() => _ownedDisplayQty = 1);
+        }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erreur : $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Erreur : $e')));
       }
     }
   }
@@ -573,9 +584,9 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erreur : $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Erreur : $e')));
       }
     }
   }
@@ -585,9 +596,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Objet rendu ?'),
-        content: Text(
-          'Confirmer que « ${_item.title} » est de retour ?',
-        ),
+        content: Text('Confirmer que « ${_item.title} » est de retour ?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -606,15 +615,15 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       final updated = await _loanService.returnItem(_item.id);
       if (mounted) {
         setState(() => _item = updated);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Prêt clôturé')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Prêt clôturé')));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erreur : $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Erreur : $e')));
       }
     }
   }
@@ -648,6 +657,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     );
     if (confirm != true || !mounted) return;
 
+    await CollectionChangeHistoryService.instance.recordDeleted(_item);
     if (_item.category == CollectionCategory.boardgame) {
       await GlobalPlayHistoryService().archivePlaysFromDeletedItem(_item);
     }
@@ -668,7 +678,8 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     final isCard = _item.category == CollectionCategory.card;
     final isTech = _item.category == CollectionCategory.tech;
     final cardSetName = _item.metadata?['set_name']?.toString().trim();
-    final canOpenSet = isCard &&
+    final canOpenSet =
+        isCard &&
         _item.cardSubcategory?.hasSetBrowser == true &&
         (_item.metadata?['set_id']?.toString().trim().isNotEmpty ?? false);
     final ro = widget.readOnly;
@@ -726,21 +737,24 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                   GestureDetector(
                     onTap: _item.imageUrl != null
                         ? () => showCoverPreview(
-                              context,
-                              imageUrl: _item.imageUrl,
-                              title: _item.title,
-                              bookCover: isBook,
-                            )
+                            context,
+                            imageUrl: _item.imageUrl,
+                            title: _item.title,
+                            bookCover: isBook,
+                          )
                         : null,
                     child: _item.imageUrl != null
-                        ? SizedBox.expand(
-                            child: CollectionCoverImage(
-                              url: _item.imageUrl!,
-                              height: 280,
-                              bookCover: isBook,
-                              boxedCover: isBook || isBoardgame || isCard,
-                              largeSource: true,
-                              fit: BoxFit.contain,
+                        ? Hero(
+                            tag: collectionCoverHeroTag(_item.id),
+                            child: SizedBox.expand(
+                              child: CollectionCoverImage(
+                                url: _item.imageUrl!,
+                                height: 280,
+                                bookCover: isBook,
+                                boxedCover: isBook || isBoardgame || isCard,
+                                largeSource: true,
+                                fit: BoxFit.contain,
+                              ),
                             ),
                           )
                         : Container(color: _item.category.color),
@@ -772,7 +786,10 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                           padding: const EdgeInsets.all(12),
                           child: Row(
                             children: [
-                              Icon(Icons.visibility, color: Colors.blue.shade700),
+                              Icon(
+                                Icons.visibility,
+                                color: Colors.blue.shade700,
+                              ),
                               const SizedBox(width: 10),
                               Expanded(
                                 child: Text(
@@ -788,13 +805,16 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                     Text(
                       _item.title,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            height: 1.25,
-                          ),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        height: 1.25,
+                      ),
                     ),
                     const SizedBox(height: 12),
-                    if (!ro && isBoardgame && _item.isExpansion && expansionOf != null) ...[
+                    if (!ro &&
+                        isBoardgame &&
+                        _item.isExpansion &&
+                        expansionOf != null) ...[
                       Card(
                         color: Colors.orange.shade50,
                         child: Padding(
@@ -812,9 +832,10 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                               const SizedBox(height: 8),
                               FilledButton.icon(
                                 onPressed: () async {
-                                  final base = await promoteOrphanExpansionToBase(
-                                    orphanExpansion: _item,
-                                  );
+                                  final base =
+                                      await promoteOrphanExpansionToBase(
+                                        orphanExpansion: _item,
+                                      );
                                   if (!mounted || base == null) return;
                                   if (!context.mounted) return;
                                   Navigator.pushReplacement(
@@ -826,7 +847,9 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                                   );
                                 },
                                 icon: const Icon(Icons.link),
-                                label: const Text('Ajouter / lier le jeu de base'),
+                                label: const Text(
+                                  'Ajouter / lier le jeu de base',
+                                ),
                               ),
                             ],
                           ),
@@ -838,7 +861,8 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         widget.friendOverlap != null &&
                         widget.friendOverlap != FriendOverlapKind.none)
                       Card(
-                        color: widget.friendOverlap ==
+                        color:
+                            widget.friendOverlap ==
                                 FriendOverlapKind.inCollection
                             ? Colors.green.shade50
                             : Colors.amber.shade50,
@@ -848,7 +872,8 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                                     FriendOverlapKind.inCollection
                                 ? Icons.check_circle_outline
                                 : Icons.favorite_border,
-                            color: widget.friendOverlap ==
+                            color:
+                                widget.friendOverlap ==
                                     FriendOverlapKind.inCollection
                                 ? Colors.green.shade700
                                 : Colors.amber.shade800,
@@ -875,7 +900,9 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         child: FilledButton.icon(
                           onPressed: _promoteFromWishlist,
                           icon: const Icon(Icons.check_circle),
-                          label: const Text('Je l\'ai — ajouter à ma collection'),
+                          label: const Text(
+                            'Je l\'ai — ajouter à ma collection',
+                          ),
                           style: FilledButton.styleFrom(
                             backgroundColor: Colors.green.shade700,
                             padding: const EdgeInsets.symmetric(vertical: 14),
@@ -1014,8 +1041,9 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                                 final count = parseBoardgamePlays(meta).length;
                                 setState(() {
                                   _item = _item.copyWith(metadata: meta);
-                                  _gamesPlayedController.text =
-                                      count > 0 ? count.toString() : '';
+                                  _gamesPlayedController.text = count > 0
+                                      ? count.toString()
+                                      : '';
                                 });
                                 _saveNow();
                               },
@@ -1044,7 +1072,8 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         ),
                       ),
                     ],
-                    if (isBoardgame && BoardgameExpansionService.itemActsAsBase(_item))
+                    if (isBoardgame &&
+                        BoardgameExpansionService.itemActsAsBase(_item))
                       CollapsibleSection(
                         title: 'Extensions',
                         accentColor: _item.category.color,
@@ -1071,8 +1100,9 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                                     if (!mounted) return;
                                     if (_groups.isEmpty) {
                                       if (!context.mounted) return;
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
                                         const SnackBar(
                                           content: Text(
                                             'Crée d\'abord un groupe dans le menu « Groupes »',
@@ -1088,12 +1118,15 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                                     if (picked.isEmpty) {
                                       setState(() {
                                         _selectedGroupIds = {};
-                                        _item = _item.copyWith(clearGroup: true);
+                                        _item = _item.copyWith(
+                                          clearGroup: true,
+                                        );
                                       });
                                     } else {
                                       final first = picked.first;
-                                      final g = _groups
-                                          .firstWhere((x) => x.id == first);
+                                      final g = _groups.firstWhere(
+                                        (x) => x.id == first,
+                                      );
                                       setState(() {
                                         _selectedGroupIds = picked;
                                         _item = _item.copyWith(
@@ -1108,7 +1141,10 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                                     }
                                     _saveNow();
                                   },
-                                  icon: const Icon(Icons.group_outlined, size: 18),
+                                  icon: const Icon(
+                                    Icons.group_outlined,
+                                    size: 18,
+                                  ),
                                   label: const Text('Gestion des groupes'),
                                 ),
                               ),
@@ -1138,25 +1174,27 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                               holderLabel: _item.locationLabel,
                               readOnly: ro,
                               applyDefaultIfEmpty: !itemHasManualHolder(_item),
-                              onChanged: ({
-                                locationUserId,
-                                holderLabel,
-                                clearHolder = false,
-                                manualHolder = false,
-                              }) {
-                                setState(() {
-                                  _item = applyWhereaboutsChange(
-                                    _item,
-                                    locationUserId: locationUserId,
-                                    holderLabel: holderLabel,
-                                    clearHolder: clearHolder,
-                                    manualHolder: manualHolder,
-                                  );
-                                });
-                                if (manualHolder || locationUserId != null) {
-                                  _saveNow();
-                                }
-                              },
+                              onChanged:
+                                  ({
+                                    locationUserId,
+                                    holderLabel,
+                                    clearHolder = false,
+                                    manualHolder = false,
+                                  }) {
+                                    setState(() {
+                                      _item = applyWhereaboutsChange(
+                                        _item,
+                                        locationUserId: locationUserId,
+                                        holderLabel: holderLabel,
+                                        clearHolder: clearHolder,
+                                        manualHolder: manualHolder,
+                                      );
+                                    });
+                                    if (manualHolder ||
+                                        locationUserId != null) {
+                                      _saveNow();
+                                    }
+                                  },
                             ),
                           ],
                         ),
@@ -1170,7 +1208,9 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         onChanged: ro
                             ? null
                             : (v) {
-                                setState(() => _item = _item.copyWith(isRead: v));
+                                setState(
+                                  () => _item = _item.copyWith(isRead: v),
+                                );
                                 _saveNow();
                               },
                       ),
@@ -1213,14 +1253,17 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                             metadata: _item.metadata,
                             readOnly: ro,
                             onMetadataChanged: (meta) {
-                              setState(() => _item = _item.copyWith(metadata: meta));
+                              setState(
+                                () => _item = _item.copyWith(metadata: meta),
+                              );
                               _saveNow();
                             },
                           ),
                           if (isBoardgame) ...[
                             const SizedBox(height: 16),
                             BggCommunityRatingPanel(
-                              avgRating: _bggAvgRating ??
+                              avgRating:
+                                  _bggAvgRating ??
                                   parseBggAvgRating(
                                     _item.metadata?['bgg_avg_rating'],
                                   ),
@@ -1238,8 +1281,8 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         !isWishlist) ...[
                       const SizedBox(height: 16),
                       DiscogsMarketValueCard(
-                        releaseId:
-                            _item.metadata?['discogs_release_id']?.toString(),
+                        releaseId: _item.metadata?['discogs_release_id']
+                            ?.toString(),
                         artist: _item.metadata?['artist']?.toString(),
                         albumTitle: _item.title,
                       ),
@@ -1250,92 +1293,92 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       RestaurantVisitsPanel(item: _item),
                     ],
                     if (!ro && !_item.isGroupOwned) ...[
-                    const Divider(height: 28),
-                    _buildSectionTitle('Prêt'),
-                    if (_item.isOnLoan) ...[
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: Icon(
-                          Icons.handshake,
-                          color: Colors.blue.shade700,
+                      const Divider(height: 28),
+                      _buildSectionTitle('Prêt'),
+                      if (_item.isOnLoan) ...[
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(
+                            Icons.handshake,
+                            color: Colors.blue.shade700,
+                          ),
+                          title: Text('Prêté à ${_item.loaneeDisplayName}'),
+                          subtitle: Text(
+                            [
+                              if (_loanSinceLabel() != null) _loanSinceLabel()!,
+                              if (_item.loanedToId != null) 'Ami sur l\'app',
+                              if (_item.loanedToId == null) 'Hors app',
+                            ].join(' · '),
+                          ),
                         ),
-                        title: Text('Prêté à ${_item.loaneeDisplayName}'),
-                        subtitle: Text(
-                          [
-                            if (_loanSinceLabel() != null) _loanSinceLabel()!,
-                            if (_item.loanedToId != null) 'Ami sur l\'app',
-                            if (_item.loanedToId == null) 'Hors app',
-                          ].join(' · '),
+                        OutlinedButton.icon(
+                          onPressed: _returnLoan,
+                          icon: const Icon(Icons.undo),
+                          label: const Text('Marquer comme rendu'),
                         ),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: _returnLoan,
-                        icon: const Icon(Icons.undo),
-                        label: const Text('Marquer comme rendu'),
-                      ),
-                    ] else if (!_item.isSold && ownedQty > 0)
-                      FilledButton.icon(
-                        onPressed: _lend,
-                        icon: const Icon(Icons.handshake_outlined),
-                        label: const Text('Prêter cet objet'),
-                      )
-                    else
-                      Text(
-                        ownedQty == 0
-                            ? 'Tu ne peux pas prêter un objet que tu ne possèdes pas.'
-                            : 'Les objets en wishlist ou vendus ne peuvent pas être prêtés.',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.grey.shade600,
+                      ] else if (!_item.isSold && ownedQty > 0)
+                        FilledButton.icon(
+                          onPressed: _lend,
+                          icon: const Icon(Icons.handshake_outlined),
+                          label: const Text('Prêter cet objet'),
+                        )
+                      else
+                        Text(
+                          ownedQty == 0
+                              ? 'Tu ne peux pas prêter un objet que tu ne possèdes pas.'
+                              : 'Les objets en wishlist ou vendus ne peuvent pas être prêtés.',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey.shade600,
+                          ),
                         ),
-                      ),
                     ],
                     if (!ro && !isWishlist && ownedQty > 0) ...[
-                    CollapsibleSection(
-                      title: 'Doubles & vente',
-                      accentColor: _item.category.color,
-                      initiallyExpanded: false,
-                      child: Column(
-                        children: [
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('À vendre / échanger'),
-                      subtitle: const Text(
-                        'Apparaît dans l\'onglet « À vendre »',
+                      CollapsibleSection(
+                        title: 'Doubles & vente',
+                        accentColor: _item.category.color,
+                        initiallyExpanded: false,
+                        child: Column(
+                          children: [
+                            SwitchListTile(
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text('À vendre / échanger'),
+                              subtitle: const Text(
+                                'Apparaît dans l\'onglet « À vendre »',
+                              ),
+                              value: _item.isForSale && !_item.isSold,
+                              onChanged: _item.isSold
+                                  ? null
+                                  : (v) {
+                                      setState(() {
+                                        _item = _item.copyWith(
+                                          isForSale: v,
+                                          isSold: false,
+                                        );
+                                      });
+                                      _saveNow();
+                                    },
+                            ),
+                            SwitchListTile(
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text('Marquer comme vendu'),
+                              subtitle: const Text(
+                                'Retire de la collection active, tuile grisée dans l\'historique',
+                              ),
+                              value: _item.isSold,
+                              onChanged: (v) {
+                                setState(() {
+                                  _item = _item.copyWith(
+                                    isSold: v,
+                                    isForSale: v ? false : _item.isForSale,
+                                  );
+                                });
+                                _saveNow();
+                              },
+                            ),
+                          ],
+                        ),
                       ),
-                      value: _item.isForSale && !_item.isSold,
-                      onChanged: _item.isSold
-                          ? null
-                          : (v) {
-                              setState(() {
-                                _item = _item.copyWith(
-                                  isForSale: v,
-                                  isSold: false,
-                                );
-                              });
-                              _saveNow();
-                            },
-                    ),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Marquer comme vendu'),
-                      subtitle: const Text(
-                        'Retire de la collection active, tuile grisée dans l\'historique',
-                      ),
-                      value: _item.isSold,
-                      onChanged: (v) {
-                        setState(() {
-                          _item = _item.copyWith(
-                            isSold: v,
-                            isForSale: v ? false : _item.isForSale,
-                          );
-                        });
-                        _saveNow();
-                      },
-                    ),
-                        ],
-                      ),
-                    ),
                     ],
                     if (isWishlist && isBoardgame) ...[
                       const Divider(height: 28),
@@ -1349,100 +1392,102 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       ),
                     ],
                     if (!isWishlist || isTech) ...[
-                    CollapsibleSection(
-                      title: isTech ? 'Budget & garantie' : 'Valeur & état',
-                      accentColor: _item.category.color,
-                      initiallyExpanded: isTech,
-                      child: Column(
-                        children: [
-                    if (isTech && _warrantyEnd != null) ...[
-                      _buildWarrantyAlert(),
-                      const SizedBox(height: 12),
-                    ],
-                    TextField(
-                      controller: _priceController,
-                      readOnly: ro,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      decoration: InputDecoration(
-                        labelText: isTech
-                            ? 'Prix d\'achat (€)'
-                            : 'Prix d\'achat (€)',
-                        border: const OutlineInputBorder(),
-                      ),
-                    ),
-                    if (isTech) ...[
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _merchantController,
-                        readOnly: ro,
-                        decoration: const InputDecoration(
-                          labelText: 'Marchand',
-                          hintText: 'LDLC, Amazon, Fnac…',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Fin de garantie'),
-                        subtitle: Text(
-                          _warrantyEnd == null
-                              ? 'Non renseignée'
-                              : warrantySubtitle(
-                                      '${_warrantyEnd!.year}-${_warrantyEnd!.month.toString().padLeft(2, '0')}-${_warrantyEnd!.day.toString().padLeft(2, '0')}') ??
-                                  'Date invalide',
-                        ),
-                        trailing: ro
-                            ? null
-                            : Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  if (_warrantyEnd != null)
-                                    IconButton(
-                                      tooltip: 'Effacer',
-                                      onPressed: _clearWarrantyEnd,
-                                      icon: const Icon(Icons.clear),
-                                    ),
-                                  IconButton(
-                                    tooltip: 'Choisir une date',
-                                    onPressed: _pickWarrantyEnd,
-                                    icon: const Icon(Icons.event),
+                      CollapsibleSection(
+                        title: isTech ? 'Budget & garantie' : 'Valeur & état',
+                        accentColor: _item.category.color,
+                        initiallyExpanded: isTech,
+                        child: Column(
+                          children: [
+                            if (isTech && _warrantyEnd != null) ...[
+                              _buildWarrantyAlert(),
+                              const SizedBox(height: 12),
+                            ],
+                            TextField(
+                              controller: _priceController,
+                              readOnly: ro,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
                                   ),
-                                ],
+                              decoration: InputDecoration(
+                                labelText: isTech
+                                    ? 'Prix d\'achat (€)'
+                                    : 'Prix d\'achat (€)',
+                                border: const OutlineInputBorder(),
                               ),
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<ItemCondition?>(
-                      initialValue: _condition,
-                      decoration: const InputDecoration(
-                        labelText: 'État',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: [
-                        const DropdownMenuItem<ItemCondition?>(
-                          value: null,
-                          child: Text('— Non renseigné —'),
+                            ),
+                            if (isTech) ...[
+                              const SizedBox(height: 12),
+                              TextField(
+                                controller: _merchantController,
+                                readOnly: ro,
+                                decoration: const InputDecoration(
+                                  labelText: 'Marchand',
+                                  hintText: 'LDLC, Amazon, Fnac…',
+                                  border: OutlineInputBorder(),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                title: const Text('Fin de garantie'),
+                                subtitle: Text(
+                                  _warrantyEnd == null
+                                      ? 'Non renseignée'
+                                      : warrantySubtitle(
+                                              '${_warrantyEnd!.year}-${_warrantyEnd!.month.toString().padLeft(2, '0')}-${_warrantyEnd!.day.toString().padLeft(2, '0')}',
+                                            ) ??
+                                            'Date invalide',
+                                ),
+                                trailing: ro
+                                    ? null
+                                    : Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          if (_warrantyEnd != null)
+                                            IconButton(
+                                              tooltip: 'Effacer',
+                                              onPressed: _clearWarrantyEnd,
+                                              icon: const Icon(Icons.clear),
+                                            ),
+                                          IconButton(
+                                            tooltip: 'Choisir une date',
+                                            onPressed: _pickWarrantyEnd,
+                                            icon: const Icon(Icons.event),
+                                          ),
+                                        ],
+                                      ),
+                              ),
+                            ],
+                            const SizedBox(height: 12),
+                            DropdownButtonFormField<ItemCondition?>(
+                              initialValue: _condition,
+                              decoration: const InputDecoration(
+                                labelText: 'État',
+                                border: OutlineInputBorder(),
+                              ),
+                              items: [
+                                const DropdownMenuItem<ItemCondition?>(
+                                  value: null,
+                                  child: Text('— Non renseigné —'),
+                                ),
+                                ...ItemCondition.values.map(
+                                  (c) => DropdownMenuItem(
+                                    value: c,
+                                    child: Text(c.label),
+                                  ),
+                                ),
+                              ],
+                              onChanged: ro
+                                  ? null
+                                  : (val) {
+                                      setState(() => _condition = val);
+                                      _scheduleSave();
+                                    },
+                            ),
+                          ],
                         ),
-                        ...ItemCondition.values.map(
-                          (c) => DropdownMenuItem(
-                            value: c,
-                            child: Text(c.label),
-                          ),
-                        ),
-                      ],
-                      onChanged: ro
-                          ? null
-                          : (val) {
-                              setState(() => _condition = val);
-                              _scheduleSave();
-                            },
-                    ),
-                        ],
                       ),
-                    ),
                     ],
                     if (!isBoardgame || isWishlist) ...[
                       const Divider(height: 28),
@@ -1476,18 +1521,68 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     }
 
     final text = _bggDescription;
-    if (text == null || text.isEmpty) return const SizedBox.shrink();
+    final galleryUrls = _bggGalleryUrls(_item.metadata);
+    if ((text == null || text.isEmpty) && galleryUrls.isEmpty) {
+      return const SizedBox.shrink();
+    }
 
-    return Text(
-      text,
-      maxLines: 3,
-      overflow: TextOverflow.ellipsis,
-      style: GoogleFonts.lora(
-        fontSize: 15,
-        height: 1.55,
-        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.85),
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (galleryUrls.length > 1) ...[
+          SizedBox(
+            height: 180,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: galleryUrls.length,
+              padding: const EdgeInsets.only(bottom: 4),
+              separatorBuilder: (_, _) => const SizedBox(width: 10),
+              itemBuilder: (context, index) => ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: AspectRatio(
+                  aspectRatio: 1.35,
+                  child: BggNetworkImage(url: galleryUrls[index]),
+                ),
+              ),
+            ),
+          ),
+          if (text != null && text.isNotEmpty) const SizedBox(height: 12),
+        ],
+        if (text != null && text.isNotEmpty)
+          Text(
+            text,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.lora(
+              fontSize: 15,
+              height: 1.55,
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurface.withValues(alpha: 0.85),
+            ),
+          ),
+      ],
     );
+  }
+
+  List<String> _bggGalleryUrls(Map<String, dynamic>? metadata) {
+    final raw = metadata?['bgg_gallery_urls'];
+    final urls = raw is List
+        ? raw
+              .map((url) => url.toString().trim())
+              .where((url) => Uri.tryParse(url)?.hasScheme == true)
+              .toSet()
+              .toList()
+        : <String>[];
+    if (urls.isEmpty) {
+      final cover = _item.imageUrl?.trim();
+      if (cover != null &&
+          cover.isNotEmpty &&
+          Uri.tryParse(cover)?.hasScheme == true) {
+        urls.add(cover);
+      }
+    }
+    return urls;
   }
 
   Widget _buildInformationsSection({
@@ -1508,8 +1603,8 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
 
     final extraRows = isBoardgame
         ? metadataRows
-            .where((r) => r.key != 'Parution' && r.key != 'Âge')
-            .toList()
+              .where((r) => r.key != 'Parution' && r.key != 'Âge')
+              .toList()
         : metadataRows;
 
     if (!isBoardgame && extraRows.isEmpty) {
@@ -1529,12 +1624,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     if (isBoardgame) {
       if (players != null) {
         boardTiles.add(
-          _infoTile(
-            Icons.people,
-            players,
-            boardAccent,
-            bestPlayersLabel,
-          ),
+          _infoTile(Icons.people, players, boardAccent, bestPlayersLabel),
         );
       }
       if (time != null) {
@@ -1578,17 +1668,11 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
             contentPadding: EdgeInsets.zero,
             title: Text(
               row.key,
-              style: TextStyle(
-                color: Colors.grey.shade600,
-                fontSize: 12,
-              ),
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
             ),
             subtitle: Text(
               row.value,
-              style: const TextStyle(
-                fontWeight: FontWeight.w500,
-                fontSize: 13,
-              ),
+              style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
             ),
           ),
         ),
@@ -1690,10 +1774,9 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w500,
-                color: Theme.of(context)
-                    .colorScheme
-                    .onSurface
-                    .withValues(alpha: 0.55),
+                color: Theme.of(
+                  context,
+                ).colorScheme.onSurface.withValues(alpha: 0.55),
               ),
             ),
           ],

@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../config/auth_redirect.dart';
 import 'profile_cache_service.dart';
 import 'profile_service.dart';
 
@@ -45,12 +46,29 @@ class AuthService {
     await ProfileCacheService.instance.clear();
   }
 
+  static final _emailRegex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+
   /// Envoie un e-mail de réinitialisation (lien Supabase Auth).
   Future<void> sendPasswordResetEmail(String email) async {
     final trimmed = email.trim();
     if (trimmed.isEmpty) {
       throw Exception('Indique l\'adresse e-mail du compte');
     }
-    await _supabase.auth.resetPasswordForEmail(trimmed);
+    if (!_emailRegex.hasMatch(trimmed)) {
+      throw Exception('L\'adresse e-mail n\'a pas l\'air correcte');
+    }
+    await _supabase.auth.resetPasswordForEmail(
+      trimmed,
+      redirectTo: AuthRedirectConfig.passwordResetRedirectTo(),
+    );
+  }
+
+  /// Après le lien de recovery : enregistre le nouveau mot de passe.
+  Future<void> updatePassword(String newPassword) async {
+    final trimmed = newPassword.trim();
+    if (trimmed.length < 6) {
+      throw Exception('Le mot de passe doit faire au moins 6 caractères');
+    }
+    await _supabase.auth.updateUser(UserAttributes(password: trimmed));
   }
 }

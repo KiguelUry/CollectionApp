@@ -3,6 +3,7 @@ import '../models/collection_category.dart';
 import '../models/collection_group.dart';
 import '../models/collection_item.dart';
 import '../utils/boardgame_display.dart';
+import '../utils/app_page_route.dart';
 import 'bgg_network_image.dart';
 import 'boardgame_tile_meta_icons.dart';
 import 'item_title_text.dart';
@@ -57,14 +58,18 @@ class CollectionItemListTile extends StatelessWidget {
                   width: 56,
                   height: 56,
                   child: item.imageUrl != null
-                      ? BggNetworkImage(
-                          key: ValueKey('${item.id}:${item.imageUrl}'),
-                          url: item.imageUrl!,
-                          width: 56,
-                          height: 56,
-                          bookCover: category == CollectionCategory.book,
-                          boxedCover: category == CollectionCategory.boardgame,
-                          compact: true,
+                      ? Hero(
+                          tag: collectionCoverHeroTag(item.id),
+                          child: BggNetworkImage(
+                            key: ValueKey('${item.id}:${item.imageUrl}'),
+                            url: item.imageUrl!,
+                            width: 56,
+                            height: 56,
+                            bookCover: category == CollectionCategory.book,
+                            boxedCover:
+                                category == CollectionCategory.boardgame,
+                            compact: true,
+                          ),
                         )
                       : ColoredBox(
                           color: category.color.withValues(alpha: 0.15),

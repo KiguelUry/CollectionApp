@@ -37,6 +37,7 @@ CollectionItem _itemFromGame(
       'bgg_short_description',
       'bgg_avg_rating',
       'bgg_best_players',
+      'bgg_gallery_urls',
     ]) {
       final v = details[key];
       if (v != null) meta[key] = v;
@@ -119,8 +120,15 @@ Future<bool> silentAddBoardgame(
         return true;
       }
     }
-    final item = _itemFromGame(game, details, isWishlist: false, userId: userId);
-    await client.from('collection_items').insert(
+    final item = _itemFromGame(
+      game,
+      details,
+      isWishlist: false,
+      userId: userId,
+    );
+    await client
+        .from('collection_items')
+        .insert(
           item.toInsertJson(
             isWishlist: false,
             locationUserId: userId,
@@ -159,7 +167,9 @@ Future<bool> silentAddBoardgameToWishlist(
     await ProfileService().ensureCurrentUserProfile();
     final details = await _resolveBggDetails(game);
     final item = _itemFromGame(game, details, isWishlist: true, userId: userId);
-    await client.from('collection_items').insert(
+    await client
+        .from('collection_items')
+        .insert(
           item.toInsertJson(
             isWishlist: true,
             locationUserId: null,
@@ -186,9 +196,7 @@ Future<bool> silentAddBoardgameToWishlist(
   }
 }
 
-Future<bool> silentRemoveBoardgame({
-  required BggCatalogGame game,
-}) async {
+Future<bool> silentRemoveBoardgame({required BggCatalogGame game}) async {
   final userId = Supabase.instance.client.auth.currentUser?.id;
   if (userId == null) return false;
 

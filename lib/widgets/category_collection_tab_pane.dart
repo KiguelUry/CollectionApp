@@ -13,7 +13,6 @@ import '../models/storage_location.dart';
 import '../screens/item_detail_screen.dart';
 import '../screens/media_artist_albums_screen.dart';
 import '../utils/boardgame_genres.dart';
-import '../utils/boardgame_language.dart';
 import '../utils/card_item_metadata.dart';
 import '../utils/collection_count_label.dart';
 import '../utils/collection_grid_grouper.dart';
@@ -21,12 +20,12 @@ import '../utils/collection_grid_layout.dart';
 import '../utils/holder_filter.dart';
 import '../utils/owned_quantity_index.dart';
 import '../utils/tcg_rarity_order.dart';
+import '../utils/app_page_route.dart';
 import 'collection_filter_bar.dart';
 import 'collection_item_list_tile.dart';
 import 'collection_item_tile.dart';
 import 'cover_preview_sheet.dart';
 import 'wishlist_suggestions_banner.dart';
-import 'wishlist/wishlist_budget_banner.dart';
 import 'bulk_group_assign_sheet.dart';
 
 /// Onglet Collection ou Wishlist isolé (filtres locaux → moins de rebuilds).
@@ -59,10 +58,10 @@ class CategoryCollectionTabPane extends StatefulWidget {
   final bool showExpansionVisibilityToggle;
   final bool showOwnedExpansions;
   final ValueChanged<bool>? onShowOwnedExpansionsChanged;
-  final bool showWishlistBudgetBanner;
   final bool showWishlistSortOptions;
-  final Set<String> boardgamePreferredLanguages;
-  final ValueChanged<Set<String>>? onBoardgamePreferredLanguagesChanged;
+
+  /// Colonnes grille mobile (2 ou 3).
+  final int gridMobileColumns;
 
   const CategoryCollectionTabPane({
     super.key,
@@ -94,10 +93,8 @@ class CategoryCollectionTabPane extends StatefulWidget {
     this.showExpansionVisibilityToggle = false,
     this.showOwnedExpansions = false,
     this.onShowOwnedExpansionsChanged,
-    this.showWishlistBudgetBanner = false,
     this.showWishlistSortOptions = false,
-    this.boardgamePreferredLanguages = const {},
-    this.onBoardgamePreferredLanguagesChanged,
+    this.gridMobileColumns = 3,
   });
 
   @override
@@ -118,12 +115,20 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
   Offset? _marqueeCurrent;
   bool _marqueeDragging = false;
   Set<String> _marqueeBaseSelection = {};
+  DateTime? _lastMarqueeSetState;
+  static const _marqueeThrottle = Duration(milliseconds: 32);
+
+  /// Cache filtre / options dérivées (évite le recalcul à chaque rebuild scroll).
+  List<CollectionItem>? _cachedFiltered;
+  List<CollectionItem>? _filterItemsRef;
+  CollectionListFilters? _filterFiltersRef;
+  List<GroupedCollectionItem>? _cachedGrouped;
+  List<CollectionItem>? _groupedSourceRef;
 
   @override
   void initState() {
     super.initState();
-    _filters = widget.defaultWishlistMineFilter &&
-            widget.currentUserId != null
+    _filters = widget.defaultWishlistMineFilter && widget.currentUserId != null
         ? CollectionListFilters(
             wishlistMineOnly: true,
             wishlistMineUserId: widget.currentUserId,
@@ -133,6 +138,47 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
 
   @override
   bool get wantKeepAlive => true;
+
+  @override
+  void didUpdateWidget(covariant CategoryCollectionTabPane oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.items, widget.items) ||
+        oldWidget.category != widget.category) {
+      _invalidateFilterCache();
+    }
+  }
+
+  void _invalidateFilterCache() {
+    _cachedFiltered = null;
+    _filterItemsRef = null;
+    _cachedGrouped = null;
+    _groupedSourceRef = null;
+  }
+
+  List<CollectionItem> _filteredItems() {
+    if (_cachedFiltered != null &&
+        identical(_filterItemsRef, widget.items) &&
+        identical(_filterFiltersRef, _filters)) {
+      return _cachedFiltered!;
+    }
+    final filtered = _filters.apply(widget.items);
+    _cachedFiltered = filtered;
+    _filterItemsRef = widget.items;
+    _filterFiltersRef = _filters;
+    _cachedGrouped = null;
+    _groupedSourceRef = null;
+    return filtered;
+  }
+
+  List<GroupedCollectionItem> _groupedEntries(List<CollectionItem> filtered) {
+    if (_cachedGrouped != null && identical(_groupedSourceRef, filtered)) {
+      return _cachedGrouped!;
+    }
+    final grouped = CollectionGridGrouper.group(filtered);
+    _cachedGrouped = grouped;
+    _groupedSourceRef = filtered;
+    return grouped;
+  }
 
   @override
   void dispose() {
@@ -168,7 +214,10 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
     );
   }
 
-  String _countLabel(List<CollectionItem> items, List<CollectionItem> filtered) {
+  String _countLabel(
+    List<CollectionItem> items,
+    List<CollectionItem> filtered,
+  ) {
     if (filtered.length != items.length) {
       return '${filtered.length} sur ${items.length}';
     }
@@ -237,6 +286,13 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
       _marqueeDragging = true;
     }
     if (!_marqueeDragging) return;
+    final now = DateTime.now();
+    final last = _lastMarqueeSetState;
+    if (last != null && now.difference(last) < _marqueeThrottle) {
+      _marqueeCurrent = event.position;
+      return;
+    }
+    _lastMarqueeSetState = now;
     final rect = Rect.fromPoints(_marqueePointerDown!, event.position);
     final inRect = _itemIdsInMarquee(rect);
     setState(() {
@@ -323,14 +379,18 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
   Widget? _buildBulkSelectionBar(List<CollectionItem> filtered) {
     if (!widget.enableBulkSelection) return null;
     final hasGroups = widget.boardgameGroups.isNotEmpty;
-    final allSelected = filtered.isNotEmpty &&
+    final allSelected =
+        filtered.isNotEmpty &&
         filtered.every((i) => _selectedIds.contains(i.id));
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
       child: Row(
         children: [
           if (_selectionMode) ...[
-            TextButton(onPressed: _exitSelectionMode, child: const Text('Annuler')),
+            TextButton(
+              onPressed: _exitSelectionMode,
+              child: const Text('Annuler'),
+            ),
             if (filtered.isNotEmpty)
               TextButton(
                 onPressed: () => setState(() {
@@ -366,7 +426,11 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
               onPressed: _selectedIds.isEmpty
                   ? null
                   : () => _bulkDeleteSelected(filtered),
-              icon: Icon(Icons.delete_outline, size: 22, color: Colors.red.shade700),
+              icon: Icon(
+                Icons.delete_outline,
+                size: 22,
+                color: Colors.red.shade700,
+              ),
             ),
           ] else
             Align(
@@ -418,8 +482,8 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
     required Map<String, int> groupActivity,
     required bool isGrid,
   }) {
-    final trackKeys = widget.category == CollectionCategory.boardgame &&
-        !_selectionMode;
+    final trackKeys =
+        widget.category == CollectionCategory.boardgame && !_selectionMode;
     if (_selectionMode || trackKeys) {
       _tileKeys.putIfAbsent(item.id, GlobalKey.new);
     }
@@ -438,34 +502,33 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
             groupNamesById: widget.groupNamesById,
             boardgameQuickEditGroups:
                 widget.category == CollectionCategory.boardgame &&
-                        !_selectionMode
-                    ? widget.boardgameGroups
-                    : null,
+                    !_selectionMode
+                ? widget.boardgameGroups
+                : null,
             groupActivityCounts: groupActivity,
             onExpansionBaseFocus: expansionFocus,
             onDelete: _selectionMode ? null : () => widget.onDeleteItem(item),
             onTap: _selectionMode
                 ? () => _toggleSelection(item.id)
                 : () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => ItemDetailScreen(
-                          item: item.copyWith(quantity: totalQuantity),
-                          ownedQuantity: ownedQuantityFor(item, ownedIndex),
-                        ),
+                    context,
+                    appPageRoute(
+                      builder: (context) => ItemDetailScreen(
+                        item: item.copyWith(quantity: totalQuantity),
+                        ownedQuantity: ownedQuantityFor(item, ownedIndex),
                       ),
                     ),
+                  ),
             onLongPress: _selectionMode
                 ? null
                 : item.imageUrl != null && item.imageUrl!.trim().isNotEmpty
-                    ? () => showCoverPreview(
-                          context,
-                          imageUrl: item.imageUrl,
-                          title: item.title,
-                          bookCover:
-                              widget.category == CollectionCategory.book,
-                        )
-                    : null,
+                ? () => showCoverPreview(
+                    context,
+                    imageUrl: item.imageUrl,
+                    title: item.title,
+                    bookCover: widget.category == CollectionCategory.book,
+                  )
+                : null,
           )
         : CollectionItemListTile(
             key: ValueKey(item.id),
@@ -475,23 +538,23 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
             ownedQuantity: ownedQuantityFor(item, ownedIndex),
             boardgameQuickEditGroups:
                 widget.category == CollectionCategory.boardgame &&
-                        !_selectionMode
-                    ? widget.boardgameGroups
-                    : null,
+                    !_selectionMode
+                ? widget.boardgameGroups
+                : null,
             groupActivityCounts: groupActivity,
             onExpansionBaseFocus: expansionFocus,
             onDelete: _selectionMode ? null : () => widget.onDeleteItem(item),
             onTap: _selectionMode
                 ? () => _toggleSelection(item.id)
                 : () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => ItemDetailScreen(
-                          item: item.copyWith(quantity: totalQuantity),
-                          ownedQuantity: ownedQuantityFor(item, ownedIndex),
-                        ),
+                    context,
+                    appPageRoute(
+                      builder: (context) => ItemDetailScreen(
+                        item: item.copyWith(quantity: totalQuantity),
+                        ownedQuantity: ownedQuantityFor(item, ownedIndex),
                       ),
                     ),
+                  ),
           );
 
     Widget keyed = (_selectionMode || trackKeys)
@@ -504,10 +567,7 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
         curve: Curves.easeOut,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: Colors.deepPurple.shade400,
-            width: 2.5,
-          ),
+          border: Border.all(color: Colors.deepPurple.shade400, width: 2.5),
           boxShadow: [
             BoxShadow(
               color: Colors.deepPurple.withValues(alpha: 0.35),
@@ -562,29 +622,23 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
   Widget build(BuildContext context) {
     super.build(context);
     final items = widget.items;
-    var filtered = _filters.apply(items);
-    if (widget.category == CollectionCategory.boardgame &&
-        widget.boardgamePreferredLanguages.isNotEmpty) {
-      filtered = filtered
-          .where(
-            (i) => itemMatchesBoardgameLanguages(
-              i.metadata,
-              widget.boardgamePreferredLanguages,
-            ),
-          )
-          .toList();
-    }
+    final filtered = _filteredItems();
     final countLabel = _countLabel(items, filtered);
-    final groupOptions = widget.groupNamesById.entries
-        .map((e) => GroupFilterOption(id: e.key, label: e.value))
-        .toList()
-      ..sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
+    final groupOptions =
+        widget.groupNamesById.entries
+            .map((e) => GroupFilterOption(id: e.key, label: e.value))
+            .toList()
+          ..sort(
+            (a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()),
+          );
 
-    final cardSubcategoryOptions = widget.category == CollectionCategory.card &&
+    final cardSubcategoryOptions =
+        widget.category == CollectionCategory.card &&
             widget.fixedCardSubcategory == null
         ? distinctCardSubcategories(items)
         : const <CardSubcategory>[];
-    final selectedUniverse = widget.fixedCardSubcategory?.dbValue ??
+    final selectedUniverse =
+        widget.fixedCardSubcategory?.dbValue ??
         (_filters.cardSubcategories.length == 1
             ? _filters.cardSubcategories.first
             : null);
@@ -594,18 +648,57 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
     final universeScoped = selectedUniverse != null
         ? items.where((i) => i.subcategory == selectedUniverse).toList()
         : items;
-    final cardRarityOptions = widget.category == CollectionCategory.card &&
-            universeSub != null
+    final cardRarityOptions =
+        widget.category == CollectionCategory.card && universeSub != null
         ? sortRarityLabels(
             distinctCardRarities(universeScoped).toList(),
             universeSub,
           )
         : const <String>[];
-    final pokemonTypeOptions = widget.category == CollectionCategory.card &&
+    final pokemonTypeOptions =
+        widget.category == CollectionCategory.card &&
             universeSub == CardSubcategory.pokemon
         ? (distinctPokemonTypes(universeScoped).toList()
-          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())))
+            ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())))
         : const <String>[];
+
+    final filterBar = CollectionFilterBar(
+      filters: _filters,
+      onChanged: (f) {
+        _invalidateFilterCache();
+        setState(() => _filters = f);
+        if (widget.category == CollectionCategory.boardgame &&
+            f.sort == CollectionSort.bggRatingDesc) {
+          widget.onBggRatingSortEnrich?.call();
+        }
+      },
+      searchController: _searchController,
+      locations: widget.locations,
+      tags: widget.tags,
+      showFocusFilter: widget.showFocusFilter,
+      showLocationFilter: widget.showLocationFilter,
+      showTagFilter: widget.showTagFilter,
+      showBoardgameGenreFilter: widget.category == CollectionCategory.boardgame,
+      boardgameGenres: widget.category == CollectionCategory.boardgame
+          ? distinctBoardgameGenres(items)
+          : const [],
+      showCardFilter: false,
+      showCardSubcategoryFilter: cardSubcategoryOptions.isNotEmpty,
+      showCardUniverseDetailFilters: universeSub != null,
+      cardRarities: cardRarityOptions,
+      pokemonTypes: pokemonTypeOptions,
+      cardSubcategoryOptions: cardSubcategoryOptions,
+      groupOptions: groupOptions,
+      holderFilterOptions: widget.category == CollectionCategory.boardgame
+          ? widget.holderFilterOptions
+          : const [],
+      useHolderLocationFilter: widget.category == CollectionCategory.boardgame,
+      showWishlistMineToggle: widget.defaultWishlistMineFilter,
+      showExpansionVisibilityToggle: widget.showExpansionVisibilityToggle,
+      showOwnedExpansions: widget.showOwnedExpansions,
+      onShowOwnedExpansionsChanged: widget.onShowOwnedExpansionsChanged,
+      showWishlistSortOptions: widget.showWishlistSortOptions,
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -625,87 +718,69 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
               ),
             ),
           ),
-        CollectionFilterBar(
-          filters: _filters,
-          onChanged: (f) {
-            setState(() => _filters = f);
-            if (widget.category == CollectionCategory.boardgame &&
-                f.sort == CollectionSort.bggRatingDesc) {
-              widget.onBggRatingSortEnrich?.call();
-            }
-          },
-          searchController: _searchController,
-          locations: widget.locations,
-          tags: widget.tags,
-          showFocusFilter: widget.showFocusFilter,
-          showLocationFilter: widget.showLocationFilter,
-          showTagFilter: widget.showTagFilter,
-          showBoardgameGenreFilter:
-              widget.category == CollectionCategory.boardgame,
-          boardgameGenres: widget.category == CollectionCategory.boardgame
-              ? distinctBoardgameGenres(items)
-              : const [],
-          showCardFilter: false,
-          showCardSubcategoryFilter: cardSubcategoryOptions.isNotEmpty,
-          showCardUniverseDetailFilters: universeSub != null,
-          cardRarities: cardRarityOptions,
-          pokemonTypes: pokemonTypeOptions,
-          cardSubcategoryOptions: cardSubcategoryOptions,
-          groupOptions: groupOptions,
-          holderFilterOptions: widget.category == CollectionCategory.boardgame
-              ? widget.holderFilterOptions
-              : const [],
-          useHolderLocationFilter:
-              widget.category == CollectionCategory.boardgame,
-          showWishlistMineToggle: widget.defaultWishlistMineFilter,
-          showExpansionVisibilityToggle: widget.showExpansionVisibilityToggle,
-          showOwnedExpansions: widget.showOwnedExpansions,
-          onShowOwnedExpansionsChanged: widget.onShowOwnedExpansionsChanged,
-          showWishlistSortOptions: widget.showWishlistSortOptions,
-          boardgamePreferredLanguages: widget.boardgamePreferredLanguages,
-          onBoardgamePreferredLanguagesChanged:
-              widget.onBoardgamePreferredLanguagesChanged,
-        ),
         ?_buildBulkSelectionBar(filtered),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-          child: Text(
-            countLabel,
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey.shade600,
-              fontWeight: FontWeight.w500,
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: widget.onReload,
+            child: _withMarqueeOverlay(
+              CustomScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                slivers: [
+                  SliverAppBar(
+                    floating: true,
+                    snap: true,
+                    pinned: false,
+                    primary: false,
+                    automaticallyImplyLeading: false,
+                    toolbarHeight: 0,
+                    backgroundColor: Theme.of(
+                      context,
+                    ).colorScheme.surfaceContainerLowest,
+                    elevation: 0,
+                    scrolledUnderElevation: 0,
+                    bottom: PreferredSize(
+                      preferredSize: const Size.fromHeight(64),
+                      child: filterBar,
+                    ),
+                  ),
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 2,
+                      ),
+                      child: Text(
+                        countLabel,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (filtered.isEmpty)
+                    SliverFillRemaining(
+                      hasScrollBody: false,
+                      child: _emptyState(),
+                    )
+                  else if (widget.category == CollectionCategory.media &&
+                      widget.mediaGroupByArtist)
+                    ..._mediaArtistSlivers(filtered)
+                  else if (widget.viewMode == CollectionViewMode.grid)
+                    _buildGridSliver(filtered)
+                  else
+                    _buildListSliver(filtered),
+                ],
+              ),
             ),
           ),
-        ),
-        Expanded(
-          child: widget.showWishlistBudgetBanner
-              ? Column(
-                  children: [
-                    Expanded(
-                      child: widget.category == CollectionCategory.media &&
-                              widget.mediaGroupByArtist
-                          ? _buildMediaArtistList(filtered)
-                          : widget.viewMode == CollectionViewMode.grid
-                              ? _buildGrid(filtered)
-                              : _buildList(filtered),
-                    ),
-                    WishlistBudgetBanner(items: filtered),
-                  ],
-                )
-              : widget.category == CollectionCategory.media &&
-                      widget.mediaGroupByArtist
-                  ? _buildMediaArtistList(filtered)
-                  : widget.viewMode == CollectionViewMode.grid
-                      ? _buildGrid(filtered)
-                      : _buildList(filtered),
         ),
       ],
     );
   }
 
-  Widget _buildMediaArtistList(List<CollectionItem> items) {
-    if (items.isEmpty) return _emptyState();
+  List<Widget> _mediaArtistSlivers(List<CollectionItem> items) {
     final byArtist = <String, List<CollectionItem>>{};
     for (final item in items) {
       final raw = item.metadata?['artist']?.toString().trim();
@@ -715,35 +790,37 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
     final artists = byArtist.keys.toList()
       ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
 
-    return ListView.separated(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      itemCount: artists.length,
-      separatorBuilder: (_, _) => const Divider(height: 1),
-      itemBuilder: (context, index) {
-        final name = artists[index];
-        final albums = byArtist[name]!;
-        return ListTile(
-          leading: CircleAvatar(
-            backgroundColor: widget.category.color.withValues(alpha: 0.2),
-            child: Icon(Icons.person, color: widget.category.color),
-          ),
-          title: Text(name, style: const TextStyle(fontWeight: FontWeight.w700)),
-          subtitle: Text(
-            '${albums.length} album${albums.length > 1 ? 's' : ''}',
-          ),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (ctx) => MediaArtistAlbumsScreen(
-                artist: name,
-                items: albums,
+    return [
+      SliverList.separated(
+        itemCount: artists.length,
+        separatorBuilder: (_, _) => const Divider(height: 1),
+        itemBuilder: (context, index) {
+          final name = artists[index];
+          final albums = byArtist[name]!;
+          return ListTile(
+            leading: CircleAvatar(
+              backgroundColor: widget.category.color.withValues(alpha: 0.2),
+              child: Icon(Icons.person, color: widget.category.color),
+            ),
+            title: Text(
+              name,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            subtitle: Text(
+              '${albums.length} album${albums.length > 1 ? 's' : ''}',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (ctx) =>
+                    MediaArtistAlbumsScreen(artist: name, items: albums),
               ),
             ),
-          ),
-        );
-      },
-    );
+          );
+        },
+      ),
+    ];
   }
 
   Widget _emptyState() {
@@ -753,8 +830,11 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.inventory_2_outlined,
-                size: 48, color: Colors.grey.shade400),
+            Icon(
+              Icons.inventory_2_outlined,
+              size: 48,
+              color: Colors.grey.shade400,
+            ),
             const SizedBox(height: 12),
             Text(
               widget.emptyHint,
@@ -764,16 +844,20 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
             if (_filters.hasActiveFilterCriteria) ...[
               const SizedBox(height: 12),
               TextButton(
-                onPressed: () => setState(() {
-                  _filters = widget.defaultWishlistMineFilter &&
-                          widget.currentUserId != null
-                      ? CollectionListFilters(
-                          wishlistMineOnly: true,
-                          wishlistMineUserId: widget.currentUserId,
-                        )
-                      : CollectionListFilters();
-                  _searchController.clear();
-                }),
+                onPressed: () {
+                  _invalidateFilterCache();
+                  setState(() {
+                    _filters =
+                        widget.defaultWishlistMineFilter &&
+                            widget.currentUserId != null
+                        ? CollectionListFilters(
+                            wishlistMineOnly: true,
+                            wishlistMineUserId: widget.currentUserId,
+                          )
+                        : CollectionListFilters();
+                    _searchController.clear();
+                  });
+                },
                 child: const Text('Réinitialiser les filtres'),
               ),
             ],
@@ -783,69 +867,63 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
     );
   }
 
-  Widget _buildGrid(List<CollectionItem> items) {
-    if (items.isEmpty) return _emptyState();
-    final grouped = CollectionGridGrouper.group(items);
+  Widget _buildGridSliver(List<CollectionItem> items) {
+    final grouped = _groupedEntries(items);
     final ownedIndex = widget.ownedQuantityIndex;
     final groupActivity = widget.groupActivityCounts;
+    final mobileCols = widget.gridMobileColumns.clamp(2, 3);
 
-    return CollectionGridLayout.constrainOnWebDesktop(
-      context: context,
-      child: RefreshIndicator(
-        onRefresh: widget.onReload,
-        child: _withMarqueeOverlay(
-          GridView.builder(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
-            cacheExtent: 480,
-            addRepaintBoundaries: false,
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: CollectionGridLayout.crossAxisCount(context),
-              crossAxisSpacing: CollectionGridLayout.gridCrossSpacing,
-              mainAxisSpacing: CollectionGridLayout.gridMainSpacing,
-              childAspectRatio:
-                  CollectionGridLayout.aspectRatio(widget.category, context),
-            ),
-            itemCount: grouped.length,
-            itemBuilder: (context, index) {
-              final entry = grouped[index];
-              final item = entry.item;
-              return RepaintBoundary(
-                child: _buildTile(
-                  item: item,
-                  totalQuantity: entry.totalQuantity,
-                  showDuplicateBadge: entry.hasDuplicates,
-                  ownedIndex: ownedIndex,
-                  groupActivity: groupActivity,
-                  isGrid: true,
-                ),
-              );
-            },
+    return SliverPadding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
+      sliver: SliverGrid(
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: CollectionGridLayout.crossAxisCount(
+            context,
+            mobile: mobileCols,
           ),
+          crossAxisSpacing: CollectionGridLayout.gridCrossSpacing,
+          mainAxisSpacing: CollectionGridLayout.gridMainSpacing,
+          childAspectRatio: CollectionGridLayout.aspectRatio(
+            widget.category,
+            context,
+            mobileColumns: mobileCols,
+          ),
+        ),
+        delegate: SliverChildBuilderDelegate(
+          (context, index) {
+            final entry = grouped[index];
+            return RepaintBoundary(
+              child: _buildTile(
+                item: entry.item,
+                totalQuantity: entry.totalQuantity,
+                showDuplicateBadge: entry.hasDuplicates,
+                ownedIndex: ownedIndex,
+                groupActivity: groupActivity,
+                isGrid: true,
+              ),
+            );
+          },
+          childCount: grouped.length,
+          addRepaintBoundaries: false,
         ),
       ),
     );
   }
 
-  Widget _buildList(List<CollectionItem> items) {
-    if (items.isEmpty) return _emptyState();
-    final grouped = CollectionGridGrouper.group(items);
+  Widget _buildListSliver(List<CollectionItem> items) {
+    final grouped = _groupedEntries(items);
     final ownedIndex = widget.ownedQuantityIndex;
     final groupActivity = widget.groupActivityCounts;
 
-    return RefreshIndicator(
-      onRefresh: widget.onReload,
-      child: _withMarqueeOverlay(
-        ListView.builder(
-          cacheExtent: 480,
-          addRepaintBoundaries: false,
-          padding: const EdgeInsets.only(bottom: 88),
-          itemCount: grouped.length,
-          itemBuilder: (context, index) {
+    return SliverPadding(
+      padding: const EdgeInsets.only(bottom: 88),
+      sliver: SliverList(
+        delegate: SliverChildBuilderDelegate(
+          (context, index) {
             final entry = grouped[index];
-            final item = entry.item;
             return RepaintBoundary(
               child: _buildTile(
-                item: item,
+                item: entry.item,
                 totalQuantity: entry.totalQuantity,
                 showDuplicateBadge: entry.hasDuplicates,
                 ownedIndex: ownedIndex,
@@ -854,6 +932,8 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
               ),
             );
           },
+          childCount: grouped.length,
+          addRepaintBoundaries: false,
         ),
       ),
     );

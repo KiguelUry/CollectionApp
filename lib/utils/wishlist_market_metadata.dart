@@ -8,6 +8,7 @@ const kMarketNewPriceMin = 'market_new_price_min';
 const kStoresPrices = 'stores_prices';
 const kMarketPriceHistory = 'market_price_history';
 const kMarketPricesFetchedAt = 'market_prices_fetched_at';
+const kPriceSightings = 'price_sightings';
 
 int purchasePriorityFromMetadata(Map<String, dynamic>? metadata) {
   final raw = metadata?[kPurchasePriority];
@@ -151,4 +152,74 @@ Map<String, dynamic> mergeMarketMetadataPatch(
   final merged = Map<String, dynamic>.from(existing ?? {});
   merged.addAll(patch);
   return merged;
+}
+
+/// Observation manuelle : « Vu à X € chez [lieu] » (+ URL / photo optionnels).
+class PriceSighting {
+  final String id;
+  final double priceEur;
+  final String place;
+  final String? url;
+  final String? photoUrl;
+  final DateTime? seenAt;
+
+  const PriceSighting({
+    required this.id,
+    required this.priceEur,
+    required this.place,
+    this.url,
+    this.photoUrl,
+    this.seenAt,
+  });
+
+  factory PriceSighting.fromJson(Map<dynamic, dynamic> json) {
+    final atRaw = json['seen_at']?.toString();
+    return PriceSighting(
+      id: json['id']?.toString() ??
+          '${json['place']}_${json['price_eur']}_${atRaw ?? ''}',
+      priceEur: _parseEuro(json['price_eur']) ?? 0,
+      place: json['place']?.toString() ?? '',
+      url: json['url']?.toString(),
+      photoUrl: json['photo_url']?.toString(),
+      seenAt: atRaw == null ? null : DateTime.tryParse(atRaw),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'price_eur': priceEur,
+        'place': place,
+        if (url != null && url!.trim().isNotEmpty) 'url': url!.trim(),
+        if (photoUrl != null && photoUrl!.trim().isNotEmpty)
+          'photo_url': photoUrl!.trim(),
+        if (seenAt != null) 'seen_at': seenAt!.toIso8601String(),
+      };
+}
+
+List<PriceSighting> priceSightingsFromMetadata(Map<String, dynamic>? metadata) {
+  final raw = metadata?[kPriceSightings];
+  if (raw is! List) return const [];
+  return raw
+      .whereType<Map>()
+      .map(PriceSighting.fromJson)
+      .where((e) => e.priceEur > 0 && e.place.trim().isNotEmpty)
+      .toList()
+    ..sort((a, b) {
+      final aAt = a.seenAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final bAt = b.seenAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return bAt.compareTo(aAt);
+    });
+}
+
+Map<String, dynamic> metadataWithPriceSightings(
+  Map<String, dynamic>? existing,
+  List<PriceSighting> sightings,
+) {
+  final meta = Map<String, dynamic>.from(existing ?? {});
+  if (sightings.isEmpty) {
+    meta.remove(kPriceSightings);
+  } else {
+    meta[kPriceSightings] = sightings.map((e) => e.toJson()).toList();
+  }
+  return meta;
 }

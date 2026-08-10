@@ -27,6 +27,14 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    _usernameController.dispose();
+    super.dispose();
+  }
+
   Future<void> _goToApp() async {
     if (!mounted) return;
     Navigator.pushReplacementNamed(context, '/categories');
@@ -49,8 +57,9 @@ class _LoginScreenState extends State<LoginScreen> {
       await _goToApp();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erreur : $e')),
+      await _showInfoDialog(
+        title: 'Connexion impossible',
+        message: '$e',
       );
     }
   }
@@ -58,10 +67,11 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _forgotPassword() async {
     final email = _emailController.text.trim();
     if (email.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Saisis d\'abord l\'e-mail du compte dans le champ ci-dessus'),
-        ),
+      await _showInfoDialog(
+        title: 'E-mail manquant',
+        message:
+            'Tape d’abord l’adresse e-mail du compte dans le champ ci-dessus, '
+            'puis appuie à nouveau sur « Mot de passe oublié ? ».',
       );
       return;
     }
@@ -70,34 +80,69 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       await _authService.sendPasswordResetEmail(email);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'E-mail envoyé à $email. Ouvre le lien pour choisir un nouveau mot de passe '
-            '(vérifie les spams).',
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          icon: Icon(
+            Icons.mark_email_read_outlined,
+            color: Theme.of(ctx).colorScheme.primary,
+            size: 44,
           ),
-          duration: const Duration(seconds: 10),
+          title: const Text('E-mail envoyé'),
+          content: Text(
+            'Un message a été envoyé à :\n\n$email\n\n'
+            '1. Ouvre ta boîte mail (et les indésirables / spam)\n'
+            '2. Clique sur le lien dans le mail\n'
+            '3. Choisis ton nouveau mot de passe\n\n'
+            'Le lien peut mettre 1–2 minutes à arriver.',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Compris'),
+            ),
+          ],
         ),
       );
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Impossible d\'envoyer l\'e-mail : $e')),
-        );
-      }
+      if (!mounted) return;
+      await _showInfoDialog(
+        title: 'Envoi impossible',
+        message:
+            'Impossible d’envoyer l’e-mail de réinitialisation.\n\n$e\n\n'
+            'Vérifie que l’adresse est la bonne, puis réessaie.',
+      );
     } finally {
       if (mounted) setState(() => _resetLoading = false);
     }
   }
 
+  Future<void> _showInfoDialog({
+    required String title,
+    required String message,
+  }) {
+    return showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _devQuickLogin() async {
     if (!DevAuthConfig.hasAutoLogin) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
+      await _showInfoDialog(
+        title: 'Mode debug',
+        message:
             'Ajoute DEV_TEST_EMAIL et DEV_TEST_PASSWORD dans ton fichier .env',
-          ),
-        ),
       );
       return;
     }
@@ -111,9 +156,7 @@ class _LoginScreenState extends State<LoginScreen> {
       await _goToApp();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Connexion dev : $e')),
-        );
+        await _showInfoDialog(title: 'Connexion dev', message: '$e');
       }
     } finally {
       if (mounted) setState(() => _devLoading = false);

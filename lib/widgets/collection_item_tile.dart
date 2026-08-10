@@ -16,6 +16,7 @@ import 'boardgame_tile_sheets.dart';
 import 'bgg_network_image.dart';
 import 'item_title_text.dart';
 import 'wishlist/wishlist_tile_meta_icons.dart';
+import '../utils/app_page_route.dart';
 
 /// Tuile grille pour un objet de collection (grisée si vendu).
 class CollectionItemTile extends StatelessWidget {
@@ -796,16 +797,19 @@ class CollectionItemTile extends StatelessWidget {
               : constraints.maxHeight.isFinite && constraints.maxHeight > 0
                   ? constraints.maxHeight
                   : null;
-          return BggNetworkImage(
-            key: ValueKey(item.id),
-            url: item.imageUrl!,
-            width: compactCover ? side : null,
-            height: compactCover ? side : null,
-            fit: isCard ? BoxFit.contain : BoxFit.cover,
-            bookCover: isBook,
-            boxedCover: isBoardgame,
-            largeSource: useLarge,
-            compact: compactCover,
+          return Hero(
+            tag: collectionCoverHeroTag(item.id),
+            child: BggNetworkImage(
+              key: ValueKey(item.id),
+              url: item.imageUrl!,
+              width: side,
+              height: side,
+              fit: isCard ? BoxFit.contain : BoxFit.cover,
+              bookCover: isBook,
+              boxedCover: isBoardgame,
+              largeSource: useLarge,
+              compact: compactCover || side != null,
+            ),
           );
         },
       );
