@@ -1,26 +1,22 @@
 import 'rawg_service.dart';
-import 'steam_store_service.dart';
 
-/// Jeux vidéo — RAWG si clé, sinon catalogue Steam (gratuit).
+/// Jeux vidéo — recherche via proxy Supabase (RAWG + Steam, cache).
 class VideogameCatalogService {
-  static bool get rawgEnabled => RawgService.isConfigured;
+  static bool get proxyEnabled => RawgService.useProxy;
 
   static String get catalogLabel {
-    if (rawgEnabled) {
-      return 'RAWG · secours Steam sans clé';
+    if (proxyEnabled) {
+      return 'RAWG + Steam (via serveur, rapide sur le web)';
     }
-    return 'Steam (gratuit, sans clé API)';
+    if (RawgService.isConfigured) {
+      return 'RAWG (clé API locale)';
+    }
+    return 'Configure RAWG_API_KEY ou Supabase pour la recherche';
   }
 
+  static String? get lastError => RawgService.lastSearchError;
+
   static Future<List<Map<String, String>>> search(String query) async {
-    final q = query.trim();
-    if (q.length < 2) return [];
-
-    if (rawgEnabled) {
-      final rawg = await RawgService.search(q);
-      if (rawg.isNotEmpty) return rawg;
-    }
-
-    return SteamStoreService.search(q);
+    return RawgService.search(query);
   }
 }

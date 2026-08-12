@@ -33,6 +33,7 @@ import '../widgets/discogs_market_value_card.dart';
 import '../widgets/friend_ratings_panel.dart';
 import '../widgets/group_rules_panel.dart';
 import '../widgets/item_aspect_ratings_section.dart';
+import '../widgets/videogame_platform_picker.dart';
 import '../widgets/profile_avatar.dart';
 import '../widgets/restaurant_visits_panel.dart';
 import '../services/boardgame_expansion_service.dart';
@@ -677,6 +678,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     final isBook = _item.category == CollectionCategory.book;
     final isCard = _item.category == CollectionCategory.card;
     final isTech = _item.category == CollectionCategory.tech;
+    final isVideogame = _item.category == CollectionCategory.videogame;
     final cardSetName = _item.metadata?['set_name']?.toString().trim();
     final canOpenSet =
         isCard &&
@@ -1213,6 +1215,20 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                                 );
                                 _saveNow();
                               },
+                      ),
+                    ],
+                    if (isVideogame && !_item.isSold) ...[
+                      CollapsibleSection(
+                        title: 'Jeu & progression',
+                        accentColor: _item.category.color,
+                        child: VideogameDetailSection(
+                          metadata: _item.metadata,
+                          readOnly: ro,
+                          onMetadataChanged: (meta) {
+                            setState(() => _item = _item.copyWith(metadata: meta));
+                            _saveNow();
+                          },
+                        ),
                       ),
                     ],
                     CollapsibleSection(

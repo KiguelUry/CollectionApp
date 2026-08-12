@@ -55,6 +55,7 @@ import '../widgets/media_search_dialog.dart' show showMediaSearch;
 import '../widgets/ui/add_option_tile.dart';
 import '../models/lego_build_kind.dart';
 import '../models/tech_subcategory.dart';
+import '../models/videogame_platform.dart';
 import '../services/lego_catalog_service.dart';
 import '../services/movie_catalog_service.dart';
 import '../services/videogame_catalog_service.dart';
@@ -62,8 +63,11 @@ import '../widgets/watch_quick_search_sheet.dart';
 import '../utils/catalog_hit_metadata.dart';
 import '../widgets/book_subcategory_picker.dart';
 import '../widgets/catalog_search_sheet.dart';
+import '../widgets/videogame_platform_picker.dart';
+import '../utils/videogame_metadata.dart';
 import 'book/book_collection_screen.dart';
 import 'book_wishlist_tab.dart';
+import 'videogame_ranking_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final CollectionCategory category;
@@ -76,6 +80,7 @@ class HomeScreen extends StatefulWidget {
   final String? customTypeName;
   final LegoBuildKind? fixedLegoKind;
   final TechSubcategory? fixedTechSubcategory;
+  final VideogamePlatform? fixedVideogamePlatform;
   final Map<String, String>? pendingCatalogHit;
 
   /// Wishlist seule (évite la liste plate collection livres).
@@ -92,6 +97,7 @@ class HomeScreen extends StatefulWidget {
     this.customTypeName,
     this.fixedLegoKind,
     this.fixedTechSubcategory,
+    this.fixedVideogamePlatform,
     this.pendingCatalogHit,
     this.bookWishlistOnly = false,
   });
@@ -245,10 +251,21 @@ class _HomeScreenState extends State<HomeScreen>
 
   Color get _accentColor => widget.accentOverride ?? widget.category.color;
 
-  void _openFromCatalogHit(Map<String, String> hit) {
+  void _openFromCatalogHit(Map<String, String> hit) async {
     var meta = metadataFromCatalogHit(hit, widget.category);
     if (widget.fixedLegoKind != null) {
       meta = {...meta, 'lego_kind': widget.fixedLegoKind!.dbValue};
+    }
+    if (widget.category == CollectionCategory.videogame) {
+      final suggested = VideogamePlatform.inferFromText(hit['platform']);
+      final platforms = await showVideogamePlatformPicker(
+        context,
+        suggested: suggested,
+      );
+      if (!mounted) return;
+      if (platforms != null && platforms.isNotEmpty) {
+        meta = metadataWithPlatforms(meta, platforms);
+      }
     }
     _showOptionsDialog(
       title: hit['title'] ?? 'Objet',
@@ -830,6 +847,7 @@ class _HomeScreenState extends State<HomeScreen>
           hint: 'Nom du jeu',
           apiHint: VideogameCatalogService.catalogLabel,
           search: VideogameCatalogService.search,
+          searchError: () => VideogameCatalogService.lastError,
           accent: _accentColor,
           onManualEntry: _showManualAddFlow,
         ).then((hit) {
@@ -996,6 +1014,12 @@ class _HomeScreenState extends State<HomeScreen>
     final techSub = widget.fixedTechSubcategory;
     if (techSub != null) {
       return items.where((i) => i.subcategory == techSub.dbValue).toList();
+    }
+    final vgPlatform = widget.fixedVideogamePlatform;
+    if (vgPlatform != null) {
+      return items
+          .where((i) => itemMatchesVideogamePlatform(i.metadata, vgPlatform))
+          .toList();
     }
     return items;
   }
@@ -1489,6 +1513,18 @@ class _HomeScreenState extends State<HomeScreen>
           label: 'Chercher',
           icon: Icons.search_rounded,
           onTap: _showVideogameAddChooser,
+        ),
+        CategoryQuickAction(
+          label: 'Classement',
+          icon: Icons.emoji_events_rounded,
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const VideogameRankingScreen(),
+              ),
+            );
+          },
         ),
       ],
       CollectionCategory.lego => [

@@ -3,7 +3,9 @@ import '../utils/boardgame_display.dart';
 import '../utils/boardgame_genres.dart';
 import '../utils/card_item_metadata.dart';
 import '../utils/holder_filter.dart';
+import '../utils/videogame_metadata.dart';
 import '../utils/wishlist_market_metadata.dart';
+import '../models/videogame_platform.dart';
 
 enum CollectionSort {
   titleAsc,
@@ -48,6 +50,8 @@ class CollectionListFilters {
   String? holderKey;
   /// Genres BGG (`boardgamecategory`), jeux de société uniquement.
   Set<String> boardgameGenres;
+  /// Plateformes jeux vidéo (`platform_ids` dans metadata).
+  Set<String> videogamePlatforms;
   CollectionOwnershipView ownershipView;
   /// Groupe unique pour le filtre Focus (prioritaire sur [groupIds]).
   String? focusGroupId;
@@ -76,6 +80,7 @@ class CollectionListFilters {
     this.tagId,
     this.holderKey,
     Set<String>? boardgameGenres,
+    Set<String>? videogamePlatforms,
     this.ownershipView = CollectionOwnershipView.all,
     this.focusGroupId,
     Set<String>? groupIds,
@@ -89,6 +94,7 @@ class CollectionListFilters {
     this.wishlistMineUserId,
   })  : groupIds = groupIds ?? <String>{},
         boardgameGenres = boardgameGenres ?? <String>{},
+        videogamePlatforms = videogamePlatforms ?? <String>{},
         cardRarities = cardRarities ?? <String>{},
         pokemonTypes = pokemonTypes ?? <String>{},
         cardSubcategories = cardSubcategories ?? <String>{};
@@ -104,6 +110,7 @@ class CollectionListFilters {
       focusGroupId != null ||
       groupIds.isNotEmpty ||
       boardgameGenres.isNotEmpty ||
+      videogamePlatforms.isNotEmpty ||
       cardRarities.isNotEmpty ||
       pokemonTypes.isNotEmpty ||
       cardSubcategories.isNotEmpty ||
@@ -123,6 +130,7 @@ class CollectionListFilters {
       focusGroupId != null ||
       groupIds.isNotEmpty ||
       boardgameGenres.isNotEmpty ||
+      videogamePlatforms.isNotEmpty ||
       cardRarities.isNotEmpty ||
       pokemonTypes.isNotEmpty ||
       cardSubcategories.isNotEmpty;
@@ -136,6 +144,7 @@ class CollectionListFilters {
     String? tagId,
     String? holderKey,
     Set<String>? boardgameGenres,
+    Set<String>? videogamePlatforms,
     CollectionOwnershipView? ownershipView,
     String? focusGroupId,
     Set<String>? groupIds,
@@ -147,6 +156,7 @@ class CollectionListFilters {
     bool clearTag = false,
     bool clearHolder = false,
     bool clearBoardgameGenre = false,
+    bool clearVideogamePlatform = false,
     bool clearGroups = false,
     bool clearCardFilters = false,
     bool? ratingAscending,
@@ -174,6 +184,9 @@ class CollectionListFilters {
       boardgameGenres: clearBoardgameGenre
           ? <String>{}
           : (boardgameGenres ?? this.boardgameGenres),
+      videogamePlatforms: clearVideogamePlatform
+          ? <String>{}
+          : (videogamePlatforms ?? this.videogamePlatforms),
       cardRarities: clearCardFilters
           ? <String>{}
           : (cardRarities ?? this.cardRarities),
@@ -225,6 +238,16 @@ class CollectionListFilters {
             ),
           )
           .toList();
+    }
+
+    if (videogamePlatforms.isNotEmpty) {
+      result = result.where((i) {
+        return videogamePlatforms.any((pid) {
+          final platform = VideogamePlatform.fromId(pid);
+          if (platform == null) return false;
+          return itemMatchesVideogamePlatform(i.metadata, platform);
+        });
+      }).toList();
     }
 
     if (cardRarities.isNotEmpty) {

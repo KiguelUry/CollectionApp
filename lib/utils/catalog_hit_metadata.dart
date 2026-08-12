@@ -1,4 +1,5 @@
 import '../models/collection_category.dart';
+import '../models/videogame_platform.dart';
 
 /// Métadonnées Supabase à partir d'un résultat de recherche catalogue.
 Map<String, dynamic> metadataFromCatalogHit(
@@ -21,7 +22,20 @@ Map<String, dynamic> metadataFromCatalogHit(
         if (hit['platform']?.isNotEmpty == true) 'platform': hit['platform'],
         if (hit['year']?.isNotEmpty == true) 'year': hit['year'],
         if (hit['rawg_id']?.isNotEmpty == true) 'rawg_id': hit['rawg_id'],
+        if (hit['steam_appid']?.isNotEmpty == true)
+          'steam_appid': hit['steam_appid'],
+        if (hit['rawg_rating']?.isNotEmpty == true)
+          'rawg_rating': hit['rawg_rating'],
+        if (hit['summary']?.isNotEmpty == true) 'summary': hit['summary'],
         'source': hit['source'] ?? 'rawg',
+        ...() {
+          final inferred =
+              VideogamePlatform.inferFromText(hit['platform']);
+          if (inferred.isEmpty) return <String, dynamic>{};
+          return {
+            'platform_ids': inferred.map((p) => p.id).toList(),
+          };
+        }(),
       },
     CollectionCategory.movie => {
         'media_kind': 'movie',

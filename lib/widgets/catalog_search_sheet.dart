@@ -13,6 +13,8 @@ Future<Map<String, String>?> showCatalogSearchSheet(
   required String hint,
   required CatalogSearchFn search,
   String? apiHint,
+  String? Function()? searchError,
+  String? initialQuery,
   VoidCallback? onManualEntry,
   Color? accent,
 }) {
@@ -26,6 +28,8 @@ Future<Map<String, String>?> showCatalogSearchSheet(
       hint: hint,
       search: search,
       apiHint: apiHint,
+      searchError: searchError,
+      initialQuery: initialQuery,
       onManualEntry: onManualEntry,
       accent: accent,
     ),
@@ -37,6 +41,8 @@ class _CatalogSearchSheet extends StatefulWidget {
   final String hint;
   final CatalogSearchFn search;
   final String? apiHint;
+  final String? Function()? searchError;
+  final String? initialQuery;
   final VoidCallback? onManualEntry;
   final Color? accent;
 
@@ -45,6 +51,8 @@ class _CatalogSearchSheet extends StatefulWidget {
     required this.hint,
     required this.search,
     this.apiHint,
+    this.searchError,
+    this.initialQuery,
     this.onManualEntry,
     this.accent,
   });
@@ -59,11 +67,17 @@ class _CatalogSearchSheetState extends State<_CatalogSearchSheet> {
   List<Map<String, String>> _results = [];
   bool _loading = false;
   bool _searched = false;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
     _controller.addListener(_scheduleSearch);
+    final initial = widget.initialQuery?.trim();
+    if (initial != null && initial.isNotEmpty) {
+      _controller.text = initial;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _runSearch());
+    }
   }
 
   @override
@@ -84,7 +98,7 @@ class _CatalogSearchSheetState extends State<_CatalogSearchSheet> {
       return;
     }
     _debounce.run(
-      delay: const Duration(milliseconds: 450),
+      delay: const Duration(milliseconds: 280),
       action: _runSearch,
     );
   }
@@ -95,12 +109,14 @@ class _CatalogSearchSheetState extends State<_CatalogSearchSheet> {
     setState(() {
       _loading = true;
       _searched = true;
+      _error = null;
     });
     final list = await widget.search(q);
     if (!mounted) return;
     setState(() {
       _results = list;
       _loading = false;
+      _error = widget.searchError?.call();
     });
   }
 
@@ -191,6 +207,14 @@ class _CatalogSearchSheetState extends State<_CatalogSearchSheet> {
                   ),
                 ),
               ),
+            if (_error != null && _error!.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text(
+                  _error!,
+                  style: TextStyle(fontSize: 12, color: scheme.error),
+                ),
+              ),
             Expanded(
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
@@ -218,6 +242,8 @@ class _CatalogSearchSheetState extends State<_CatalogSearchSheet> {
                                 final sub = [
                                   r['year'],
                                   r['platform'],
+                                  if (r['rawg_rating']?.isNotEmpty == true)
+                                    '★ ${r['rawg_rating']}',
                                   if (r['set_number']?.isNotEmpty == true)
                                     'Set ${r['set_number']}',
                                   if (r['media_kind'] == 'movie')

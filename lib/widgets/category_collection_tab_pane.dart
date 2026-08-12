@@ -13,6 +13,7 @@ import '../models/storage_location.dart';
 import '../screens/item_detail_screen.dart';
 import '../screens/media_artist_albums_screen.dart';
 import '../utils/boardgame_genres.dart';
+import '../utils/videogame_metadata.dart';
 import '../utils/card_item_metadata.dart';
 import '../utils/collection_count_label.dart';
 import '../utils/collection_grid_grouper.dart';
@@ -682,6 +683,12 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
       boardgameGenres: widget.category == CollectionCategory.boardgame
           ? distinctBoardgameGenres(items)
           : const [],
+      showVideogamePlatformFilter:
+          widget.category == CollectionCategory.videogame,
+      videogamePlatformOptions:
+          widget.category == CollectionCategory.videogame
+              ? distinctVideogamePlatformsInCollection(items)
+              : const [],
       showCardFilter: false,
       showCardSubcategoryFilter: cardSubcategoryOptions.isNotEmpty,
       showCardUniverseDetailFilters: universeSub != null,

@@ -4,6 +4,7 @@ import '../models/collection_list_filters.dart';
 import '../models/item_tag.dart';
 import '../models/storage_location.dart';
 import '../utils/holder_filter.dart';
+import '../models/videogame_platform.dart';
 
 class GroupFilterOption {
   final String id;
@@ -23,6 +24,8 @@ class CollectionFilterBar extends StatelessWidget {
   final bool showTagFilter;
   final bool showBoardgameGenreFilter;
   final List<String> boardgameGenres;
+  final bool showVideogamePlatformFilter;
+  final List<VideogamePlatform> videogamePlatformOptions;
   final bool showCardFilter;
   final bool showCardSubcategoryFilter;
   final bool showCardUniverseDetailFilters;
@@ -51,6 +54,8 @@ class CollectionFilterBar extends StatelessWidget {
     this.showTagFilter = true,
     this.showBoardgameGenreFilter = false,
     this.boardgameGenres = const [],
+    this.showVideogamePlatformFilter = false,
+    this.videogamePlatformOptions = const [],
     this.showCardFilter = false,
     this.showCardSubcategoryFilter = false,
     this.showCardUniverseDetailFilters = false,
@@ -508,6 +513,42 @@ class CollectionFilterBar extends StatelessWidget {
                   activeFilters.copyWith(
                     boardgameGenres: next,
                     clearBoardgameGenre: next.isEmpty,
+                  ),
+                );
+              },
+            ),
+        ],
+      );
+    }
+    if (showVideogamePlatformFilter && videogamePlatformOptions.isNotEmpty) {
+      return Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          _sheetChip(
+            context,
+            label: 'Toutes plateformes',
+            selected: activeFilters.videogamePlatforms.isEmpty,
+            onTap: () =>
+                apply(activeFilters.copyWith(clearVideogamePlatform: true)),
+          ),
+          for (final platform in videogamePlatformOptions)
+            _sheetChip(
+              context,
+              label: platform.label,
+              selected: activeFilters.videogamePlatforms.contains(platform.id),
+              onTap: () {
+                final next =
+                    Set<String>.from(activeFilters.videogamePlatforms);
+                if (next.contains(platform.id)) {
+                  next.remove(platform.id);
+                } else {
+                  next.add(platform.id);
+                }
+                apply(
+                  activeFilters.copyWith(
+                    videogamePlatforms: next,
+                    clearVideogamePlatform: next.isEmpty,
                   ),
                 );
               },
