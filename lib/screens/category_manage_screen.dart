@@ -118,8 +118,10 @@ class _CategoryManageScreenState extends State<CategoryManageScreen> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
                   child: Text(
-                    'Glisse pour réordonner le menu principal. '
-                    'Les catégories masquées restent ici mais disparaissent du hub.',
+                    'Focus actuel : jeux de société, livres, cartes, jeux vidéo… '
+                    'Les catégories « Lab » (montres, tech, nature, restos) sont '
+                    'masquées par défaut — tu peux les réactiver ici. '
+                    'Rien n’est perdu : on les fera mûrir ensuite.',
                     style: TextStyle(
                       fontSize: 13,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -137,12 +139,15 @@ class _CategoryManageScreenState extends State<CategoryManageScreen> {
                       final key = ValueKey(entry.storageKey);
                       if (entry.category != null) {
                         final cat = entry.category!;
+                        final lab = _prefs.isLab(cat);
                         return _ManageTile(
                           key: key,
                           index: index,
                           leading: Icon(cat.icon, color: cat.color),
-                          title: cat.label,
-                          subtitle: cat.description,
+                          title: lab ? '${cat.label} · Lab' : cat.label,
+                          subtitle: lab
+                              ? 'À maturer plus tard — ${cat.description}'
+                              : cat.description,
                           trailing: Switch(
                             value: _prefs.isVisible(cat),
                             onChanged: (v) => _toggleCategory(cat, v),

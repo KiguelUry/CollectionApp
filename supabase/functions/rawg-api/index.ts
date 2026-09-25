@@ -16,7 +16,12 @@ const SEARCH_CACHE_MAX = 64;
 const searchCache = new Map<string, { at: number; games: GameHit[] }>();
 
 function normalize(s: string): string {
-  return s.toLowerCase().trim().replace(/\s+/g, " ");
+  return s
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9àâäéèêëïîôùûüç]+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function titleRelevanceScore(title: string, query: string): number {
@@ -25,11 +30,21 @@ function titleRelevanceScore(title: string, query: string): number {
   if (!q) return 0;
   if (t === q) return 1000;
   if (t.startsWith(q)) return 500;
-  if (t.includes(q)) return 120;
-  for (const w of t.split(/\s+/)) {
-    if (w.startsWith(q)) return 350;
+  const words = t.split(" ").filter(Boolean);
+  for (const w of words) {
+    if (w === q) return 800;
   }
+  for (const w of words) {
+    if (w.startsWith(q) && q.length >= 3) return 400;
+  }
+  if (t.includes(q)) return 200;
   return 0;
+}
+
+function ratingBoost(hit: GameHit): number {
+  const r = parseFloat(hit.rawg_rating ?? "");
+  if (!Number.isFinite(r) || r <= 0) return 0;
+  return Math.round(r * 15);
 }
 
 function storeCache(key: string, games: GameHit[]): void {
@@ -52,10 +67,12 @@ async function fetchRawg(query: string, key: string): Promise<GameHit[]> {
   url.searchParams.set("search", query);
   url.searchParams.set("page_size", "24");
 
-  const res = await fetch(url.toString(), {
-    headers: { Accept: "application/json", "User-Agent": "Palomnia/1.0" },
-  });
-  if (!res.ok) return [];
+  try {
+    const res = await fetch(url.toString(), {
+      headers: { Accept: "application/json", "User-Agent": "Palomnia/1.0" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return [];
 
   const data = await res.json();
   const list = (data.results ?? []) as Record<string, unknown>[];
@@ -87,6 +104,9 @@ async function fetchRawg(query: string, key: string): Promise<GameHit[]> {
     out.push(hit);
   }
   return out;
+  } catch {
+    return [];
+  }
 }
 
 async function fetchSteam(query: string): Promise<GameHit[]> {
@@ -95,27 +115,32 @@ async function fetchSteam(query: string): Promise<GameHit[]> {
   url.searchParams.set("l", "french");
   url.searchParams.set("cc", "FR");
 
-  const res = await fetch(url.toString(), {
-    headers: { Accept: "application/json", "User-Agent": "Palomnia/1.0" },
-  });
-  if (!res.ok) return [];
-
-  const data = await res.json();
-  const list = (data.items ?? []) as Record<string, unknown>[];
-  const out: GameHit[] = [];
-
-  for (const g of list) {
-    const name = g.name?.toString();
-    if (!name) continue;
-    out.push({
-      title: name,
-      image_url: g.tiny_image?.toString() ?? "",
-      platform: "PC (Steam)",
-      steam_appid: g.id?.toString() ?? "",
-      source: "steam",
+  try {
+    const res = await fetch(url.toString(), {
+      headers: { Accept: "application/json", "User-Agent": "Palomnia/1.0" },
+      signal: AbortSignal.timeout(8000),
     });
+    if (!res.ok) return [];
+
+    const data = await res.json();
+    const list = (data.items ?? []) as Record<string, unknown>[];
+    const out: GameHit[] = [];
+
+    for (const g of list) {
+      const name = g.name?.toString();
+      if (!name) continue;
+      out.push({
+        title: name,
+        image_url: g.tiny_image?.toString() ?? "",
+        platform: "PC (Steam)",
+        steam_appid: g.id?.toString() ?? "",
+        source: "steam",
+      });
+    }
+    return out;
+  } catch {
+    return [];
   }
-  return out;
 }
 
 function mergeHits(rawg: GameHit[], steam: GameHit[]): GameHit[] {
@@ -153,13 +178,22 @@ async function handleSearch(query: string): Promise<Response> {
   let games = mergeHits(rawg, steam);
   games.sort(
     (a, b) =>
-      titleRelevanceScore(b.title ?? "", trimmed) -
-      titleRelevanceScore(a.title ?? "", trimmed),
+      titleRelevanceScore(b.title ?? "", trimmed) +
+      ratingBoost(b) -
+      (titleRelevanceScore(a.title ?? "", trimmed) + ratingBoost(a)),
   );
   games = games.slice(0, 30);
 
-  storeCache(cacheKey, games);
-  return json({ games });
+  if (games.length > 0) {
+    storeCache(cacheKey, games);
+  }
+  return json({
+    games,
+    sources: {
+      rawg: rawg.length,
+      steam: steam.length,
+    },
+  });
 }
 
 function json(body: unknown, status = 200): Response {

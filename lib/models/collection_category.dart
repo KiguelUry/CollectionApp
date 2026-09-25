@@ -129,6 +129,7 @@ enum CollectionCategory {
   }
 
   /// Masquées du menu principal (données existantes conservées en base).
+  /// Catégories « retirées » — pas destinées au hub public.
   static const Set<CollectionCategory> hiddenFromMenu = {
     CollectionCategory.car,
     CollectionCategory.stamp,
@@ -136,10 +137,24 @@ enum CollectionCategory {
     CollectionCategory.custom,
   };
 
+  /// Lab : code conservé, maturité à rattraper plus tard.
+  /// Masquées par défaut du hub (réactivables dans Gestion des collections).
+  /// Focus public actuel : jeux de société (+ livres, cartes, JV, médias, lego, films).
+  static const Set<CollectionCategory> labCategories = {
+    CollectionCategory.watch,
+    CollectionCategory.tech,
+    CollectionCategory.wildlife,
+    CollectionCategory.restaurant,
+  };
+
   static List<CollectionCategory> get menuValues =>
       CollectionCategory.values
           .where((c) => !hiddenFromMenu.contains(c))
           .toList();
+
+  /// Hub « focus » : menu sans les catégories lab.
+  static List<CollectionCategory> get focusMenuValues =>
+      menuValues.where((c) => !labCategories.contains(c)).toList();
 
   /// Libellé court pour les totaux (ex. « 5 jeux », « 1 livre »).
   String countSummary(int total) {

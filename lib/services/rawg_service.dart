@@ -118,11 +118,12 @@ class RawgService {
       }
       final raw = decoded['games'];
       if (raw is! List) return [];
-      return raw
+      final games = raw
           .whereType<Map>()
           .map((g) => g.map((k, v) => MapEntry(k.toString(), v?.toString() ?? '')))
           .where((g) => g['title']?.isNotEmpty == true)
           .toList();
+      return games;
     } catch (e) {
       lastSearchError = '$e';
       if (kDebugMode) debugPrint('RAWG proxy: $e');
