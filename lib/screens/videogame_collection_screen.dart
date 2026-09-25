@@ -3,10 +3,10 @@ import 'package:flutter/material.dart';
 import '../models/collection_category.dart';
 import '../models/videogame_platform.dart';
 import '../services/videogame_catalog_service.dart';
-import '../widgets/catalog_search_sheet.dart';
 import '../widgets/category_hub_header.dart';
 import '../widgets/category_type_hub.dart';
 import 'home_screen.dart';
+import 'videogame_catalog_grid_screen.dart';
 import 'videogame_ranking_screen.dart';
 
 /// Hub jeux vidéo — style proche des jeux de société.
@@ -37,6 +37,24 @@ class _VideogameCollectionScreenState extends State<VideogameCollectionScreen> {
           screenTitle: platform?.label ?? 'Mes jeux vidéo',
           accentOverride: _accent,
           fixedVideogamePlatform: platform,
+        ),
+      ),
+    );
+  }
+
+  void _openGrid(
+    BuildContext context, {
+    required VideogameCatalogSource source,
+    required String title,
+    String? query,
+  }) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (ctx) => VideogameCatalogGridScreen(
+          source: source,
+          title: title,
+          initialQuery: query,
         ),
       ),
     );
@@ -93,37 +111,19 @@ class _VideogameCollectionScreenState extends State<VideogameCollectionScreen> {
   void _openSearch(BuildContext context) {
     final q = _searchController.text.trim();
     if (q.length < 2) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Tape au moins 2 lettres pour chercher.'),
-        ),
+      _openGrid(
+        context,
+        source: VideogameCatalogSource.search,
+        title: 'Rechercher un jeu',
       );
       return;
     }
-    showCatalogSearchSheet(
+    _openGrid(
       context,
+      source: VideogameCatalogSource.search,
       title: 'Rechercher un jeu',
-      hint: 'Nom du jeu',
-      apiHint: VideogameCatalogService.catalogLabel,
-      search: VideogameCatalogService.search,
-      searchError: () => VideogameCatalogService.lastError,
-      accent: _accent,
-      initialQuery: q,
-      onManualEntry: () => _openCollection(context),
-    ).then((hit) {
-      if (hit == null || !context.mounted) return;
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (ctx) => HomeScreen(
-            category: CollectionCategory.videogame,
-            screenTitle: hit['title'] ?? 'Jeu',
-            accentOverride: _accent,
-            pendingCatalogHit: hit,
-          ),
-        ),
-      );
-    });
+      query: q,
+    );
   }
 
   @override
@@ -157,7 +157,7 @@ class _VideogameCollectionScreenState extends State<VideogameCollectionScreen> {
               showTitleInHero: false,
               heroWatermark: Icons.sports_esports,
               subtitle:
-                  'Cherche, note et classe tes jeux — filtre par plateforme dans ta collection.',
+                  'Découvre, note et classe tes jeux — comme pour les jeux de société.',
               featuredItem: CategoryTypeHubItem(
                 label: 'Mes jeux vidéo',
                 description: 'Collection et wishlist',
@@ -174,7 +174,29 @@ class _VideogameCollectionScreenState extends State<VideogameCollectionScreen> {
                   onTap: () => _openRanking(context),
                 ),
                 CategoryTypeHubItem(
-                  label: 'Rechercher et ajouter',
+                  label: 'Populaires',
+                  description: 'Les mieux notés sur RAWG',
+                  icon: Icons.local_fire_department,
+                  color: Colors.red,
+                  onTap: () => _openGrid(
+                    context,
+                    source: VideogameCatalogSource.popular,
+                    title: 'Populaires',
+                  ),
+                ),
+                CategoryTypeHubItem(
+                  label: 'Ajouts des amis',
+                  description: 'Ce que tes potes ont ajouté',
+                  icon: Icons.people_outline,
+                  color: Colors.teal,
+                  onTap: () => _openGrid(
+                    context,
+                    source: VideogameCatalogSource.friends,
+                    title: 'Ajouts des amis',
+                  ),
+                ),
+                CategoryTypeHubItem(
+                  label: 'Rechercher',
                   description: VideogameCatalogService.catalogLabel,
                   icon: Icons.travel_explore,
                   color: Colors.blueGrey,

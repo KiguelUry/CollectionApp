@@ -84,26 +84,29 @@ Future<void> quickAddBoardgameFromCatalog(
         }
 
         int? playingTime;
-        final pt = details?['playing_time'];
+        final detailsMap = details;
+        final pt = detailsMap?['playing_time'];
         if (pt is int && pt > 0) playingTime = pt;
 
         try {
           String message;
-          if (!options.isWishlist && game.bggId.isNotEmpty && details != null) {
+          if (!options.isWishlist &&
+              game.bggId.isNotEmpty &&
+              detailsMap != null) {
             if (!context.mounted) return;
             final expansionMsg = await insertBoardgameWithExpansionRules(
               context: context,
               title: game.title,
               bggId: game.bggId,
-              bggDetails: details,
+              bggDetails: detailsMap,
               imageUrl: coverUrl,
               isWishlist: false,
               quantity: options.quantity,
               locationId: options.locationId,
               groupId: options.groupId,
               locationUserId: options.locationUserId,
-              minPlayers: details['min_players'] as int?,
-              maxPlayers: details['max_players'] as int?,
+              minPlayers: detailsMap['min_players'] as int?,
+              maxPlayers: detailsMap['max_players'] as int?,
               playingTime: playingTime,
             );
             if (expansionMsg != null) {
@@ -124,7 +127,7 @@ Future<void> quickAddBoardgameFromCatalog(
                 'bgg_best_players',
                 'bgg_gallery_urls',
               ]) {
-                final v = details[key];
+                final v = detailsMap[key];
                 if (v != null) meta[key] = v;
               }
               if (options.isWishlist) {}
@@ -138,8 +141,8 @@ Future<void> quickAddBoardgameFromCatalog(
                 quantity: options.quantity,
                 locationId: options.locationId,
                 groupId: options.groupId,
-                minPlayers: details['min_players'] as int?,
-                maxPlayers: details['max_players'] as int?,
+                minPlayers: detailsMap['min_players'] as int?,
+                maxPlayers: detailsMap['max_players'] as int?,
                 playingTime: playingTime,
               );
               final payload = buildCollectionItemInsertPayload(

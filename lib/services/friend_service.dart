@@ -345,6 +345,18 @@ class FriendService {
   Future<List<CollectionItem>> fetchFriendRecentBoardgames(
     String friendProfileId, {
     int limit = 20,
+  }) {
+    return fetchFriendRecentByCategory(
+      friendProfileId,
+      CollectionCategory.boardgame,
+      limit: limit,
+    );
+  }
+
+  Future<List<CollectionItem>> fetchFriendRecentByCategory(
+    String friendProfileId,
+    CollectionCategory category, {
+    int limit = 20,
   }) async {
     if (!await canViewFriendCollection(friendProfileId)) {
       return [];
@@ -356,7 +368,7 @@ class FriendService {
         .or(
           'added_by.eq.$friendProfileId,location_user_id.eq.$friendProfileId',
         )
-        .eq('category', CollectionCategory.boardgame.dbValue)
+        .eq('category', category.dbValue)
         .eq('is_wishlist', false)
         .order('created_at', ascending: false)
         .limit(limit);

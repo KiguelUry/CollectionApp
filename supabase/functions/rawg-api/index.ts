@@ -196,6 +196,64 @@ async function handleSearch(query: string): Promise<Response> {
   });
 }
 
+async function handlePopular(): Promise<Response> {
+  const cacheKey = "__popular__";
+  const cached = searchCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < SEARCH_CACHE_TTL_MS) {
+    return json({ games: cached.games, cached: true });
+  }
+
+  const key = Deno.env.get("RAWG_API_KEY")?.trim() ?? "";
+  if (!key) {
+    return json({ games: [], error: "RAWG_API_KEY missing" });
+  }
+
+  try {
+    const url = new URL("https://api.rawg.io/api/games");
+    url.searchParams.set("key", key);
+    url.searchParams.set("ordering", "-rating");
+    url.searchParams.set("page_size", "40");
+    url.searchParams.set("metacritic", "75,100");
+
+    const res = await fetch(url.toString(), {
+      headers: { Accept: "application/json", "User-Agent": "Palomnia/1.0" },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return json({ games: [] });
+
+    const data = await res.json();
+    const list = (data.results ?? []) as Record<string, unknown>[];
+    const games: GameHit[] = [];
+    for (const g of list) {
+      const name = g.name?.toString();
+      if (!name) continue;
+      const platforms = (g.platforms as { platform?: { name?: string } }[] | undefined)
+        ?.map((p) => p.platform?.name)
+        .filter(Boolean)
+        .slice(0, 6)
+        .join(", ") ?? "";
+      const released = g.released?.toString() ?? "";
+      const year = released.length >= 4 ? released.substring(0, 4) : "";
+      const rating = typeof g.rating === "number" ? g.rating.toFixed(1) : "";
+      const hit: GameHit = {
+        title: name,
+        image_url: g.background_image?.toString() ?? "",
+        platform: platforms,
+        year,
+        rawg_id: g.id?.toString() ?? "",
+        source: "rawg",
+      };
+      if (rating) hit.rawg_rating = rating;
+      games.push(hit);
+    }
+
+    storeCache(cacheKey, games);
+    return json({ games, sources: { rawg: games.length, steam: 0 } });
+  } catch {
+    return json({ games: [] });
+  }
+}
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -221,6 +279,9 @@ Deno.serve(async (req) => {
   try {
     if (action === "search") {
       return await handleSearch(url.searchParams.get("query") ?? "");
+    }
+    if (action === "popular") {
+      return await handlePopular();
     }
     return json({ error: "Unknown action" }, 400);
   } catch (e) {

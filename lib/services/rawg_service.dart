@@ -37,13 +37,13 @@ class RawgService {
 
   static String? lastSearchError;
 
-  static Uri _proxyUri(String query) {
+  static Uri _proxyUri({required String action, String? query}) {
     final base = SupabasePublicConfig.url.replaceAll(RegExp(r'/+$'), '');
     final anon = AppEnv.supabaseAnonKey;
     return Uri.parse('$base/functions/v1/rawg-api').replace(
       queryParameters: {
-        'action': 'search',
-        'query': query,
+        'action': action,
+        if (query != null && query.isNotEmpty) 'query': query,
         'apikey': anon,
       },
     );
@@ -73,6 +73,25 @@ class RawgService {
     return games;
   }
 
+  /// Jeux bien notés (RAWG), pour le hub découverte.
+  static Future<List<Map<String, String>>> popular() async {
+    lastSearchError = null;
+    const cacheKey = '__popular__';
+    final cached = _cache[cacheKey];
+    if (cached != null && DateTime.now().difference(cached.at) < _cacheTtl) {
+      return cached.games.map((g) => Map<String, String>.from(g)).toList();
+    }
+
+    List<Map<String, String>> games;
+    if (useProxy) {
+      games = await _fetchViaProxy(action: 'popular');
+    } else {
+      games = await _popularDirect();
+    }
+    if (games.isNotEmpty) _storeCache(cacheKey, games);
+    return games;
+  }
+
   static void _storeCache(String key, List<Map<String, String>> games) {
     _cache[key] = _CachedSearch(
       games.map((g) => Map<String, String>.from(g)).toList(),
@@ -90,12 +109,18 @@ class RawgService {
     if (oldestKey != null) _cache.remove(oldestKey);
   }
 
-  static Future<List<Map<String, String>>> _searchViaProxy(String q) async {
+  static Future<List<Map<String, String>>> _searchViaProxy(String q) =>
+      _fetchViaProxy(action: 'search', query: q);
+
+  static Future<List<Map<String, String>>> _fetchViaProxy({
+    required String action,
+    String? query,
+  }) async {
     try {
       final anon = AppEnv.supabaseAnonKey;
       final response = await http
           .get(
-            _proxyUri(q),
+            _proxyUri(action: action, query: query),
             headers: {
               'Accept': 'application/json',
               'apikey': anon,
@@ -118,12 +143,12 @@ class RawgService {
       }
       final raw = decoded['games'];
       if (raw is! List) return [];
-      final games = raw
+      return raw
           .whereType<Map>()
-          .map((g) => g.map((k, v) => MapEntry(k.toString(), v?.toString() ?? '')))
+          .map((g) =>
+              g.map((k, v) => MapEntry(k.toString(), v?.toString() ?? '')))
           .where((g) => g['title']?.isNotEmpty == true)
           .toList();
-      return games;
     } catch (e) {
       lastSearchError = '$e';
       if (kDebugMode) debugPrint('RAWG proxy: $e');
@@ -156,6 +181,32 @@ class RawgService {
       return games;
     } catch (e) {
       if (kDebugMode) debugPrint('RAWG direct: $e');
+      return [];
+    }
+  }
+
+  static Future<List<Map<String, String>>> _popularDirect() async {
+    final key = _apiKey;
+    if (key == null) return [];
+    try {
+      final uri = Uri.https('api.rawg.io', '/api/games', {
+        'key': key,
+        'ordering': '-rating',
+        'page_size': '40',
+        'metacritic': '75,100',
+      });
+      final response = await http
+          .get(uri, headers: catalogHttpHeaders)
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode != 200) return [];
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final list = data['results'] as List<dynamic>? ?? [];
+      return list
+          .map((raw) => _mapGame(raw as Map<String, dynamic>))
+          .whereType<Map<String, String>>()
+          .toList();
+    } catch (e) {
+      if (kDebugMode) debugPrint('RAWG popular: $e');
       return [];
     }
   }
