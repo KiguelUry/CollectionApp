@@ -204,34 +204,11 @@ class _HomeScreenState extends State<HomeScreen>
   Future<void> _maybeReconcileExpansions() async {
     if (_expansionReconcileDone || !mounted) return;
     _expansionReconcileDone = true;
+    // Réparation BGG / extensions en silence (pas de SnackBar).
     final result = await repairAndReconcileBoardgameExpansions();
     if (!mounted || !result.changed) return;
-    final parts = <String>[];
-    if (result.metadataFixedCount > 0) {
-      parts.add(
-        '${result.metadataFixedCount} fiche${result.metadataFixedCount > 1 ? 's' : ''} BGG corrigée${result.metadataFixedCount > 1 ? 's' : ''}',
-      );
-    }
-    if (result.repairedCount > 0) {
-      parts.add(
-        '${result.repairedCount} lien${result.repairedCount > 1 ? 's' : ''} réparé${result.repairedCount > 1 ? 's' : ''}',
-      );
-    }
-    if (result.mergedCount > 0) {
-      parts.add(
-        '${result.mergedCount} extension${result.mergedCount > 1 ? 's' : ''} rattachée${result.mergedCount > 1 ? 's' : ''}',
-      );
-    }
-    // Feedback discret + durée courte (évite le bandeau « coincé » en bas).
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(parts.join(' · ')),
-        duration: const Duration(seconds: 3),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    // Rafraîchir la grille si des liens ont bougé.
+    _load();
   }
 
   List<Map<String, dynamic>> _filterAndScopeRows(
