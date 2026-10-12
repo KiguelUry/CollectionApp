@@ -16,6 +16,7 @@ enum CollectionSort {
   estimatedValueAsc,
   genreAsc,
   locationAsc,
+  favoritesFirst,
 }
 
 enum CollectionScopeFilter {
@@ -70,6 +71,8 @@ class CollectionListFilters {
   /// Wishlist perso : objets ajoutés par moi, même s'ils sont dans un groupe.
   bool wishlistMineOnly;
   String? wishlistMineUserId;
+  /// N'afficher que les favoris (cœur).
+  bool favoritesOnly;
 
   CollectionListFilters({
     this.searchQuery = '',
@@ -92,6 +95,7 @@ class CollectionListFilters {
     this.locationAscending = false,
     this.wishlistMineOnly = false,
     this.wishlistMineUserId,
+    this.favoritesOnly = false,
   })  : groupIds = groupIds ?? <String>{},
         boardgameGenres = boardgameGenres ?? <String>{},
         videogamePlatforms = videogamePlatforms ?? <String>{},
@@ -115,6 +119,7 @@ class CollectionListFilters {
       pokemonTypes.isNotEmpty ||
       cardSubcategories.isNotEmpty ||
       wishlistMineOnly ||
+      favoritesOnly ||
       sort != CollectionSort.titleAsc;
 
   /// Filtres actifs hors tri (pour badge bouton Filtre).
@@ -133,7 +138,8 @@ class CollectionListFilters {
       videogamePlatforms.isNotEmpty ||
       cardRarities.isNotEmpty ||
       pokemonTypes.isNotEmpty ||
-      cardSubcategories.isNotEmpty;
+      cardSubcategories.isNotEmpty ||
+      favoritesOnly;
 
   CollectionListFilters copyWith({
     String? searchQuery,
@@ -165,6 +171,7 @@ class CollectionListFilters {
     bool? wishlistMineOnly,
     String? wishlistMineUserId,
     bool clearWishlistMine = false,
+    bool? favoritesOnly,
   }) {
     return CollectionListFilters(
       searchQuery: searchQuery ?? this.searchQuery,
@@ -202,6 +209,7 @@ class CollectionListFilters {
       wishlistMineUserId: clearWishlistMine
           ? null
           : (wishlistMineUserId ?? this.wishlistMineUserId),
+      favoritesOnly: favoritesOnly ?? this.favoritesOnly,
     );
   }
 
@@ -213,6 +221,10 @@ class CollectionListFilters {
       result = result
           .where((i) => i.title.toLowerCase().contains(q))
           .toList();
+    }
+
+    if (favoritesOnly) {
+      result = result.where((i) => i.isFavorite).toList();
     }
 
     if (locationId != null) {
@@ -321,6 +333,13 @@ class CollectionListFilters {
 
   int _comparator(CollectionItem a, CollectionItem b) {
     switch (sort) {
+      case CollectionSort.favoritesFirst:
+        final fa = a.isFavorite ? 0 : 1;
+        final fb = b.isFavorite ? 0 : 1;
+        final cmp = fa.compareTo(fb);
+        return cmp != 0
+            ? cmp
+            : a.title.toLowerCase().compareTo(b.title.toLowerCase());
       case CollectionSort.titleAsc:
         return a.title.toLowerCase().compareTo(b.title.toLowerCase());
       case CollectionSort.titleDesc:

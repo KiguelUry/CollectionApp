@@ -45,14 +45,19 @@ class _CollectionChangeHistoryScreenState
           await CollectionChangeHistoryService.instance.restoreDeleted(event);
       CollectionRefresh.instance.bump();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
         SnackBar(
           content: Text('« ${event.title} » restauré'),
+          duration: const Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
           action: restored == null
               ? null
               : SnackBarAction(
                   label: 'Ouvrir',
                   onPressed: () {
+                    messenger.hideCurrentSnackBar();
                     Navigator.push(
                       context,
                       appPageRoute(
@@ -64,6 +69,11 @@ class _CollectionChangeHistoryScreenState
         ),
       );
       await _reload();
+      if (!mounted) return;
+      // Évite qu'un rebuild laisse un SnackBar « coincé ».
+      Future<void>.delayed(const Duration(seconds: 4), () {
+        messenger.hideCurrentSnackBar();
+      });
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -144,7 +154,13 @@ class _CollectionChangeHistoryScreenState
                     style: const TextStyle(fontWeight: FontWeight.w600),
                   ),
                   subtitle: Text(
-                    '${isDelete ? 'Supprimé' : 'Ajouté'} · ${_fmt(e.at)}',
+                    [
+                      isDelete ? 'Supprimé' : 'Ajouté',
+                      if (e.actorUsername != null &&
+                          e.actorUsername!.isNotEmpty)
+                        'par ${e.actorUsername}',
+                      _fmt(e.at),
+                    ].join(' · '),
                   ),
                   trailing: isDelete
                       ? FilledButton.tonal(

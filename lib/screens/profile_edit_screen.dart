@@ -11,6 +11,8 @@ import '../widgets/profile/trophy_picker_sheet.dart';
 import '../widgets/preset_avatar_picker_sheet.dart';
 import '../widgets/profile_avatar.dart';
 import '../utils/preset_avatars.dart';
+import '../utils/app_page_route.dart';
+import 'collection_share_screen.dart';
 
 class ProfileEditScreen extends StatefulWidget {
   const ProfileEditScreen({super.key});
@@ -32,8 +34,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   bool _saving = false;
   bool _uploadingAvatar = false;
   bool _savingTrophies = false;
-  final List<String?> _trophySlotIds = List.filled(6, null);
-  final List<CollectionItem?> _trophySlots = List.filled(6, null);
+  List<CollectionItem> _vitrineItems = [];
   List<QuickLogEntry> _quickLogs = [];
 
   @override
@@ -57,9 +58,6 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       final p = await _service.fetchCurrentProfile();
       if (!mounted) return;
       final ids = p.favoriteItemIds;
-      for (var i = 0; i < 6; i++) {
-        _trophySlotIds[i] = i < ids.length ? ids[i] : null;
-      }
       final trophies = await _service.fetchFavoriteItems(ids);
       final logs = await _quickLog.fetchMyLogs();
       if (!mounted) return;
@@ -68,9 +66,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         _usernameController.text = p.username;
         _bioController.text = p.bio ?? '';
         _accentColor = p.accentColor;
-        for (var i = 0; i < 6; i++) {
-          _trophySlots[i] = i < trophies.length ? trophies[i] : null;
-        }
+        _vitrineItems = trophies;
         _quickLogs = logs;
         _loading = false;
       });
@@ -99,8 +95,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
             ),
             ListTile(
               leading: const Icon(Icons.face_retouching_natural_outlined),
-              title: const Text('Avatar illustré'),
-              subtitle: const Text('Images SVG ou PNG dans l\'app'),
+              title: const Text('Avatar'),
               onTap: () => Navigator.pop(ctx, 'preset'),
             ),
           ],
@@ -247,82 +242,39 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     }
   }
 
-  Future<void> _onTrophySlotTap(int index) async {
+  Future<void> _addVitrineItem() async {
     if (_profile == null) return;
-
-    final existing = _trophySlots[index];
-    if (existing != null) {
-      final action = await showModalBottomSheet<String>(
-        context: context,
-        showDragHandle: true,
-        builder: (ctx) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.swap_horiz),
-                title: const Text('Remplacer'),
-                onTap: () => Navigator.pop(ctx, 'replace'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.delete_outline, color: Colors.red),
-                title: const Text('Retirer de l\'arbre'),
-                onTap: () => Navigator.pop(ctx, 'remove'),
-              ),
-            ],
-          ),
-        ),
-      );
-      if (action == 'remove') {
-        setState(() {
-          _trophySlotIds[index] = null;
-          _trophySlots[index] = null;
-        });
-        await _persistTrophies();
-      } else if (action != 'replace') {
-        return;
-      }
-    }
-
     final candidates = await _service.fetchPickableTrophyCandidates();
     if (!mounted) return;
     final picked = await showTrophyPickerSheet(
       context,
       candidates: candidates,
-      alreadyPickedIds: _trophySlotIds.whereType<String>().toSet(),
+      alreadyPickedIds: _vitrineItems.map((e) => e.id).toSet(),
     );
     if (picked == null || !mounted) return;
-
-    setState(() {
-      _trophySlotIds[index] = picked.id;
-      _trophySlots[index] = picked;
-    });
-    await _persistTrophies();
+    if (_vitrineItems.length >= FavoritesShowcase.maxItems) return;
+    setState(() => _vitrineItems = [..._vitrineItems, picked]);
+    await _persistVitrine();
   }
 
-  Future<void> _persistTrophies() async {
+  Future<void> _removeVitrineItem(String id) async {
+    setState(
+      () => _vitrineItems = _vitrineItems.where((e) => e.id != id).toList(),
+    );
+    await _persistVitrine();
+  }
+
+  Future<void> _persistVitrine() async {
     setState(() => _savingTrophies = true);
     try {
-      final ids = [
-        for (var i = 0; i < 6; i++)
-          if (_trophySlotIds[i] != null) _trophySlotIds[i]!,
-      ];
+      final ids = _vitrineItems.map((e) => e.id).toList();
       final updated = await _service.updateFavoriteItemIds(ids);
       final items = await _service.fetchFavoriteItems(updated.favoriteItemIds);
       if (!mounted) return;
       setState(() {
         _profile = updated;
-        for (var i = 0; i < 6; i++) {
-          _trophySlotIds[i] =
-              i < updated.favoriteItemIds.length ? updated.favoriteItemIds[i] : null;
-          _trophySlots[i] = i < items.length ? items[i] : null;
-        }
+        _vitrineItems = items;
       });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Trophées mis à jour')),
-        );
-      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -538,10 +490,29 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                       child: LinearProgressIndicator(),
                     ),
                   FavoritesShowcase(
-                    slots: _trophySlots,
+                    items: _vitrineItems,
                     accentColor: accent,
                     editable: true,
-                    onSlotTap: _onTrophySlotTap,
+                    onAdd: _addVitrineItem,
+                    onRemove: _removeVitrineItem,
+                  ),
+                  const SizedBox(height: 16),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.ios_share, color: accent),
+                    title: const Text('Partage'),
+                    subtitle: const Text(
+                      'Exporter collection / wishlist (CSV ou page web)',
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        appPageRoute(
+                          builder: (_) => const CollectionShareScreen(),
+                        ),
+                      );
+                    },
                   ),
                   const SizedBox(height: 24),
                   QuickLogTimeline(

@@ -18,17 +18,19 @@ abstract final class SupabaseEmbeds {
 
   /// Objet + localisation + groupe principal + détenteur (listes / grilles).
   static const collectionItemList =
-      '*, $locationsLabel, $groupsName, location_holder:$locationHolderProfile';
+      '*, $locationsLabel, $groupsName, location_holder:$locationHolderProfile, '
+      'added_by_profile:$addedByProfileUsername';
 
   /// Objet + localisation + groupe principal.
   static const collectionItem =
-      '*, $locationsLabel, $groupsName';
+      '*, $locationsLabel, $groupsName, added_by_profile:$addedByProfileUsername';
 
   /// Fiche détail complète.
   static const collectionItemDetail =
       '*, $locationsLabel, $groupsName, '
       'location_holder:$locationHolderProfile, '
       'loaned_to:$loanedToProfile, '
+      'added_by_profile:$addedByProfileUsername, '
       'collection_item_tags(item_tags(id, label, color))';
 
   /// Prêts actifs.

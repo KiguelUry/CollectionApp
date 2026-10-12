@@ -404,25 +404,6 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     _localRefresh();
   }
 
-  void _addFromFields() {
-    final name = _newPlayerController.text.trim();
-    if (name.isEmpty) return;
-    final team = widget.useTeams ? _newTeamController.text.trim() : '';
-    _addPlayerColumn(
-      name: name,
-      team: team.isEmpty ? null : team,
-      colorIndex: _newPlayerColorIndex,
-    );
-    _newPlayerController.clear();
-    if (widget.useTeams) {
-      // Conserver l'équipe sélectionnée pour enchaîner les ajouts.
-      _newPlayerColorIndex = team.isNotEmpty ? _teamColorIndices[team] : null;
-    } else {
-      _newTeamController.clear();
-      _newPlayerColorIndex = null;
-    }
-  }
-
   Future<void> _editPlayer(int index) async {
     final nameCtrl = TextEditingController(
       text: _playerControllers[index].text,
@@ -600,17 +581,197 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     _localRefresh();
   }
 
-  void _selectColor(int i) {
-    if (!_isColorAvailable(i)) return;
+  String? _ownerOfColor(int colorIndex, {int? exceptPlayer}) {
     if (widget.useTeams) {
-      final team = _selectedTeamForColor;
-      if (team == null) return;
-      _applyTeamColor(team, i);
-      _newPlayerColorIndex = i;
-    } else {
-      _newPlayerColorIndex = i;
+      for (final e in _teamColorIndices.entries) {
+        if (e.value == colorIndex) return e.key;
+      }
+      return null;
     }
-    _localRefresh();
+    for (var p = 0; p < _playerColorIndices.length; p++) {
+      if (exceptPlayer != null && p == exceptPlayer) continue;
+      if (_playerColorIndices[p] == colorIndex) {
+        final n = _playerControllers[p].text.trim();
+        return n.isEmpty ? 'un joueur' : n;
+      }
+    }
+    return null;
+  }
+
+  Future<bool> _confirmStealColor(String ownerName) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Couleur déjà prise'),
+        content: Text('Voulez-vous VOLER la couleur de $ownerName ?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Voler'),
+          ),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
+  Future<void> _openAddPlayerSheet() async {
+    final nameCtrl = TextEditingController();
+    final teamCtrl = TextEditingController(text: _newTeamController.text);
+    var colorIndex = _pickNextColorIndex();
+    if (colorIndex < 0) colorIndex = 0;
+
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final scheme = Theme.of(context).colorScheme;
+            return Padding(
+              padding: EdgeInsets.fromLTRB(
+                20,
+                0,
+                20,
+                MediaQuery.viewInsetsOf(context).bottom + 24,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Ajouter un joueur',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: nameCtrl,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Nom',
+                      hintText: 'Prénom ou pseudo',
+                    ),
+                    textInputAction: TextInputAction.done,
+                  ),
+                  if (widget.useTeams) ...[
+                    const SizedBox(height: 10),
+                    DropdownButtonFormField<String>(
+                      initialValue: teamCtrl.text.trim().isEmpty
+                          ? null
+                          : teamCtrl.text.trim(),
+                      decoration: const InputDecoration(labelText: 'Équipe'),
+                      items: [
+                        for (final c in _definedTeamControllers)
+                          if (c.text.trim().isNotEmpty)
+                            DropdownMenuItem(
+                              value: c.text.trim(),
+                              child: Text(c.text.trim()),
+                            ),
+                      ],
+                      onChanged: (v) {
+                        teamCtrl.text = v ?? '';
+                        if (v != null && _teamColorIndices.containsKey(v)) {
+                          setSheetState(
+                            () => colorIndex = _teamColorIndices[v]!,
+                          );
+                        }
+                      },
+                    ),
+                  ],
+                  const SizedBox(height: 14),
+                  Text('Couleur', style: Theme.of(context).textTheme.labelLarge),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (var i = 0; i < kBoardgameColumnPalette.length; i++)
+                        GestureDetector(
+                          onTap: () async {
+                            final owner = _ownerOfColor(i);
+                            final team = teamCtrl.text.trim();
+                            final mine = widget.useTeams &&
+                                team.isNotEmpty &&
+                                _teamColorIndices[team] == i;
+                            if (owner != null && !mine) {
+                              final steal = await _confirmStealColor(owner);
+                              if (!steal || !context.mounted) return;
+                            }
+                            setSheetState(() => colorIndex = i);
+                          },
+                          child: Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              color: kBoardgameColumnPalette[i],
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: colorIndex == i
+                                    ? scheme.onSurface
+                                    : scheme.outlineVariant.withValues(
+                                        alpha: 0.35,
+                                      ),
+                                width: colorIndex == i ? 2.5 : 1,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton.icon(
+                    onPressed: () {
+                      final name = nameCtrl.text.trim();
+                      if (name.isEmpty) return;
+                      Navigator.pop(ctx, {
+                        'name': name,
+                        'team': teamCtrl.text.trim(),
+                        'color': colorIndex,
+                      });
+                    },
+                    icon: const Icon(Icons.check),
+                    label: const Text('Ajouter'),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+    nameCtrl.dispose();
+    teamCtrl.dispose();
+    if (result == null || !mounted) return;
+
+    final name = result['name'] as String;
+    final team = (result['team'] as String?)?.trim();
+    final color = result['color'] as int?;
+
+    // Vol : libérer la couleur chez l'ancien propriétaire.
+    if (color != null) {
+      if (widget.useTeams) {
+        _teamColorIndices.removeWhere((_, v) => v == color);
+      } else {
+        for (var p = 0; p < _playerColorIndices.length; p++) {
+          if (_playerColorIndices[p] == color) {
+            _playerColorIndices[p] = null;
+          }
+        }
+      }
+    }
+
+    _addPlayerColumn(
+      name: name,
+      team: (team != null && team.isNotEmpty) ? team : null,
+      colorIndex: color,
+    );
   }
 
   double _measureTextWidth(String text, {double fontSize = 12}) {
@@ -739,18 +900,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (widget.enabled) ...[
-          // ── Bloc 1 : toggle équipes ──
-          if (widget.onTeamsChanged != null) ...[
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Équipes'),
-              value: widget.useTeams,
-              onChanged: (v) => widget.onTeamsChanged!(v),
-            ),
-            const SizedBox(height: 16),
-          ],
-
-          // ── Bloc 2 : configuration des équipes ──
+          // ── Configuration des équipes (si type = Équipes) ──
           if (widget.useTeams) ...[
             Text(
               'Configuration des équipes',
@@ -806,20 +956,37 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
               ),
             ],
             const SizedBox(height: 10),
+            Text(
+              'Score d\'équipe',
+              style: Theme.of(context).textTheme.labelMedium,
+            ),
+            const SizedBox(height: 4),
             SegmentedButton<TeamScoreMode>(
               segments: const [
                 ButtonSegment(
-                  value: TeamScoreMode.divided,
-                  label: Text('Par joueur'),
-                ),
-                ButtonSegment(
                   value: TeamScoreMode.shared,
                   label: Text('Commun'),
+                  tooltip: 'Un score partagé par équipe',
+                ),
+                ButtonSegment(
+                  value: TeamScoreMode.divided,
+                  label: Text('Par joueur'),
+                  tooltip: 'Chaque joueur a son score',
                 ),
               ],
               selected: {_teamScoreMode},
               onSelectionChanged: (s) =>
                   setState(() => _teamScoreMode = s.first),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _teamScoreMode == TeamScoreMode.shared
+                  ? 'Un total commun pour toute l\'équipe'
+                  : 'Chaque joueur marque ses propres points',
+              style: TextStyle(
+                fontSize: 12,
+                color: scheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 20),
           ],
@@ -830,11 +997,10 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
             style: Theme.of(context).textTheme.labelLarge,
           ),
           const SizedBox(height: 10),
-          TextField(
-            controller: _newPlayerController,
-            decoration: const InputDecoration(hintText: 'Prénom'),
-            textInputAction: TextInputAction.done,
-            onSubmitted: (_) => _addFromFields(),
+          FilledButton.tonalIcon(
+            onPressed: _openAddPlayerSheet,
+            icon: const Icon(Icons.person_add_alt_1),
+            label: const Text('Ajouter un joueur'),
           ),
           if (_availableSuggestions.isNotEmpty) ...[
             const SizedBox(height: 8),
@@ -849,102 +1015,23 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
               }).toList(),
             ),
           ],
-          if (widget.useTeams) ...[
-            const SizedBox(height: 10),
-            DropdownButtonFormField<String>(
-              initialValue: _newTeamController.text.trim().isEmpty
-                  ? null
-                  : _newTeamController.text.trim(),
-              decoration: const InputDecoration(labelText: 'Équipe'),
-              items: [
-                for (final c in _definedTeamControllers)
-                  if (c.text.trim().isNotEmpty)
-                    DropdownMenuItem(
-                      value: c.text.trim(),
-                      child: Text(c.text.trim()),
-                    ),
-              ],
-              onChanged: (v) {
-                _newTeamController.text = v ?? '';
-                if (v != null && _teamColorIndices.containsKey(v)) {
-                  _newPlayerColorIndex = _teamColorIndices[v];
-                }
-                _localRefresh();
-              },
-            ),
-          ],
-          const SizedBox(height: 12),
-          Text(
-            widget.useTeams ? 'Couleur de l\'équipe' : 'Couleur du joueur',
-            style: Theme.of(context).textTheme.labelSmall,
-          ),
-          const SizedBox(height: 6),
-          SizedBox(
-            height: 32,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: kBoardgameColumnPalette.length,
-              separatorBuilder: (context, index) => const SizedBox(width: 6),
-              itemBuilder: (context, i) {
-                final selected = widget.useTeams
-                    ? _teamColorIndices[_selectedTeamForColor ?? ''] == i
-                    : _newPlayerColorIndex == i;
-                final available = _isColorAvailable(i);
-                return GestureDetector(
-                  onTap: available ? () => _selectColor(i) : null,
-                  child: Opacity(
-                    opacity: available ? 1 : 0.25,
-                    child: Container(
-                      width: 28,
-                      height: 28,
-                      decoration: BoxDecoration(
-                        color: kBoardgameColumnPalette[i],
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: selected
-                              ? scheme.onSurface
-                              : scheme.outlineVariant.withValues(alpha: 0.4),
-                          width: selected ? 2.5 : 1,
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Row(
-            mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              FilledButton.tonalIcon(
-                onPressed: _addFromFields,
-                icon: const Icon(Icons.person_add_outlined, size: 18),
-                label: const Text('Ajouter'),
-              ),
-              if (widget.onPickPlayer != null) ...[
-                const SizedBox(width: 4),
+              if (widget.onPickPlayer != null)
                 IconButton(
                   onPressed: () async {
                     final name = await widget.onPickPlayer!();
                     if (name != null && name.trim().isNotEmpty) {
                       WidgetsBinding.instance.addPostFrameCallback((_) {
                         if (!mounted) return;
-                        _addPlayerColumn(
-                          name: name.trim(),
-                          team:
-                              widget.useTeams &&
-                                  _newTeamController.text.trim().isNotEmpty
-                              ? _newTeamController.text.trim()
-                              : null,
-                        );
+                        _addPlayerColumn(name: name.trim());
                       });
                     }
                   },
                   icon: const Icon(Icons.person_search_outlined),
                   tooltip: 'Depuis mes contacts',
                 ),
-              ],
               IconButton(
                 onPressed: _shuffleRoster,
                 icon: const Icon(Icons.shuffle),
@@ -1237,14 +1324,14 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                 TextButton.icon(
                   onPressed: _addRound,
                   icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Ligne'),
+                  label: const Text('Ligne · Ajouter'),
                 ),
                 if (_roundLabelControllers.length > 1)
                   TextButton.icon(
                     onPressed: () =>
                         _removeRound(_roundLabelControllers.length - 1),
                     icon: const Icon(Icons.remove, size: 18),
-                    label: const Text('Retirer'),
+                    label: const Text('Ligne · Retirer'),
                   ),
               ],
             ),

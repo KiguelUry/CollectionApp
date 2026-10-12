@@ -13,7 +13,7 @@ class BoardgameScoreGrid {
     this.teams = const [],
     this.playerColors = const [],
     this.teamColorMap = const {},
-    this.teamScoreMode = TeamScoreMode.divided,
+    this.teamScoreMode = TeamScoreMode.shared,
   });
 
   /// Nombre de colonnes joueur par défaut selon la fiche BGG.
@@ -489,8 +489,8 @@ enum TeamScoreMode {
       };
 
   static TeamScoreMode fromJson(String? raw) => switch (raw) {
-        'shared' => TeamScoreMode.shared,
-        _ => TeamScoreMode.divided,
+        'divided' => TeamScoreMode.divided,
+        _ => TeamScoreMode.shared,
       };
 
   String get dbValue => switch (this) {

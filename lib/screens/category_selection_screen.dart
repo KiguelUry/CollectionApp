@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_category.dart';
 import '../services/category_hub_preferences.dart';
-import '../services/recommendation_service.dart';
-import '../widgets/recommendations_banner.dart';
 import '../widgets/main_drawer.dart';
 import '../models/user_collection_type.dart';
 import '../models/user_profile.dart';
@@ -40,7 +38,6 @@ class CategorySelectionScreen extends StatefulWidget {
 }
 
 class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
-  final _recommendations = RecommendationService();
   Map<CollectionCategory, int> _counts = {};
   Map<CollectionCategory, int> _groupCounts = {};
   Map<CollectionCategory, int> _wishlistCounts = {};
@@ -48,7 +45,6 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
   Map<String, int> _customCounts = {};
   bool _loadingCounts = true;
   List<HubTileEntry> _orderedTiles = [];
-  List<Recommendation> _recommendationsList = [];
   @override
   void initState() {
     super.initState();
@@ -84,7 +80,6 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     final customCounts = <String, int>{};
     var boardgameExpansionCount = 0;
     var orderedTiles = <HubTileEntry>[];
-    var recommendationsList = <Recommendation>[];
     String? loadError;
 
     try {
@@ -159,10 +154,6 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
         // group_members RLS : compteurs perso OK, groupes ignorés
       }
 
-      try {
-        recommendationsList = await _recommendations.generate(limit: 6);
-      } catch (_) {}
-
       orderedTiles = await loadVisibleHubTiles();
     } catch (e) {
       loadError = e.toString();
@@ -176,7 +167,6 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
         _boardgameExpansionCount = boardgameExpansionCount;
         _customCounts = customCounts;
         _orderedTiles = orderedTiles;
-        _recommendationsList = recommendationsList;
         _loadingCounts = false;
       });
       if (loadError != null) {
@@ -390,11 +380,6 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
               ],
             ),
           ),
-          if (!_loadingCounts && _recommendationsList.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: RecommendationsBanner(items: _recommendationsList),
-            ),
           Expanded(
             child: _loadingCounts
                 ? const Center(child: CircularProgressIndicator())

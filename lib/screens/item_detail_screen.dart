@@ -28,6 +28,7 @@ import '../widgets/bgg_network_image.dart';
 import '../models/boardgame_play_session.dart';
 import '../widgets/boardgame_detail_bento.dart';
 import '../widgets/collapsible_section.dart';
+import '../widgets/detail_bento_tile.dart';
 import '../widgets/compact_whereabouts_dropdown.dart';
 import '../widgets/discogs_market_value_card.dart';
 import '../widgets/friend_ratings_panel.dart';
@@ -97,6 +98,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
   double? _bggAvgRating;
 
   int _ownedDisplayQty = 0;
+  String? _expandedBento;
 
   @override
   void initState() {
@@ -712,6 +714,18 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
             ),
           if (!ro)
             IconButton(
+              tooltip: _item.isFavorite ? 'Retirer des favoris' : 'Favori',
+              icon: Icon(
+                _item.isFavorite ? Icons.favorite : Icons.favorite_border,
+                color: _item.isFavorite ? Colors.redAccent : null,
+              ),
+              onPressed: () {
+                setState(() => _item = _item.withFavorite(!_item.isFavorite));
+                _saveNow();
+              },
+            ),
+          if (!ro)
+            IconButton(
               icon: const Icon(Icons.delete_outline),
               onPressed: _delete,
             ),
@@ -922,10 +936,16 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          if (_item.createdAtLabel != null)
+                          if (_item.createdAtLabel != null ||
+                              _item.addedByUsername != null)
                             Expanded(
                               child: Text(
-                                _item.createdAtLabel!,
+                                [
+                                  if (_item.createdAtLabel != null)
+                                    _item.createdAtLabel!,
+                                  if (_item.addedByUsername != null)
+                                    'Ajouté par ${_item.addedByUsername}',
+                                ].join(' · '),
                                 style: TextStyle(
                                   fontSize: 13,
                                   color: Colors.grey.shade600,
@@ -1014,10 +1034,16 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                           (_bggDescription != null &&
                               _bggDescription!.isNotEmpty))
                         const SizedBox(height: 16),
-                      BoardgameDetailBento(
+                    ],
+                    _buildInformationsSection(
+                      isBoardgame: isBoardgame,
+                      metadataRows: metadataRows,
+                    ),
+                    if (isBoardgame) ...[
+                      const SizedBox(height: 12),
+                      BoardgamePlayHubBento(
                         item: _item,
                         readOnly: ro,
-                        bestPlayers: _bggBestPlayers,
                         personalRulesController:
                             isWishlist ? null : _personalRulesController,
                         onMetadataChanged: (meta) {
@@ -1030,16 +1056,21 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                           _saveNow();
                         },
                       ),
-                    ] else
-                      _buildInformationsSection(
-                        isBoardgame: false,
-                        metadataRows: metadataRows,
-                      ),
+                    ],
                     if (isBoardgame &&
-                        BoardgameExpansionService.itemActsAsBase(_item))
-                      CollapsibleSection(
+                        BoardgameExpansionService.itemActsAsBase(_item)) ...[
+                      const SizedBox(height: 12),
+                      DetailBentoTile(
+                        icon: Icons.extension_outlined,
                         title: 'Extensions',
-                        accentColor: _item.category.color,
+                        subtitle: 'Base & extensions',
+                        accent: _item.category.color,
+                        expanded: _expandedBento == 'extensions',
+                        onTap: () => setState(
+                          () => _expandedBento = _expandedBento == 'extensions'
+                              ? null
+                              : 'extensions',
+                        ),
                         child: BoardgameExpansionsSection(
                           item: _item,
                           readOnly: ro,
@@ -1047,10 +1078,21 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                               setState(() => _item = updated),
                         ),
                       ),
+                    ],
                     if (!isWishlist) ...[
-                      CollapsibleSection(
+                      const SizedBox(height: 12),
+                      DetailBentoTile(
+                        icon: Icons.group_outlined,
                         title: 'Partage & groupes',
-                        accentColor: _item.category.color,
+                        subtitle: _selectedGroupIds.isEmpty
+                            ? 'Groupes & localisation'
+                            : '${_selectedGroupIds.length} groupe${_selectedGroupIds.length > 1 ? 's' : ''}',
+                        accent: _item.category.color,
+                        expanded: _expandedBento == 'share',
+                        onTap: () => setState(
+                          () => _expandedBento =
+                              _expandedBento == 'share' ? null : 'share',
+                        ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
@@ -1192,9 +1234,19 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         ),
                       ),
                     ],
-                    CollapsibleSection(
+                    const SizedBox(height: 12),
+                    DetailBentoTile(
+                      icon: Icons.star_outline,
                       title: 'Ma note & avis',
-                      accentColor: _item.category.color,
+                      subtitle: (_item.rating ?? 0) > 0
+                          ? '${_item.rating!.toStringAsFixed(1)} / 5'
+                          : 'Noter cet objet',
+                      accent: _item.category.color,
+                      expanded: _expandedBento == 'rating',
+                      onTap: () => setState(
+                        () => _expandedBento =
+                            _expandedBento == 'rating' ? null : 'rating',
+                      ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
@@ -1311,10 +1363,19 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         ),
                     ],
                     if (!ro && !isWishlist && ownedQty > 0) ...[
-                      CollapsibleSection(
+                      const SizedBox(height: 12),
+                      DetailBentoTile(
+                        icon: Icons.sell_outlined,
                         title: 'Doubles & vente',
-                        accentColor: _item.category.color,
-                        initiallyExpanded: false,
+                        subtitle: _item.isSold
+                            ? 'Vendu'
+                            : (_item.isForSale ? 'À vendre' : 'État de vente'),
+                        accent: _item.category.color,
+                        expanded: _expandedBento == 'sale',
+                        onTap: () => setState(
+                          () => _expandedBento =
+                              _expandedBento == 'sale' ? null : 'sale',
+                        ),
                         child: Column(
                           children: [
                             SwitchListTile(

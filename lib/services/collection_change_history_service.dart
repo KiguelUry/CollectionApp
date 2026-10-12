@@ -15,6 +15,7 @@ class CollectionChangeEvent {
   final CollectionCategory category;
   final String title;
   final String? imageUrl;
+  final String? actorUsername;
   final Map<String, dynamic> snapshot;
 
   const CollectionChangeEvent({
@@ -25,6 +26,7 @@ class CollectionChangeEvent {
     required this.title,
     required this.imageUrl,
     required this.snapshot,
+    this.actorUsername,
   });
 
   factory CollectionChangeEvent.fromJson(Map<String, dynamic> json) {
@@ -37,6 +39,7 @@ class CollectionChangeEvent {
       ),
       title: json['title']?.toString() ?? 'Sans titre',
       imageUrl: json['image_url']?.toString(),
+      actorUsername: json['actor_username']?.toString(),
       snapshot: Map<String, dynamic>.from(json['snapshot'] as Map? ?? {}),
     );
   }
@@ -48,6 +51,7 @@ class CollectionChangeEvent {
         'category': category.dbValue,
         'title': title,
         'image_url': imageUrl,
+        if (actorUsername != null) 'actor_username': actorUsername,
         'snapshot': snapshot,
       };
 }
@@ -119,6 +123,15 @@ class CollectionChangeHistoryService {
     final userId = Supabase.instance.client.auth.currentUser?.id;
     if (userId == null) return;
     final events = await load(category: item.category);
+    String? actor;
+    try {
+      final row = await Supabase.instance.client
+          .from('profiles')
+          .select('username')
+          .eq('id', userId)
+          .maybeSingle();
+      actor = row?['username']?.toString();
+    } catch (_) {}
     final entry = CollectionChangeEvent(
       id: '${DateTime.now().microsecondsSinceEpoch}_${item.id}',
       action: action,
@@ -126,6 +139,7 @@ class CollectionChangeHistoryService {
       category: item.category,
       title: item.title,
       imageUrl: item.imageUrl,
+      actorUsername: actor,
       snapshot: snapshot,
     );
     final next = [entry, ...events].take(_maxEntries).toList();

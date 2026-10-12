@@ -159,6 +159,10 @@ class CollectionFilterBar extends StatelessWidget {
       },
       itemBuilder: (context) => [
         const PopupMenuItem(
+          value: CollectionSort.favoritesFirst,
+          child: Text('Favoris en premier'),
+        ),
+        const PopupMenuItem(
           value: CollectionSort.titleAsc,
           child: Text('Titre A → Z'),
         ),
@@ -194,9 +198,19 @@ class CollectionFilterBar extends StatelessWidget {
         style: OutlinedButton.styleFrom(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           visualDensity: VisualDensity.compact,
-          foregroundColor: sortActive ? scheme.primary : null,
+          foregroundColor:
+              sortActive ? scheme.primary : scheme.onSurfaceVariant,
+          side: BorderSide(
+            color: sortActive
+                ? scheme.primary
+                : scheme.outlineVariant.withValues(alpha: 0.55),
+          ),
         ),
-        icon: Icon(Icons.sort, size: 18, color: scheme.primary),
+        icon: Icon(
+          Icons.sort,
+          size: 18,
+          color: sortActive ? scheme.primary : scheme.onSurfaceVariant,
+        ),
         label: const Text('Tri', style: TextStyle(fontSize: 13)),
       ),
     );
@@ -213,12 +227,18 @@ class CollectionFilterBar extends StatelessWidget {
         style: OutlinedButton.styleFrom(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           visualDensity: VisualDensity.compact,
-          foregroundColor: active ? scheme.primary : null,
+          foregroundColor: active ? scheme.primary : scheme.onSurfaceVariant,
+          side: BorderSide(
+            color: active
+                ? scheme.primary
+                : scheme.outlineVariant.withValues(alpha: 0.55),
+            width: active ? 1.5 : 1,
+          ),
         ),
         icon: Icon(
           Icons.filter_list,
           size: 18,
-          color: active ? scheme.primary : null,
+          color: active ? scheme.primary : scheme.onSurfaceVariant,
         ),
         label: const Text('Filtre', style: TextStyle(fontSize: 13)),
       ),
@@ -258,6 +278,33 @@ class CollectionFilterBar extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 12),
+                    _filterSection(
+                      context,
+                      title: 'Favoris',
+                      icon: Icons.favorite_border,
+                      child: Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          _sheetChip(
+                            context,
+                            label: 'Tous',
+                            selected: !sheetFilters.favoritesOnly,
+                            onTap: () => apply(
+                              sheetFilters.copyWith(favoritesOnly: false),
+                            ),
+                          ),
+                          _sheetChip(
+                            context,
+                            label: 'Favoris seulement',
+                            selected: sheetFilters.favoritesOnly,
+                            onTap: () => apply(
+                              sheetFilters.copyWith(favoritesOnly: true),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                     if (useHolderLocationFilter &&
                         holderFilterOptions.isNotEmpty)
                       _filterSection(

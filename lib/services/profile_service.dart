@@ -295,8 +295,8 @@ class ProfileService {
   Future<UserProfile> updateFavoriteItemIds(List<String> ids) async {
     final userId = _userId;
     if (userId == null) throw Exception('Non connecté');
-    if (ids.length > 6) {
-      throw Exception('6 trophées maximum');
+    if (ids.length > 100) {
+      throw Exception('100 objets maximum dans la vitrine');
     }
 
     final row = await _client

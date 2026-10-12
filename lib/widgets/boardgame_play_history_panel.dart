@@ -8,6 +8,7 @@ import '../models/collection_item.dart';
 import '../services/friend_service.dart';
 import '../services/profile_cache_service.dart';
 import '../utils/boardgame_past_players.dart';
+import 'bgg_network_image.dart';
 import 'boardgame_ranking_panel.dart';
 import 'boardgame_score_grid_editor.dart';
 
@@ -453,7 +454,8 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     _winCondition = seed?.winCondition == BoardgameWinCondition.cooperative
         ? BoardgameWinCondition.highest
         : (seed?.winCondition ?? BoardgameWinCondition.highest);
-    _status = s?.status ?? BoardgamePlayStatus.finished;
+    // Nouvelle partie / relaunch → en cours ; édition conserve le statut.
+    _status = s?.status ?? BoardgamePlayStatus.inProgress;
     if (s != null && s.scoreGrid != null) {
       _initialGrid = s.scoreGrid!;
     } else if (t?.scoreGrid != null) {
@@ -683,29 +685,19 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
               children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(8),
-                  child: item.imageUrl != null && item.imageUrl!.isNotEmpty
-                      ? Image.network(
-                          item.imageUrl!,
-                          width: 48,
-                          height: 48,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) => ColoredBox(
+                  child: SizedBox(
+                    width: 56,
+                    height: 56,
+                    child: item.imageUrl != null && item.imageUrl!.isNotEmpty
+                        ? BggNetworkImage(
+                            url: item.imageUrl!,
+                            boxedCover: true,
+                          )
+                        : ColoredBox(
                             color: scheme.primaryContainer,
-                            child: SizedBox(
-                              width: 48,
-                              height: 48,
-                              child: Icon(Icons.casino, color: scheme.primary),
-                            ),
-                          ),
-                        )
-                      : ColoredBox(
-                          color: scheme.primaryContainer,
-                          child: SizedBox(
-                            width: 48,
-                            height: 48,
                             child: Icon(Icons.casino, color: scheme.primary),
                           ),
-                        ),
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -726,23 +718,40 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
             label: Text(dateFmt.format(_date)),
           ),
           const SizedBox(height: 12),
-          SegmentedButton<BoardgamePlayStatus>(
-            segments: const [
-              ButtonSegment(
-                value: BoardgamePlayStatus.finished,
-                label: Text('Terminée'),
-                icon: Icon(Icons.flag, size: 16),
+          if (_status == BoardgamePlayStatus.inProgress)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Row(
+                children: [
+                  Icon(Icons.timelapse, size: 18, color: Colors.orange.shade700),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Partie en cours',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: Colors.orange.shade800,
+                    ),
+                  ),
+                ],
               ),
-              ButtonSegment(
-                value: BoardgamePlayStatus.inProgress,
-                label: Text('En cours'),
-                icon: Icon(Icons.timelapse, size: 16),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Row(
+                children: [
+                  Icon(Icons.flag, size: 18, color: scheme.primary),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Partie terminée',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: scheme.primary,
+                    ),
+                  ),
+                ],
               ),
-            ],
-            selected: {_status},
-            onSelectionChanged: (s) => setState(() => _status = s.first),
-          ),
-          const SizedBox(height: 12),
+            ),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Compter les points'),
@@ -768,7 +777,9 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
                 setState(() {
                   _confrontation = s.first;
                   _useTeams =
-                      _confrontation == BoardgameConfrontationType.teams;
+                      _confrontation == BoardgameConfrontationType.teams ||
+                      (_confrontation == BoardgameConfrontationType.cooperative &&
+                          _coopTeamCount > 1);
                 });
               },
             ),
@@ -870,16 +881,10 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
               useTeams: useTeamsEffective,
               winCondition: _winCondition,
               targetScore: _targetScore,
-              onTeamsChanged: _isCoop
-                  ? null
-                  : (v) => setState(() {
-                        _useTeams = v;
-                        _confrontation = v
-                            ? BoardgameConfrontationType.teams
-                            : BoardgameConfrontationType.freeForAll;
-                      }),
+              // Type de jeu pilote déjà Solo / Équipes / Coop — pas de toggle doublon.
+              onTeamsChanged: null,
               onPickPlayer: canPickPlayers ? _pickPlayerFromContacts : null,
-              showScoreTable: !(_isCoop && _coopTeamCount <= 1),
+              showScoreTable: true,
               onQuickSave: _submit,
             ),
           ] else ...[
@@ -914,11 +919,29 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
             ),
           ),
           const SizedBox(height: 24),
-          FilledButton.icon(
-            onPressed: _submit,
-            icon: const Icon(Icons.save_rounded),
-            label: const Text('Enregistrer la partie'),
-          ),
+          if (_status == BoardgamePlayStatus.inProgress)
+            FilledButton.icon(
+              onPressed: () {
+                setState(() => _status = BoardgamePlayStatus.finished);
+                _submit();
+              },
+              icon: const Icon(Icons.flag_rounded),
+              label: const Text('Finir la partie'),
+            )
+          else
+            FilledButton.icon(
+              onPressed: _submit,
+              icon: const Icon(Icons.save_rounded),
+              label: const Text('Enregistrer la partie'),
+            ),
+          if (_status == BoardgamePlayStatus.inProgress) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _submit,
+              icon: const Icon(Icons.save_outlined),
+              label: const Text('Enregistrer (rester en cours)'),
+            ),
+          ],
         ],
       ),
     );

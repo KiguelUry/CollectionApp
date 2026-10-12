@@ -136,7 +136,7 @@ class CollectionItem {
       createdAt = DateTime.tryParse(rawCreated);
     }
 
-    final metadata = CategoryMetadata.parse(json['metadata']);
+    var metadata = CategoryMetadata.parse(json['metadata']);
 
     final customHolder = metadata?['holder_label'] as String?;
     final hasCustomHolder =
@@ -151,6 +151,15 @@ class CollectionItem {
       locLabel = formatManualHolderLabel(customHolder.trim());
     } else if (locLabel == null && loc is Map) {
       locLabel = loc['label'] as String?;
+    }
+
+    // Conserve le username d'ajout pour l'UI (groupes / historique).
+    final addedByProfile = json['added_by_profile'] ??
+        json['profiles'] ??
+        json['profiles!collection_items_added_by_fkey'];
+    if (addedByProfile is Map && addedByProfile['username'] != null) {
+      metadata = Map<String, dynamic>.from(metadata ?? {});
+      metadata['_added_by_username'] = addedByProfile['username'].toString();
     }
 
     return CollectionItem(
@@ -363,6 +372,26 @@ class CollectionItem {
     final d = dt.day.toString().padLeft(2, '0');
     final m = dt.month.toString().padLeft(2, '0');
     return 'Ajouté le $d/$m/${dt.year}';
+  }
+
+  /// Favori local (metadata, pas la vitrine profil limitée à 6).
+  bool get isFavorite => metadata?['is_favorite'] == true;
+
+  CollectionItem withFavorite(bool value) {
+    final meta = Map<String, dynamic>.from(metadata ?? {});
+    if (value) {
+      meta['is_favorite'] = true;
+    } else {
+      meta.remove('is_favorite');
+    }
+    return copyWith(metadata: meta);
+  }
+
+  /// Username de l'ajouteur si l'embed `profiles!…added_by…` est présent.
+  String? get addedByUsername {
+    final raw = metadata?['_added_by_username']?.toString().trim();
+    if (raw != null && raw.isNotEmpty) return raw;
+    return null;
   }
 
   BookSubcategory? get bookSubcategory {
