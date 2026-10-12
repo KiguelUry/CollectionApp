@@ -207,8 +207,7 @@ class _HomeScreenState extends State<HomeScreen>
     // Réparation BGG / extensions en silence (pas de SnackBar).
     final result = await repairAndReconcileBoardgameExpansions();
     if (!mounted || !result.changed) return;
-    // Rafraîchir la grille si des liens ont bougé.
-    _load();
+    await _reloadItemsFromDb();
   }
 
   List<Map<String, dynamic>> _filterAndScopeRows(
