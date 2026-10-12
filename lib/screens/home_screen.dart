@@ -222,9 +222,16 @@ class _HomeScreenState extends State<HomeScreen>
         '${result.mergedCount} extension${result.mergedCount > 1 ? 's' : ''} rattachée${result.mergedCount > 1 ? 's' : ''}',
       );
     }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(parts.join(' · '))));
+    // Feedback discret + durée courte (évite le bandeau « coincé » en bas).
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(parts.join(' · ')),
+        duration: const Duration(seconds: 3),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   List<Map<String, dynamic>> _filterAndScopeRows(

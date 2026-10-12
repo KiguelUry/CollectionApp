@@ -27,6 +27,7 @@ import '../widgets/bgg_community_rating_panel.dart';
 import '../widgets/bgg_network_image.dart';
 import '../models/boardgame_play_session.dart';
 import '../widgets/boardgame_detail_bento.dart';
+import '../widgets/boardgame_rules_bento.dart';
 import '../widgets/collapsible_section.dart';
 import '../widgets/detail_bento_tile.dart';
 import '../widgets/compact_whereabouts_dropdown.dart';
@@ -1044,8 +1045,6 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       BoardgamePlayHubBento(
                         item: _item,
                         readOnly: ro,
-                        personalRulesController:
-                            isWishlist ? null : _personalRulesController,
                         onMetadataChanged: (meta) {
                           final count = parseBoardgamePlays(meta).length;
                           setState(() {
@@ -1056,6 +1055,27 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                           _saveNow();
                         },
                       ),
+                      if (!isWishlist) ...[
+                        const SizedBox(height: 12),
+                        BoardgameRulesBento(
+                          item: _item,
+                          readOnly: ro,
+                          expanded: _expandedBento == 'rules',
+                          onToggle: () => setState(
+                            () => _expandedBento =
+                                _expandedBento == 'rules' ? null : 'rules',
+                          ),
+                          onPersonalRulesChanged: (encoded) {
+                            _personalRulesController.text = encoded;
+                            setState(() {
+                              _item = _item.copyWith(
+                                personalRules: encoded.isEmpty ? null : encoded,
+                              );
+                            });
+                            _scheduleSave();
+                          },
+                        ),
+                      ],
                     ],
                     if (isBoardgame &&
                         BoardgameExpansionService.itemActsAsBase(_item)) ...[

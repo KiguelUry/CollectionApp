@@ -5,7 +5,6 @@ import '../models/collection_item.dart';
 import '../utils/boardgame_play_stats.dart';
 import 'boardgame_play_history_panel.dart';
 import 'detail_bento_tile.dart';
-import 'group_rules_panel.dart';
 
 enum _PlayHubTab { none, history, stats, ranking }
 
@@ -14,14 +13,12 @@ class BoardgamePlayHubBento extends StatefulWidget {
   final CollectionItem item;
   final bool readOnly;
   final ValueChanged<Map<String, dynamic>> onMetadataChanged;
-  final TextEditingController? personalRulesController;
 
   const BoardgamePlayHubBento({
     super.key,
     required this.item,
     required this.readOnly,
     required this.onMetadataChanged,
-    this.personalRulesController,
   });
 
   @override
@@ -126,26 +123,6 @@ class _BoardgamePlayHubBentoState extends State<BoardgamePlayHubBento> {
             ],
           ),
         ),
-        if (!widget.readOnly) ...[
-          const SizedBox(height: 12),
-          if (widget.item.groupId != null)
-            GroupRulesPanel(
-              groupId: widget.item.groupId!,
-              itemId: widget.item.id,
-              itemTitle: widget.item.title,
-              accent: accent,
-            )
-          else if (widget.personalRulesController != null)
-            TextField(
-              controller: widget.personalRulesController,
-              readOnly: widget.readOnly,
-              maxLines: 4,
-              decoration: const InputDecoration(
-                labelText: 'Règles personnalisées',
-                border: OutlineInputBorder(),
-              ),
-            ),
-        ],
       ],
     );
   }
