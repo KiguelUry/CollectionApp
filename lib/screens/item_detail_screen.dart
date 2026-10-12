@@ -26,15 +26,13 @@ import '../widgets/boardgame_expansions_section.dart';
 import '../widgets/bgg_community_rating_panel.dart';
 import '../widgets/bgg_network_image.dart';
 import '../models/boardgame_play_session.dart';
-import '../widgets/boardgame_play_history_panel.dart';
+import '../widgets/boardgame_detail_bento.dart';
 import '../widgets/collapsible_section.dart';
 import '../widgets/compact_whereabouts_dropdown.dart';
 import '../widgets/discogs_market_value_card.dart';
 import '../widgets/friend_ratings_panel.dart';
-import '../widgets/group_rules_panel.dart';
 import '../widgets/item_aspect_ratings_section.dart';
 import '../widgets/videogame_platform_picker.dart';
-import '../widgets/profile_avatar.dart';
 import '../widgets/restaurant_visits_panel.dart';
 import '../services/boardgame_expansion_service.dart';
 import '../utils/tech_warranty.dart';
@@ -333,13 +331,6 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
         );
       },
     );
-  }
-
-  Color _groupAccent() {
-    final gid = _item.groupId;
-    if (gid == null) return Theme.of(context).colorScheme.primary;
-    final group = _groups.where((g) => g.id == gid).firstOrNull;
-    return ProfileAvatar.colorFromHex(group?.accentColor);
   }
 
   Future<void> _reloadItem() async {
@@ -1023,57 +1014,27 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                           (_bggDescription != null &&
                               _bggDescription!.isNotEmpty))
                         const SizedBox(height: 16),
-                    ],
-                    _buildInformationsSection(
-                      isBoardgame: isBoardgame,
-                      metadataRows: metadataRows,
-                    ),
-                    if (isBoardgame) ...[
-                      const SizedBox(height: 12),
-                      CollapsibleSection(
-                        title: 'Jeu de société',
-                        accentColor: _item.category.color,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            BoardgamePlayHistoryPanel(
-                              item: _item,
-                              readOnly: ro,
-                              onMetadataChanged: (meta) {
-                                final count = parseBoardgamePlays(meta).length;
-                                setState(() {
-                                  _item = _item.copyWith(metadata: meta);
-                                  _gamesPlayedController.text = count > 0
-                                      ? count.toString()
-                                      : '';
-                                });
-                                _saveNow();
-                              },
-                            ),
-                            if (!isWishlist) ...[
-                              const SizedBox(height: 12),
-                              if (_item.groupId != null)
-                                GroupRulesPanel(
-                                  groupId: _item.groupId!,
-                                  itemId: _item.id,
-                                  itemTitle: _item.title,
-                                  accent: _groupAccent(),
-                                )
-                              else
-                                TextField(
-                                  controller: _personalRulesController,
-                                  readOnly: ro,
-                                  maxLines: 5,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Règles personnalisées',
-                                    border: OutlineInputBorder(),
-                                  ),
-                                ),
-                            ],
-                          ],
-                        ),
+                      BoardgameDetailBento(
+                        item: _item,
+                        readOnly: ro,
+                        bestPlayers: _bggBestPlayers,
+                        personalRulesController:
+                            isWishlist ? null : _personalRulesController,
+                        onMetadataChanged: (meta) {
+                          final count = parseBoardgamePlays(meta).length;
+                          setState(() {
+                            _item = _item.copyWith(metadata: meta);
+                            _gamesPlayedController.text =
+                                count > 0 ? count.toString() : '';
+                          });
+                          _saveNow();
+                        },
                       ),
-                    ],
+                    ] else
+                      _buildInformationsSection(
+                        isBoardgame: false,
+                        metadataRows: metadataRows,
+                      ),
                     if (isBoardgame &&
                         BoardgameExpansionService.itemActsAsBase(_item))
                       CollapsibleSection(

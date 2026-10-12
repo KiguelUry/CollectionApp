@@ -6,12 +6,14 @@ class BoardgameScoreHighlight {
   final int score;
   final DateTime date;
   final int sessionIndex;
+  final String? gameTitle;
 
   const BoardgameScoreHighlight({
     required this.player,
     required this.score,
     required this.date,
     required this.sessionIndex,
+    this.gameTitle,
   });
 }
 
@@ -144,17 +146,20 @@ class BoardgameRankingStats {
     required this.podiumSlots,
   });
 
-  BoardgamePlayAggregateStats get legacySummary => BoardgamePlayAggregateStats(
-        winPodium: winPodium,
-        bestScores: allScores.take(5).toList(),
-        worstScores: List<BoardgameScoreHighlight>.from(allScores)
-          ..sort((a, b) => b.score.compareTo(a.score))
-          ..take(5),
-      );
+  BoardgamePlayAggregateStats get legacySummary {
+    final worst = List<BoardgameScoreHighlight>.from(allScores)
+      ..sort((a, b) => a.score.compareTo(b.score));
+    return BoardgamePlayAggregateStats(
+      winPodium: winPodium,
+      bestScores: allScores.take(5).toList(),
+      worstScores: worst.take(5).toList(),
+    );
+  }
 
   factory BoardgameRankingStats.fromSessions(
-    List<BoardgamePlaySession> sessions,
-  ) {
+    List<BoardgamePlaySession> sessions, {
+    List<String?>? gameTitles,
+  }) {
     final winCounts = <String, int>{};
     final lastCounts = <String, int>{};
     final gamesPlayed = <String, int>{};
@@ -164,6 +169,7 @@ class BoardgameRankingStats {
     final allScores = <BoardgameScoreHighlight>[];
     final rawNames = <String>{};
     final duoCounts = <String, int>{};
+    final titles = gameTitles ?? const <String?>[];
 
     void bumpGames(Iterable<String> names) {
       for (final n in names) {
@@ -175,7 +181,11 @@ class BoardgameRankingStats {
     }
 
     void recordDuoWinners(List<String> winners) {
-      final unique = winners.map((e) => e.trim()).where((e) => e.isNotEmpty).toSet().toList();
+      final unique = winners
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toSet()
+          .toList();
       for (var i = 0; i < unique.length; i++) {
         for (var j = i + 1; j < unique.length; j++) {
           final key = _duoKey(unique[i], unique[j]);
@@ -186,28 +196,30 @@ class BoardgameRankingStats {
 
     for (var sessionIdx = 0; sessionIdx < sessions.length; sessionIdx++) {
       final session = sessions[sessionIdx];
+      final gameTitle =
+          sessionIdx < titles.length ? titles[sessionIdx]?.trim() : null;
       final participants = _sessionParticipants(session);
       bumpGames(participants);
 
-      if (session.winCondition == BoardgameWinCondition.cooperative) {
+      if (session.isCooperative) {
         if (session.coopVictory == true && participants.isNotEmpty) {
           for (final p in participants) {
             winCounts[p] = (winCounts[p] ?? 0) + 1;
           }
           recordDuoWinners(participants);
         }
-        continue;
-      }
+        // Still collect scores for averages / lists.
+      } else {
+        final winners = _winningPlayers(session);
+        for (final w in winners) {
+          winCounts[w] = (winCounts[w] ?? 0) + 1;
+        }
+        if (winners.isNotEmpty) recordDuoWinners(winners);
 
-      final winners = _winningPlayers(session);
-      for (final w in winners) {
-        winCounts[w] = (winCounts[w] ?? 0) + 1;
-      }
-      if (winners.isNotEmpty) recordDuoWinners(winners);
-
-      final losers = _lastPlacePlayers(session);
-      for (final l in losers) {
-        lastCounts[l] = (lastCounts[l] ?? 0) + 1;
+        final losers = _lastPlacePlayers(session);
+        for (final l in losers) {
+          lastCounts[l] = (lastCounts[l] ?? 0) + 1;
+        }
       }
 
       final grid = session.scoreGrid;
@@ -225,6 +237,9 @@ class BoardgameRankingStats {
             score: score,
             date: session.date,
             sessionIndex: sessionIdx,
+            gameTitle: (gameTitle != null && gameTitle.isNotEmpty)
+                ? gameTitle
+                : null,
           );
           allScores.add(entry);
           scoresByPlayer.putIfAbsent(name, () => []).add(entry);
@@ -256,7 +271,11 @@ class BoardgameRankingStats {
         .toList()
       ..sort((a, b) => b.average.compareTo(a.average));
 
-    allScores.sort((a, b) => b.score.compareTo(a.score));
+    allScores.sort((a, b) {
+      final byScore = b.score.compareTo(a.score);
+      if (byScore != 0) return byScore;
+      return b.date.compareTo(a.date);
+    });
 
     final duos = duoCounts.entries
         .map((e) {
@@ -273,7 +292,11 @@ class BoardgameRankingStats {
     final scoreMatrix = _buildScoreMatrix(scoresByPlayer, gamesPlayed);
     final averageMatrix = _buildAverageMatrix(averages, gamesPlayed);
     final winsMatrix = _buildWinsMatrix(podium, lastCounts, gamesPlayed);
-    final globalMatrix = _buildGlobalMatrix(sessions, gamesPlayed);
+    final globalMatrix = _buildGlobalMatrix(
+      sessions,
+      gamesPlayed,
+      gameTitles: titles,
+    );
 
     return BoardgameRankingStats(
       winPodium: podium,
@@ -327,8 +350,9 @@ class BoardgameRankingStats {
 
   static BoardgameGlobalMatrix _buildGlobalMatrix(
     List<BoardgamePlaySession> sessions,
-    Map<String, int> gamesPlayed,
-  ) {
+    Map<String, int> gamesPlayed, {
+    List<String?> gameTitles = const [],
+  }) {
     final indexed = List.generate(sessions.length, (i) => (i, sessions[i]));
     indexed.sort((a, b) => a.$2.date.compareTo(b.$2.date));
 
@@ -341,7 +365,14 @@ class BoardgameRankingStats {
     for (var col = 0; col < indexed.length; col++) {
       final (sessionIdx, session) = indexed[col];
       sessionIndices.add(sessionIdx);
-      sessionLabels.add('Partie ${col + 1}');
+      final title = sessionIdx < gameTitles.length
+          ? gameTitles[sessionIdx]?.trim()
+          : null;
+      if (title != null && title.isNotEmpty) {
+        sessionLabels.add(title);
+      } else {
+        sessionLabels.add('Partie ${col + 1}');
+      }
 
       final grid = session.scoreGrid;
       final sessionScores = <String, int>{};
@@ -360,10 +391,10 @@ class BoardgameRankingStats {
         }
       }
 
-      final sortedScores = sessionScores.entries.toList();
       medalsBySession[sessionIdx] = _assignSessionMedals(
-        Map.fromEntries(sortedScores),
+        sessionScores,
         session.winCondition,
+        targetScore: session.targetScore,
       );
 
       for (final entry in sessionScores.entries) {
@@ -409,6 +440,8 @@ class BoardgameRankingStats {
   }
 
   static List<String> _winningPlayers(BoardgamePlaySession session) {
+    if (session.isCooperative) return [];
+
     final manual = session.winner?.trim();
     if (manual != null && manual.isNotEmpty) {
       if (manual.contains('&')) {
@@ -418,7 +451,9 @@ class BoardgameRankingStats {
             .where((s) => s.isNotEmpty)
             .toList();
       }
-      if (session.useTeams && session.scoreGrid != null && session.scoreGrid!.hasTeams) {
+      if (session.useTeams &&
+          session.scoreGrid != null &&
+          session.scoreGrid!.hasTeams) {
         final grid = session.scoreGrid!;
         final out = <String>[];
         for (var i = 0; i < grid.players.length; i++) {
@@ -436,7 +471,10 @@ class BoardgameRankingStats {
     if (grid == null || !grid.hasScores) return [];
 
     if (session.useTeams && grid.hasTeams) {
-      final teams = grid.winnerNames(session.winCondition);
+      final teams = grid.winnerNames(
+        session.winCondition,
+        targetScore: session.targetScore,
+      );
       if (teams.isEmpty) return [];
       final out = <String>[];
       for (final team in teams) {
@@ -450,16 +488,39 @@ class BoardgameRankingStats {
       return out;
     }
 
-    return grid.winnerNames(session.winCondition);
+    return grid.winnerNames(
+      session.winCondition,
+      targetScore: session.targetScore,
+    );
   }
 
   static List<String> _lastPlacePlayers(BoardgamePlaySession session) {
-    if (session.winCondition == BoardgameWinCondition.cooperative) return [];
+    if (session.isCooperative ||
+        session.winCondition == BoardgameWinCondition.exactTarget) {
+      return [];
+    }
     final grid = session.scoreGrid;
     if (grid == null || !grid.hasScores) return [];
 
     final indices = grid.lastPlaceColumnIndices(session.winCondition);
     if (indices.isEmpty) return [];
+
+    if (session.useTeams && grid.hasTeams) {
+      final teamNames = <String>{};
+      for (final i in indices) {
+        final team = i < grid.teams.length ? grid.teams[i]?.trim() : null;
+        if (team != null && team.isNotEmpty) teamNames.add(team);
+      }
+      final out = <String>[];
+      for (var i = 0; i < grid.players.length; i++) {
+        final team = i < grid.teams.length ? grid.teams[i]?.trim() : null;
+        if (team != null && teamNames.contains(team)) {
+          final n = grid.players[i].trim();
+          if (n.isNotEmpty) out.add(n);
+        }
+      }
+      return out;
+    }
 
     return indices
         .map((i) => grid.players[i].trim())
@@ -469,13 +530,28 @@ class BoardgameRankingStats {
 
   static Map<String, int> _assignSessionMedals(
     Map<String, int> sessionScores,
-    BoardgameWinCondition condition,
-  ) {
+    BoardgameWinCondition condition, {
+    int? targetScore,
+  }) {
     if (sessionScores.isEmpty) return {};
-    final sorted = sessionScores.entries.toList()
-      ..sort((a, b) => condition == BoardgameWinCondition.lowest
-          ? a.value.compareTo(b.value)
-          : b.value.compareTo(a.value));
+    if (condition == BoardgameWinCondition.cooperative) return {};
+
+    final sorted = sessionScores.entries.toList();
+    if (condition == BoardgameWinCondition.exactTarget) {
+      final target = targetScore;
+      if (target == null) return {};
+      sorted.sort((a, b) {
+        final aUnder = a.value <= target;
+        final bUnder = b.value <= target;
+        if (aUnder != bUnder) return aUnder ? -1 : 1;
+        if (aUnder) return b.value.compareTo(a.value);
+        return b.value.compareTo(a.value);
+      });
+    } else if (condition == BoardgameWinCondition.lowest) {
+      sorted.sort((a, b) => a.value.compareTo(b.value));
+    } else {
+      sorted.sort((a, b) => b.value.compareTo(a.value));
+    }
 
     final medals = <String, int>{};
     var i = 0;

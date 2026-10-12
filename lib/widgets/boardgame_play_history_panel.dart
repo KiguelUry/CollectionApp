@@ -11,17 +11,21 @@ import '../utils/boardgame_past_players.dart';
 import 'boardgame_ranking_panel.dart';
 import 'boardgame_score_grid_editor.dart';
 
+enum BoardgamePlayPanelMode { all, history, ranking }
+
 /// Historique des parties jouées (stocké dans metadata.boardgame_plays).
 class BoardgamePlayHistoryPanel extends StatefulWidget {
   final CollectionItem item;
   final bool readOnly;
   final ValueChanged<Map<String, dynamic>> onMetadataChanged;
+  final BoardgamePlayPanelMode mode;
 
   const BoardgamePlayHistoryPanel({
     super.key,
     required this.item,
     required this.readOnly,
     required this.onMetadataChanged,
+    this.mode = BoardgamePlayPanelMode.all,
   });
 
   @override
@@ -42,11 +46,15 @@ class _BoardgamePlayHistoryPanelState extends State<BoardgamePlayHistoryPanel> {
     await _openSessionDetail(_sessions[index], index);
   }
 
-  Future<void> _openAddSession() async {
+  Future<void> _openAddSession({BoardgamePlaySession? prefillFrom}) async {
     final session = await Navigator.push<BoardgamePlaySession>(
       context,
       MaterialPageRoute(
-        builder: (_) => BoardgamePlaySessionPage(item: widget.item),
+        builder: (_) => BoardgamePlaySessionPage(
+          item: widget.item,
+          // Prefill roster only — new session (no initial = create).
+          template: prefillFrom,
+        ),
         fullscreenDialog: true,
       ),
     );
@@ -80,6 +88,7 @@ class _BoardgamePlayHistoryPanelState extends State<BoardgamePlayHistoryPanel> {
     );
     if (edited == null) return;
     final next = List<BoardgamePlaySession>.from(_sessions);
+    if (index < 0 || index >= next.length) return;
     next[index] = edited;
     _saveSessions(next);
   }
@@ -113,6 +122,16 @@ class _BoardgamePlayHistoryPanelState extends State<BoardgamePlayHistoryPanel> {
     _saveSessions(next);
   }
 
+  bool get _showTabs => widget.mode == BoardgamePlayPanelMode.all;
+
+  bool get _showHistory =>
+      widget.mode == BoardgamePlayPanelMode.history ||
+      (widget.mode == BoardgamePlayPanelMode.all && _tabIndex == 0);
+
+  bool get _showRanking =>
+      widget.mode == BoardgamePlayPanelMode.ranking ||
+      (widget.mode == BoardgamePlayPanelMode.all && _tabIndex == 1);
+
   @override
   Widget build(BuildContext context) {
     final sessions = _sessions;
@@ -126,16 +145,18 @@ class _BoardgamePlayHistoryPanelState extends State<BoardgamePlayHistoryPanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SegmentedButton<int>(
-          segments: const [
-            ButtonSegment(value: 0, label: Text('Historique')),
-            ButtonSegment(value: 1, label: Text('Classement')),
-          ],
-          selected: {_tabIndex},
-          onSelectionChanged: (s) => setState(() => _tabIndex = s.first),
-        ),
-        const SizedBox(height: 12),
-        if (_tabIndex == 0) ...[
+        if (_showTabs) ...[
+          SegmentedButton<int>(
+            segments: const [
+              ButtonSegment(value: 0, label: Text('Historique')),
+              ButtonSegment(value: 1, label: Text('Classement')),
+            ],
+            selected: {_tabIndex},
+            onSelectionChanged: (s) => setState(() => _tabIndex = s.first),
+          ),
+          const SizedBox(height: 12),
+        ],
+        if (_showHistory) ...[
           Row(
             children: [
               Expanded(
@@ -172,29 +193,85 @@ class _BoardgamePlayHistoryPanelState extends State<BoardgamePlayHistoryPanel> {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        CircleAvatar(
-                          radius: 18,
-                          backgroundColor:
-                              scheme.primaryContainer.withValues(alpha: 0.7),
-                          child: Icon(
-                            s.trackScores
-                                ? Icons.grid_on_rounded
-                                : Icons.groups,
-                            size: 18,
-                            color: scheme.onPrimaryContainer,
-                          ),
+                        Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            CircleAvatar(
+                              radius: 18,
+                              backgroundColor: scheme.primaryContainer
+                                  .withValues(alpha: 0.7),
+                              child: Icon(
+                                s.trackScores
+                                    ? Icons.grid_on_rounded
+                                    : Icons.groups,
+                                size: 18,
+                                color: scheme.onPrimaryContainer,
+                              ),
+                            ),
+                            if (s.isInProgress)
+                              Positioned(
+                                right: -2,
+                                bottom: -2,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                    vertical: 1,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.orange.shade700,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: const Text(
+                                    '…',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                dateFmt.format(s.date),
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 14,
-                                ),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      dateFmt.format(s.date),
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ),
+                                  if (s.isInProgress)
+                                    Container(
+                                      margin: const EdgeInsets.only(left: 6),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 2,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.orange.withValues(
+                                          alpha: 0.15,
+                                        ),
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Text(
+                                        'En cours',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w700,
+                                          color: Colors.orange.shade800,
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
                               if (s.summaryLine().isNotEmpty) ...[
                                 const SizedBox(height: 4),
@@ -210,11 +287,18 @@ class _BoardgamePlayHistoryPanelState extends State<BoardgamePlayHistoryPanel> {
                             ],
                           ),
                         ),
-                        if (!widget.readOnly)
+                        if (!widget.readOnly) ...[
+                          IconButton(
+                            tooltip: 'Relancer',
+                            icon: const Icon(Icons.play_arrow_rounded, size: 22),
+                            onPressed: () =>
+                                _openAddSession(prefillFrom: s),
+                          ),
                           IconButton(
                             icon: const Icon(Icons.delete_outline, size: 20),
                             onPressed: () => _deleteSession(realIndex),
                           ),
+                        ],
                       ],
                     ),
                   ),
@@ -235,7 +319,7 @@ class _BoardgamePlayHistoryPanelState extends State<BoardgamePlayHistoryPanel> {
                 label: const Text('Réduire'),
               ),
           ],
-        ]         else
+        ] else if (_showRanking)
           BoardgameRankingPanel(
             sessions: sessions,
             onOpenSession: widget.readOnly ? null : _openSessionAtIndex,
@@ -313,9 +397,17 @@ class _SessionDetailSheet extends StatelessWidget {
 /// Page complète pour saisir une partie (grille de points incluse).
 class BoardgamePlaySessionPage extends StatefulWidget {
   final CollectionItem? item;
+  /// Édition d'une partie existante.
   final BoardgamePlaySession? initial;
+  /// Préremplissage (relaunch) sans éditer l'ancienne partie.
+  final BoardgamePlaySession? template;
 
-  const BoardgamePlaySessionPage({super.key, this.item, this.initial});
+  const BoardgamePlaySessionPage({
+    super.key,
+    this.item,
+    this.initial,
+    this.template,
+  });
 
   @override
   State<BoardgamePlaySessionPage> createState() =>
@@ -329,28 +421,68 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
   late bool _trackScores;
   late bool _useTeams;
   late BoardgameWinCondition _winCondition;
+  late BoardgameConfrontationType _confrontation;
+  late BoardgamePlayStatus _status;
   late BoardgameScoreGrid _initialGrid;
   bool? _coopVictory;
   int _coopTeamCount = 1;
   final _winnerController = TextEditingController();
   final _notesController = TextEditingController();
   final _playersOnlyController = TextEditingController();
+  final _targetScoreController = TextEditingController();
   List<Map<String, dynamic>> _pickableProfiles = [];
 
   @override
   void initState() {
     super.initState();
     final s = widget.initial;
+    final t = widget.template;
+    final seed = s ?? t;
     _date = s?.date ?? DateTime.now();
-    _trackScores = s?.trackScores ?? false;
-    _useTeams = s?.useTeams ?? false;
-    _winCondition = s?.winCondition ?? BoardgameWinCondition.highest;
-    _initialGrid = s?.scoreGrid ?? BoardgameScoreGrid.empty(playerCount: 0);
+    _trackScores = seed?.trackScores ?? false;
+    _confrontation = seed?.confrontationType ??
+        (seed?.useTeams == true
+            ? BoardgameConfrontationType.teams
+            : BoardgameConfrontationType.freeForAll);
+    if (seed?.isCooperative == true) {
+      _confrontation = BoardgameConfrontationType.cooperative;
+    }
+    _useTeams = _confrontation == BoardgameConfrontationType.teams ||
+        (_confrontation == BoardgameConfrontationType.cooperative &&
+            (seed?.coopTeamCount ?? 1) > 1);
+    _winCondition = seed?.winCondition == BoardgameWinCondition.cooperative
+        ? BoardgameWinCondition.highest
+        : (seed?.winCondition ?? BoardgameWinCondition.highest);
+    _status = s?.status ?? BoardgamePlayStatus.finished;
+    if (s != null && s.scoreGrid != null) {
+      _initialGrid = s.scoreGrid!;
+    } else if (t?.scoreGrid != null) {
+      // Relancer : garder noms/équipes/couleurs, vider les scores.
+      final g = t!.scoreGrid!;
+      _initialGrid = BoardgameScoreGrid(
+        players: List<String>.from(g.players),
+        teams: List<String?>.from(g.teams),
+        playerColors: List<int?>.from(g.playerColors),
+        teamColorMap: Map<String, int>.from(g.teamColorMap),
+        teamScoreMode: g.teamScoreMode,
+        rounds: [
+          BoardgameScoreRound(
+            scores: List<int?>.filled(g.players.length, null),
+          ),
+        ],
+      );
+    } else {
+      _initialGrid = BoardgameScoreGrid.empty(playerCount: 0);
+    }
     _winnerController.text = s?.winner ?? '';
     _notesController.text = s?.notes ?? '';
-    _playersOnlyController.text = s?.players.join(', ') ?? '';
+    _playersOnlyController.text =
+        (s ?? t)?.players.join(', ') ?? '';
     _coopVictory = s?.coopVictory;
-    _coopTeamCount = s?.coopTeamCount ?? 1;
+    _coopTeamCount = seed?.coopTeamCount ?? 1;
+    if (seed?.targetScore != null) {
+      _targetScoreController.text = '${seed!.targetScore}';
+    }
     _loadProfiles();
   }
 
@@ -373,8 +505,14 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     _winnerController.dispose();
     _notesController.dispose();
     _playersOnlyController.dispose();
+    _targetScoreController.dispose();
     super.dispose();
   }
+
+  int? get _targetScore => int.tryParse(_targetScoreController.text.trim());
+
+  bool get _isCoop =>
+      _confrontation == BoardgameConfrontationType.cooperative;
 
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
@@ -424,10 +562,11 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     List<String> players;
     BoardgameScoreGrid? grid;
     Map<String, int>? scores;
+    final useTeamsEffective = _confrontation == BoardgameConfrontationType.teams ||
+        (_isCoop && _coopTeamCount > 1) ||
+        _useTeams;
 
-    if (_trackScores &&
-        _winCondition == BoardgameWinCondition.cooperative &&
-        _coopTeamCount <= 1) {
+    if (_trackScores && _isCoop && _coopTeamCount <= 1) {
       grid = _gridKey.currentState?.buildGrid() ?? _initialGrid;
       players = grid.activePlayers;
       if (players.isEmpty) {
@@ -436,7 +575,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
         );
         return;
       }
-      if (_coopVictory == null) {
+      if (_status == BoardgamePlayStatus.finished && _coopVictory == null) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Indique victoire ou défaite.')),
         );
@@ -451,6 +590,13 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
           const SnackBar(
             content: Text('Indique au moins un joueur dans la grille.'),
           ),
+        );
+        return;
+      }
+      if (_winCondition == BoardgameWinCondition.exactTarget &&
+          _targetScore == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Indique le score exact à atteindre.')),
         );
         return;
       }
@@ -469,11 +615,15 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
       }
     }
 
-    final autoNames = grid?.winnerNames(_winCondition) ?? const <String>[];
+    final autoNames = grid?.winnerNames(
+          _winCondition,
+          targetScore: _targetScore,
+        ) ??
+        const <String>[];
     final manualWinner = _winnerController.text.trim();
     final winner = manualWinner.isNotEmpty
         ? manualWinner
-        : (_winCondition == BoardgameWinCondition.cooperative
+        : (_isCoop
             ? null
             : (autoNames.isEmpty ? null : autoNames.join(' & ')));
 
@@ -490,13 +640,14 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
             : _notesController.text.trim(),
         trackScores: _trackScores,
         winCondition: _winCondition,
-        useTeams: _useTeams,
-        coopVictory: _winCondition == BoardgameWinCondition.cooperative
-            ? _coopVictory
+        confrontationType: _confrontation,
+        useTeams: useTeamsEffective,
+        coopVictory: _isCoop ? _coopVictory : null,
+        coopTeamCount: _isCoop ? _coopTeamCount : null,
+        targetScore: _winCondition == BoardgameWinCondition.exactTarget
+            ? _targetScore
             : null,
-        coopTeamCount: _winCondition == BoardgameWinCondition.cooperative
-            ? _coopTeamCount
-            : null,
+        status: _status,
         createdAt: widget.initial?.createdAt ?? DateTime.now(),
       ),
     );
@@ -508,6 +659,10 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     final scheme = Theme.of(context).colorScheme;
     final canPickPlayers = _pickableProfiles.isNotEmpty &&
         Supabase.instance.client.auth.currentUser != null;
+    final item = widget.item;
+    final useTeamsEffective =
+        _confrontation == BoardgameConfrontationType.teams ||
+            (_isCoop && _coopTeamCount > 1);
 
     return Scaffold(
       appBar: AppBar(
@@ -515,7 +670,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
         actions: [
           IconButton(
             onPressed: _submit,
-            icon: const Icon(Icons.check_rounded),
+            icon: const Icon(Icons.save_rounded),
             tooltip: 'Enregistrer',
           ),
         ],
@@ -523,53 +678,143 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [
+          if (item != null) ...[
+            Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: item.imageUrl != null && item.imageUrl!.isNotEmpty
+                      ? Image.network(
+                          item.imageUrl!,
+                          width: 48,
+                          height: 48,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) => ColoredBox(
+                            color: scheme.primaryContainer,
+                            child: SizedBox(
+                              width: 48,
+                              height: 48,
+                              child: Icon(Icons.casino, color: scheme.primary),
+                            ),
+                          ),
+                        )
+                      : ColoredBox(
+                          color: scheme.primaryContainer,
+                          child: SizedBox(
+                            width: 48,
+                            height: 48,
+                            child: Icon(Icons.casino, color: scheme.primary),
+                          ),
+                        ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    item.title,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+          ],
           OutlinedButton.icon(
             onPressed: _pickDate,
             icon: const Icon(Icons.calendar_today, size: 18),
             label: Text(dateFmt.format(_date)),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
+          SegmentedButton<BoardgamePlayStatus>(
+            segments: const [
+              ButtonSegment(
+                value: BoardgamePlayStatus.finished,
+                label: Text('Terminée'),
+                icon: Icon(Icons.flag, size: 16),
+              ),
+              ButtonSegment(
+                value: BoardgamePlayStatus.inProgress,
+                label: Text('En cours'),
+                icon: Icon(Icons.timelapse, size: 16),
+              ),
+            ],
+            selected: {_status},
+            onSelectionChanged: (s) => setState(() => _status = s.first),
+          ),
+          const SizedBox(height: 12),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Compter les points'),
-            subtitle: const Text('Grille joueurs × tours avec totaux'),
+            subtitle: const Text('Scores'),
             value: _trackScores,
             onChanged: (v) => setState(() => _trackScores = v),
           ),
           if (_trackScores) ...[
             const SizedBox(height: 8),
-            Text(
-              'Condition de victoire',
-              style: Theme.of(context).textTheme.labelLarge,
-            ),
+            Text('Type de jeu', style: Theme.of(context).textTheme.labelLarge),
             const SizedBox(height: 4),
-            SegmentedButton<BoardgameWinCondition>(
-              segments: BoardgameWinCondition.values
+            SegmentedButton<BoardgameConfrontationType>(
+              segments: BoardgameConfrontationType.values
                   .map(
                     (c) => ButtonSegment(
                       value: c,
-                      label: Text(
-                        switch (c) {
-                          BoardgameWinCondition.highest => 'Max',
-                          BoardgameWinCondition.lowest => 'Min',
-                          BoardgameWinCondition.cooperative => 'Coop',
-                        },
-                        style: const TextStyle(fontSize: 12),
-                      ),
+                      label: Text(c.shortLabel, style: const TextStyle(fontSize: 11)),
                     ),
                   )
                   .toList(),
-              selected: {_winCondition},
-              onSelectionChanged: (selection) {
-                setState(() => _winCondition = selection.first);
+              selected: {_confrontation},
+              onSelectionChanged: (s) {
+                setState(() {
+                  _confrontation = s.first;
+                  _useTeams =
+                      _confrontation == BoardgameConfrontationType.teams;
+                });
               },
             ),
-            const SizedBox(height: 8),
-            if (_winCondition == BoardgameWinCondition.cooperative) ...[
+            if (!_isCoop) ...[
+              const SizedBox(height: 12),
+              Text(
+                'Condition de victoire',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              const SizedBox(height: 4),
+              SegmentedButton<BoardgameWinCondition>(
+                segments: BoardgameWinCondition.selectable
+                    .map(
+                      (c) => ButtonSegment(
+                        value: c,
+                        label: Text(
+                          c.shortLabel,
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                      ),
+                    )
+                    .toList(),
+                selected: {_winCondition},
+                onSelectionChanged: (s) =>
+                    setState(() => _winCondition = s.first),
+              ),
+            ],
+            if (_winCondition == BoardgameWinCondition.exactTarget &&
+                !_isCoop) ...[
+              const SizedBox(height: 8),
+              TextField(
+                controller: _targetScoreController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Score exact à atteindre',
+                  isDense: true,
+                ),
+                onChanged: (_) => setState(() {}),
+              ),
+            ],
+            if (_isCoop) ...[
+              const SizedBox(height: 8),
               Row(
                 children: [
                   Text(
-                    'Équipes',
+                    'Équipes coop',
                     style: Theme.of(context).textTheme.labelLarge,
                   ),
                   const Spacer(),
@@ -581,7 +826,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
                   ),
                   Text('$_coopTeamCount'),
                   IconButton(
-                    onPressed: _coopTeamCount < 4
+                    onPressed: _coopTeamCount < 12
                         ? () => setState(() => _coopTeamCount++)
                         : null,
                     icon: const Icon(Icons.add_circle_outline),
@@ -613,34 +858,29 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
                   onSelectionChanged: (s) =>
                       setState(() => _coopVictory = s.firstOrNull),
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  'Joueurs',
-                  style: Theme.of(context).textTheme.labelLarge,
-                ),
-                const SizedBox(height: 8),
               ],
             ],
-            if (!(_winCondition == BoardgameWinCondition.cooperative &&
-                _coopTeamCount <= 1)) ...[
-              const SizedBox(height: 8),
-            ],
+            const SizedBox(height: 8),
             BoardgameScoreGridEditor(
               key: _gridKey,
               initialGrid: _initialGrid,
               suggestedPlayerNames: pastPlayerNamesFromSessions(
                 parseBoardgamePlays(widget.item?.metadata),
               ),
-              useTeams: _useTeams || _winCondition == BoardgameWinCondition.cooperative,
+              useTeams: useTeamsEffective,
               winCondition: _winCondition,
-              onTeamsChanged: _winCondition == BoardgameWinCondition.cooperative
+              targetScore: _targetScore,
+              onTeamsChanged: _isCoop
                   ? null
-                  : (v) => setState(() => _useTeams = v),
-              onPickPlayer:
-                  canPickPlayers ? _pickPlayerFromContacts : null,
-              showScoreTable: !(_winCondition ==
-                      BoardgameWinCondition.cooperative &&
-                  _coopTeamCount <= 1),
+                  : (v) => setState(() {
+                        _useTeams = v;
+                        _confrontation = v
+                            ? BoardgameConfrontationType.teams
+                            : BoardgameConfrontationType.freeForAll;
+                      }),
+              onPickPlayer: canPickPlayers ? _pickPlayerFromContacts : null,
+              showScoreTable: !(_isCoop && _coopTeamCount <= 1),
+              onQuickSave: _submit,
             ),
           ] else ...[
             const SizedBox(height: 8),
@@ -652,13 +892,13 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
               ),
             ),
           ],
-          if (_winCondition != BoardgameWinCondition.cooperative) ...[
+          if (!_isCoop) ...[
             const SizedBox(height: 16),
             TextField(
               controller: _winnerController,
               decoration: InputDecoration(
-                labelText: 'Gagnant (optionnel)',
-                hintText: 'Calculé auto si vide',
+                labelText: 'Gagnant (forcer manuellement)',
+                hintText: 'Couronne auto si vide',
                 prefixIcon:
                     Icon(Icons.emoji_events_outlined, color: scheme.primary),
               ),
@@ -674,9 +914,10 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
             ),
           ),
           const SizedBox(height: 24),
-          FilledButton(
+          FilledButton.icon(
             onPressed: _submit,
-            child: const Text('Enregistrer la partie'),
+            icon: const Icon(Icons.save_rounded),
+            label: const Text('Enregistrer la partie'),
           ),
         ],
       ),

@@ -17,11 +17,14 @@ String _rankEmoji(int rank) {
 /// Classement, podium et statistiques matricielles pour un jeu.
 class BoardgameRankingPanel extends StatelessWidget {
   final List<BoardgamePlaySession> sessions;
+  /// Titres de jeux alignés sur [sessions] (historique global multi-jeux).
+  final List<String?>? gameTitles;
   final void Function(int sessionIndex)? onOpenSession;
 
   const BoardgameRankingPanel({
     super.key,
     required this.sessions,
+    this.gameTitles,
     this.onOpenSession,
   });
 
@@ -45,7 +48,10 @@ class BoardgameRankingPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final stats = BoardgameRankingStats.fromSessions(sessions);
+    final stats = BoardgameRankingStats.fromSessions(
+      sessions,
+      gameTitles: gameTitles,
+    );
     final scheme = Theme.of(context).colorScheme;
 
     if (sessions.isEmpty) {
@@ -146,10 +152,13 @@ class BoardgameRankingPanel extends StatelessWidget {
               stats.allScores,
               e.key,
             );
+            final game = e.value.gameTitle;
+            final gameSuffix =
+                game != null && game.isNotEmpty ? ' · $game' : '';
             return Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Text(
-                '${_rankEmoji(rank)} ${e.value.player} — ${e.value.score} pts',
+                '${_rankEmoji(rank)} ${e.value.player} — ${e.value.score} pts$gameSuffix',
                 style: const TextStyle(fontSize: 13),
               ),
             );

@@ -184,7 +184,19 @@ class _BoardgameRankingDetailScreenState
           ),
           columns: [
             const DataColumn(label: Text('Joueur')),
-            ...matrix.sessionLabels.map((l) => DataColumn(label: Text(l))),
+            ...matrix.sessionLabels.map(
+              (l) => DataColumn(
+                label: SizedBox(
+                  width: 88,
+                  child: Text(
+                    l,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11, height: 1.2),
+                  ),
+                ),
+              ),
+            ),
           ],
           rows: matrix.players.map((player) {
             final scores = matrix.scoresByPlayer[player] ?? [];

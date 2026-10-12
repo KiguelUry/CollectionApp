@@ -11,9 +11,12 @@ class BoardgamePlaySession {
   final String? notes;
   final bool trackScores;
   final BoardgameWinCondition winCondition;
+  final BoardgameConfrontationType confrontationType;
   final bool useTeams;
   final bool? coopVictory;
   final int? coopTeamCount;
+  final int? targetScore;
+  final BoardgamePlayStatus status;
   /// Heure d'ajout (tri stable quand plusieurs parties ont la même date).
   final DateTime? createdAt;
 
@@ -26,9 +29,12 @@ class BoardgamePlaySession {
     this.notes,
     this.trackScores = false,
     this.winCondition = BoardgameWinCondition.highest,
+    this.confrontationType = BoardgameConfrontationType.freeForAll,
     this.useTeams = false,
     this.coopVictory,
     this.coopTeamCount,
+    this.targetScore,
+    this.status = BoardgamePlayStatus.finished,
     this.createdAt,
   });
 
@@ -59,6 +65,30 @@ class BoardgamePlaySession {
       createdAt = DateTime.tryParse(rawCreated);
     }
 
+    final rawWin = json['win_condition']?.toString();
+    var winCondition = BoardgameWinCondition.fromJson(rawWin);
+    final useTeamsFlag =
+        json['use_teams'] as bool? ?? grid?.hasTeams == true;
+
+    BoardgameConfrontationType confrontation;
+    if (json['confrontation_type'] != null) {
+      confrontation = BoardgameConfrontationType.fromJson(
+        json['confrontation_type']?.toString(),
+      );
+    } else if (winCondition == BoardgameWinCondition.cooperative) {
+      confrontation = BoardgameConfrontationType.cooperative;
+      winCondition = BoardgameWinCondition.highest;
+    } else if (useTeamsFlag) {
+      confrontation = BoardgameConfrontationType.teams;
+    } else {
+      confrontation = BoardgameConfrontationType.freeForAll;
+    }
+
+    final targetRaw = json['target_score'];
+    final targetScore = targetRaw is num
+        ? targetRaw.round()
+        : int.tryParse(targetRaw?.toString() ?? '');
+
     return BoardgamePlaySession(
       date: DateTime.tryParse(json['date']?.toString() ?? '') ?? DateTime.now(),
       players: grid?.activePlayers.isNotEmpty == true
@@ -69,12 +99,16 @@ class BoardgamePlaySession {
       scoreGrid: grid,
       notes: json['notes']?.toString(),
       trackScores: json['track_scores'] as bool? ?? grid != null,
-      winCondition: BoardgameWinCondition.fromJson(
-        json['win_condition']?.toString(),
-      ),
-      useTeams: json['use_teams'] as bool? ?? grid?.hasTeams == true,
+      winCondition: winCondition,
+      confrontationType: confrontation,
+      useTeams: confrontation == BoardgameConfrontationType.teams ||
+          (confrontation == BoardgameConfrontationType.cooperative &&
+              ((json['coop_team_count'] as num?)?.toInt() ?? 1) > 1) ||
+          useTeamsFlag,
       coopVictory: json['coop_victory'] as bool?,
       coopTeamCount: json['coop_team_count'] as int?,
+      targetScore: targetScore,
+      status: BoardgamePlayStatus.fromJson(json['status']?.toString()),
       createdAt: createdAt,
     );
   }
@@ -89,15 +123,29 @@ class BoardgamePlaySession {
         if (scores != null && scores!.isNotEmpty) 'scores': scores,
         'track_scores': trackScores,
         'win_condition': winCondition.dbValue,
-        if (useTeams) 'use_teams': true,
+        'confrontation_type': confrontationType.dbValue,
+        'status': status.dbValue,
+        if (useTeams ||
+            confrontationType == BoardgameConfrontationType.teams)
+          'use_teams': true,
         if (coopVictory != null) 'coop_victory': coopVictory,
         if (coopTeamCount != null) 'coop_team_count': coopTeamCount,
+        if (targetScore != null) 'target_score': targetScore,
         if (notes != null && notes!.trim().isNotEmpty) 'notes': notes!.trim(),
       };
 
+  bool get isCooperative =>
+      confrontationType == BoardgameConfrontationType.cooperative ||
+      winCondition == BoardgameWinCondition.cooperative;
+
+  bool get isInProgress => status == BoardgamePlayStatus.inProgress;
+
   String? get autoWinner {
-    if (winCondition == BoardgameWinCondition.cooperative) return null;
-    return scoreGrid?.autoWinnerName(winCondition);
+    if (isCooperative) return null;
+    return scoreGrid?.autoWinnerName(
+      winCondition,
+      targetScore: targetScore,
+    );
   }
 
   String? get effectiveWinner {
@@ -141,15 +189,16 @@ class BoardgamePlaySession {
         return 'Gagnant : $w';
       }
       if (w.contains('&')) return 'Gagnants : $w';
-      return winCondition == BoardgameWinCondition.cooperative
-          ? 'Coop réussi'
-          : 'Gagnant : $w';
+      return isCooperative ? 'Coop réussi' : 'Gagnant : $w';
     }
     if (scoreGrid != null && scoreGrid!.hasScores) {
-      final names = scoreGrid!.winnerNames(winCondition);
+      final names = scoreGrid!.winnerNames(
+        winCondition,
+        targetScore: targetScore,
+      );
       if (names.length > 1) return 'Gagnants : ${names.join(' & ')}';
       if (names.length == 1) return 'Gagnant : ${names.first}';
-    } else if (winCondition == BoardgameWinCondition.cooperative) {
+    } else if (isCooperative) {
       if (coopVictory == true) {
         if (players.isNotEmpty) {
           return 'Victoire coop (${_formatNameList(players)})';
@@ -166,74 +215,49 @@ class BoardgamePlaySession {
 
   String summaryLine() {
     final parts = <String>[];
-    if (trackScores && scoreGrid != null && scoreGrid!.hasScores) {
-      if (useTeams && scoreGrid!.hasTeams) {
-        final tt = scoreGrid!.teamTotals();
-        parts.add(
-          tt.entries.map((e) => '${e.key} : ${e.value}').join(' · '),
-        );
-      } else {
-        parts.add(scoreGrid!.totalsSummary());
-      }
-    } else if (scores != null && scores!.isNotEmpty) {
-      parts.add(
-        scores!.entries.map((e) => '${e.key} : ${e.value}').join(' · '),
-      );
-    } else if (players.isNotEmpty) {
-      parts.add(players.join(', '));
-    }
-    final w = effectiveWinner;
-    if (w != null && w.isNotEmpty) {
-      if (useTeams && scoreGrid != null && scoreGrid!.hasTeams) {
-        final members = <String>[];
-        for (var i = 0; i < scoreGrid!.players.length; i++) {
-          if (scoreGrid!.teams.length > i &&
-              scoreGrid!.teams[i]?.trim() == w.trim()) {
-            final n = scoreGrid!.players[i].trim();
-            if (n.isNotEmpty) members.add(n);
-          }
-        }
-        if (members.isNotEmpty) {
-          parts.add(
-            'Équipe gagnante : $w (Joueurs : ${_formatNameList(members)})',
-          );
-        } else {
-          parts.add('Gagnant : $w');
-        }
-      } else if (w.contains('&')) {
-        parts.add('Gagnants : $w');
-      } else {
-        parts.add(
-          winCondition == BoardgameWinCondition.cooperative
-              ? 'Coop réussi'
-              : 'Gagnant : $w',
-        );
-      }
-    } else if (scoreGrid != null && scoreGrid!.hasScores) {
-      final names = scoreGrid!.winnerNames(winCondition);
-      if (names.length > 1) {
-        parts.add('Gagnants : ${names.join(' & ')}');
-      } else if (names.length == 1) {
-        parts.add('Gagnant : ${names.first}');
-      }
-    } else if (winCondition == BoardgameWinCondition.cooperative) {
-      if (coopVictory == true) {
-        if (players.isNotEmpty) {
-          parts.add(
-            'Victoire coop (${_formatNameList(players)})',
-          );
-        } else {
-          parts.add('Victoire coop');
-        }
-      } else if (coopVictory == false) {
-        parts.add('Défaite coop');
-      } else if (scoreGrid?.hasScores == true) {
-        parts.add(
-          'Score coop : ${scoreGrid!.columnTotals().fold(0, (a, b) => a + b)}',
-        );
-      }
-    }
+    final scores = scoresLine;
+    if (scores != null && scores.isNotEmpty) parts.add(scores);
+    final win = winnerLine;
+    if (win != null && win.isNotEmpty) parts.add(win);
     return parts.join('\n');
+  }
+
+  BoardgamePlaySession copyWith({
+    DateTime? date,
+    List<String>? players,
+    String? winner,
+    bool clearWinner = false,
+    Map<String, int>? scores,
+    BoardgameScoreGrid? scoreGrid,
+    String? notes,
+    bool? trackScores,
+    BoardgameWinCondition? winCondition,
+    BoardgameConfrontationType? confrontationType,
+    bool? useTeams,
+    bool? coopVictory,
+    int? coopTeamCount,
+    int? targetScore,
+    bool clearTarget = false,
+    BoardgamePlayStatus? status,
+    DateTime? createdAt,
+  }) {
+    return BoardgamePlaySession(
+      date: date ?? this.date,
+      players: players ?? this.players,
+      winner: clearWinner ? null : (winner ?? this.winner),
+      scores: scores ?? this.scores,
+      scoreGrid: scoreGrid ?? this.scoreGrid,
+      notes: notes ?? this.notes,
+      trackScores: trackScores ?? this.trackScores,
+      winCondition: winCondition ?? this.winCondition,
+      confrontationType: confrontationType ?? this.confrontationType,
+      useTeams: useTeams ?? this.useTeams,
+      coopVictory: coopVictory ?? this.coopVictory,
+      coopTeamCount: coopTeamCount ?? this.coopTeamCount,
+      targetScore: clearTarget ? null : (targetScore ?? this.targetScore),
+      status: status ?? this.status,
+      createdAt: createdAt ?? this.createdAt,
+    );
   }
 
   static String _formatNameList(List<String> names) {
@@ -264,7 +288,6 @@ int compareBoardgamePlaySessions(
     return 1;
   }
 
-  // Legacy : index 0 = ajout le plus récent (insert en tête).
   return indexA.compareTo(indexB);
 }
 

@@ -9,18 +9,18 @@ if (-not (Test-Path $flutter)) {
     $flutter = "flutter"
 }
 
-if (-not (Test-Path ".env")) {
-    Write-Error "Fichier .env manquant à la racine (SUPABASE_URL, SUPABASE_ANON_KEY)."
+if (-not (Test-Path '.env')) {
+    Write-Error 'Fichier .env manquant a la racine (SUPABASE_URL, SUPABASE_ANON_KEY).'
 }
 
-Write-Host "Collectingo — build Web release (Vercel)" -ForegroundColor Cyan
+Write-Host 'Collectingo - build Web release (Vercel)' -ForegroundColor Cyan
 & $flutter pub get
 & $flutter build web --release --pwa-strategy=none
 
-if (Test-Path "build\web\index.html") {
-    & (Join-Path $PSScriptRoot "sync-web-deploy.ps1")
-    Write-Host ""
-    Write-Host "Pret pour Vercel : commit + push (dossier web_deploy)." -ForegroundColor Green
+if (Test-Path 'build\web\index.html') {
+    & (Join-Path $PSScriptRoot 'sync-web-deploy.ps1')
+    Write-Host ''
+    Write-Host 'Pret pour Vercel : commit + push (dossier web_deploy).' -ForegroundColor Green
 } else {
-    Write-Error "build\web introuvable apres le build."
+    Write-Error 'build\web introuvable apres le build.'
 }

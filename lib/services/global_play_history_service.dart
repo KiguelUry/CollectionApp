@@ -201,6 +201,45 @@ class GlobalPlayHistoryService {
     await saveSessionToItem(item, sessions);
   }
 
+  /// Remplace une session éditée (collection ou orphan).
+  Future<void> replaceSession(
+    GlobalPlayHistoryEntry entry,
+    BoardgamePlaySession updated,
+  ) async {
+    if (entry.isOrphan) {
+      final orphans = await loadOrphans();
+      final i = orphans.indexWhere((o) => o.id == entry.orphanId);
+      if (i < 0) return;
+      orphans[i] = OrphanBoardgamePlay(
+        id: orphans[i].id,
+        title: orphans[i].title,
+        bggId: orphans[i].bggId,
+        imageUrl: orphans[i].imageUrl,
+        session: updated,
+      );
+      await saveOrphans(orphans);
+      return;
+    }
+
+    final itemId = entry.itemId;
+    if (itemId == null) return;
+
+    final row = await _client
+        .from('collection_items')
+        .select(SupabaseEmbeds.collectionItemDetail)
+        .eq('id', itemId)
+        .maybeSingle();
+    if (row == null) return;
+
+    final item = CollectionItem.fromJson(Map<String, dynamic>.from(row as Map));
+    final sessions = parseBoardgamePlays(item.metadata);
+    if (entry.sessionIndex < 0 || entry.sessionIndex >= sessions.length) {
+      return;
+    }
+    sessions[entry.sessionIndex] = updated;
+    await saveSessionToItem(item, sessions);
+  }
+
   Future<void> saveSessionToItem(
     CollectionItem item,
     List<BoardgamePlaySession> sessions,

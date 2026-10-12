@@ -143,9 +143,15 @@ class BoardgameScoreGrid {
   }
 
   /// Indices des colonnes gagnantes selon la condition de victoire.
-  Set<int> winningColumnIndices(BoardgameWinCondition condition) {
+  Set<int> winningColumnIndices(
+    BoardgameWinCondition condition, {
+    int? targetScore,
+  }) {
     if (condition == BoardgameWinCondition.cooperative || !hasScores) {
       return {};
+    }
+    if (condition == BoardgameWinCondition.exactTarget) {
+      return _exactTargetWinners(targetScore);
     }
     if (hasTeams) {
       final tt = teamTotals();
@@ -190,7 +196,6 @@ class BoardgameScoreGrid {
       }
     }
     if (bestIdx < 0) return {};
-    // Égalités : toutes les colonnes au même score optimal.
     final winners = <int>{bestIdx};
     for (var i = 0; i < players.length; i++) {
       if (i == bestIdx || players[i].trim().isEmpty || !columnHasScores(i)) {
@@ -202,17 +207,79 @@ class BoardgameScoreGrid {
     return winners;
   }
 
-  String? autoWinnerName(BoardgameWinCondition condition) {
-    final names = winnerNames(condition);
+  /// Score exact : sous la cible = plus proche ; si tous dépassent = plus haut.
+  Set<int> _exactTargetWinners(int? targetScore) {
+    final target = targetScore;
+    if (target == null) return {};
+
+    if (hasTeams) {
+      final tt = teamTotals();
+      if (tt.isEmpty) return {};
+      final entries = <MapEntry<String, int>>[];
+      for (final e in tt.entries) {
+        var hasScored = false;
+        for (var i = 0; i < teams.length; i++) {
+          if (teams[i]?.trim() == e.key && columnHasScores(i)) {
+            hasScored = true;
+            break;
+          }
+        }
+        if (hasScored) entries.add(e);
+      }
+      if (entries.isEmpty) return {};
+      final under = entries.where((e) => e.value <= target).toList();
+      final pool = under.isNotEmpty ? under : entries;
+      final best = under.isNotEmpty
+          ? pool.map((e) => e.value).reduce((a, b) => a >= b ? a : b)
+          : pool.map((e) => e.value).reduce((a, b) => a >= b ? a : b);
+      final winnerTeams =
+          pool.where((e) => e.value == best).map((e) => e.key).toSet();
+      final winners = <int>{};
+      for (var i = 0; i < teams.length; i++) {
+        final team = teams[i]?.trim();
+        if (team != null && winnerTeams.contains(team) && columnHasScores(i)) {
+          winners.add(i);
+        }
+      }
+      return winners;
+    }
+
+    final totals = columnTotals();
+    final scored = <int>[];
+    for (var i = 0; i < players.length; i++) {
+      if (players[i].trim().isEmpty || !columnHasScores(i)) continue;
+      scored.add(i);
+    }
+    if (scored.isEmpty) return {};
+    final under = scored.where((i) => totals[i] <= target).toList();
+    final pool = under.isNotEmpty ? under : scored;
+    final best = pool.map((i) => totals[i]).reduce((a, b) => a >= b ? a : b);
+    return pool.where((i) => totals[i] == best).toSet();
+  }
+
+  String? autoWinnerName(
+    BoardgameWinCondition condition, {
+    int? targetScore,
+  }) {
+    final names = winnerNames(condition, targetScore: targetScore);
     if (names.isEmpty) return null;
     if (names.length == 1) return names.first;
     return names.join(' & ');
   }
 
   /// Noms des gagnants (ex-aequo inclus).
-  List<String> winnerNames(BoardgameWinCondition condition) {
+  List<String> winnerNames(
+    BoardgameWinCondition condition, {
+    int? targetScore,
+  }) {
     if (condition == BoardgameWinCondition.cooperative) return [];
-    if (hasTeams && hasScores) {
+    if (condition == BoardgameWinCondition.exactTarget ||
+        (hasTeams && hasScores && condition != BoardgameWinCondition.exactTarget)) {
+      // Teams + exact handled via winningColumnIndices.
+    }
+    if (hasTeams &&
+        hasScores &&
+        condition != BoardgameWinCondition.exactTarget) {
       final tt = teamTotals();
       if (tt.isEmpty) return [];
       final eligible = <MapEntry<String, int>>[];
@@ -235,7 +302,18 @@ class BoardgameScoreGrid {
           .map((e) => e.key)
           .toList();
     }
-    final winners = winningColumnIndices(condition);
+    final winners =
+        winningColumnIndices(condition, targetScore: targetScore);
+    if (hasTeams) {
+      final names = <String>[];
+      for (final i in winners) {
+        final team = i < teams.length ? teams[i]?.trim() : null;
+        if (team != null && team.isNotEmpty && !names.contains(team)) {
+          names.add(team);
+        }
+      }
+      if (names.isNotEmpty) return names;
+    }
     return winners
         .map((i) => players[i].trim())
         .where((n) => n.isNotEmpty)
@@ -244,7 +322,9 @@ class BoardgameScoreGrid {
 
   /// Indices des colonnes en dernière place (ex-aequo inclus).
   Set<int> lastPlaceColumnIndices(BoardgameWinCondition condition) {
-    if (condition == BoardgameWinCondition.cooperative || !hasScores) {
+    if (condition == BoardgameWinCondition.cooperative ||
+        condition == BoardgameWinCondition.exactTarget ||
+        !hasScores) {
       return {};
     }
     if (hasTeams) {
@@ -419,20 +499,71 @@ enum TeamScoreMode {
       };
 }
 
-enum BoardgameWinCondition {
-  highest,
-  lowest,
+/// Type d'affrontement (indépendant de la condition de victoire).
+enum BoardgameConfrontationType {
+  freeForAll,
+  teams,
   cooperative;
 
   String get label => switch (this) {
-        BoardgameWinCondition.highest => 'Plus haut score gagne',
-        BoardgameWinCondition.lowest => 'Plus bas score gagne',
+        BoardgameConfrontationType.freeForAll => 'Chacun pour soi',
+        BoardgameConfrontationType.teams => 'En équipes',
+        BoardgameConfrontationType.cooperative => 'Coopératif',
+      };
+
+  String get shortLabel => switch (this) {
+        BoardgameConfrontationType.freeForAll => 'Solo',
+        BoardgameConfrontationType.teams => 'Équipes',
+        BoardgameConfrontationType.cooperative => 'Coop',
+      };
+
+  static BoardgameConfrontationType fromJson(String? raw) {
+    return switch (raw) {
+      'teams' => BoardgameConfrontationType.teams,
+      'cooperative' => BoardgameConfrontationType.cooperative,
+      _ => BoardgameConfrontationType.freeForAll,
+    };
+  }
+
+  String get dbValue => switch (this) {
+        BoardgameConfrontationType.freeForAll => 'free_for_all',
+        BoardgameConfrontationType.teams => 'teams',
+        BoardgameConfrontationType.cooperative => 'cooperative',
+      };
+}
+
+enum BoardgameWinCondition {
+  highest,
+  lowest,
+  exactTarget,
+  /// Legacy — préférer [BoardgameConfrontationType.cooperative].
+  cooperative;
+
+  String get label => switch (this) {
+        BoardgameWinCondition.highest => 'Plus haut score',
+        BoardgameWinCondition.lowest => 'Plus bas score',
+        BoardgameWinCondition.exactTarget => 'Score exact',
         BoardgameWinCondition.cooperative => 'Mode coopératif',
       };
+
+  String get shortLabel => switch (this) {
+        BoardgameWinCondition.highest => 'Max',
+        BoardgameWinCondition.lowest => 'Min',
+        BoardgameWinCondition.exactTarget => 'Exact',
+        BoardgameWinCondition.cooperative => 'Coop',
+      };
+
+  /// Conditions affichables (hors legacy cooperative).
+  static List<BoardgameWinCondition> get selectable => const [
+        BoardgameWinCondition.highest,
+        BoardgameWinCondition.lowest,
+        BoardgameWinCondition.exactTarget,
+      ];
 
   static BoardgameWinCondition fromJson(String? raw) {
     return switch (raw) {
       'lowest' => BoardgameWinCondition.lowest,
+      'exact' || 'exact_target' => BoardgameWinCondition.exactTarget,
       'cooperative' => BoardgameWinCondition.cooperative,
       _ => BoardgameWinCondition.highest,
     };
@@ -441,7 +572,30 @@ enum BoardgameWinCondition {
   String get dbValue => switch (this) {
         BoardgameWinCondition.highest => 'highest',
         BoardgameWinCondition.lowest => 'lowest',
+        BoardgameWinCondition.exactTarget => 'exact_target',
         BoardgameWinCondition.cooperative => 'cooperative',
+      };
+}
+
+enum BoardgamePlayStatus {
+  finished,
+  inProgress;
+
+  String get label => switch (this) {
+        BoardgamePlayStatus.finished => 'Terminée',
+        BoardgamePlayStatus.inProgress => 'En cours',
+      };
+
+  static BoardgamePlayStatus fromJson(String? raw) {
+    return switch (raw) {
+      'in_progress' || 'playing' => BoardgamePlayStatus.inProgress,
+      _ => BoardgamePlayStatus.finished,
+    };
+  }
+
+  String get dbValue => switch (this) {
+        BoardgamePlayStatus.finished => 'finished',
+        BoardgamePlayStatus.inProgress => 'in_progress',
       };
 }
 

@@ -84,20 +84,21 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
     _load();
   }
 
-  Future<void> _openEntry(GlobalPlayHistoryEntry entry) async {
-    CollectionItem item;
+  Future<CollectionItem> _itemForEntry(GlobalPlayHistoryEntry entry) async {
     if (entry.itemId != null) {
       final items = await _service.fetchBoardgameItems();
-      item = items.firstWhere(
+      return items.firstWhere(
         (i) => i.id == entry.itemId,
         orElse: () => _fallbackItem(entry),
       );
-    } else {
-      item = _fallbackItem(entry);
     }
+    return _fallbackItem(entry);
+  }
 
+  Future<void> _openEntry(GlobalPlayHistoryEntry entry) async {
+    final item = await _itemForEntry(entry);
     if (!mounted) return;
-    await Navigator.push<void>(
+    final edited = await Navigator.push<BoardgamePlaySession>(
       context,
       MaterialPageRoute(
         builder: (_) => BoardgamePlaySessionPage(
@@ -107,7 +108,43 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
         fullscreenDialog: true,
       ),
     );
-    _load();
+    if (edited != null) {
+      await _service.replaceSession(entry, edited);
+    }
+    if (mounted) _load();
+  }
+
+  Future<void> _relaunchEntry(GlobalPlayHistoryEntry entry) async {
+    final item = await _itemForEntry(entry);
+    if (!mounted) return;
+    final session = await Navigator.push<BoardgamePlaySession>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BoardgamePlaySessionPage(
+          item: item,
+          template: entry.session,
+        ),
+        fullscreenDialog: true,
+      ),
+    );
+    if (session == null) return;
+
+    if (entry.itemId != null) {
+      final fresh = await _itemForEntry(entry);
+      final sessions = parseBoardgamePlays(fresh.metadata);
+      await _service.saveSessionToItem(fresh, [session, ...sessions]);
+    } else {
+      await _service.addOrphan(
+        OrphanBoardgamePlay(
+          id: 'orphan_${DateTime.now().microsecondsSinceEpoch}',
+          title: entry.title,
+          bggId: entry.bggId,
+          imageUrl: entry.imageUrl,
+          session: session,
+        ),
+      );
+    }
+    if (mounted) _load();
   }
 
   CollectionItem _fallbackItem(GlobalPlayHistoryEntry entry) {
@@ -256,19 +293,15 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
         children: [
           Text(
-            'Classement général (All-Time)',
+            'Classement général',
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            'Tous jeux confondus — victoires cumulées, départagées par taux de victoire.',
-            style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-          ),
           const SizedBox(height: 16),
           BoardgameRankingPanel(
             sessions: sessions,
+            gameTitles: _entries.map((e) => e.title).toList(),
             onOpenSession: (index) {
               if (index >= 0 && index < _entries.length) {
                 _openEntry(_entries[index]);
@@ -331,6 +364,7 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
                     title: group.title,
                     nested: true,
                     onTap: () => _openEntry(entry),
+                    onRelaunch: () => _relaunchEntry(entry),
                     onDelete: () => _deleteEntry(entry),
                   ),
               ],
@@ -344,6 +378,7 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
             title: group.title,
             imageUrl: group.imageUrl,
             onTap: () => _openEntry(entry),
+            onRelaunch: () => _relaunchEntry(entry),
             onDelete: () => _deleteEntry(entry),
           );
         },
@@ -622,6 +657,7 @@ class _EntryTile extends StatelessWidget {
   final DateFormat dateFmt;
   final String title;
   final VoidCallback onTap;
+  final VoidCallback? onRelaunch;
   final VoidCallback? onDelete;
   final String? imageUrl;
   final bool nested;
@@ -631,6 +667,7 @@ class _EntryTile extends StatelessWidget {
     required this.dateFmt,
     required this.title,
     required this.onTap,
+    this.onRelaunch,
     this.onDelete,
     this.imageUrl,
     this.nested = false,
@@ -654,16 +691,61 @@ class _EntryTile extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (!nested) ...[
-                _historyThumb(imageUrl),
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    _historyThumb(imageUrl),
+                    if (session.isInProgress)
+                      Positioned(
+                        right: -2,
+                        bottom: -2,
+                        child: Container(
+                          width: 10,
+                          height: 10,
+                          decoration: BoxDecoration(
+                            color: Colors.orange.shade700,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 1.5),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
                 const SizedBox(width: 12),
               ],
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      nested ? dateFmt.format(session.date) : title,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            nested ? dateFmt.format(session.date) : title,
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                        if (session.isInProgress)
+                          Container(
+                            margin: const EdgeInsets.only(left: 6),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              'En cours',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.orange.shade800,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                     if (!nested) ...[
                       const SizedBox(height: 2),
@@ -696,6 +778,12 @@ class _EntryTile extends StatelessWidget {
                   ],
                 ),
               ),
+              if (onRelaunch != null)
+                IconButton(
+                  icon: const Icon(Icons.play_arrow_rounded),
+                  tooltip: 'Relancer',
+                  onPressed: onRelaunch,
+                ),
               if (onDelete != null)
                 IconButton(
                   icon: const Icon(Icons.delete_outline),
