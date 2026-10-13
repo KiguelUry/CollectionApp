@@ -14,6 +14,7 @@ import '../utils/tcg_card_display.dart';
 import 'boardgame_tile_inventory_sheets.dart';
 import 'boardgame_tile_sheets.dart';
 import 'bgg_network_image.dart';
+import 'favorite_heart_button.dart';
 import 'item_title_text.dart';
 import 'wishlist/wishlist_tile_meta_icons.dart';
 import '../utils/app_page_route.dart';
@@ -43,6 +44,9 @@ class CollectionItemTile extends StatelessWidget {
   final Future<void> Function(CollectionItem base)? onExpansionBaseFocus;
   /// Grille / liste : couverture légère (URL + cache mémoire).
   final bool compactCover;
+  /// Affiche le cœur favori (ex. face à la poubelle).
+  final bool showFavoriteHeart;
+  final bool favoriteReadOnly;
 
   const CollectionItemTile({
     super.key,
@@ -63,6 +67,8 @@ class CollectionItemTile extends StatelessWidget {
     this.contextGroupId,
     this.compactCover = false,
     this.onExpansionBaseFocus,
+    this.showFavoriteHeart = true,
+    this.favoriteReadOnly = false,
   });
 
   bool get _isGrayed =>
@@ -296,6 +302,16 @@ class CollectionItemTile extends StatelessWidget {
               child: _buildImage(),
             ),
           ),
+        if (showFavoriteHeart && !item.isWishlist)
+          Positioned(
+            top: 4,
+            left: 4,
+            child: FavoriteHeartButton(
+              item: item,
+              readOnly: favoriteReadOnly,
+              size: 15,
+            ),
+          ),
         if (onDelete != null)
           Positioned(
             top: 4,
@@ -305,14 +321,16 @@ class CollectionItemTile extends StatelessWidget {
         ?_overlapBadge,
         if (item.isOnLoan && !item.isSold)
           Positioned(
-            top: 4,
+            top: showFavoriteHeart && !item.isWishlist ? 34 : 4,
             left: 4,
             child: _badge('Prêté', Colors.blue.shade700),
           ),
         if (item.isForSale && !item.isSold)
           Positioned(
-            top: 4,
-            left: item.isOnLoan ? 52 : 4,
+            top: showFavoriteHeart && !item.isWishlist ? 34 : 4,
+            left: item.isOnLoan
+                ? 52
+                : (showFavoriteHeart && !item.isWishlist ? 4 : 4),
             child: _badge('Vente', Colors.orange.shade800),
           ),
         if (item.isSold)
@@ -363,6 +381,16 @@ class CollectionItemTile extends StatelessWidget {
                     top: 4,
                     right: onDelete != null ? 32 : 4,
                     child: _badge('×$_ownedQty', Colors.deepPurple),
+                  ),
+                if (showFavoriteHeart && !item.isWishlist)
+                  Positioned(
+                    top: 4,
+                    left: 4,
+                    child: FavoriteHeartButton(
+                      item: item,
+                      readOnly: favoriteReadOnly,
+                      size: 15,
+                    ),
                   ),
                 if (onDelete != null)
                   Positioned(

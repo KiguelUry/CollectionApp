@@ -8,9 +8,11 @@ import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../services/bgg_service.dart';
 import '../services/global_play_history_service.dart';
+import '../services/player_alias_service.dart';
 import '../widgets/boardgame_play_history_panel.dart';
 import '../widgets/boardgame_ranking_panel.dart';
 import '../widgets/bgg_network_image.dart';
+import '../widgets/player_alias_linker_sheet.dart';
 
 /// Historique global des parties (tous jeux confondus).
 class GlobalPlayHistoryScreen extends StatefulWidget {
@@ -195,6 +197,30 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
     _load();
   }
 
+  Future<void> _openAliasLinker() async {
+    await PlayerAliasService.instance.ensureLoaded();
+    final names = <String>{};
+    for (final e in _entries) {
+      for (final p in e.session.players) {
+        final t = p.trim();
+        if (t.isNotEmpty) names.add(t);
+      }
+      final grid = e.session.scoreGrid;
+      if (grid != null) {
+        for (final n in grid.players) {
+          final t = n.trim();
+          if (t.isNotEmpty) names.add(t);
+        }
+      }
+    }
+    if (!mounted) return;
+    await showPlayerAliasLinkerSheet(
+      context,
+      knownNames: names.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())),
+    );
+    if (mounted) setState(() {});
+  }
+
   Future<_GamePick?> _pickGame() async {
     final items = await _service.fetchBoardgameItems();
     if (!mounted) return null;
@@ -213,7 +239,16 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
     final allSessions = _entries.map((e) => e.session).toList();
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Historique des parties')),
+      appBar: AppBar(
+        title: const Text('Historique des parties'),
+        actions: [
+          IconButton(
+            tooltip: 'Lier des noms de joueurs',
+            icon: const Icon(Icons.people_alt_outlined),
+            onPressed: _openAliasLinker,
+          ),
+        ],
+      ),
       floatingActionButton: _tabIndex == 0
           ? FloatingActionButton.extended(
               onPressed: _addSession,
@@ -780,8 +815,8 @@ class _EntryTile extends StatelessWidget {
               ),
               if (onRelaunch != null)
                 IconButton(
-                  icon: const Icon(Icons.play_arrow_rounded),
-                  tooltip: 'Relancer',
+                  icon: const Icon(Icons.add_circle_outline),
+                  tooltip: '+ Partie',
                   onPressed: onRelaunch,
                 ),
               if (onDelete != null)

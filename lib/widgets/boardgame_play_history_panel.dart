@@ -288,18 +288,11 @@ class _BoardgamePlayHistoryPanelState extends State<BoardgamePlayHistoryPanel> {
                             ],
                           ),
                         ),
-                        if (!widget.readOnly) ...[
-                          IconButton(
-                            tooltip: 'Relancer',
-                            icon: const Icon(Icons.play_arrow_rounded, size: 22),
-                            onPressed: () =>
-                                _openAddSession(prefillFrom: s),
-                          ),
+                        if (!widget.readOnly)
                           IconButton(
                             icon: const Icon(Icons.delete_outline, size: 20),
                             onPressed: () => _deleteSession(realIndex),
                           ),
-                        ],
                       ],
                     ),
                   ),

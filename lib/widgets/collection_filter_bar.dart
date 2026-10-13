@@ -193,25 +193,33 @@ class CollectionFilterBar extends StatelessWidget {
             child: Text('Coût estimé'),
           ),
       ],
-      child: OutlinedButton.icon(
-        onPressed: null,
-        style: OutlinedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          visualDensity: VisualDensity.compact,
-          foregroundColor:
-              sortActive ? scheme.primary : scheme.onSurfaceVariant,
-          side: BorderSide(
-            color: sortActive
-                ? scheme.primary
-                : scheme.outlineVariant.withValues(alpha: 0.55),
+      child: IgnorePointer(
+        child: OutlinedButton.icon(
+          onPressed: () {},
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            visualDensity: VisualDensity.compact,
+            foregroundColor:
+                sortActive ? scheme.primary : scheme.onSurface,
+            side: BorderSide(
+              color: sortActive
+                  ? scheme.primary
+                  : scheme.outlineVariant.withValues(alpha: 0.55),
+            ),
+          ),
+          icon: Icon(
+            Icons.sort,
+            size: 18,
+            color: sortActive ? scheme.primary : scheme.onSurface,
+          ),
+          label: Text(
+            'Tri',
+            style: TextStyle(
+              fontSize: 13,
+              color: sortActive ? scheme.primary : scheme.onSurface,
+            ),
           ),
         ),
-        icon: Icon(
-          Icons.sort,
-          size: 18,
-          color: sortActive ? scheme.primary : scheme.onSurfaceVariant,
-        ),
-        label: const Text('Tri', style: TextStyle(fontSize: 13)),
       ),
     );
   }

@@ -48,12 +48,7 @@ class _BoardgamePlayHubBentoState extends State<BoardgamePlayHubBento> {
     final accent = Colors.orange.shade800;
     final sessions = _sessions;
     final stats = BoardgameRankingStats.fromSessions(sessions);
-    final topWin = stats.winPodium.isNotEmpty ? stats.winPodium.first : null;
-    final subtitle = sessions.isEmpty
-        ? 'Historique · stats · classement'
-        : topWin != null
-            ? '${sessions.length} partie${sessions.length > 1 ? 's' : ''} · ${topWin.name}'
-            : '${sessions.length} partie${sessions.length > 1 ? 's' : ''}';
+    final subtitle = _hubSubtitle(sessions, stats);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -70,7 +65,7 @@ class _BoardgamePlayHubBentoState extends State<BoardgamePlayHubBento> {
             children: [
               DetailBentoSubTile(
                 icon: Icons.history,
-                title: 'Historique',
+                title: 'Historique & parties',
                 subtitle: sessions.isEmpty
                     ? 'Ajouter une partie'
                     : '${sessions.length} partie${sessions.length > 1 ? 's' : ''}',
@@ -125,6 +120,41 @@ class _BoardgamePlayHubBentoState extends State<BoardgamePlayHubBento> {
         ),
       ],
     );
+  }
+
+  String _hubSubtitle(
+    List<BoardgamePlaySession> sessions,
+    BoardgameRankingStats stats,
+  ) {
+    if (sessions.isEmpty) return 'Historique · stats · classement';
+    final parts = <String>[
+      '${sessions.length} partie${sessions.length > 1 ? 's' : ''}',
+    ];
+    if (stats.allPlayerNames.isNotEmpty) {
+      parts.add(
+        '${stats.allPlayerNames.length} joueur'
+        '${stats.allPlayerNames.length > 1 ? 's' : ''}',
+      );
+    }
+    if (stats.podiumSlots.isNotEmpty) {
+      final top = stats.podiumSlots.first.players;
+      if (top.length > 1) {
+        final names = top.take(2).map((p) => p.name).join(' & ');
+        parts.add('ex æquo $names');
+      } else if (top.isNotEmpty) {
+        final w = top.first;
+        parts.add(
+          '${w.name} (${w.wins} victoire${w.wins > 1 ? 's' : ''})',
+        );
+      }
+    } else if (stats.allScores.isNotEmpty) {
+      final best = stats.allScores.first;
+      parts.add('best ${best.score}');
+    }
+    final last = sessions.first;
+    final d = last.date;
+    parts.add('${d.day}/${d.month}');
+    return parts.take(4).join(' · ');
   }
 }
 

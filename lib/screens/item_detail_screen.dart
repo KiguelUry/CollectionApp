@@ -30,6 +30,7 @@ import '../widgets/boardgame_detail_bento.dart';
 import '../widgets/boardgame_rules_bento.dart';
 import '../widgets/collapsible_section.dart';
 import '../widgets/detail_bento_tile.dart';
+import '../widgets/favorite_heart_button.dart';
 import '../widgets/compact_whereabouts_dropdown.dart';
 import '../widgets/discogs_market_value_card.dart';
 import '../widgets/friend_ratings_panel.dart';
@@ -84,6 +85,10 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
   late final TextEditingController _gamesPlayedController;
   late final TextEditingController _personalRulesController;
   late final TextEditingController _merchantController;
+  late final TextEditingController _soldToController;
+  late final TextEditingController _soldPriceController;
+  late final TextEditingController _tradedForController;
+  late final TextEditingController _tradedWithController;
 
   ItemCondition? _condition;
   DateTime? _warrantyEnd;
@@ -121,6 +126,18 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     _merchantController = TextEditingController(
       text: _item.metadata?['merchant']?.toString() ?? '',
     );
+    _soldToController = TextEditingController(
+      text: _item.metadata?['sold_to']?.toString() ?? '',
+    );
+    _soldPriceController = TextEditingController(
+      text: _item.metadata?['sold_price']?.toString() ?? '',
+    );
+    _tradedForController = TextEditingController(
+      text: _item.metadata?['traded_for']?.toString() ?? '',
+    );
+    _tradedWithController = TextEditingController(
+      text: _item.metadata?['traded_with']?.toString() ?? '',
+    );
     final rawWarranty = _item.metadata?['warranty_end']?.toString();
     if (rawWarranty != null && rawWarranty.isNotEmpty) {
       _warrantyEnd = DateTime.tryParse(rawWarranty);
@@ -133,6 +150,10 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       _gamesPlayedController.addListener(_scheduleSave);
       _personalRulesController.addListener(_scheduleSave);
       _merchantController.addListener(_scheduleSave);
+      _soldToController.addListener(_scheduleSave);
+      _soldPriceController.addListener(_scheduleSave);
+      _tradedForController.addListener(_scheduleSave);
+      _tradedWithController.addListener(_scheduleSave);
       _loadGroups();
       _loadGroupMembership();
       _reloadItem();
@@ -254,6 +275,10 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     _priceController.dispose();
     _gamesPlayedController.dispose();
     _personalRulesController.dispose();
+    _soldToController.dispose();
+    _soldPriceController.dispose();
+    _tradedForController.dispose();
+    _tradedWithController.dispose();
     _merchantController.dispose();
     super.dispose();
   }
@@ -481,6 +506,19 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
         meta.remove('warranty_end');
       }
     }
+    void setOrClear(String key, String value) {
+      final t = value.trim();
+      if (t.isEmpty) {
+        meta.remove(key);
+      } else {
+        meta[key] = t;
+      }
+    }
+
+    setOrClear('sold_to', _soldToController.text);
+    setOrClear('sold_price', _soldPriceController.text);
+    setOrClear('traded_for', _tradedForController.text);
+    setOrClear('traded_with', _tradedWithController.text);
 
     final groupIds = _selectedGroupIds.toList();
     _item = _item.copyWith(
@@ -714,15 +752,10 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
               },
             ),
           if (!ro)
-            IconButton(
-              tooltip: _item.isFavorite ? 'Retirer des favoris' : 'Favori',
-              icon: Icon(
-                _item.isFavorite ? Icons.favorite : Icons.favorite_border,
-                color: _item.isFavorite ? Colors.redAccent : null,
-              ),
-              onPressed: () {
-                setState(() => _item = _item.withFavorite(!_item.isFavorite));
-                _saveNow();
+            FavoriteHeartIconButton(
+              item: _item,
+              onChanged: (updated) {
+                setState(() => _item = updated);
               },
             ),
           if (!ro)
@@ -1083,7 +1116,11 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       DetailBentoTile(
                         icon: Icons.extension_outlined,
                         title: 'Extensions',
-                        subtitle: 'Base & extensions',
+                        subtitle: () {
+                          final owned = ownedExpansionCount(_item);
+                          if (owned <= 0) return 'Base & extensions';
+                          return '$owned possédée${owned > 1 ? 's' : ''}';
+                        }(),
                         accent: _item.category.color,
                         expanded: _expandedBento == 'extensions',
                         onTap: () => setState(
@@ -1104,9 +1141,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       DetailBentoTile(
                         icon: Icons.group_outlined,
                         title: 'Partage & groupes',
-                        subtitle: _selectedGroupIds.isEmpty
-                            ? 'Groupes & localisation'
-                            : '${_selectedGroupIds.length} groupe${_selectedGroupIds.length > 1 ? 's' : ''}',
+                        subtitle: _shareGroupsSubtitle(),
                         accent: _item.category.color,
                         expanded: _expandedBento == 'share',
                         onTap: () => setState(
@@ -1258,9 +1293,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                     DetailBentoTile(
                       icon: Icons.star_outline,
                       title: 'Ma note & avis',
-                      subtitle: (_item.rating ?? 0) > 0
-                          ? '${_item.rating!.toStringAsFixed(1)} / 5'
-                          : 'Noter cet objet',
+                      subtitle: _ratingBentoSubtitle(),
                       accent: _item.category.color,
                       expanded: _expandedBento == 'rating',
                       onTap: () => setState(
@@ -1387,9 +1420,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       DetailBentoTile(
                         icon: Icons.sell_outlined,
                         title: 'Doubles & vente',
-                        subtitle: _item.isSold
-                            ? 'Vendu'
-                            : (_item.isForSale ? 'À vendre' : 'État de vente'),
+                        subtitle: _saleDispositionSubtitle(),
                         accent: _item.category.color,
                         expanded: _expandedBento == 'sale',
                         onTap: () => setState(
@@ -1397,10 +1428,11 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                               _expandedBento == 'sale' ? null : 'sale',
                         ),
                         child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             SwitchListTile(
                               contentPadding: EdgeInsets.zero,
-                              title: const Text('À vendre / échanger'),
+                              title: const Text('À vendre'),
                               subtitle: const Text(
                                 'Apparaît dans l\'onglet « À vendre »',
                               ),
@@ -1412,6 +1444,31 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                                         _item = _item.copyWith(
                                           isForSale: v,
                                           isSold: false,
+                                          metadata: _dispositionMeta(
+                                            keep: !v,
+                                            sell: v,
+                                            trade: false,
+                                          ),
+                                        );
+                                      });
+                                      _saveNow();
+                                    },
+                            ),
+                            SwitchListTile(
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text('Envie d\'échanger'),
+                              value: _dispositionIsTrade && !_item.isSold,
+                              onChanged: _item.isSold
+                                  ? null
+                                  : (v) {
+                                      setState(() {
+                                        _item = _item.copyWith(
+                                          isForSale: v ? true : _item.isForSale,
+                                          metadata: _dispositionMeta(
+                                            keep: !v && !_item.isForSale,
+                                            sell: !v && _item.isForSale,
+                                            trade: v,
+                                          ),
                                         );
                                       });
                                       _saveNow();
@@ -1421,7 +1478,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                               contentPadding: EdgeInsets.zero,
                               title: const Text('Marquer comme vendu'),
                               subtitle: const Text(
-                                'Retire de la collection active, tuile grisée dans l\'historique',
+                                'Retire de la collection active',
                               ),
                               value: _item.isSold,
                               onChanged: (v) {
@@ -1429,10 +1486,82 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                                   _item = _item.copyWith(
                                     isSold: v,
                                     isForSale: v ? false : _item.isForSale,
+                                    metadata: _dispositionMeta(
+                                      keep: !v && !_item.isForSale,
+                                      sell: false,
+                                      trade: false,
+                                      sold: v,
+                                    ),
                                   );
                                 });
                                 _saveNow();
                               },
+                            ),
+                            if (_item.isSold) ...[
+                              const SizedBox(height: 8),
+                              TextField(
+                                controller: _soldToController,
+                                readOnly: ro,
+                                decoration: const InputDecoration(
+                                  labelText: 'Vendu à',
+                                  border: OutlineInputBorder(),
+                                  isDense: true,
+                                ),
+                                onChanged: (_) => _scheduleSave(),
+                              ),
+                              const SizedBox(height: 8),
+                              TextField(
+                                controller: _soldPriceController,
+                                readOnly: ro,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                  decimal: true,
+                                ),
+                                decoration: const InputDecoration(
+                                  labelText: 'Prix de vente (€)',
+                                  border: OutlineInputBorder(),
+                                  isDense: true,
+                                ),
+                                onChanged: (_) => _scheduleSave(),
+                              ),
+                            ],
+                            if (_dispositionIsTrade && !_item.isSold) ...[
+                              const SizedBox(height: 8),
+                              TextField(
+                                controller: _tradedForController,
+                                readOnly: ro,
+                                decoration: const InputDecoration(
+                                  labelText: 'Échangé contre',
+                                  border: OutlineInputBorder(),
+                                  isDense: true,
+                                ),
+                                onChanged: (_) => _scheduleSave(),
+                              ),
+                              const SizedBox(height: 8),
+                              TextField(
+                                controller: _tradedWithController,
+                                readOnly: ro,
+                                decoration: const InputDecoration(
+                                  labelText: 'Avec',
+                                  border: OutlineInputBorder(),
+                                  isDense: true,
+                                ),
+                                onChanged: (_) => _scheduleSave(),
+                              ),
+                            ],
+                            const SizedBox(height: 12),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: ActionChip(
+                                avatar: const Icon(Icons.storefront_outlined,
+                                    size: 18),
+                                label: const Text('Accès Vinted'),
+                                onPressed: () => _openVintedSearch(
+                                  isBoardgame: isBoardgame,
+                                  isMedia: _item.category ==
+                                      CollectionCategory.media,
+                                ),
+                              ),
                             ),
                           ],
                         ),
@@ -1450,10 +1579,17 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       ),
                     ],
                     if (!isWishlist || isTech) ...[
-                      CollapsibleSection(
+                      const SizedBox(height: 12),
+                      DetailBentoTile(
+                        icon: Icons.payments_outlined,
                         title: isTech ? 'Budget & garantie' : 'Valeur & état',
-                        accentColor: _item.category.color,
-                        initiallyExpanded: isTech,
+                        subtitle: _valueConditionSubtitle(isTech: isTech),
+                        accent: _item.category.color,
+                        expanded: _expandedBento == 'value',
+                        onTap: () => setState(
+                          () => _expandedBento =
+                              _expandedBento == 'value' ? null : 'value',
+                        ),
                         child: Column(
                           children: [
                             if (isTech && _warrantyEnd != null) ...[
@@ -1791,6 +1927,117 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
         ],
       ),
     );
+  }
+
+  bool get _dispositionIsTrade =>
+      _item.metadata?['disposition']?.toString() == 'trade';
+
+  Map<String, dynamic> _dispositionMeta({
+    bool keep = false,
+    bool sell = false,
+    bool trade = false,
+    bool sold = false,
+  }) {
+    final meta = Map<String, dynamic>.from(_item.metadata ?? {});
+    if (sold) {
+      meta['disposition'] = 'sold';
+    } else if (trade) {
+      meta['disposition'] = 'trade';
+    } else if (sell) {
+      meta['disposition'] = 'sell';
+    } else if (keep) {
+      meta['disposition'] = 'keep';
+    } else {
+      meta.remove('disposition');
+    }
+    return meta;
+  }
+
+  String _shareGroupsSubtitle() {
+    final parts = <String>[];
+    final loc = _item.locationLabel?.trim();
+    if (loc != null && loc.isNotEmpty) {
+      parts.add(loc);
+    }
+    final groupNames = _groups
+        .where((g) => _selectedGroupIds.contains(g.id))
+        .map((g) => g.name)
+        .toList();
+    if (groupNames.isNotEmpty) {
+      parts.add(groupNames.take(2).join(', '));
+    } else if (_selectedGroupIds.isNotEmpty) {
+      parts.add(
+        '${_selectedGroupIds.length} groupe'
+        '${_selectedGroupIds.length > 1 ? 's' : ''}',
+      );
+    }
+    if (parts.isEmpty) return 'Groupes & localisation';
+    return parts.join(' · ');
+  }
+
+  String _ratingBentoSubtitle() {
+    final parts = <String>[];
+    final perso = _item.rating;
+    if (perso != null && perso > 0) {
+      parts.add('Perso ${perso.toStringAsFixed(1)}');
+    }
+    final bgg = _bggAvgRating ??
+        parseBggAvgRating(_item.metadata?['bgg_avg_rating']);
+    if (bgg != null && bgg > 0) {
+      parts.add('Commu ${bgg.toStringAsFixed(1)}');
+    }
+    if (parts.isEmpty) return 'Noter cet objet';
+    return parts.join(' · ');
+  }
+
+  String _saleDispositionSubtitle() {
+    if (_item.isSold) {
+      final to = _item.metadata?['sold_to']?.toString().trim();
+      final price = _item.metadata?['sold_price']?.toString().trim();
+      if (to != null && to.isNotEmpty && price != null && price.isNotEmpty) {
+        return 'Vendu à $to · $price €';
+      }
+      if (to != null && to.isNotEmpty) return 'Vendu à $to';
+      return 'Vendu';
+    }
+    if (_dispositionIsTrade) {
+      final against = _item.metadata?['traded_for']?.toString().trim();
+      final withWho = _item.metadata?['traded_with']?.toString().trim();
+      if (against != null &&
+          against.isNotEmpty &&
+          withWho != null &&
+          withWho.isNotEmpty) {
+        return 'Échange : $against avec $withWho';
+      }
+      return 'Envie d\'échanger';
+    }
+    if (_item.isForSale) return 'Envie de vendre';
+    return 'Dans ma collection';
+  }
+
+  String _valueConditionSubtitle({required bool isTech}) {
+    final parts = <String>[];
+    final price = _priceController.text.trim();
+    if (price.isNotEmpty) parts.add('$price €');
+    final cond = _condition?.label;
+    if (cond != null && cond.isNotEmpty) parts.add(cond);
+    if (isTech && _warrantyEnd != null) parts.add('Garantie');
+    if (parts.isEmpty) return isTech ? 'Prix & garantie' : 'Prix & état';
+    return parts.join(' · ');
+  }
+
+  Future<void> _openVintedSearch({
+    required bool isBoardgame,
+    required bool isMedia,
+  }) async {
+    final title = _item.title.trim();
+    final query = isBoardgame
+        ? 'jeu $title'
+        : (isMedia ? title : title);
+    final uri = Uri.https('www.vinted.fr', '/catalog', {
+      'search_text': query,
+    });
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
   Widget _buildSectionTitle(String title) {

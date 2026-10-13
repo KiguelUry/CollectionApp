@@ -427,14 +427,26 @@ class BggService {
     return candidates;
   }
 
+  static String unescapeHtml(String raw) {
+    return raw
+        .replaceAll('&amp;', '&')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#039;', "'")
+        .replaceAll('&apos;', "'")
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>');
+  }
+
   static String _primaryTitle(XmlElement node) {
     for (final name in node.findElements('name')) {
       if (name.getAttribute('type') == 'primary') {
-        return name.getAttribute('value') ?? 'Sans titre';
+        return unescapeHtml(name.getAttribute('value') ?? 'Sans titre');
       }
     }
-    return node.findElements('name').firstOrNull?.getAttribute('value') ??
-        'Sans titre';
+    return unescapeHtml(
+      node.findElements('name').firstOrNull?.getAttribute('value') ??
+          'Sans titre',
+    );
   }
 
   static Future<List<Map<String, String>>> searchGames(
@@ -1163,7 +1175,7 @@ class BggService {
           .map((e) {
             return BggExpansion(
               bggId: e['bggId']?.toString() ?? '',
-              title: e['title']?.toString() ?? '',
+              title: unescapeHtml(e['title']?.toString() ?? ''),
               imageUrl: e['imageUrl']?.toString(),
               year: e['year'] is int
                   ? e['year'] as int

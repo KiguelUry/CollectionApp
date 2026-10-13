@@ -11,6 +11,7 @@ import '../utils/whereabouts_apply.dart';
 import '../utils/whereabouts_persistence.dart';
 import 'bgg_community_rating_panel.dart';
 import 'compact_whereabouts_dropdown.dart';
+import 'favorite_heart_button.dart';
 import 'star_rating_bar.dart';
 
 Future<void> showBoardgameTileRatingSheet(
@@ -124,13 +125,24 @@ class _BoardgameTileRatingSheetState extends State<_BoardgameTileRatingSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              widget.item.title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(
+                    widget.item.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
                   ),
+                ),
+                FavoriteHeartIconButton(
+                  item: widget.item,
+                  readOnly: widget.readOnly,
+                ),
+              ],
             ),
             const SizedBox(height: 16),
             BggCommunityRatingPanel(avgRating: bggAvg),

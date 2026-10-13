@@ -1317,8 +1317,8 @@ class _HomeScreenState extends State<HomeScreen>
           color: _onAccent,
         ),
         tooltip: _gridMobileColumns == 2
-            ? 'Grille dense (3 colonnes)'
-            : 'Grandes pochettes (2 colonnes)',
+            ? 'Grille plus dense (s\'adapte à l\'écran)'
+            : 'Grille plus large (s\'adapte à l\'écran)',
         onPressed: () async {
           await CollectionDisplayPreferences.instance.toggleGridMobileColumns();
           if (!mounted) return;
@@ -1352,10 +1352,10 @@ class _HomeScreenState extends State<HomeScreen>
       ),
   ];
 
-  double _headerPreferredHeight(BuildContext context) {
+  double _headerPreferredHeight(BuildContext context, {required bool compact}) {
     final top = MediaQuery.paddingOf(context).top;
-    // SafeArea in header + title + tabs + toolbar
-    return top + 40 + 36 + 36;
+    // SafeArea in header + title + tabs + toolbar (labels vs icônes)
+    return top + 40 + 36 + (compact ? 36 : 44);
   }
 
   @override
@@ -1401,7 +1401,12 @@ class _HomeScreenState extends State<HomeScreen>
               scrolledUnderElevation: 0,
               toolbarHeight: 0,
               bottom: PreferredSize(
-                preferredSize: Size.fromHeight(_headerPreferredHeight(context)),
+                preferredSize: Size.fromHeight(
+                  _headerPreferredHeight(
+                    context,
+                    compact: innerBoxIsScrolled,
+                  ),
+                ),
                 child: CategoryCollectionHeader(
                   category: widget.category,
                   title: title,
@@ -1409,6 +1414,7 @@ class _HomeScreenState extends State<HomeScreen>
                   accentOverride: widget.accentOverride,
                   quickActions: _quickActions(),
                   extraActions: _headerActions,
+                  compactActions: innerBoxIsScrolled,
                 ),
               ),
             ),
@@ -1436,7 +1442,7 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
         CategoryQuickAction(
-          label: 'Historique parties',
+          label: 'Parties',
           icon: Icons.history_edu,
           onTap: () => Navigator.push(
             context,
@@ -1446,7 +1452,7 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
         CategoryQuickAction(
-          label: 'Historique collection',
+          label: 'Ajouts & suppressions',
           icon: Icons.restore_rounded,
           onTap: () => Navigator.push(
             context,

@@ -1079,34 +1079,19 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
         // ── Bloc 5 : grille de score ──
         if (widget.showScoreTable && _hasTableContent) ...[
           const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Grille de score',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
-                ),
-              ),
-              if (widget.enabled)
-                IconButton(
-                  onPressed: () => setState(() => _hideTotals = !_hideTotals),
-                  icon: Icon(
-                    _hideTotals
-                        ? Icons.visibility_off_outlined
-                        : Icons.visibility_outlined,
-                  ),
-                  tooltip: _hideTotals
-                      ? 'Afficher les totaux'
-                      : 'Masquer les totaux (anti-spoil)',
-                ),
-            ],
+          Text(
+            'Grille de score',
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 10),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            child: Container(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: scheme.outlineVariant),
@@ -1315,6 +1300,24 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                     ]),
                 ],
               ),
+            ),
+                if (widget.enabled)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4),
+                    child: IconButton(
+                      onPressed: () =>
+                          setState(() => _hideTotals = !_hideTotals),
+                      icon: Icon(
+                        _hideTotals
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                      ),
+                      tooltip: _hideTotals
+                          ? 'Afficher les totaux'
+                          : 'Masquer les totaux (anti-spoil)',
+                    ),
+                  ),
+              ],
             ),
           ),
           if (widget.enabled) ...[
