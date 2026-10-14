@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/boardgame_play_session.dart';
+import '../services/player_alias_service.dart';
 import '../utils/boardgame_play_stats.dart';
 import 'boardgame_ranking_detail_screen.dart';
 
@@ -51,6 +52,7 @@ class BoardgameRankingPanel extends StatelessWidget {
     final stats = BoardgameRankingStats.fromSessions(
       sessions,
       gameTitles: gameTitles,
+      resolveName: PlayerAliasService.instance.canonical,
     );
     final scheme = Theme.of(context).colorScheme;
 

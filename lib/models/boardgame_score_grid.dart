@@ -99,6 +99,24 @@ class BoardgameScoreGrid {
   List<String> get activePlayers =>
       players.map((p) => p.trim()).where((p) => p.isNotEmpty).toList();
 
+  BoardgameScoreGrid remapPlayerNames(Map<String, String> map) {
+    if (map.isEmpty) return this;
+    String mapName(String raw) {
+      final t = raw.trim();
+      if (t.isEmpty) return raw;
+      return map[t.toLowerCase()] ?? raw;
+    }
+
+    return BoardgameScoreGrid(
+      players: players.map(mapName).toList(),
+      rounds: rounds,
+      teams: teams,
+      playerColors: playerColors,
+      teamColorMap: teamColorMap,
+      teamScoreMode: teamScoreMode,
+    );
+  }
+
   bool get hasScores => rounds.any((r) => r.scores.any((s) => s != null));
 
   bool get hasTeams =>

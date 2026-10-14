@@ -2,59 +2,108 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Groupe d'alias : plusieurs noms = la même personne.
-class PlayerAliasGroup {
+/// Identité joueur : un ou plusieurs pseudos = la même personne.
+class PlayerIdentity {
   final String id;
+  /// Pseudos liés (orthographes telles qu'écrites dans l'historique).
   final List<String> names;
+  /// Nom affiché dans classements / après renommage.
+  final String displayName;
+  /// Cette identité = toi.
+  final bool isMe;
 
-  const PlayerAliasGroup({required this.id, required this.names});
+  const PlayerIdentity({
+    required this.id,
+    required this.names,
+    required this.displayName,
+    this.isMe = false,
+  });
 
-  String get primary => names.isEmpty ? '' : names.first;
+  String get primary => displayName.trim().isNotEmpty
+      ? displayName.trim()
+      : (names.isEmpty ? '' : names.first);
 
-  Map<String, dynamic> toJson() => {'id': id, 'names': names};
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'names': names,
+        'displayName': displayName,
+        'isMe': isMe,
+      };
 
-  factory PlayerAliasGroup.fromJson(Map<String, dynamic> json) {
+  factory PlayerIdentity.fromJson(Map<String, dynamic> json) {
     final raw = json['names'];
     final names = raw is List
         ? raw.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList()
         : <String>[];
-    return PlayerAliasGroup(
-      id: json['id']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString(),
+    final display = json['displayName']?.toString().trim();
+    return PlayerIdentity(
+      id: json['id']?.toString() ??
+          DateTime.now().millisecondsSinceEpoch.toString(),
       names: names,
+      displayName: (display != null && display.isNotEmpty)
+          ? display
+          : (names.isNotEmpty ? names.first : ''),
+      isMe: json['isMe'] == true,
+    );
+  }
+
+  PlayerIdentity copyWith({
+    List<String>? names,
+    String? displayName,
+    bool? isMe,
+  }) {
+    return PlayerIdentity(
+      id: id,
+      names: names ?? this.names,
+      displayName: displayName ?? this.displayName,
+      isMe: isMe ?? this.isMe,
     );
   }
 }
 
-/// Lie plusieurs pseudos (Kiki / Kig / Goran) à la même personne.
+/// @Deprecated — alias de compat.
+typedef PlayerAliasGroup = PlayerIdentity;
+
+/// Lie plusieurs pseudos et fusionne les stats / renomme les parties.
 class PlayerAliasService {
   PlayerAliasService._();
   static final instance = PlayerAliasService._();
 
-  static const _prefsKey = 'player_alias_groups_v1';
+  static const _prefsKey = 'player_alias_groups_v2';
+  static const _prefsKeyLegacy = 'player_alias_groups_v1';
 
-  List<PlayerAliasGroup> _groups = [];
+  List<PlayerIdentity> _identities = [];
   bool _loaded = false;
 
-  List<PlayerAliasGroup> get groups => List.unmodifiable(_groups);
+  List<PlayerIdentity> get groups => List.unmodifiable(_identities);
+  List<PlayerIdentity> get identities => List.unmodifiable(_identities);
+
+  PlayerIdentity? get meIdentity {
+    try {
+      return _identities.firstWhere((e) => e.isMe);
+    } catch (_) {
+      return null;
+    }
+  }
 
   Future<void> ensureLoaded() async {
     if (_loaded) return;
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_prefsKey);
+    final raw = prefs.getString(_prefsKey) ?? prefs.getString(_prefsKeyLegacy);
     if (raw == null || raw.isEmpty) {
-      _groups = [];
+      _identities = [];
       _loaded = true;
       return;
     }
     try {
       final list = jsonDecode(raw) as List<dynamic>;
-      _groups = list
+      _identities = list
           .whereType<Map>()
-          .map((e) => PlayerAliasGroup.fromJson(Map<String, dynamic>.from(e)))
-          .where((g) => g.names.length >= 2)
+          .map((e) => PlayerIdentity.fromJson(Map<String, dynamic>.from(e)))
+          .where((g) => g.names.isNotEmpty)
           .toList();
     } catch (_) {
-      _groups = [];
+      _identities = [];
     }
     _loaded = true;
   }
@@ -63,109 +112,166 @@ class PlayerAliasService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
       _prefsKey,
-      jsonEncode(_groups.map((g) => g.toJson()).toList()),
+      jsonEncode(_identities.map((g) => g.toJson()).toList()),
     );
   }
 
-  /// Nom canonique (premier du groupe) ou le nom tel quel.
+  /// Nom canonique pour classements (displayName du groupe, sinon inchangé).
   String canonical(String name) {
     final t = name.trim();
     if (t.isEmpty) return t;
     final lower = t.toLowerCase();
-    for (final g in _groups) {
-      if (g.names.any((n) => n.toLowerCase() == lower)) {
+    for (final g in _identities) {
+      if (g.names.any((n) => n.toLowerCase() == lower) ||
+          g.displayName.toLowerCase() == lower) {
         return g.primary;
       }
     }
     return t;
   }
 
-  /// Tous les alias d'une personne (ou juste [name]).
   List<String> aliasesFor(String name) {
     final t = name.trim();
     if (t.isEmpty) return const [];
     final lower = t.toLowerCase();
-    for (final g in _groups) {
-      if (g.names.any((n) => n.toLowerCase() == lower)) {
+    for (final g in _identities) {
+      if (g.names.any((n) => n.toLowerCase() == lower) ||
+          g.displayName.toLowerCase() == lower) {
         return List<String>.from(g.names);
       }
     }
     return [t];
   }
 
-  /// Libellé compact pour une ligne de liste : « Kiki · Kig · Goran ».
-  String displayLabel(String name, {int maxNames = 3}) {
-    final aliases = aliasesFor(name);
-    if (aliases.length <= 1) return name.trim();
-    if (aliases.length <= maxNames) return aliases.join(' · ');
-    return '${aliases.take(maxNames - 1).join(' · ')} · +${aliases.length - (maxNames - 1)}';
+  PlayerIdentity? identityFor(String name) {
+    final lower = name.trim().toLowerCase();
+    if (lower.isEmpty) return null;
+    for (final g in _identities) {
+      if (g.names.any((n) => n.toLowerCase() == lower) ||
+          g.displayName.toLowerCase() == lower) {
+        return g;
+      }
+    }
+    return null;
   }
 
-  Future<PlayerAliasGroup> linkNames(List<String> names) async {
+  String displayLabel(String name, {int maxNames = 3}) {
+    final id = identityFor(name);
+    if (id == null) return name.trim();
+    final label = id.primary;
+    final extras =
+        id.names.where((n) => n.toLowerCase() != label.toLowerCase()).toList();
+    if (extras.isEmpty) return id.isMe ? '$label (moi)' : label;
+    final shown = extras.take(maxNames).join(' · ');
+    final more = extras.length > maxNames ? ' · +${extras.length - maxNames}' : '';
+    final me = id.isMe ? ' · moi' : '';
+    return '$label ($shown$more)$me';
+  }
+
+  /// Crée / fusionne une identité.
+  /// [names] = pseudos cochés ; [displayName] = nom à afficher.
+  Future<PlayerIdentity> linkNames(
+    List<String> names, {
+    String? displayName,
+    bool isMe = false,
+  }) async {
     await ensureLoaded();
     final cleaned = <String>[];
     final seen = <String>{};
     for (final n in names) {
       final t = n.trim();
       if (t.isEmpty) continue;
-      final key = t.toLowerCase();
-      if (seen.add(key)) cleaned.add(t);
+      if (seen.add(t.toLowerCase())) cleaned.add(t);
     }
-    if (cleaned.length < 2) {
-      throw ArgumentError('Il faut au moins 2 noms à lier');
+    if (cleaned.isEmpty) {
+      throw ArgumentError('Sélectionne au moins un nom');
     }
 
-    // Fusionner avec groupes existants qui touchent ces noms.
     final touchKeys = cleaned.map((e) => e.toLowerCase()).toSet();
-    final keep = <PlayerAliasGroup>[];
+    final keep = <PlayerIdentity>[];
     final merged = <String>[];
     final mergedSeen = <String>{};
+    var wasMe = isMe;
+
     void addName(String n) {
-      final k = n.toLowerCase();
-      if (mergedSeen.add(k)) merged.add(n);
+      if (mergedSeen.add(n.toLowerCase())) merged.add(n);
     }
 
-    for (final g in _groups) {
-      final hits = g.names.any((n) => touchKeys.contains(n.toLowerCase()));
+    for (final g in _identities) {
+      final hits = g.names.any((n) => touchKeys.contains(n.toLowerCase())) ||
+          touchKeys.contains(g.displayName.toLowerCase());
       if (hits) {
+        wasMe = wasMe || g.isMe;
         for (final n in g.names) {
           addName(n);
         }
       } else {
-        keep.add(g);
+        keep.add(isMe ? g.copyWith(isMe: false) : g);
       }
     }
     for (final n in cleaned) {
       addName(n);
     }
 
-    final group = PlayerAliasGroup(
+    final chosen = (displayName?.trim().isNotEmpty == true)
+        ? displayName!.trim()
+        : merged.first;
+
+    if (!mergedSeen.contains(chosen.toLowerCase())) {
+      merged.insert(0, chosen);
+    }
+
+    // Un seul « moi ».
+    final nextKeep = wasMe || isMe
+        ? keep.map((g) => g.copyWith(isMe: false)).toList()
+        : keep;
+
+    final group = PlayerIdentity(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       names: merged,
+      displayName: chosen,
+      isMe: wasMe || isMe,
     );
-    _groups = [...keep, group];
+    _identities = [...nextKeep, group];
     await _persist();
     return group;
+  }
+
+  Future<void> setMe(String identityId) async {
+    await ensureLoaded();
+    _identities = _identities
+        .map((g) => g.copyWith(isMe: g.id == identityId))
+        .toList();
+    await _persist();
+  }
+
+  Future<void> clearMe() async {
+    await ensureLoaded();
+    _identities = _identities.map((g) => g.copyWith(isMe: false)).toList();
+    await _persist();
+  }
+
+  Future<void> deleteGroup(String id) async {
+    await ensureLoaded();
+    _identities = _identities.where((g) => g.id != id).toList();
+    await _persist();
   }
 
   Future<void> unlinkName(String name) async {
     await ensureLoaded();
     final lower = name.trim().toLowerCase();
     if (lower.isEmpty) return;
-    final next = <PlayerAliasGroup>[];
-    for (final g in _groups) {
+    final next = <PlayerIdentity>[];
+    for (final g in _identities) {
       final names = g.names.where((n) => n.toLowerCase() != lower).toList();
-      if (names.length >= 2) {
-        next.add(PlayerAliasGroup(id: g.id, names: names));
+      if (names.isEmpty) continue;
+      var display = g.displayName;
+      if (display.toLowerCase() == lower) {
+        display = names.first;
       }
+      next.add(g.copyWith(names: names, displayName: display));
     }
-    _groups = next;
-    await _persist();
-  }
-
-  Future<void> deleteGroup(String id) async {
-    await ensureLoaded();
-    _groups = _groups.where((g) => g.id != id).toList();
+    _identities = next;
     await _persist();
   }
 }

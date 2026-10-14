@@ -17,6 +17,7 @@ import '../utils/holder_filter.dart';
 import '../utils/shake_pick_filters.dart';
 import '../widgets/app_app_bar.dart';
 import '../widgets/bgg_network_image.dart';
+import 'finger_team_pick_screen.dart';
 import 'item_detail_screen.dart';
 
 /// Secoue le téléphone (mobile) ou appuie sur le bouton pour tirer un jeu au hasard.
@@ -164,7 +165,21 @@ class _ShakePickScreenState extends State<ShakePickScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const AppAppBar(title: 'À quoi on joue ce soir ?'),
+      appBar: AppAppBar(
+        title: 'À quoi on joue ce soir ?',
+        actions: [
+          TextButton.icon(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const FingerTeamPickScreen(),
+              ),
+            ),
+            icon: const Icon(Icons.touch_app_outlined, size: 18),
+            label: const Text('Jeu du doigt'),
+          ),
+        ],
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _allCandidates.isEmpty

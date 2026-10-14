@@ -159,7 +159,15 @@ class BoardgameRankingStats {
   factory BoardgameRankingStats.fromSessions(
     List<BoardgamePlaySession> sessions, {
     List<String?>? gameTitles,
+    /// Fusionne les pseudos (ex. aliases) avant agrégation.
+    String Function(String name)? resolveName,
   }) {
+    String resolve(String raw) {
+      final t = raw.trim();
+      if (t.isEmpty) return t;
+      return resolveName?.call(t) ?? t;
+    }
+
     final winCounts = <String, int>{};
     final lastCounts = <String, int>{};
     final gamesPlayed = <String, int>{};
@@ -173,7 +181,7 @@ class BoardgameRankingStats {
 
     void bumpGames(Iterable<String> names) {
       for (final n in names) {
-        final t = n.trim();
+        final t = resolve(n);
         if (t.isEmpty) continue;
         gamesPlayed[t] = (gamesPlayed[t] ?? 0) + 1;
         rawNames.add(t);
@@ -182,7 +190,7 @@ class BoardgameRankingStats {
 
     void recordDuoWinners(List<String> winners) {
       final unique = winners
-          .map((e) => e.trim())
+          .map(resolve)
           .where((e) => e.isNotEmpty)
           .toSet()
           .toList();
@@ -198,7 +206,8 @@ class BoardgameRankingStats {
       final session = sessions[sessionIdx];
       final gameTitle =
           sessionIdx < titles.length ? titles[sessionIdx]?.trim() : null;
-      final participants = _sessionParticipants(session);
+      final participants =
+          _sessionParticipants(session).map(resolve).toList();
       bumpGames(participants);
 
       if (session.isCooperative) {
@@ -210,13 +219,13 @@ class BoardgameRankingStats {
         }
         // Still collect scores for averages / lists.
       } else {
-        final winners = _winningPlayers(session);
+        final winners = _winningPlayers(session).map(resolve).toList();
         for (final w in winners) {
           winCounts[w] = (winCounts[w] ?? 0) + 1;
         }
         if (winners.isNotEmpty) recordDuoWinners(winners);
 
-        final losers = _lastPlacePlayers(session);
+        final losers = _lastPlacePlayers(session).map(resolve).toList();
         for (final l in losers) {
           lastCounts[l] = (lastCounts[l] ?? 0) + 1;
         }
@@ -226,7 +235,7 @@ class BoardgameRankingStats {
       if (session.trackScores && grid != null && grid.hasScores) {
         final totals = grid.columnTotals();
         for (var i = 0; i < grid.players.length; i++) {
-          final name = grid.players[i].trim();
+          final name = resolve(grid.players[i]);
           if (name.isEmpty || !grid.columnHasScores(i)) continue;
           rawNames.add(name);
           final score = i < totals.length ? totals[i] : 0;

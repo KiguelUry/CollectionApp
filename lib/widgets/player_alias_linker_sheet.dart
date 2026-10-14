@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/global_play_history_service.dart';
 import '../services/player_alias_service.dart';
 
 Future<void> showPlayerAliasLinkerSheet(
@@ -26,7 +27,9 @@ class _PlayerAliasLinkerSheet extends StatefulWidget {
 
 class _PlayerAliasLinkerSheetState extends State<_PlayerAliasLinkerSheet> {
   final _selected = <String>{};
-  String? _anchor;
+  final _displayController = TextEditingController();
+  bool _markAsMe = false;
+  bool _renameEverywhere = true;
   bool _saving = false;
 
   @override
@@ -37,19 +40,61 @@ class _PlayerAliasLinkerSheetState extends State<_PlayerAliasLinkerSheet> {
     });
   }
 
-  Future<void> _confirmLink() async {
-    if (_selected.length < 2) return;
+  @override
+  void dispose() {
+    _displayController.dispose();
+    super.dispose();
+  }
+
+  void _toggle(String name, bool? selected) {
+    setState(() {
+      if (selected == true) {
+        _selected.add(name);
+        if (_displayController.text.trim().isEmpty) {
+          _displayController.text = name;
+        }
+      } else {
+        _selected.remove(name);
+        if (_displayController.text.trim().toLowerCase() ==
+            name.toLowerCase()) {
+          _displayController.text =
+              _selected.isEmpty ? '' : _selected.first;
+        }
+      }
+    });
+  }
+
+  Future<void> _confirm() async {
+    if (_selected.isEmpty) return;
+    final display = _displayController.text.trim().isEmpty
+        ? _selected.first
+        : _displayController.text.trim();
     setState(() => _saving = true);
     try {
-      await PlayerAliasService.instance.linkNames(_selected.toList());
+      final identity = await PlayerAliasService.instance.linkNames(
+        _selected.toList(),
+        displayName: display,
+        isMe: _markAsMe,
+      );
+
+      var renamed = 0;
+      if (_renameEverywhere) {
+        renamed = await GlobalPlayHistoryService().renamePlayerAcrossHistory(
+          fromNames: identity.names,
+          toName: identity.displayName,
+        );
+      }
+
       if (!mounted) return;
       setState(() {
         _selected.clear();
-        _anchor = null;
+        _displayController.clear();
+        _markAsMe = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Noms liés — même personne')),
-      );
+      final msg = _renameEverywhere && renamed > 0
+          ? 'Identité enregistrée · $renamed partie${renamed > 1 ? 's' : ''} mises à jour'
+          : 'Identité enregistrée — classements fusionnés';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -58,8 +103,8 @@ class _PlayerAliasLinkerSheetState extends State<_PlayerAliasLinkerSheet> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final groups = PlayerAliasService.instance.groups;
-    final height = MediaQuery.sizeOf(context).height * 0.78;
+    final identities = PlayerAliasService.instance.identities;
+    final height = MediaQuery.sizeOf(context).height * 0.85;
 
     return SafeArea(
       child: SizedBox(
@@ -70,51 +115,72 @@ class _PlayerAliasLinkerSheetState extends State<_PlayerAliasLinkerSheet> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                'Lier des noms',
+                'Identités joueurs',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.w800,
                     ),
               ),
               const SizedBox(height: 6),
               Text(
-                'Pour lier plusieurs noms de la même personne (ex. Kiki, Kig, Goran). '
-                'Les noms restent dans l\'historique, mais on sait que c\'est le même joueur.',
+                'Regroupe les pseudos d’une même personne pour les classements. '
+                'Tu peux aussi choisir un nom unique appliqué partout dans l’historique.\n'
+                'Attention : si deux personnes ont écrit exactement le même pseudo '
+                '(ex. « Lou »), on ne peut pas les distinguer.',
                 style: TextStyle(
                   fontSize: 13,
                   height: 1.35,
                   color: scheme.onSurfaceVariant,
                 ),
               ),
-              if (groups.isNotEmpty) ...[
+              if (identities.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 Text(
-                  'Groupes existants',
+                  'Identités enregistrées',
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
                     color: scheme.primary,
                   ),
                 ),
                 const SizedBox(height: 6),
-                for (final g in groups)
-                  ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(g.names.join(' · ')),
-                    trailing: IconButton(
-                      tooltip: 'Supprimer le lien',
-                      icon: const Icon(Icons.link_off, size: 20),
-                      onPressed: () async {
-                        await PlayerAliasService.instance.deleteGroup(g.id);
-                        if (mounted) setState(() {});
-                      },
+                for (final g in identities)
+                  Card(
+                    margin: const EdgeInsets.only(bottom: 6),
+                    child: ListTile(
+                      dense: true,
+                      title: Text(
+                        g.isMe ? '${g.displayName} · moi' : g.displayName,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      subtitle: Text(g.names.join(' · ')),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (!g.isMe)
+                            IconButton(
+                              tooltip: 'C’est moi',
+                              icon: const Icon(Icons.person_outline, size: 20),
+                              onPressed: () async {
+                                await PlayerAliasService.instance.setMe(g.id);
+                                if (mounted) setState(() {});
+                              },
+                            ),
+                          IconButton(
+                            tooltip: 'Supprimer',
+                            icon: const Icon(Icons.link_off, size: 20),
+                            onPressed: () async {
+                              await PlayerAliasService.instance
+                                  .deleteGroup(g.id);
+                              if (mounted) setState(() {});
+                            },
+                          ),
+                        ],
+                      ),
                     ),
                   ),
               ],
               const SizedBox(height: 8),
               Text(
-                _anchor == null
-                    ? 'Choisis un premier nom'
-                    : 'Lier « $_anchor » avec…',
+                'Sélectionne les pseudos à regrouper',
                 style: const TextStyle(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 6),
@@ -122,7 +188,7 @@ class _PlayerAliasLinkerSheetState extends State<_PlayerAliasLinkerSheet> {
                 child: widget.knownNames.isEmpty
                     ? Center(
                         child: Text(
-                          'Aucun joueur trouvé dans l\'historique.',
+                          'Aucun pseudo trouvé dans l’historique.',
                           style: TextStyle(color: scheme.onSurfaceVariant),
                         ),
                       )
@@ -130,57 +196,69 @@ class _PlayerAliasLinkerSheetState extends State<_PlayerAliasLinkerSheet> {
                         itemCount: widget.knownNames.length,
                         itemBuilder: (context, i) {
                           final name = widget.knownNames[i];
-                          final aliases =
-                              PlayerAliasService.instance.aliasesFor(name);
+                          final id =
+                              PlayerAliasService.instance.identityFor(name);
                           final selected = _selected.contains(name);
                           return CheckboxListTile(
                             dense: true,
                             value: selected,
                             title: Text(name),
-                            subtitle: aliases.length > 1
+                            subtitle: id != null
                                 ? Text(
-                                    'Déjà lié : ${aliases.join(' · ')}',
+                                    '→ ${id.displayName}${id.isMe ? ' (moi)' : ''}',
                                     style: TextStyle(
                                       fontSize: 11,
                                       color: scheme.onSurfaceVariant,
                                     ),
                                   )
                                 : null,
-                            onChanged: (v) {
-                              setState(() {
-                                if (v == true) {
-                                  _selected.add(name);
-                                  _anchor ??= name;
-                                } else {
-                                  _selected.remove(name);
-                                  if (_anchor == name) {
-                                    _anchor = _selected.isEmpty
-                                        ? null
-                                        : _selected.first;
-                                  }
-                                }
-                              });
-                            },
+                            onChanged: (v) => _toggle(name, v),
                           );
                         },
                       ),
               ),
+              if (_selected.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _displayController,
+                  decoration: const InputDecoration(
+                    labelText: 'Nom affiché pour cette personne',
+                    hintText: 'Ex. Kiki',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('C’est moi'),
+                  subtitle: const Text('Marque cette identité comme la tienne'),
+                  value: _markAsMe,
+                  onChanged: (v) => setState(() => _markAsMe = v),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Renommer partout dans l’historique'),
+                  subtitle: const Text(
+                    'Remplace les anciens pseudos par le nom affiché dans toutes les parties',
+                  ),
+                  value: _renameEverywhere,
+                  onChanged: (v) => setState(() => _renameEverywhere = v),
+                ),
+              ],
               const SizedBox(height: 8),
               FilledButton.icon(
-                onPressed: _saving || _selected.length < 2
-                    ? null
-                    : _confirmLink,
+                onPressed: _saving || _selected.isEmpty ? null : _confirm,
                 icon: _saving
                     ? const SizedBox(
                         width: 16,
                         height: 16,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(Icons.link),
+                    : const Icon(Icons.group_add_outlined),
                 label: Text(
-                  _selected.length < 2
-                      ? 'Sélectionne au moins 2 noms'
-                      : 'C\'est la même personne (${_selected.length})',
+                  _selected.isEmpty
+                      ? 'Choisis au moins un pseudo'
+                      : 'Enregistrer l’identité',
                 ),
               ),
             ],

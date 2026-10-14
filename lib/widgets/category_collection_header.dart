@@ -36,6 +36,28 @@ class CategoryCollectionHeader extends StatelessWidget {
         quickActions.isNotEmpty ||
         extraActions.isNotEmpty;
     final showLabels = !compactActions;
+    final narrow = MediaQuery.sizeOf(context).width < 720;
+
+    final leftActions = <_ToolbarAction>[
+      if (showCollectionsHome)
+        _ToolbarAction(
+          tooltip: 'Accueil',
+          label: 'Accueil',
+          icon: Icons.home_rounded,
+          color: onAccent,
+          showLabel: showLabels,
+          onTap: () => AppNavigation.openCollections(context),
+        ),
+      for (final action in quickActions)
+        _ToolbarAction(
+          tooltip: action.label,
+          label: action.label,
+          icon: action.icon,
+          color: onAccent,
+          showLabel: showLabels,
+          onTap: action.onTap,
+        ),
+    ];
 
     return Material(
       child: Container(
@@ -85,12 +107,12 @@ class CategoryCollectionHeader extends StatelessWidget {
                 dividerColor: Colors.transparent,
                 labelPadding: const EdgeInsets.symmetric(horizontal: 8),
                 labelStyle: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w900,
                 ),
                 unselectedLabelStyle: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
                 ),
                 tabs: const [
                   Tab(height: 36, text: 'Collection'),
@@ -99,39 +121,88 @@ class CategoryCollectionHeader extends StatelessWidget {
               ),
               if (hasToolbar)
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
-                  child: SizedBox(
-                    height: showLabels ? 44 : 36,
-                    child: Row(
-                      children: [
-                        if (showCollectionsHome)
-                          _ToolbarAction(
-                            tooltip: 'Accueil',
-                            label: 'Accueil',
-                            icon: Icons.home_rounded,
-                            color: onAccent,
-                            showLabel: showLabels,
-                            onTap: () => AppNavigation.openCollections(context),
-                          ),
-                        for (final action in quickActions)
-                          _ToolbarAction(
-                            tooltip: action.label,
-                            label: action.label,
-                            icon: action.icon,
-                            color: onAccent,
-                            showLabel: showLabels,
-                            onTap: action.onTap,
-                          ),
-                        const Spacer(),
-                        ...extraActions,
-                      ],
-                    ),
+                  padding: const EdgeInsets.fromLTRB(4, 0, 2, 4),
+                  child: _ToolbarLayout(
+                    leftActions: leftActions,
+                    extraActions: extraActions,
+                    twoRows: showLabels && narrow && leftActions.length >= 3,
+                    compact: !showLabels,
                   ),
                 ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class _ToolbarLayout extends StatelessWidget {
+  final List<_ToolbarAction> leftActions;
+  final List<Widget> extraActions;
+  final bool twoRows;
+  final bool compact;
+
+  const _ToolbarLayout({
+    required this.leftActions,
+    required this.extraActions,
+    required this.twoRows,
+    required this.compact,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final trailing = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: extraActions,
+    );
+
+    if (!twoRows) {
+      return SizedBox(
+        height: compact ? 36 : 44,
+        child: Row(
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(children: leftActions),
+              ),
+            ),
+            trailing,
+          ],
+        ),
+      );
+    }
+
+    // Mobile étiqueté : 2 lignes à gauche, toggles toujours visibles à droite.
+    final mid = (leftActions.length / 2).ceil();
+    final row1 = leftActions.take(mid).toList();
+    final row2 = leftActions.skip(mid).toList();
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                height: 40,
+                child: Row(children: row1),
+              ),
+              const SizedBox(height: 4),
+              SizedBox(
+                height: 40,
+                child: Row(children: row2),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: trailing,
+        ),
+      ],
     );
   }
 }
@@ -188,7 +259,7 @@ class _ToolbarAction extends StatelessWidget {
                   Icon(icon, size: 18, color: color),
                   const SizedBox(width: 5),
                   ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 88),
+                    constraints: const BoxConstraints(maxWidth: 110),
                     child: Text(
                       short,
                       maxLines: 1,
@@ -211,12 +282,13 @@ class _ToolbarAction extends StatelessWidget {
 
   static String _shortLabel(String label) {
     final t = label.trim();
-    if (t.length <= 14) return t;
-    // Libellés longs → version courte lisible.
-    if (t.toLowerCase().contains('tirage')) return 'Tirage';
-    if (t.toLowerCase().contains('parties')) return 'Parties';
-    if (t.toLowerCase().contains('ajout')) return 'Ajouts';
-    if (t.toLowerCase().contains('historique')) return 'Historique';
+    if (t.length <= 16) return t;
+    final lower = t.toLowerCase();
+    if (lower.contains('tirage')) return 'Tirage';
+    if (lower.contains('parties')) return 'Parties';
+    if (lower.contains('modif')) return 'Modifs';
+    if (lower.contains('ajout')) return 'Ajouts';
+    if (lower.contains('historique')) return 'Historique';
     return t;
   }
 }

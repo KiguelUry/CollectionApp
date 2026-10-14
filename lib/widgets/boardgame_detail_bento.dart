@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/boardgame_play_session.dart';
 import '../models/collection_item.dart';
+import '../services/player_alias_service.dart';
 import '../utils/boardgame_play_stats.dart';
 import 'boardgame_play_history_panel.dart';
 import 'detail_bento_tile.dart';
@@ -29,6 +30,14 @@ class _BoardgamePlayHubBentoState extends State<BoardgamePlayHubBento> {
   bool _hubOpen = false;
   _PlayHubTab _tab = _PlayHubTab.none;
 
+  @override
+  void initState() {
+    super.initState();
+    PlayerAliasService.instance.ensureLoaded().then((_) {
+      if (mounted) setState(() {});
+    });
+  }
+
   List<BoardgamePlaySession> get _sessions =>
       parseBoardgamePlays(widget.item.metadata);
 
@@ -47,7 +56,11 @@ class _BoardgamePlayHubBentoState extends State<BoardgamePlayHubBento> {
   Widget build(BuildContext context) {
     final accent = Colors.orange.shade800;
     final sessions = _sessions;
-    final stats = BoardgameRankingStats.fromSessions(sessions);
+    final aliases = PlayerAliasService.instance;
+    final stats = BoardgameRankingStats.fromSessions(
+      sessions,
+      resolveName: aliases.canonical,
+    );
     final subtitle = _hubSubtitle(sessions, stats);
 
     return Column(
@@ -126,7 +139,7 @@ class _BoardgamePlayHubBentoState extends State<BoardgamePlayHubBento> {
     List<BoardgamePlaySession> sessions,
     BoardgameRankingStats stats,
   ) {
-    if (sessions.isEmpty) return 'Historique · stats · classement';
+    if (sessions.isEmpty) return 'Aucune partie';
     final parts = <String>[
       '${sessions.length} partie${sessions.length > 1 ? 's' : ''}',
     ];
@@ -144,17 +157,14 @@ class _BoardgamePlayHubBentoState extends State<BoardgamePlayHubBento> {
       } else if (top.isNotEmpty) {
         final w = top.first;
         parts.add(
-          '${w.name} (${w.wins} victoire${w.wins > 1 ? 's' : ''})',
+          '${w.name} · ${w.wins} victoire${w.wins > 1 ? 's' : ''}',
         );
       }
     } else if (stats.allScores.isNotEmpty) {
       final best = stats.allScores.first;
       parts.add('best ${best.score}');
     }
-    final last = sessions.first;
-    final d = last.date;
-    parts.add('${d.day}/${d.month}');
-    return parts.take(4).join(' · ');
+    return parts.take(3).join(' · ');
   }
 }
 

@@ -36,6 +36,9 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
   void initState() {
     super.initState();
     _searchController.addListener(() => setState(() {}));
+    PlayerAliasService.instance.ensureLoaded().then((_) {
+      if (mounted) setState(() {});
+    });
     _load();
   }
 
@@ -242,10 +245,10 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
       appBar: AppBar(
         title: const Text('Historique des parties'),
         actions: [
-          IconButton(
-            tooltip: 'Lier des noms de joueurs',
-            icon: const Icon(Icons.people_alt_outlined),
+          TextButton.icon(
             onPressed: _openAliasLinker,
+            icon: const Icon(Icons.people_alt_outlined, size: 20),
+            label: const Text('Identités'),
           ),
         ],
       ),
@@ -253,7 +256,7 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
           ? FloatingActionButton.extended(
               onPressed: _addSession,
               icon: const Icon(Icons.add),
-              label: const Text('Partie'),
+              label: const Text('+ Partie'),
             )
           : null,
       body: _loading
@@ -814,10 +817,20 @@ class _EntryTile extends StatelessWidget {
                 ),
               ),
               if (onRelaunch != null)
-                IconButton(
-                  icon: const Icon(Icons.add_circle_outline),
-                  tooltip: '+ Partie',
-                  onPressed: onRelaunch,
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: FilledButton.tonal(
+                    style: FilledButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      shape: const StadiumBorder(),
+                    ),
+                    onPressed: onRelaunch,
+                    child: const Text('+ Partie'),
+                  ),
                 ),
               if (onDelete != null)
                 IconButton(

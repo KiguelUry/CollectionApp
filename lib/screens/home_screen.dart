@@ -1354,8 +1354,14 @@ class _HomeScreenState extends State<HomeScreen>
 
   double _headerPreferredHeight(BuildContext context, {required bool compact}) {
     final top = MediaQuery.paddingOf(context).top;
-    // SafeArea in header + title + tabs + toolbar (labels vs icônes)
-    return top + 40 + 36 + (compact ? 36 : 44);
+    final narrow = MediaQuery.sizeOf(context).width < 720;
+    // SafeArea + title + tabs + toolbar (1 ou 2 lignes sur mobile)
+    final toolbar = compact
+        ? 36.0
+        : (narrow && widget.category == CollectionCategory.boardgame
+            ? 84.0
+            : 44.0);
+    return top + 40 + 36 + toolbar;
   }
 
   @override
@@ -1452,7 +1458,7 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
         CategoryQuickAction(
-          label: 'Ajouts & suppressions',
+          label: 'Modifications récentes',
           icon: Icons.restore_rounded,
           onTap: () => Navigator.push(
             context,

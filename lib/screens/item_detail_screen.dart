@@ -45,6 +45,7 @@ import '../utils/boardgame_expansion_flow.dart';
 import '../utils/boardgame_expansions.dart';
 import '../services/bgg_service.dart';
 import '../services/global_play_history_service.dart';
+import '../services/player_alias_service.dart';
 import '../services/collection_change_history_service.dart';
 import '../utils/copy_friend_item.dart';
 import '../utils/friend_item_overlap.dart';
@@ -105,6 +106,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
 
   int _ownedDisplayQty = 0;
   String? _expandedBento;
+  int? _expansionCatalogTotal;
 
   @override
   void initState() {
@@ -144,6 +146,8 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     }
     _syncGroupSelectionFromItem();
     _loadBggDescription();
+    _loadExpansionCatalogTotal();
+    PlayerAliasService.instance.ensureLoaded();
     if (!widget.readOnly) {
       _reviewController.addListener(_scheduleSave);
       _priceController.addListener(_scheduleSave);
@@ -180,6 +184,26 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       if (mounted) {
         setState(() => _ownedDisplayQty = ownedQuantityFor(_item, idx));
       }
+    } catch (_) {}
+  }
+
+  Future<void> _loadExpansionCatalogTotal() async {
+    if (_item.category != CollectionCategory.boardgame) return;
+    if (!BoardgameExpansionService.itemActsAsBase(_item)) return;
+    final cached = _item.metadata?['bgg_expansion_total'];
+    if (cached is num) {
+      _expansionCatalogTotal = cached.round();
+      return;
+    }
+    final bggId = _item.metadata?['bgg_id']?.toString();
+    if (bggId == null || bggId.isEmpty) return;
+    try {
+      final list = await BggService.fetchExpansions(bggId);
+      if (!mounted) return;
+      setState(() => _expansionCatalogTotal = list.length);
+      final meta = Map<String, dynamic>.from(_item.metadata ?? {});
+      meta['bgg_expansion_total'] = list.length;
+      _item = _item.copyWith(metadata: meta);
     } catch (_) {}
   }
 
@@ -1118,7 +1142,11 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         title: 'Extensions',
                         subtitle: () {
                           final owned = ownedExpansionCount(_item);
-                          if (owned <= 0) return 'Base & extensions';
+                          final total = _expansionCatalogTotal;
+                          if (total != null && total > 0) {
+                            return '$owned / $total possédées';
+                          }
+                          if (owned <= 0) return '0 possédée';
                           return '$owned possédée${owned > 1 ? 's' : ''}';
                         }(),
                         accent: _item.category.color,
@@ -1971,7 +1999,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
         '${_selectedGroupIds.length > 1 ? 's' : ''}',
       );
     }
-    if (parts.isEmpty) return 'Groupes & localisation';
+    if (parts.isEmpty) return 'Chez moi · aucun groupe';
     return parts.join(' · ');
   }
 
@@ -1980,13 +2008,16 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     final perso = _item.rating;
     if (perso != null && perso > 0) {
       parts.add('Perso ${perso.toStringAsFixed(1)}');
+    } else {
+      parts.add('Perso —');
     }
     final bgg = _bggAvgRating ??
         parseBggAvgRating(_item.metadata?['bgg_avg_rating']);
     if (bgg != null && bgg > 0) {
       parts.add('Commu ${bgg.toStringAsFixed(1)}');
+    } else {
+      parts.add('Commu —');
     }
-    if (parts.isEmpty) return 'Noter cet objet';
     return parts.join(' · ');
   }
 
@@ -2022,7 +2053,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     final cond = _condition?.label;
     if (cond != null && cond.isNotEmpty) parts.add(cond);
     if (isTech && _warrantyEnd != null) parts.add('Garantie');
-    if (parts.isEmpty) return isTech ? 'Prix & garantie' : 'Prix & état';
+    if (parts.isEmpty) return 'Non renseigné';
     return parts.join(' · ');
   }
 

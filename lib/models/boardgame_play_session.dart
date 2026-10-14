@@ -260,6 +260,44 @@ class BoardgamePlaySession {
     );
   }
 
+  /// Remplace les noms de joueurs selon [map] (clés en minuscules).
+  BoardgamePlaySession remapPlayerNames(Map<String, String> map) {
+    if (map.isEmpty) return this;
+    String mapName(String raw) {
+      final t = raw.trim();
+      if (t.isEmpty) return raw;
+      return map[t.toLowerCase()] ?? raw;
+    }
+
+    final nextPlayers = players.map(mapName).toList();
+    String? nextWinner = winner;
+    if (nextWinner != null && nextWinner.trim().isNotEmpty) {
+      // Winner peut être "A & B"
+      if (nextWinner.contains('&')) {
+        nextWinner = nextWinner
+            .split('&')
+            .map((p) => mapName(p.trim()))
+            .join(' & ');
+      } else {
+        nextWinner = mapName(nextWinner);
+      }
+    }
+    Map<String, int>? nextScores;
+    if (scores != null) {
+      nextScores = {};
+      for (final e in scores!.entries) {
+        nextScores[mapName(e.key)] = e.value;
+      }
+    }
+    final nextGrid = scoreGrid?.remapPlayerNames(map);
+    return copyWith(
+      players: nextPlayers,
+      winner: nextWinner,
+      scores: nextScores,
+      scoreGrid: nextGrid,
+    );
+  }
+
   static String _formatNameList(List<String> names) {
     if (names.length <= 1) return names.join();
     if (names.length == 2) return '${names[0]} et ${names[1]}';

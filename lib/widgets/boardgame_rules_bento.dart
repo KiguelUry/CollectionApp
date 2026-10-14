@@ -82,15 +82,23 @@ class _BoardgameRulesBentoState extends State<BoardgameRulesBento> {
   }
 
   String get _subtitle {
-    final hasPerso = !RuleBodyCodec.isEmpty(_sections);
-    if (hasPerso && _pinned.isNotEmpty) {
-      return 'Perso + ${_pinned.length} commu';
+    final filled = _sections
+        .where((s) => s.plainText.trim().isNotEmpty || s.imageUrl != null)
+        .length;
+    final total = filled + _pinned.length;
+    if (total <= 0) return 'Aucune règle';
+    final parts = <String>[];
+    if (filled > 0) {
+      parts.add(
+        '$filled perso',
+      );
     }
-    if (hasPerso) return 'Règles simplifiées perso';
-    if (_community.isNotEmpty) {
-      return '${_community.length} règle${_community.length > 1 ? 's' : ''} commu';
+    if (_pinned.isNotEmpty) {
+      parts.add(
+        '${_pinned.length} affichée${_pinned.length > 1 ? 's' : ''}',
+      );
     }
-    return 'Résumé pour rejouer sans tout relire';
+    return parts.join(' · ');
   }
 
   void _onSectionsChanged(List<RuleSection> next) {
@@ -161,7 +169,7 @@ class _BoardgameRulesBentoState extends State<BoardgameRulesBento> {
     await CommunityRulesService.instance.pinToItem(widget.item.id, id);
     await _loadCommunity();
     if (!mounted) return;
-    ScaffoldMessenger.of(this.context).showSnackBar(
+    ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Ajoutée à « Afficher les règles »'),
       ),
@@ -193,12 +201,6 @@ class _BoardgameRulesBentoState extends State<BoardgameRulesBento> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Résumé maison pour rejouer sans tout relire — et plus tard '
-            'les meilleurs résumés de la communauté.',
-            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-          ),
-          const SizedBox(height: 12),
           DetailBentoSubTile(
             icon: Icons.edit_note_outlined,
             title: 'Créer mes règles',

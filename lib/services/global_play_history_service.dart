@@ -256,6 +256,63 @@ class GlobalPlayHistoryService {
         .eq('id', item.id);
   }
 
+  /// Renomme [fromNames] → [toName] dans toutes les parties (collection + orphelins).
+  /// Retourne le nombre de sessions touchées.
+  Future<int> renamePlayerAcrossHistory({
+    required Iterable<String> fromNames,
+    required String toName,
+  }) async {
+    final target = toName.trim();
+    if (target.isEmpty) return 0;
+    final map = <String, String>{
+      for (final n in fromNames)
+        if (n.trim().isNotEmpty) n.trim().toLowerCase(): target,
+    };
+    if (map.isEmpty) return 0;
+
+    var touched = 0;
+    final items = await fetchBoardgameItems();
+    for (final item in items) {
+      final sessions = parseBoardgamePlays(item.metadata);
+      if (sessions.isEmpty) continue;
+      var dirty = false;
+      final next = <BoardgamePlaySession>[];
+      for (final s in sessions) {
+        final remapped = s.remapPlayerNames(map);
+        if (remapped.toJson().toString() != s.toJson().toString()) {
+          dirty = true;
+          touched++;
+        }
+        next.add(remapped);
+      }
+      if (dirty) await saveSessionToItem(item, next);
+    }
+
+    final orphans = await loadOrphans();
+    var orphanDirty = false;
+    final nextOrphans = <OrphanBoardgamePlay>[];
+    for (final o in orphans) {
+      final remapped = o.session.remapPlayerNames(map);
+      if (remapped.toJson().toString() != o.session.toJson().toString()) {
+        orphanDirty = true;
+        touched++;
+        nextOrphans.add(
+          OrphanBoardgamePlay(
+            id: o.id,
+            title: o.title,
+            bggId: o.bggId,
+            imageUrl: o.imageUrl,
+            session: remapped,
+          ),
+        );
+      } else {
+        nextOrphans.add(o);
+      }
+    }
+    if (orphanDirty) await saveOrphans(nextOrphans);
+    return touched;
+  }
+
   /// Archive les parties d'un jeu avant suppression de l'objet collection.
   Future<void> archivePlaysFromDeletedItem(CollectionItem item) async {
     if (item.category != CollectionCategory.boardgame) return;
