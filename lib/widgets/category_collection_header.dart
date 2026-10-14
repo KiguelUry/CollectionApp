@@ -49,19 +49,6 @@ class CategoryCollectionHeader extends StatelessWidget {
           onTap: action.onTap,
         ),
     ];
-    final trailingActions = <Widget>[
-      if (showCollectionsHome)
-        _ToolbarAction(
-          tooltip: 'Accueil',
-          label: 'Accueil',
-          icon: Icons.home_rounded,
-          color: onAccent,
-          showLabel: showLabels,
-          onTap: () => AppNavigation.openCollections(context),
-        ),
-      ...extraActions,
-    ];
-
     return Material(
       child: Container(
         decoration: CategoryAccentTheme.headerDecoration(accent),
@@ -72,7 +59,7 @@ class CategoryCollectionHeader extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(4, 0, 8, 0),
+                padding: const EdgeInsets.fromLTRB(4, 0, 4, 0),
                 child: SizedBox(
                   height: 40,
                   child: Row(
@@ -98,6 +85,15 @@ class CategoryCollectionHeader extends StatelessWidget {
                           ),
                         ),
                       ),
+                      // Accueil en haut à droite, au-dessus des toggles colonnes.
+                      if (showCollectionsHome)
+                        IconButton(
+                          tooltip: 'Accueil',
+                          visualDensity: VisualDensity.compact,
+                          icon: Icon(Icons.home_rounded, color: onAccent),
+                          onPressed: () =>
+                              AppNavigation.openCollections(context),
+                        ),
                     ],
                   ),
                 ),
@@ -127,7 +123,7 @@ class CategoryCollectionHeader extends StatelessWidget {
                   padding: const EdgeInsets.fromLTRB(4, 0, 2, 4),
                   child: _ToolbarLayout(
                     leftActions: leftActions,
-                    extraActions: trailingActions,
+                    extraActions: extraActions,
                     twoRows: showLabels && narrow && leftActions.length >= 2,
                     compact: !showLabels,
                   ),

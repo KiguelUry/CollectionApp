@@ -29,7 +29,6 @@ class _PlayerAliasLinkerSheetState extends State<_PlayerAliasLinkerSheet> {
   final _selected = <String>{};
   final _displayController = TextEditingController();
   bool _markAsMe = false;
-  bool _renameEverywhere = true;
   bool _saving = false;
 
   @override
@@ -77,13 +76,11 @@ class _PlayerAliasLinkerSheetState extends State<_PlayerAliasLinkerSheet> {
         isMe: _markAsMe,
       );
 
-      var renamed = 0;
-      if (_renameEverywhere) {
-        renamed = await GlobalPlayHistoryService().renamePlayerAcrossHistory(
-          fromNames: identity.names,
-          toName: identity.displayName,
-        );
-      }
+      final renamed =
+          await GlobalPlayHistoryService().renamePlayerAcrossHistory(
+        fromNames: identity.names,
+        toName: identity.displayName,
+      );
 
       if (!mounted) return;
       setState(() {
@@ -91,9 +88,9 @@ class _PlayerAliasLinkerSheetState extends State<_PlayerAliasLinkerSheet> {
         _displayController.clear();
         _markAsMe = false;
       });
-      final msg = _renameEverywhere && renamed > 0
+      final msg = renamed > 0
           ? 'Identité enregistrée · $renamed partie${renamed > 1 ? 's' : ''} mises à jour'
-          : 'Identité enregistrée — classements fusionnés';
+          : 'Identité enregistrée';
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -222,8 +219,10 @@ class _PlayerAliasLinkerSheetState extends State<_PlayerAliasLinkerSheet> {
                 TextField(
                   controller: _displayController,
                   decoration: const InputDecoration(
-                    labelText: 'Nom affiché pour cette personne',
+                    labelText: 'Nom affiché (appliqué partout)',
                     hintText: 'Ex. Kiki',
+                    helperText:
+                        'Ce nom remplace les pseudos liés dans toutes les parties.',
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
@@ -234,15 +233,6 @@ class _PlayerAliasLinkerSheetState extends State<_PlayerAliasLinkerSheet> {
                   subtitle: const Text('Marque cette identité comme la tienne'),
                   value: _markAsMe,
                   onChanged: (v) => setState(() => _markAsMe = v),
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Renommer partout dans l’historique'),
-                  subtitle: const Text(
-                    'Remplace les anciens pseudos par le nom affiché dans toutes les parties',
-                  ),
-                  value: _renameEverywhere,
-                  onChanged: (v) => setState(() => _renameEverywhere = v),
                 ),
               ],
               const SizedBox(height: 8),

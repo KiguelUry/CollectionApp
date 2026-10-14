@@ -241,16 +241,16 @@ class _FingerTeamPickScreenState extends State<FingerTeamPickScreen>
                           '${_perTeam > 0 ? ' de ~$_perTeam' : ''}',
                   style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  _useNamesMode
-                      ? 'Idéal sur PC : tirage aléatoire sans multi-touch.'
-                      : 'Quand tout le monde a le doigt posé, comptage puis tirage.',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: scheme.onSurfaceVariant,
+                if (!_useNamesMode) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'Quand tout le monde a le doigt posé, comptage puis tirage.',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: scheme.onSurfaceVariant,
+                    ),
                   ),
-                ),
+                ],
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 16,

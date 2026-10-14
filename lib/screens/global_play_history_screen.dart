@@ -219,9 +219,11 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
     if (!mounted) return;
     await showPlayerAliasLinkerSheet(
       context,
-      knownNames: names.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())),
+      knownNames: names.toList()
+        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())),
     );
-    if (mounted) setState(() {});
+    // Recharge les parties (renommages) + refresh classements (aliases).
+    if (mounted) await _load();
   }
 
   Future<_GamePick?> _pickGame() async {
@@ -256,7 +258,7 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
           ? FloatingActionButton.extended(
               onPressed: _addSession,
               icon: const Icon(Icons.add),
-              label: const Text('+ Partie'),
+              label: const Text('Partie'),
             )
           : null,
       body: _loading
@@ -819,17 +821,18 @@ class _EntryTile extends StatelessWidget {
               if (onRelaunch != null)
                 Padding(
                   padding: const EdgeInsets.only(right: 4),
-                  child: FilledButton.tonal(
+                  child: FilledButton.tonalIcon(
                     style: FilledButton.styleFrom(
                       visualDensity: VisualDensity.compact,
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
+                        horizontal: 10,
                         vertical: 8,
                       ),
                       shape: const StadiumBorder(),
                     ),
                     onPressed: onRelaunch,
-                    child: const Text('+ Partie'),
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Partie'),
                   ),
                 ),
               if (onDelete != null)
