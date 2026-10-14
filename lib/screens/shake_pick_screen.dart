@@ -167,6 +167,7 @@ class _ShakePickScreenState extends State<ShakePickScreen>
     return Scaffold(
       appBar: AppAppBar(
         title: 'À quoi on joue ce soir ?',
+        showCollectionsHome: false,
         actions: [
           TextButton.icon(
             onPressed: () => Navigator.push(

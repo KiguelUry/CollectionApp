@@ -299,11 +299,11 @@ class BoardgameMarketService {
   }
 
   static String vintedSearchUrl(String title) {
-    // Vinted does not document a stable board-game catalog ID; keep only its
-    // public query parameters and never infer listings by scraping.
+    // catalog[]=4881 = catégorie « Jeux de société » (Vinted FR).
     return Uri.https('www.vinted.fr', '/catalog', {
       'search_text': title.trim(),
       'order': 'relevance',
+      'catalog[]': '4881',
     }).toString();
   }
 

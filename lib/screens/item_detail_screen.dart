@@ -2062,12 +2062,13 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     required bool isMedia,
   }) async {
     final title = _item.title.trim();
-    final query = isBoardgame
-        ? 'jeu $title'
-        : (isMedia ? title : title);
-    final uri = Uri.https('www.vinted.fr', '/catalog', {
-      'search_text': query,
-    });
+    // catalog[]=4881 = « Jeux de société » sur Vinted FR.
+    final params = <String, String>{
+      'search_text': isBoardgame ? title : title,
+      'order': 'relevance',
+      if (isBoardgame) 'catalog[]': '4881',
+    };
+    final uri = Uri.https('www.vinted.fr', '/catalog', params);
     await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 

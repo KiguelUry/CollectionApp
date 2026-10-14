@@ -39,15 +39,6 @@ class CategoryCollectionHeader extends StatelessWidget {
     final narrow = MediaQuery.sizeOf(context).width < 720;
 
     final leftActions = <_ToolbarAction>[
-      if (showCollectionsHome)
-        _ToolbarAction(
-          tooltip: 'Accueil',
-          label: 'Accueil',
-          icon: Icons.home_rounded,
-          color: onAccent,
-          showLabel: showLabels,
-          onTap: () => AppNavigation.openCollections(context),
-        ),
       for (final action in quickActions)
         _ToolbarAction(
           tooltip: action.label,
@@ -57,6 +48,18 @@ class CategoryCollectionHeader extends StatelessWidget {
           showLabel: showLabels,
           onTap: action.onTap,
         ),
+    ];
+    final trailingActions = <Widget>[
+      if (showCollectionsHome)
+        _ToolbarAction(
+          tooltip: 'Accueil',
+          label: 'Accueil',
+          icon: Icons.home_rounded,
+          color: onAccent,
+          showLabel: showLabels,
+          onTap: () => AppNavigation.openCollections(context),
+        ),
+      ...extraActions,
     ];
 
     return Material(
@@ -124,8 +127,8 @@ class CategoryCollectionHeader extends StatelessWidget {
                   padding: const EdgeInsets.fromLTRB(4, 0, 2, 4),
                   child: _ToolbarLayout(
                     leftActions: leftActions,
-                    extraActions: extraActions,
-                    twoRows: showLabels && narrow && leftActions.length >= 3,
+                    extraActions: trailingActions,
+                    twoRows: showLabels && narrow && leftActions.length >= 2,
                     compact: !showLabels,
                   ),
                 ),
@@ -174,10 +177,14 @@ class _ToolbarLayout extends StatelessWidget {
       );
     }
 
-    // Mobile étiqueté : 2 lignes à gauche, toggles toujours visibles à droite.
-    final mid = (leftActions.length / 2).ceil();
-    final row1 = leftActions.take(mid).toList();
-    final row2 = leftActions.skip(mid).toList();
+    // Mobile : ligne 1 = 1er quick action (Tirage), ligne 2 = le reste.
+    // Droite : Accueil + toggles colonnes.
+    final row1 = leftActions.isEmpty
+        ? const <_ToolbarAction>[]
+        : leftActions.take(1).toList();
+    final row2 = leftActions.length <= 1
+        ? const <_ToolbarAction>[]
+        : leftActions.skip(1).toList();
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -190,11 +197,13 @@ class _ToolbarLayout extends StatelessWidget {
                 height: 40,
                 child: Row(children: row1),
               ),
-              const SizedBox(height: 4),
-              SizedBox(
-                height: 40,
-                child: Row(children: row2),
-              ),
+              if (row2.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                SizedBox(
+                  height: 40,
+                  child: Row(children: row2),
+                ),
+              ],
             ],
           ),
         ),

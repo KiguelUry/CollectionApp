@@ -438,6 +438,9 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
               alignment: Alignment.centerLeft,
               child: TextButton.icon(
                 onPressed: () => setState(() => _selectionMode = true),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.white,
+                ),
                 icon: const Icon(Icons.checklist_rounded, size: 18),
                 label: const Text('Sélection multiple'),
               ),
