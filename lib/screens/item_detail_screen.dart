@@ -39,6 +39,7 @@ import '../widgets/videogame_platform_picker.dart';
 import '../widgets/restaurant_visits_panel.dart';
 import '../widgets/temporary_loan_toggle.dart';
 import '../widgets/cost_per_play_badge.dart';
+import '../widgets/recommend_to_friend_button.dart';
 import '../utils/wishlist_market_metadata.dart';
 import '../services/boardgame_expansion_service.dart';
 import '../utils/tech_warranty.dart';
@@ -778,6 +779,8 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                 if (ok == true) _reloadItem();
               },
             ),
+          if (Supabase.instance.client.auth.currentUser != null)
+            RecommendToFriendButton(item: _item),
           if (!ro)
             FavoriteHeartIconButton(
               item: _item,

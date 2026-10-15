@@ -19,6 +19,8 @@ class BoardgamePlaySession {
   final BoardgamePlayStatus status;
   /// Heure d'ajout (tri stable quand plusieurs parties ont la même date).
   final DateTime? createdAt;
+  /// Identifiant stable d'une partie partagée entre amis (anti-doublon).
+  final String? shareId;
 
   const BoardgamePlaySession({
     required this.date,
@@ -36,6 +38,7 @@ class BoardgamePlaySession {
     this.targetScore,
     this.status = BoardgamePlayStatus.finished,
     this.createdAt,
+    this.shareId,
   });
 
   factory BoardgamePlaySession.fromJson(Map<String, dynamic> json) {
@@ -110,6 +113,9 @@ class BoardgamePlaySession {
       targetScore: targetScore,
       status: BoardgamePlayStatus.fromJson(json['status']?.toString()),
       createdAt: createdAt,
+      shareId: (json['share_id']?.toString().trim().isEmpty ?? true)
+          ? null
+          : json['share_id'].toString().trim(),
     );
   }
 
@@ -132,6 +138,7 @@ class BoardgamePlaySession {
         if (coopTeamCount != null) 'coop_team_count': coopTeamCount,
         if (targetScore != null) 'target_score': targetScore,
         if (notes != null && notes!.trim().isNotEmpty) 'notes': notes!.trim(),
+        if (shareId != null) 'share_id': shareId,
       };
 
   bool get isCooperative =>
@@ -240,6 +247,7 @@ class BoardgamePlaySession {
     bool clearTarget = false,
     BoardgamePlayStatus? status,
     DateTime? createdAt,
+    String? shareId,
   }) {
     return BoardgamePlaySession(
       date: date ?? this.date,
@@ -257,6 +265,7 @@ class BoardgamePlaySession {
       targetScore: clearTarget ? null : (targetScore ?? this.targetScore),
       status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
+      shareId: shareId ?? this.shareId,
     );
   }
 

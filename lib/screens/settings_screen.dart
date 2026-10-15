@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/settings_service.dart';
 import '../widgets/app_app_bar.dart';
+import '../widgets/bgg_collection_import_card.dart';
 import 'category_manage_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -49,6 +50,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
           ),
+          const BggCollectionImportCard(),
           const _SectionHeader('Apparence'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),

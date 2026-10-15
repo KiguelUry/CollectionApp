@@ -11,13 +11,21 @@ class PlayerIdentity {
   final String displayName;
   /// Cette identité = toi.
   final bool isMe;
+  /// Compte ami de l'app associé à ce joueur (partage des parties).
+  final String? friendProfileId;
+  final String? friendUsername;
 
   const PlayerIdentity({
     required this.id,
     required this.names,
     required this.displayName,
     this.isMe = false,
+    this.friendProfileId,
+    this.friendUsername,
   });
+
+  bool get isLinkedToFriend =>
+      friendProfileId != null && friendProfileId!.isNotEmpty;
 
   String get primary => displayName.trim().isNotEmpty
       ? displayName.trim()
@@ -28,6 +36,9 @@ class PlayerIdentity {
         'names': names,
         'displayName': displayName,
         'isMe': isMe,
+        if (isLinkedToFriend) 'friendProfileId': friendProfileId,
+        if (isLinkedToFriend && friendUsername != null)
+          'friendUsername': friendUsername,
       };
 
   factory PlayerIdentity.fromJson(Map<String, dynamic> json) {
@@ -44,21 +55,117 @@ class PlayerIdentity {
           ? display
           : (names.isNotEmpty ? names.first : ''),
       isMe: json['isMe'] == true,
+      friendProfileId: _nonEmpty(json['friendProfileId']),
+      friendUsername: _nonEmpty(json['friendUsername']),
     );
+  }
+
+  static String? _nonEmpty(Object? raw) {
+    final t = raw?.toString().trim();
+    return t == null || t.isEmpty ? null : t;
   }
 
   PlayerIdentity copyWith({
     List<String>? names,
     String? displayName,
     bool? isMe,
+    String? friendProfileId,
+    String? friendUsername,
+    bool clearFriend = false,
   }) {
     return PlayerIdentity(
       id: id,
       names: names ?? this.names,
       displayName: displayName ?? this.displayName,
       isMe: isMe ?? this.isMe,
+      friendProfileId:
+          clearFriend ? null : (friendProfileId ?? this.friendProfileId),
+      friendUsername:
+          clearFriend ? null : (friendUsername ?? this.friendUsername),
     );
   }
+}
+
+/// Joueur d'une partie lié à un compte ami.
+class LinkedFriendPlayer {
+  final String playerName;
+  final String profileId;
+  final String username;
+
+  const LinkedFriendPlayer({
+    required this.playerName,
+    required this.profileId,
+    required this.username,
+  });
+}
+
+/// Joueurs de [players] liés à un ami (hors « moi »), un seul par compte.
+List<LinkedFriendPlayer> linkedFriendsAmong(
+  Iterable<String> players,
+  Iterable<PlayerIdentity> identities,
+) {
+  final out = <LinkedFriendPlayer>[];
+  final seenProfiles = <String>{};
+  for (final raw in players) {
+    final lower = raw.trim().toLowerCase();
+    if (lower.isEmpty) continue;
+    for (final id in identities) {
+      if (id.isMe || !id.isLinkedToFriend) continue;
+      final hit = id.names.any((n) => n.toLowerCase() == lower) ||
+          id.displayName.toLowerCase() == lower;
+      if (!hit) continue;
+      if (seenProfiles.add(id.friendProfileId!)) {
+        out.add(
+          LinkedFriendPlayer(
+            playerName: raw.trim(),
+            profileId: id.friendProfileId!,
+            username: id.friendUsername ?? id.primary,
+          ),
+        );
+      }
+      break;
+    }
+  }
+  return out;
+}
+
+/// Lie [name] au compte ami (crée l'identité si besoin). Un compte ami
+/// n'est rattaché qu'à une seule identité à la fois.
+List<PlayerIdentity> applyFriendLink(
+  List<PlayerIdentity> identities, {
+  required String name,
+  required String profileId,
+  required String username,
+  required String newId,
+}) {
+  final lower = name.trim().toLowerCase();
+  if (lower.isEmpty) return identities;
+  var found = false;
+  final next = <PlayerIdentity>[];
+  for (final id in identities) {
+    final hit = id.names.any((n) => n.toLowerCase() == lower) ||
+        id.displayName.toLowerCase() == lower;
+    if (hit) {
+      found = true;
+      next.add(id.copyWith(friendProfileId: profileId, friendUsername: username));
+    } else if (id.friendProfileId == profileId) {
+      next.add(id.copyWith(clearFriend: true));
+    } else {
+      next.add(id);
+    }
+  }
+  if (!found) {
+    next.add(
+      PlayerIdentity(
+        id: newId,
+        names: [name.trim()],
+        displayName: name.trim(),
+        friendProfileId: profileId,
+        friendUsername: username,
+      ),
+    );
+  }
+  return next;
 }
 
 /// Clé de comparaison : casse et espaces ignorés (« Lou », « lou », « L ou »).
@@ -223,6 +330,8 @@ class PlayerAliasService {
     final merged = <String>[];
     final mergedSeen = <String>{};
     var wasMe = isMe;
+    String? friendProfileId;
+    String? friendUsername;
 
     void addName(String n) {
       if (mergedSeen.add(n.toLowerCase())) merged.add(n);
@@ -233,6 +342,10 @@ class PlayerAliasService {
           touchKeys.contains(g.displayName.toLowerCase());
       if (hits) {
         wasMe = wasMe || g.isMe;
+        if (friendProfileId == null && g.isLinkedToFriend) {
+          friendProfileId = g.friendProfileId;
+          friendUsername = g.friendUsername;
+        }
         for (final n in g.names) {
           addName(n);
         }
@@ -262,11 +375,41 @@ class PlayerAliasService {
       names: merged,
       displayName: chosen,
       isMe: wasMe || isMe,
+      friendProfileId: (wasMe || isMe) ? null : friendProfileId,
+      friendUsername: (wasMe || isMe) ? null : friendUsername,
     );
     _identities = [...nextKeep, group];
     await _persist();
     return group;
   }
+
+  /// Associe un pseudo à un compte ami (« Cette personne est dans ma liste d'amis »).
+  Future<void> linkFriend(
+    String name, {
+    required String profileId,
+    required String username,
+  }) async {
+    await ensureLoaded();
+    _identities = applyFriendLink(
+      _identities,
+      name: name,
+      profileId: profileId,
+      username: username,
+      newId: DateTime.now().millisecondsSinceEpoch.toString(),
+    );
+    await _persist();
+  }
+
+  Future<void> unlinkFriend(String identityId) async {
+    await ensureLoaded();
+    _identities = _identities
+        .map((g) => g.id == identityId ? g.copyWith(clearFriend: true) : g)
+        .toList();
+    await _persist();
+  }
+
+  List<LinkedFriendPlayer> linkedFriendsIn(Iterable<String> players) =>
+      linkedFriendsAmong(players, _identities);
 
   Future<void> setMe(String identityId) async {
     await ensureLoaded();

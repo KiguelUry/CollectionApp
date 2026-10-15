@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/boardgame_score_grid.dart';
+import '../models/friend_choice.dart';
+import 'friend_link_selector.dart';
 
 /// Palette de 20 couleurs contrastées pour colonnes joueur / équipe.
 const List<Color> kBoardgameColumnPalette = [
@@ -32,6 +34,29 @@ const List<Color> kBoardgameColumnPalette = [
 const kFirstPlayerBadge = '🎲 1er';
 
 /// Pastille « 🎲 1er » du joueur qui commence.
+/// Libère des contrôleurs quand la feuille est vraiment démontée
+/// (après l'animation de fermeture, pas au retour de `showModalBottomSheet`).
+class _DisposeOnUnmount extends StatefulWidget {
+  final VoidCallback onDispose;
+  final Widget child;
+
+  const _DisposeOnUnmount({required this.onDispose, required this.child});
+
+  @override
+  State<_DisposeOnUnmount> createState() => _DisposeOnUnmountState();
+}
+
+class _DisposeOnUnmountState extends State<_DisposeOnUnmount> {
+  @override
+  void dispose() {
+    widget.onDispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
 class FirstPlayerBadge extends StatelessWidget {
   const FirstPlayerBadge({super.key});
 
@@ -65,6 +90,12 @@ class BoardgameScoreGridEditor extends StatefulWidget {
   final List<String> suggestedPlayerNames;
   final VoidCallback? onQuickSave;
 
+  /// Amis de l'app proposés dans « Ajouter un joueur ».
+  final List<FriendChoice> friendChoices;
+
+  /// Appelé quand un joueur ajouté est lié à un compte ami.
+  final void Function(String playerName, FriendChoice friend)? onFriendLinked;
+
   /// Injectable pour les tests (tirage « Qui commence ? »).
   final Random? random;
 
@@ -80,6 +111,8 @@ class BoardgameScoreGridEditor extends StatefulWidget {
     this.showScoreTable = true,
     this.suggestedPlayerNames = const [],
     this.onQuickSave,
+    this.friendChoices = const [],
+    this.onFriendLinked,
     this.random,
   });
 
@@ -151,7 +184,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
         .toList();
     _playerColorIndices = grid.playerColors.length == grid.players.length
         ? List<int?>.from(grid.playerColors)
-        : List<int?>.filled(grid.players.length, null);
+        : List<int?>.filled(grid.players.length, null, growable: true);
     _teamScoreMode = grid.teamScoreMode;
     _definedTeamControllers = grid
         .uniqueTeamNames()
@@ -709,13 +742,20 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     final teamCtrl = TextEditingController(text: _newTeamController.text);
     var colorIndex = _pickNextColorIndex();
     if (colorIndex < 0) colorIndex = 0;
+    var isFriend = false;
+    FriendChoice? friend;
 
     final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
       builder: (ctx) {
-        return StatefulBuilder(
+        return _DisposeOnUnmount(
+          onDispose: () {
+            nameCtrl.dispose();
+            teamCtrl.dispose();
+          },
+          child: StatefulBuilder(
           builder: (context, setSheetState) {
             final scheme = Theme.of(context).colorScheme;
             return Padding(
@@ -762,6 +802,21 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                             ),
                     ),
                     textInputAction: TextInputAction.done,
+                  ),
+                  FriendLinkSelector(
+                    friends: widget.friendChoices,
+                    linked: isFriend,
+                    selected: friend,
+                    onLinkedChanged: (v) => setSheetState(() {
+                      isFriend = v;
+                      if (!isFriend) friend = null;
+                    }),
+                    onSelected: (f) => setSheetState(() {
+                      friend = f;
+                      if (f != null && nameCtrl.text.trim().isEmpty) {
+                        nameCtrl.text = f.username;
+                      }
+                    }),
                   ),
                   if (widget.useTeams) ...[
                     const SizedBox(height: 10),
@@ -841,6 +896,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                         'name': name,
                         'team': teamCtrl.text.trim(),
                         'color': colorIndex,
+                        if (isFriend && friend != null) 'friend': friend,
                       });
                     },
                     icon: const Icon(Icons.check),
@@ -850,11 +906,10 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
               ),
             );
           },
+          ),
         );
       },
     );
-    nameCtrl.dispose();
-    teamCtrl.dispose();
     if (result == null || !mounted) return;
 
     final name = result['name'] as String;
@@ -879,6 +934,8 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
       team: (team != null && team.isNotEmpty) ? team : null,
       colorIndex: color,
     );
+    final linked = result['friend'];
+    if (linked is FriendChoice) widget.onFriendLinked?.call(name, linked);
   }
 
   double _measureTextWidth(String text, {double fontSize = 12}) {

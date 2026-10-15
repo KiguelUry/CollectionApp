@@ -8,7 +8,9 @@ import 'package:xml/xml.dart';
 import '../config/app_env.dart';
 import '../config/supabase_public_config.dart';
 import '../models/bgg_expansion.dart';
+import '../utils/bgg_collection_parse.dart';
 import '../utils/retry_backoff.dart';
+import 'bgg_catalog_cache.dart';
 import '../utils/search_relevance.dart';
 
 enum BggSearchSort {
@@ -20,6 +22,21 @@ enum BggSearchSort {
 
   /// Année de sortie la plus récente.
   recent,
+}
+
+class BggCollectionFetchResult {
+  final List<BggCollectionEntry> entries;
+  final bool pending;
+  final String? error;
+
+  const BggCollectionFetchResult.ok(this.entries) : pending = false, error = null;
+  const BggCollectionFetchResult.pending()
+    : entries = const [],
+      pending = true,
+      error = null;
+  const BggCollectionFetchResult.error(String this.error)
+    : entries = const [],
+      pending = false;
 }
 
 class _CachedSearch {
@@ -118,9 +135,14 @@ class BggService {
         },
       );
       if (response.statusCode != 200 || response.body.isEmpty) {
+        String? serverError;
+        try {
+          final body = jsonDecode(response.body);
+          if (body is Map) serverError = body['error']?.toString();
+        } catch (_) {}
         lastSearchError = response.statusCode == 0
             ? 'Réseau bloqué. Vérifie la fonction bgg-api sur Supabase.'
-            : 'BGG API ${response.statusCode}';
+            : (serverError ?? 'BGG API ${response.statusCode}');
         return null;
       }
       final decoded = jsonDecode(response.body);
@@ -1181,32 +1203,53 @@ class BggService {
   }
 
   /// Extensions BGG du jeu de base (`inbound="true"` sur le lien expansion).
+  /// Passe par le cache partagé `bgg_catalog_cache` (14 jours).
   static Future<List<BggExpansion>> fetchExpansions(
     String baseGameBggId,
   ) async {
     if (baseGameBggId.isEmpty) return [];
+    try {
+      final cached = await BggCatalogCache.instance.getOrFetch(
+        baseGameBggId,
+        BggCacheKind.expansions,
+        () async {
+          final list = await _fetchExpansionsRemote(baseGameBggId);
+          return list?.map((e) => e.toJson()).toList();
+        },
+      );
+      if (cached is! List) return [];
+      return cached
+          .whereType<Map>()
+          .map(BggExpansion.fromJson)
+          .where((e) => e.bggId.isNotEmpty)
+          .toList();
+    } catch (e) {
+      if (kDebugMode) debugPrint('BGG expansions $baseGameBggId: $e');
+      return [];
+    }
+  }
+
+  /// `null` = échec réseau / BGG (rien n'est mis en cache).
+  static Future<List<BggExpansion>?> _fetchExpansionsRemote(
+    String baseGameBggId,
+  ) async {
     if (_useWebJsonApi) {
-      if (!_webProxyReady) return [];
+      if (!_webProxyReady) return null;
       final data = await _jsonApiGet('expansions', {'id': baseGameBggId});
       final raw = data?['expansions'];
-      if (raw is! List) return [];
+      if (raw is! List) return null;
       return raw
           .whereType<Map>()
           .map((e) {
+            final exp = BggExpansion.fromJson(e);
             return BggExpansion(
-              bggId: e['bggId']?.toString() ?? '',
-              title: unescapeHtml(e['title']?.toString() ?? ''),
-              imageUrl: e['imageUrl']?.toString(),
-              year: e['year'] is int
-                  ? e['year'] as int
-                  : int.tryParse('${e['year']}'),
-              summary: e['summary']?.toString(),
-              bggRank: e['bggRank'] is int
-                  ? e['bggRank'] as int
-                  : int.tryParse('${e['bggRank']}'),
-              avgRating: e['avgRating'] is num
-                  ? (e['avgRating'] as num).toDouble()
-                  : double.tryParse('${e['avgRating']}'),
+              bggId: exp.bggId,
+              title: unescapeHtml(exp.title),
+              imageUrl: exp.imageUrl,
+              year: exp.year,
+              summary: exp.summary,
+              bggRank: exp.bggRank,
+              avgRating: exp.avgRating,
             );
           })
           .where((e) => e.bggId.isNotEmpty)
@@ -1218,11 +1261,11 @@ class BggService {
         'id': baseGameBggId,
       });
       final response = await _getWithRetry(url);
-      if (response.statusCode != 200 || response.body.isEmpty) return [];
+      if (response.statusCode != 200 || response.body.isEmpty) return null;
 
       final document = XmlDocument.parse(response.body);
       final baseItem = document.findAllElements('item').firstOrNull;
-      if (baseItem == null) return [];
+      if (baseItem == null) return null;
 
       final expansionIds = <String, String>{};
       for (final link in baseItem.findAllElements('link')) {
@@ -1301,11 +1344,29 @@ class BggService {
       return expansions;
     } catch (e) {
       if (kDebugMode) debugPrint('BGG expansions $baseGameBggId: $e');
-      return [];
+      return null;
     }
   }
 
+  /// Fiche BGG complète (images, joueurs, durée…) via le cache partagé.
   static Future<Map<String, dynamic>?> getGameFullDetails(String bggId) async {
+    if (bggId.trim().isEmpty) return null;
+    try {
+      final cached = await BggCatalogCache.instance.getOrFetch(
+        bggId,
+        BggCacheKind.details,
+        () => _fetchGameFullDetailsRemote(bggId),
+      );
+      return cached is Map ? Map<String, dynamic>.from(cached) : null;
+    } catch (e) {
+      if (kDebugMode) debugPrint('Erreur détails BGG: $e');
+      return null;
+    }
+  }
+
+  static Future<Map<String, dynamic>?> _fetchGameFullDetailsRemote(
+    String bggId,
+  ) async {
     if (_useWebJsonApi) {
       if (!_webProxyReady) return null;
       final data = await _jsonApiGet('game', {'id': bggId});
@@ -1343,6 +1404,74 @@ class BggService {
       if (item != null) return _parseThingItem(item);
     }
     return null;
+  }
+
+  /// Jeux possédés (`own=1`) d'un compte BoardGameGeek.
+  /// BGG prépare la collection en différé : on réessaie tant qu'elle est en
+  /// file d'attente (jusqu'à [maxWaits] fois).
+  static Future<BggCollectionFetchResult> fetchUserCollection(
+    String username, {
+    int maxWaits = 8,
+    Duration waitStep = const Duration(seconds: 3),
+    void Function(String status)? onStatus,
+  }) async {
+    final user = username.trim();
+    if (user.isEmpty) {
+      return const BggCollectionFetchResult.error('Pseudo BGG vide');
+    }
+    for (var attempt = 0; attempt <= maxWaits; attempt++) {
+      final result = await _fetchUserCollectionOnce(user);
+      if (!result.pending) return result;
+      onStatus?.call(
+        'BGG prépare la collection… (${attempt + 1}/${maxWaits + 1})',
+      );
+      await Future.delayed(waitStep * (attempt + 1));
+    }
+    return const BggCollectionFetchResult.error(
+      'BGG met trop de temps à préparer la collection. Réessaie dans une minute.',
+    );
+  }
+
+  static Future<BggCollectionFetchResult> _fetchUserCollectionOnce(
+    String user,
+  ) async {
+    if (_useWebJsonApi) {
+      lastSearchError = null;
+      final data = await _jsonApiGet('collection', {'username': user});
+      if (data == null) {
+        return BggCollectionFetchResult.error(
+          lastSearchError ?? 'BGG indisponible',
+        );
+      }
+      if (data['pending'] == true) {
+        return const BggCollectionFetchResult.pending();
+      }
+      final raw = data['items'];
+      if (raw is! List) return const BggCollectionFetchResult.ok([]);
+      return BggCollectionFetchResult.ok(
+        raw
+            .whereType<Map>()
+            .map(BggCollectionEntry.fromJson)
+            .where((e) => e.bggId.isNotEmpty)
+            .toList(),
+      );
+    }
+
+    final url = Uri.https('boardgamegeek.com', '/xmlapi2/collection', {
+      'username': user,
+      'own': '1',
+      'stats': '1',
+    });
+    final response = await _getWithRetry(url);
+    if (isBggCollectionPending(response.statusCode, response.body)) {
+      return const BggCollectionFetchResult.pending();
+    }
+    if (response.statusCode != 200) {
+      return BggCollectionFetchResult.error('BGG a répondu ${response.statusCode}');
+    }
+    final err = bggCollectionXmlError(response.body);
+    if (err != null) return BggCollectionFetchResult.error(err);
+    return BggCollectionFetchResult.ok(parseBggCollectionXml(response.body));
   }
 
   static int? _positivePlayingTime(dynamic value) {

@@ -25,6 +25,7 @@ import '../utils/boardgame_expansions.dart';
 import '../utils/hub_category_visibility.dart';
 import '../utils/hub_greeting.dart';
 import '../services/profile_cache_service.dart';
+import '../widgets/notifications/notification_bell.dart';
 import '../widgets/profile_avatar.dart';
 import 'category_manage_screen.dart';
 import 'wildlife/wildlife_collection_screen.dart';
@@ -347,6 +348,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
       appBar: AppBar(
         title: const Text('Collections'),
         actions: [
+          const NotificationBell(),
           IconButton(
             icon: const Icon(Icons.bar_chart_outlined),
             tooltip: 'Statistiques',

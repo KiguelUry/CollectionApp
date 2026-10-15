@@ -812,6 +812,88 @@ async function handleExpansions(id: string): Promise<Response> {
   return json({ expansions: parseExpansions(baseXml + detailXml) });
 }
 
+function parseCollectionItems(xml: string): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  const seen = new Set<string>();
+  const re = /<item\b([^>]*)>([\s\S]*?)<\/item>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(xml)) !== null) {
+    const attrs = m[1];
+    const inner = m[2];
+    const id = attrs.match(/\bobjectid="(\d+)"/i)?.[1];
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const subtype = attrs.match(/\bsubtype="([^"]*)"/i)?.[1] ?? "";
+    const title =
+      inner.match(/<name[^>]*>([^<]*)<\/name>/i)?.[1]?.trim() || "Sans titre";
+    const year = parseInt(
+      inner.match(/<yearpublished>([^<]*)<\/yearpublished>/i)?.[1] ?? "",
+      10,
+    );
+    const image = inner.match(/<image>([^<]*)<\/image>/i)?.[1]?.trim();
+    const thumb = inner.match(/<thumbnail>([^<]*)<\/thumbnail>/i)?.[1]?.trim();
+    const statsAttrs = inner.match(/<stats\b([^>]*)>/i)?.[1] ?? "";
+    const stat = (name: string): number | undefined => {
+      const v = parseInt(
+        statsAttrs.match(new RegExp(`\\b${name}="(\\d+)"`, "i"))?.[1] ?? "",
+        10,
+      );
+      return Number.isNaN(v) || v <= 0 ? undefined : v;
+    };
+    out.push({
+      bgg_id: id,
+      title,
+      ...(Number.isNaN(year) ? {} : { year }),
+      ...(image ? { image_url: image } : {}),
+      ...(thumb ? { thumbnail_url: thumb } : {}),
+      ...(stat("minplayers") ? { min_players: stat("minplayers") } : {}),
+      ...(stat("maxplayers") ? { max_players: stat("maxplayers") } : {}),
+      ...((stat("playingtime") ?? stat("maxplaytime"))
+        ? { playing_time: stat("playingtime") ?? stat("maxplaytime") }
+        : {}),
+      ...(subtype === "boardgameexpansion" ? { is_expansion: true } : {}),
+    });
+  }
+  return out;
+}
+
+/// Collection BGG (jeux possédés). BGG répond 202 tant qu'elle est en file :
+/// on renvoie `{ pending: true }` et l'app réessaie.
+async function handleCollection(username: string): Promise<Response> {
+  const user = username.trim();
+  if (!user) return json({ error: "Missing username" }, 400, false);
+  const token = Deno.env.get("BGG_APPLICATION_TOKEN")?.trim() ?? "";
+  const target = new URL("/xmlapi2/collection", BGG_ORIGIN);
+  target.searchParams.set("username", user);
+  target.searchParams.set("own", "1");
+  target.searchParams.set("stats", "1");
+  const headers: Record<string, string> = {
+    "User-Agent": "Collectingo/1.1",
+    Accept: "application/xml",
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const now = Date.now();
+  const wait = MIN_BGG_GAP_MS - (now - lastBggHttpAt);
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  lastBggHttpAt = Date.now();
+
+  const res = await fetch(target.toString(), { headers });
+  const text = await res.text();
+  if (res.status === 202 || text.includes("Please try again later")) {
+    return json({ pending: true, status: "BGG prépare la collection…" }, 200, false);
+  }
+  if (res.status === 429) {
+    return json({ pending: true, status: "BGG surchargé — nouvel essai…" }, 200, false);
+  }
+  if (res.status !== 200) {
+    return json({ error: `BGG a répondu ${res.status}` }, 502, false);
+  }
+  const err = text.match(/<error>[\s\S]*?<message>([^<]*)<\/message>/i)?.[1];
+  if (err) return json({ error: err.trim() }, 404, false);
+  return json({ items: parseCollectionItems(text) }, 200, false);
+}
+
 async function handlePrices(eid: string): Promise<Response> {
   const id = eid.trim();
   if (!id) return json({ error: "Missing eid" }, 400);
@@ -832,13 +914,13 @@ async function handlePrices(eid: string): Promise<Response> {
   return json(body);
 }
 
-function json(body: unknown, status = 200): Response {
+function json(body: unknown, status = 200, cacheable = true): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
       ...corsHeaders,
       "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "public, max-age=300",
+      "Cache-Control": cacheable ? "public, max-age=300" : "no-store",
     },
   });
 }
@@ -873,6 +955,10 @@ Deno.serve(async (req) => {
         const id = url.searchParams.get("id") ?? "";
         return await handleExpansions(id);
       }
+      case "collection":
+        return await handleCollection(
+          url.searchParams.get("username") ?? "",
+        );
       case "prices": {
         const eid = url.searchParams.get("eid") ?? "";
         return await handlePrices(eid);

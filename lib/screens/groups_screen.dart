@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import '../models/app_notification.dart';
 import '../models/collection_group.dart';
 import '../services/friend_service.dart';
 import '../services/group_service.dart';
+import '../services/notification_service.dart';
 import '../widgets/app_app_bar.dart';
 import '../widgets/friend_picker_dialog.dart';
 import '../widgets/group_badge.dart';
@@ -104,11 +106,32 @@ class _GroupsScreenState extends State<GroupsScreen> {
       friends: friends,
     );
     if (picked == null) return;
-    await _groupService.addMember(group.id, picked);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Membre ajouté au groupe')),
+    final friend = friends.firstWhere(
+      (f) => f['profile_id'] == picked,
+      orElse: () => const {},
+    );
+    final name = friend['username'] as String? ?? 'ton ami';
+    try {
+      await NotificationService.instance.send(
+        recipientId: picked,
+        type: AppNotificationType.groupInvite,
+        dedupeKey: 'group:${group.id}',
+        replaceExisting: true,
+        payload: {'group_id': group.id, 'group_name': group.name},
       );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Invitation envoyée à $name')),
+        );
+      }
+    } catch (_) {
+      // Migration notifications absente : ajout direct comme avant.
+      await _groupService.addMember(group.id, picked);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Membre ajouté au groupe')),
+        );
+      }
     }
   }
 

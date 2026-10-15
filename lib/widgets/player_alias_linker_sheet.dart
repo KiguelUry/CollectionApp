@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../models/friend_choice.dart';
+import '../services/friend_service.dart';
 import '../services/global_play_history_service.dart';
 import '../services/player_alias_service.dart';
+import 'friend_link_selector.dart';
 
 Future<void> showPlayerAliasLinkerSheet(
   BuildContext context, {
@@ -11,8 +14,23 @@ Future<void> showPlayerAliasLinkerSheet(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
-    builder: (ctx) => _PlayerAliasLinkerSheet(knownNames: knownNames),
+    builder: (ctx) => PlayerAliasLinkerSheet(knownNames: knownNames),
   );
+}
+
+Future<List<FriendChoice>> _loadFriendChoices() async {
+  try {
+    final rows = await FriendService().fetchFriends();
+    return [
+      for (final r in rows)
+        FriendChoice(
+          profileId: r['profile_id'] as String,
+          username: r['username'] as String? ?? 'Ami',
+        ),
+    ];
+  } catch (_) {
+    return const [];
+  }
 }
 
 /// Avertissement « pseudos quasi identiques » avec action de fusion.
@@ -59,21 +77,31 @@ class AliasCollisionWarning extends StatelessWidget {
   }
 }
 
-class _PlayerAliasLinkerSheet extends StatefulWidget {
+class PlayerAliasLinkerSheet extends StatefulWidget {
   final List<String> knownNames;
 
-  const _PlayerAliasLinkerSheet({required this.knownNames});
+  /// Injectable pour les tests (sinon amis Supabase).
+  final Future<List<FriendChoice>> Function()? loadFriends;
+
+  const PlayerAliasLinkerSheet({
+    super.key,
+    required this.knownNames,
+    this.loadFriends,
+  });
 
   @override
-  State<_PlayerAliasLinkerSheet> createState() =>
+  State<PlayerAliasLinkerSheet> createState() =>
       _PlayerAliasLinkerSheetState();
 }
 
-class _PlayerAliasLinkerSheetState extends State<_PlayerAliasLinkerSheet> {
+class _PlayerAliasLinkerSheetState extends State<PlayerAliasLinkerSheet> {
   final _selected = <String>{};
   final _displayController = TextEditingController();
   bool _markAsMe = false;
   bool _saving = false;
+  List<FriendChoice> _friends = const [];
+  bool _linkFriend = false;
+  FriendChoice? _friend;
 
   @override
   void initState() {
@@ -81,6 +109,33 @@ class _PlayerAliasLinkerSheetState extends State<_PlayerAliasLinkerSheet> {
     PlayerAliasService.instance.ensureLoaded().then((_) {
       if (mounted) setState(() {});
     });
+    (widget.loadFriends ?? _loadFriendChoices)().then((list) {
+      if (mounted) setState(() => _friends = list);
+    });
+  }
+
+  Future<void> _pickFriendFor(PlayerIdentity identity) async {
+    final picked = await showDialog<FriendChoice>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: Text('« ${identity.displayName} » est…'),
+        children: [
+          for (final f in _friends)
+            SimpleDialogOption(
+              key: ValueKey('pick_friend_${f.profileId}'),
+              onPressed: () => Navigator.pop(ctx, f),
+              child: Text(f.username),
+            ),
+        ],
+      ),
+    );
+    if (picked == null) return;
+    await PlayerAliasService.instance.linkFriend(
+      identity.displayName,
+      profileId: picked.profileId,
+      username: picked.username,
+    );
+    if (mounted) setState(() {});
   }
 
   @override
@@ -154,6 +209,14 @@ class _PlayerAliasLinkerSheetState extends State<_PlayerAliasLinkerSheet> {
         displayName: display,
         isMe: _markAsMe,
       );
+      final friend = _friend;
+      if (_linkFriend && friend != null && !_markAsMe) {
+        await PlayerAliasService.instance.linkFriend(
+          identity.displayName,
+          profileId: friend.profileId,
+          username: friend.username,
+        );
+      }
 
       final renamed =
           await GlobalPlayHistoryService().renamePlayerAcrossHistory(
@@ -166,6 +229,8 @@ class _PlayerAliasLinkerSheetState extends State<_PlayerAliasLinkerSheet> {
         _selected.clear();
         _displayController.clear();
         _markAsMe = false;
+        _linkFriend = false;
+        _friend = null;
       });
       final msg = renamed > 0
           ? 'Identité enregistrée · $renamed partie${renamed > 1 ? 's' : ''} mises à jour'
@@ -233,10 +298,37 @@ class _PlayerAliasLinkerSheetState extends State<_PlayerAliasLinkerSheet> {
                         g.isMe ? '${g.displayName} · moi' : g.displayName,
                         style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
-                      subtitle: Text(g.names.join(' · ')),
+                      subtitle: Text(
+                        g.isLinkedToFriend
+                            ? '${g.names.join(' · ')}\nAmi : ${g.friendUsername ?? '?'}'
+                            : g.names.join(' · '),
+                      ),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          if (!g.isMe &&
+                              (_friends.isNotEmpty || g.isLinkedToFriend))
+                            IconButton(
+                              key: ValueKey('link_friend_${g.id}'),
+                              tooltip: g.isLinkedToFriend
+                                  ? 'Délier de ${g.friendUsername ?? 'l’ami'}'
+                                  : 'Cette personne est dans ma liste d’amis',
+                              icon: Icon(
+                                g.isLinkedToFriend
+                                    ? Icons.person_remove_alt_1_outlined
+                                    : Icons.people_alt_outlined,
+                                size: 20,
+                              ),
+                              onPressed: () async {
+                                if (g.isLinkedToFriend) {
+                                  await PlayerAliasService.instance
+                                      .unlinkFriend(g.id);
+                                  if (mounted) setState(() {});
+                                } else {
+                                  await _pickFriendFor(g);
+                                }
+                              },
+                            ),
                           if (!g.isMe)
                             IconButton(
                               tooltip: 'C’est moi',
@@ -319,6 +411,17 @@ class _PlayerAliasLinkerSheetState extends State<_PlayerAliasLinkerSheet> {
                   value: _markAsMe,
                   onChanged: (v) => setState(() => _markAsMe = v),
                 ),
+                if (!_markAsMe)
+                  FriendLinkSelector(
+                    friends: _friends,
+                    linked: _linkFriend,
+                    selected: _friend,
+                    onLinkedChanged: (v) => setState(() {
+                      _linkFriend = v;
+                      if (!v) _friend = null;
+                    }),
+                    onSelected: (f) => setState(() => _friend = f),
+                  ),
               ],
               const SizedBox(height: 8),
               FilledButton.icon(

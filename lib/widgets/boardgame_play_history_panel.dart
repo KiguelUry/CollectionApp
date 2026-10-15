@@ -5,9 +5,13 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/boardgame_play_session.dart';
 import '../models/boardgame_score_grid.dart';
 import '../models/collection_item.dart';
+import '../models/friend_choice.dart';
 import '../services/friend_service.dart';
+import '../services/play_share_service.dart';
+import '../services/player_alias_service.dart';
 import '../services/profile_cache_service.dart';
 import '../utils/boardgame_past_players.dart';
+import '../utils/play_share.dart';
 import 'bgg_network_image.dart';
 import 'boardgame_ranking_panel.dart';
 import 'boardgame_score_grid_editor.dart';
@@ -428,6 +432,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
   final _playersOnlyController = TextEditingController();
   final _targetScoreController = TextEditingController();
   List<Map<String, dynamic>> _pickableProfiles = [];
+  List<FriendChoice> _friendChoices = const [];
 
   @override
   void initState() {
@@ -493,7 +498,18 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
       list.add({'profile_id': me.id, 'username': me.username});
     }
     list.addAll(friends);
-    if (mounted) setState(() => _pickableProfiles = list);
+    if (mounted) {
+      setState(() {
+        _pickableProfiles = list;
+        _friendChoices = [
+          for (final f in friends)
+            FriendChoice(
+              profileId: f['profile_id'] as String,
+              username: f['username'] as String? ?? 'Ami',
+            ),
+        ];
+      });
+    }
   }
 
   @override
@@ -619,9 +635,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
         ? manualWinner
         : (_isCoop ? null : (autoNames.isEmpty ? null : autoNames.join(' & ')));
 
-    Navigator.pop(
-      context,
-      BoardgamePlaySession(
+    final session = BoardgamePlaySession(
         date: _date,
         players: players,
         winner: winner,
@@ -641,8 +655,19 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
             : null,
         status: _status,
         createdAt: widget.initial?.createdAt ?? DateTime.now(),
-      ),
-    );
+        shareId: widget.initial?.shareId ?? newPlayShareId(),
+      );
+    final item = widget.item;
+    if (item != null &&
+        Supabase.instance.client.auth.currentUser != null) {
+      PlayShareService.instance.shareWithLinkedFriends(
+        session: session,
+        gameTitle: item.title,
+        bggId: item.metadata?['bgg_id']?.toString(),
+        imageUrl: item.imageUrl,
+      );
+    }
+    Navigator.pop(context, session);
   }
 
   @override
@@ -897,6 +922,13 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
                   onPickPlayer: canPickPlayers ? _pickPlayerFromContacts : null,
                   showScoreTable: true,
                   onQuickSave: _submit,
+                  friendChoices: _friendChoices,
+                  onFriendLinked: (name, friend) =>
+                      PlayerAliasService.instance.linkFriend(
+                        name,
+                        profileId: friend.profileId,
+                        username: friend.username,
+                      ),
                 ),
               ] else ...[
                 const SizedBox(height: 8),
