@@ -431,6 +431,13 @@ class PlayerAliasService {
     await _persist();
   }
 
+  /// Efface toutes les identités locales (export / suppression de compte).
+  Future<void> resetAllLocalData() async {
+    _identities = [];
+    _loaded = true;
+    await _persist();
+  }
+
   Future<void> unlinkName(String name) async {
     await ensureLoaded();
     final lower = name.trim().toLowerCase();

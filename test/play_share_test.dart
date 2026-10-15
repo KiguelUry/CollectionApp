@@ -3,9 +3,11 @@ import 'dart:math';
 import 'package:collection_app/models/boardgame_play_session.dart';
 import 'package:collection_app/models/collection_category.dart';
 import 'package:collection_app/models/collection_item.dart';
+import 'package:collection_app/services/play_share_service.dart';
 import 'package:collection_app/services/player_alias_service.dart';
 import 'package:collection_app/utils/play_share.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 BoardgamePlaySession _session({
   List<String> players = const ['Kiki', 'Igor', 'Lou'],
@@ -30,6 +32,20 @@ CollectionItem _item(String id, String title, {String? bggId}) =>
     );
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  group('shareFinishedPlay', () {
+    test('assigne un shareId si absent (partie terminée)', () async {
+      // Pas d'appel réseau : aucun ami lié → 0 envoi.
+      final sent = await PlayShareService.instance.shareFinishedPlay(
+        session: _session(shareId: null),
+        gameTitle: 'Catan',
+      );
+      expect(sent, 0);
+    });
+  });
+
   group('shareId', () {
     test('aller-retour JSON et copyWith', () {
       final s = _session(shareId: 'ps_abc');

@@ -26,6 +26,7 @@ import '../widgets/boardgame_expansions_section.dart';
 import '../widgets/bgg_community_rating_panel.dart';
 import '../widgets/bgg_network_image.dart';
 import '../models/boardgame_play_session.dart';
+import '../widgets/boardgame/boardgame_item_bento_layout.dart';
 import '../widgets/boardgame_detail_bento.dart';
 import '../widgets/boardgame_rules_bento.dart';
 import '../widgets/collapsible_section.dart';
@@ -797,59 +798,68 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       ),
       body: CustomScrollView(
         slivers: [
-          SliverAppBar(
-            expandedHeight: 280,
-            pinned: true,
-            automaticallyImplyLeading: false,
-            flexibleSpace: FlexibleSpaceBar(
-              background: Stack(
-                fit: StackFit.expand,
-                children: [
-                  GestureDetector(
-                    onTap: _item.imageUrl != null
-                        ? () => showCoverPreview(
-                            context,
-                            imageUrl: _item.imageUrl,
-                            title: _item.title,
-                            bookCover: isBook,
-                          )
-                        : null,
-                    child: _item.imageUrl != null
-                        ? Hero(
-                            tag: collectionCoverHeroTag(_item.id),
-                            child: SizedBox.expand(
-                              child: CollectionCoverImage(
-                                url: _item.imageUrl!,
-                                height: 280,
-                                bookCover: isBook,
-                                boxedCover: isBook || isBoardgame || isCard,
-                                largeSource: true,
-                                fit: BoxFit.contain,
+          if (!isBoardgame)
+            SliverAppBar(
+              expandedHeight: 280,
+              pinned: true,
+              automaticallyImplyLeading: false,
+              flexibleSpace: FlexibleSpaceBar(
+                background: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    GestureDetector(
+                      onTap: _item.imageUrl != null
+                          ? () => showCoverPreview(
+                              context,
+                              imageUrl: _item.imageUrl,
+                              title: _item.title,
+                              bookCover: isBook,
+                            )
+                          : null,
+                      child: _item.imageUrl != null
+                          ? Hero(
+                              tag: collectionCoverHeroTag(_item.id),
+                              child: SizedBox.expand(
+                                child: CollectionCoverImage(
+                                  url: _item.imageUrl!,
+                                  height: 280,
+                                  bookCover: isBook,
+                                  boxedCover: isBook || isCard,
+                                  largeSource: true,
+                                  fit: BoxFit.contain,
+                                ),
                               ),
-                            ),
-                          )
-                        : Container(color: _item.category.color),
-                  ),
-                  const DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [Colors.transparent, Colors.black54],
+                            )
+                          : Container(color: _item.category.color),
+                    ),
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Colors.transparent, Colors.black54],
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
           SliverList(
             delegate: SliverChildListDelegate([
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
-                child: Column(
+                child: BoardgameDetailWidthLimiter(
+                  child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    if (isBoardgame) ...[
+                      BoardgameDetailCompactHeader(
+                        item: _item,
+                        expansionOfLabel: expansionOf,
+                      ),
+                      const SizedBox(height: 16),
+                    ],
                     if (ro)
                       Card(
                         color: Colors.blue.shade50,
@@ -873,15 +883,17 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         ),
                       ),
                     if (ro) const SizedBox(height: 12),
-                    Text(
-                      _item.title,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        height: 1.25,
+                    if (!isBoardgame) ...[
+                      Text(
+                        _item.title,
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          height: 1.25,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 12),
+                      const SizedBox(height: 12),
+                    ],
                     if (!ro &&
                         isBoardgame &&
                         _item.isExpansion &&
@@ -982,19 +994,20 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       ),
                       const SizedBox(height: 16),
                     ],
-                    Wrap(
-                      spacing: 8,
-                      children: [
-                        Chip(
-                          avatar: Icon(_item.category.icon, size: 18),
-                          label: Text(_item.category.label),
-                        ),
-                        if (_item.bookSubcategory != null)
-                          Chip(label: Text(_item.bookSubcategory!.label)),
-                        if (_item.cardSubcategory != null)
-                          Chip(label: Text(_item.cardSubcategory!.label)),
-                      ],
-                    ),
+                    if (!isBoardgame)
+                      Wrap(
+                        spacing: 8,
+                        children: [
+                          Chip(
+                            avatar: Icon(_item.category.icon, size: 18),
+                            label: Text(_item.category.label),
+                          ),
+                          if (_item.bookSubcategory != null)
+                            Chip(label: Text(_item.bookSubcategory!.label)),
+                          if (_item.cardSubcategory != null)
+                            Chip(label: Text(_item.cardSubcategory!.label)),
+                        ],
+                      ),
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
                       child: Row(
@@ -1093,46 +1106,81 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                     ],
                     const SizedBox(height: 16),
                     if (isBoardgame) ...[
-                      _buildBggDescriptionSection(),
-                      if (_bggDescriptionLoading ||
-                          (_bggDescription != null &&
-                              _bggDescription!.isNotEmpty))
-                        const SizedBox(height: 16),
+                      BoardgameBentoGrid(
+                        children: [
+                          BoardgameBentoSummaryTile(
+                            icon: Icons.inventory_2_outlined,
+                            title: 'Ma boîte',
+                            subtitle: _boardgameMaBoiteSubtitle(ownedQty),
+                            accent: _item.category.color,
+                            onOpenDetail: () => showBoardgameBentoDetailSheet(
+                              context,
+                              title: 'Ma boîte',
+                              child: _buildBoardgameMaBoitePanel(ro),
+                            ),
+                          ),
+                          BoardgameBentoSummaryTile(
+                            icon: Icons.info_outline,
+                            title: 'Infos & galerie BGG',
+                            subtitle: _bggDescription?.trim().isNotEmpty == true
+                                ? _bggDescription!.trim()
+                                : 'Description, notes communautaires, galerie',
+                            accent: Colors.blue.shade700,
+                            onOpenDetail: () => showBoardgameBentoDetailSheet(
+                              context,
+                              title: 'Infos BoardGameGeek',
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  _buildBggDescriptionSection(),
+                                  const SizedBox(height: 12),
+                                  BggCommunityRatingPanel(
+                                    avgRating:
+                                        _bggAvgRating ??
+                                        parseBggAvgRating(
+                                          _item.metadata?['bgg_avg_rating'],
+                                        ),
+                                    loading: _bggDescriptionLoading,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          BoardgameBentoSummaryTile(
+                            icon: Icons.history_edu_outlined,
+                            title: 'Historique & classement',
+                            subtitle: _boardgameHistoriqueSubtitle(),
+                            accent: Colors.orange.shade800,
+                            onOpenDetail: () => showBoardgameBentoDetailSheet(
+                              context,
+                              title: 'Parties & scores',
+                              child: BoardgamePlayHubBento(
+                                item: _item,
+                                readOnly: ro,
+                                onMetadataChanged: _onBoardgamePlaysMetadataChanged,
+                              ),
+                            ),
+                          ),
+                          BoardgameBentoSummaryTile(
+                            icon: Icons.payments_outlined,
+                            title: 'Prix & observations',
+                            subtitle: _boardgamePrixSubtitle(),
+                            accent: _item.category.color,
+                            onOpenDetail: () => showBoardgameBentoDetailSheet(
+                              context,
+                              title: 'Prix & observations',
+                              child: _buildBoardgamePrixObsPanel(ro),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
                     ],
                     _buildInformationsSection(
                       isBoardgame: isBoardgame,
                       metadataRows: metadataRows,
                     ),
                     if (isBoardgame) ...[
-                      const SizedBox(height: 12),
-                      BoardgamePlayHubBento(
-                        item: _item,
-                        readOnly: ro,
-                        onMetadataChanged: (meta) {
-                          final count = parseBoardgamePlays(meta).length;
-                          setState(() {
-                            _item = _item.copyWith(metadata: meta);
-                            _gamesPlayedController.text =
-                                count > 0 ? count.toString() : '';
-                          });
-                          _saveNow();
-                        },
-                      ),
-                      if (!isWishlist && !_item.isSold)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 12),
-                          child: CostPerPlayBadge(
-                            purchasePrice: _item.purchasePrice,
-                            estimatedValue:
-                                marketSecondhandPriceFromMetadata(
-                                      _item.metadata,
-                                    ) ??
-                                    marketNewPriceMinFromMetadata(
-                                      _item.metadata,
-                                    ),
-                            plays: parseBoardgamePlays(_item.metadata).length,
-                          ),
-                        ),
                       if (!isWishlist) ...[
                         const SizedBox(height: 12),
                         BoardgameRulesBento(
@@ -1414,7 +1462,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                               _saveNow();
                             },
                           ),
-                          if (isBoardgame) ...[
+                          if (!isBoardgame) ...[
                             const SizedBox(height: 16),
                             BggCommunityRatingPanel(
                               avgRating:
@@ -1651,7 +1699,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         ),
                       ),
                     ],
-                    if (!isWishlist || isTech) ...[
+                    if ((!isWishlist || isTech) && !isBoardgame) ...[
                       const SizedBox(height: 12),
                       DetailBentoTile(
                         icon: Icons.payments_outlined,
@@ -1770,12 +1818,162 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       ),
                     ],
                   ],
+                  ),
                 ),
               ),
             ]),
           ),
         ],
       ),
+    );
+  }
+
+  String _boardgameMaBoiteSubtitle(int ownedQty) {
+    final parts = <String>['Quantité ×$ownedQty'];
+    final loc = _item.locationLabel?.trim();
+    if (loc != null && loc.isNotEmpty) parts.add(loc);
+    if (_item.isOnLoan) parts.add('Prêt · ${_item.loaneeDisplayName}');
+    return parts.join(' · ');
+  }
+
+  String _boardgameHistoriqueSubtitle() {
+    final sessions = parseBoardgamePlays(_item.metadata);
+    if (sessions.isEmpty) return 'Aucune partie — lance un score';
+    return '${sessions.length} partie${sessions.length > 1 ? 's' : ''} · podium & matrices';
+  }
+
+  String _boardgamePrixSubtitle() => _valueConditionSubtitle(isTech: false);
+
+  void _onBoardgamePlaysMetadataChanged(Map<String, dynamic> meta) {
+    final count = parseBoardgamePlays(meta).length;
+    setState(() {
+      _item = _item.copyWith(metadata: meta);
+      _gamesPlayedController.text = count > 0 ? count.toString() : '';
+    });
+    _saveNow();
+  }
+
+  Widget _buildBoardgamePrixObsPanel(bool ro) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (!_item.isWishlist && !_item.isSold)
+          CostPerPlayBadge(
+            purchasePrice: _item.purchasePrice,
+            estimatedValue:
+                marketSecondhandPriceFromMetadata(_item.metadata) ??
+                marketNewPriceMinFromMetadata(_item.metadata),
+            plays: parseBoardgamePlays(_item.metadata).length,
+          ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _priceController,
+          readOnly: ro,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(
+            labelText: 'Prix d\'achat (€)',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 12),
+        DropdownButtonFormField<ItemCondition?>(
+          initialValue: _condition,
+          decoration: const InputDecoration(
+            labelText: 'État',
+            border: OutlineInputBorder(),
+          ),
+          items: [
+            const DropdownMenuItem<ItemCondition?>(
+              value: null,
+              child: Text('— Non renseigné —'),
+            ),
+            ...ItemCondition.values.map(
+              (c) => DropdownMenuItem(value: c, child: Text(c.label)),
+            ),
+          ],
+          onChanged: ro
+              ? null
+              : (val) {
+                  setState(() => _condition = val);
+                  _scheduleSave();
+                },
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _personalRulesController,
+          readOnly: ro,
+          maxLines: 4,
+          decoration: const InputDecoration(
+            labelText: 'Notes & observations',
+            border: OutlineInputBorder(),
+          ),
+          onChanged: ro ? null : (_) => _scheduleSave(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBoardgameMaBoitePanel(bool ro) {
+    final meId = Supabase.instance.client.auth.currentUser?.id;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (!_item.isWishlist && !_item.isSold)
+          CostPerPlayBadge(
+            purchasePrice: _item.purchasePrice,
+            estimatedValue:
+                marketSecondhandPriceFromMetadata(_item.metadata) ??
+                marketNewPriceMinFromMetadata(_item.metadata),
+            plays: parseBoardgamePlays(_item.metadata).length,
+          ),
+        const SizedBox(height: 12),
+        CompactWhereaboutsDropdown(
+          groups: _groups,
+          selectedGroupIds: _selectedGroupIds,
+          locationUserId: _item.locationUserId,
+          holderLabel: _item.locationLabel,
+          readOnly: ro,
+          applyDefaultIfEmpty: !itemHasManualHolder(_item),
+          onChanged:
+              ({
+                locationUserId,
+                holderLabel,
+                clearHolder = false,
+                manualHolder = false,
+              }) {
+                setState(() {
+                  _item = applyWhereaboutsChange(
+                    _item,
+                    locationUserId: locationUserId,
+                    holderLabel: holderLabel,
+                    clearHolder: clearHolder,
+                    manualHolder: manualHolder,
+                  );
+                });
+                if (manualHolder || locationUserId != null) {
+                  _saveNow();
+                }
+              },
+        ),
+        if (!ro && isAwayFromHome(_item, meUserId: meId)) ...[
+          const SizedBox(height: 8),
+          TemporaryLoanToggle(
+            isLoan: _item.isOnLoan,
+            loanedAt: _item.loanedAt,
+            onChanged: (isLoan, date) {
+              setState(() {
+                _item = applyTemporaryLoan(
+                  _item,
+                  isLoan: isLoan,
+                  loanedAt: date,
+                  meUserId: meId,
+                );
+              });
+              _saveNow();
+            },
+          ),
+        ],
+      ],
     );
   }
 

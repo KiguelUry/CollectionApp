@@ -811,8 +811,97 @@ class BggService {
     return games;
   }
 
-  /// Rangs + miniatures (via API thing ; sur le web : proxy Supabase).
+  static const _searchMetaRankKey = 'bgg_search_meta_rank';
+
+  static _BggThingMeta? _metaFromCachePayload(Map<String, dynamic> map) {
+    final rankRaw = map[_searchMetaRankKey] ?? map['bgg_rank'];
+    int? rank;
+    if (rankRaw is int) {
+      rank = rankRaw;
+    } else {
+      rank = int.tryParse('$rankRaw');
+    }
+    final avg = map['bgg_avg_rating'];
+    final avgRating = avg is num
+        ? avg.toDouble()
+        : double.tryParse('$avg');
+    final image = map['image_url']?.toString();
+    final thumb = map['thumbnail_url']?.toString();
+    final cats = map['bgg_categories'];
+    List<String> categories = const [];
+    if (cats is List) {
+      categories = cats.map((e) => e.toString()).where((s) => s.isNotEmpty).toList();
+    } else if (cats is String && cats.isNotEmpty) {
+      categories = cats.split('|').where((s) => s.isNotEmpty).toList();
+    }
+    final yearRaw = map['year_published'] ?? map['year'];
+    final year = yearRaw?.toString();
+    final title = map['title']?.toString();
+    if (rank == null &&
+        avgRating == null &&
+        (image == null || image.isEmpty) &&
+        (title == null || title.isEmpty)) {
+      return null;
+    }
+    return _BggThingMeta(
+      rank: rank,
+      thumbnail: thumb?.isNotEmpty == true ? thumb : null,
+      image: image?.isNotEmpty == true ? image : null,
+      title: title?.isNotEmpty == true ? title : null,
+      year: year?.isNotEmpty == true ? year : null,
+      categories: categories,
+      avgRating: avgRating,
+    );
+  }
+
+  static Map<String, dynamic> _cachePayloadFromMeta(String id, _BggThingMeta m) {
+    return {
+      'bgg_id': id,
+      if (m.image != null && m.image!.isNotEmpty) 'image_url': m.image,
+      if (m.thumbnail != null && m.thumbnail!.isNotEmpty)
+        'thumbnail_url': m.thumbnail,
+      if (m.avgRating != null) 'bgg_avg_rating': m.avgRating,
+      if (m.rank != null) _searchMetaRankKey: m.rank,
+      if (m.title != null && m.title!.isNotEmpty) 'title': m.title,
+      if (m.year != null && m.year!.isNotEmpty) 'year_published': m.year,
+      if (m.categories.isNotEmpty) 'bgg_categories': m.categories,
+    };
+  }
+
+  /// Rangs + notes communautaires : cache partagé `bgg_catalog_cache` puis BGG.
   static Future<Map<String, _BggThingMeta>> _fetchThingMeta(
+    List<String> ids,
+  ) async {
+    if (ids.isEmpty) return {};
+    final unique = ids.toSet().toList();
+    final out = <String, _BggThingMeta>{};
+    await Future.wait(
+      unique.map((id) async {
+        try {
+          final cached = await BggCatalogCache.instance.getOrFetch(
+            id,
+            BggCacheKind.details,
+            () async {
+              final chunk = await _fetchThingMetaUncached([id]);
+              final m = chunk[id];
+              if (m == null) return null;
+              return _cachePayloadFromMeta(id, m);
+            },
+          );
+          if (cached is Map) {
+            final meta = _metaFromCachePayload(Map<String, dynamic>.from(cached));
+            if (meta != null) out[id] = meta;
+          }
+        } catch (e) {
+          if (kDebugMode) debugPrint('BGG meta cache $id: $e');
+        }
+      }),
+    );
+    return out;
+  }
+
+  /// Appel BGG direct (sans cache).
+  static Future<Map<String, _BggThingMeta>> _fetchThingMetaUncached(
     List<String> ids,
   ) async {
     if (ids.isEmpty) return {};
@@ -931,7 +1020,7 @@ class BggService {
     return result;
   }
 
-  /// Complète rang, note communautaire et vignettes via l'API BGG.
+  /// Complète rang, note communautaire et vignettes (cache 14 j puis BGG).
   static Future<List<Map<String, String>>> enrichGameMaps(
     List<Map<String, String>> games,
   ) async {

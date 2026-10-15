@@ -15,6 +15,27 @@ class PlayShareService {
   PlayShareService._();
   static final instance = PlayShareService._();
 
+  /// Partage une partie terminée (historique global, orpheline, rattachement…).
+  Future<int> shareFinishedPlay({
+    required BoardgamePlaySession session,
+    required String gameTitle,
+    String? bggId,
+    String? imageUrl,
+  }) {
+    if (session.status != BoardgamePlayStatus.finished) {
+      return Future.value(0);
+    }
+    final withId = session.shareId == null
+        ? session.copyWith(shareId: newPlayShareId())
+        : session;
+    return shareWithLinkedFriends(
+      session: withId,
+      gameTitle: gameTitle,
+      bggId: bggId,
+      imageUrl: imageUrl,
+    );
+  }
+
   /// Notifie chaque ami lié présent dans la partie (une fois par partie).
   /// Retourne le nombre d'amis notifiés.
   Future<int> shareWithLinkedFriends({

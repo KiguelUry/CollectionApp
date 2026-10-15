@@ -23,6 +23,7 @@ import '../widgets/profile_avatar.dart';
 import '../widgets/group_members_sheet.dart';
 import '../widgets/group_stats_banner.dart';
 import '../widgets/group_wanted_board.dart';
+import '../widgets/group_game_night_sheet.dart';
 import 'group_edit_screen.dart';
 import 'item_detail_screen.dart';
 
@@ -179,6 +180,20 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
         foregroundColor: Colors.white,
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.casino_outlined),
+            tooltip: 'On joue à quoi ce soir ? — 3 jeux pour le groupe',
+            onPressed: () async {
+              final members = await _groupService.fetchMembers(_group.id);
+              if (!context.mounted) return;
+              final count = members.isEmpty ? 1 : members.length;
+              await showGroupGameNightSheet(
+                context,
+                group: _group,
+                memberCount: count,
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.people_outline),
             tooltip: 'Membres',

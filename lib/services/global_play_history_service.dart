@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -7,6 +8,7 @@ import '../models/boardgame_play_session.dart';
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../utils/supabase_embeds.dart';
+import 'play_share_service.dart';
 
 /// Partie enregistrée sur un jeu non possédé (en attente de liaison).
 class OrphanBoardgamePlay {
@@ -355,13 +357,22 @@ class GlobalPlayHistoryService {
         ? item
         : CollectionItem.fromJson(Map<String, dynamic>.from(row as Map));
 
+    final attachedSession = orphans[i].session;
     final sessions = mergeSessionIntoHistory(
       parseBoardgamePlays(fresh.metadata),
-      orphans[i].session,
+      attachedSession,
     );
     await saveSessionToItem(fresh, sessions);
     orphans.removeAt(i);
     await saveOrphans(orphans);
+    unawaited(
+      PlayShareService.instance.shareFinishedPlay(
+        session: attachedSession,
+        gameTitle: fresh.title,
+        bggId: fresh.metadata?['bgg_id']?.toString(),
+        imageUrl: fresh.imageUrl,
+      ),
+    );
     return true;
   }
 

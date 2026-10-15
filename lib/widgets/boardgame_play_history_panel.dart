@@ -660,7 +660,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     final item = widget.item;
     if (item != null &&
         Supabase.instance.client.auth.currentUser != null) {
-      PlayShareService.instance.shareWithLinkedFriends(
+      PlayShareService.instance.shareFinishedPlay(
         session: session,
         gameTitle: item.title,
         bggId: item.metadata?['bgg_id']?.toString(),

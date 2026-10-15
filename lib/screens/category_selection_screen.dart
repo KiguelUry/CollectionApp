@@ -26,6 +26,7 @@ import '../utils/hub_category_visibility.dart';
 import '../utils/hub_greeting.dart';
 import '../services/profile_cache_service.dart';
 import '../widgets/notifications/notification_bell.dart';
+import '../widgets/onboarding/onboarding_flow.dart';
 import '../widgets/profile_avatar.dart';
 import 'category_manage_screen.dart';
 import 'wildlife/wildlife_collection_screen.dart';
@@ -52,6 +53,9 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     super.initState();
     ProfileCacheService.instance.addListener(_onProfileCacheChanged);
     _load();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      showOnboardingIfNeeded(context);
+    });
   }
 
   @override
@@ -351,7 +355,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
           const NotificationBell(),
           IconButton(
             icon: const Icon(Icons.bar_chart_outlined),
-            tooltip: 'Statistiques',
+            tooltip: 'Statistiques — tableau de bord de ta collection',
             onPressed: _openStats,
           ),
         ],

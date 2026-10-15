@@ -8,10 +8,12 @@ import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../services/bgg_service.dart';
 import '../services/global_play_history_service.dart';
+import '../services/play_share_service.dart';
 import '../services/player_alias_service.dart';
 import '../widgets/boardgame_play_history_panel.dart';
 import '../widgets/boardgame_ranking_panel.dart';
 import '../widgets/bgg_network_image.dart';
+import '../widgets/empty_state_view.dart';
 import '../widgets/orphan_attach_sheet.dart';
 import '../widgets/player_alias_linker_sheet.dart';
 
@@ -116,6 +118,7 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
     );
     if (edited != null) {
       await _service.replaceSession(entry, edited);
+      await _maybeShareSession(edited, entry);
     }
     if (mounted) _load();
   }
@@ -150,6 +153,7 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
         ),
       );
     }
+    await _maybeShareSession(session, entry);
     if (mounted) _load();
   }
 
@@ -229,6 +233,17 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
         picked.item!,
         [session, ...sessions],
       );
+      await _maybeShareSession(
+        session,
+        GlobalPlayHistoryEntry(
+          itemId: picked.item!.id,
+          title: picked.item!.title,
+          imageUrl: picked.item!.imageUrl,
+          bggId: picked.item!.metadata?['bgg_id']?.toString(),
+          session: session,
+          sessionIndex: 0,
+        ),
+      );
     } else {
       await _service.addOrphan(
         OrphanBoardgamePlay(
@@ -239,8 +254,31 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
           session: session,
         ),
       );
+      await _maybeShareSession(
+        session,
+        GlobalPlayHistoryEntry(
+          title: picked.title!,
+          imageUrl: picked.imageUrl,
+          bggId: picked.bggId,
+          session: session,
+          sessionIndex: 0,
+          isOrphan: true,
+        ),
+      );
     }
     _load();
+  }
+
+  Future<void> _maybeShareSession(
+    BoardgamePlaySession session,
+    GlobalPlayHistoryEntry entry,
+  ) async {
+    await PlayShareService.instance.shareFinishedPlay(
+      session: session,
+      gameTitle: entry.title,
+      bggId: entry.bggId,
+      imageUrl: entry.imageUrl,
+    );
   }
 
   Future<void> _openAliasLinker() async {
@@ -363,10 +401,14 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
 
   Widget _buildAllTimeRanking(List<BoardgamePlaySession> sessions) {
     if (sessions.isEmpty) {
-      return Center(
-        child: Text(
-          'Aucune partie enregistrée.',
-          style: TextStyle(color: Colors.grey.shade600),
+      return EmptyStateView(
+        icon: Icons.emoji_events_outlined,
+        title: 'Aucune partie enregistrée',
+        subtitle: 'Ajoute une partie depuis un jeu ou l\'historique global.',
+        action: FilledButton.icon(
+          onPressed: _addSession,
+          icon: const Icon(Icons.add),
+          label: const Text('Nouvelle partie'),
         ),
       );
     }
@@ -398,10 +440,15 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
 
   Widget _buildHistoryList(DateFormat dateFmt) {
     if (_groups.isEmpty) {
-      return Center(
-        child: Text(
-          'Aucune partie enregistrée.',
-          style: TextStyle(color: Colors.grey.shade600),
+      return EmptyStateView(
+        icon: Icons.history_edu_outlined,
+        title: 'Historique vide',
+        subtitle:
+            'Tes parties apparaîtront ici — même pour les jeux que tu ne possèdes pas encore.',
+        action: FilledButton.icon(
+          onPressed: _addSession,
+          icon: const Icon(Icons.add),
+          label: const Text('Enregistrer une partie'),
         ),
       );
     }
