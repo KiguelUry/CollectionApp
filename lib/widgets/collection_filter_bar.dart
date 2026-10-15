@@ -313,6 +313,35 @@ class CollectionFilterBar extends StatelessWidget {
                         ],
                       ),
                     ),
+                    if (showBoardgameGenreFilter && !showWishlistSortOptions)
+                      _filterSection(
+                        context,
+                        title: 'Parties',
+                        icon: Icons.casino_outlined,
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            _sheetChip(
+                              context,
+                              label: 'Tous',
+                              selected: !sheetFilters.unplayedOnly,
+                              onTap: () => apply(
+                                sheetFilters.copyWith(unplayedOnly: false),
+                              ),
+                            ),
+                            _sheetChip(
+                              context,
+                              key: const ValueKey('filter_unplayed'),
+                              label: 'Non joués (0 partie)',
+                              selected: sheetFilters.unplayedOnly,
+                              onTap: () => apply(
+                                sheetFilters.copyWith(unplayedOnly: true),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     if (useHolderLocationFilter &&
                         holderFilterOptions.isNotEmpty)
                       _filterSection(
@@ -715,12 +744,14 @@ class CollectionFilterBar extends StatelessWidget {
 
   Widget _sheetChip(
     BuildContext context, {
+    Key? key,
     required String label,
     required bool selected,
     required VoidCallback onTap,
     Color? color,
   }) {
     return FilterChip(
+      key: key,
       label: Text(label, style: const TextStyle(fontSize: 12)),
       selected: selected,
       onSelected: (_) => onTap(),

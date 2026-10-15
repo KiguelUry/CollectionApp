@@ -61,6 +61,37 @@ class PlayerIdentity {
   }
 }
 
+/// Clé de comparaison : casse et espaces ignorés (« Lou », « lou », « L ou »).
+String aliasCollisionKey(String name) =>
+    name.toLowerCase().replaceAll(RegExp(r'\s+'), '');
+
+/// Groupes de pseudos qui ne diffèrent que par la casse / les espaces.
+/// Les groupes déjà liés à une même identité sont ignorés.
+List<List<String>> findAliasCollisions(
+  Iterable<String> names, {
+  String? Function(String name)? identityIdOf,
+}) {
+  final buckets = <String, List<String>>{};
+  final seenRaw = <String>{};
+  for (final raw in names) {
+    final t = raw.trim();
+    if (t.isEmpty || !seenRaw.add(t)) continue;
+    final key = aliasCollisionKey(t);
+    if (key.isEmpty) continue;
+    buckets.putIfAbsent(key, () => []).add(t);
+  }
+  final out = <List<String>>[];
+  for (final group in buckets.values) {
+    if (group.length < 2) continue;
+    if (identityIdOf != null) {
+      final ids = group.map(identityIdOf).toSet();
+      if (ids.length == 1 && ids.first != null) continue;
+    }
+    out.add(group);
+  }
+  return out;
+}
+
 /// @Deprecated — alias de compat.
 typedef PlayerAliasGroup = PlayerIdentity;
 

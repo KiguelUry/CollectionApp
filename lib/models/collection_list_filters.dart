@@ -1,3 +1,4 @@
+import '../models/boardgame_play_session.dart';
 import '../models/collection_item.dart';
 import '../utils/boardgame_display.dart';
 import '../utils/boardgame_genres.dart';
@@ -73,6 +74,8 @@ class CollectionListFilters {
   String? wishlistMineUserId;
   /// N'afficher que les favoris (cœur).
   bool favoritesOnly;
+  /// Jeux jamais joués (0 partie) — « pile de la honte ».
+  bool unplayedOnly;
 
   CollectionListFilters({
     this.searchQuery = '',
@@ -96,6 +99,7 @@ class CollectionListFilters {
     this.wishlistMineOnly = false,
     this.wishlistMineUserId,
     this.favoritesOnly = false,
+    this.unplayedOnly = false,
   })  : groupIds = groupIds ?? <String>{},
         boardgameGenres = boardgameGenres ?? <String>{},
         videogamePlatforms = videogamePlatforms ?? <String>{},
@@ -120,6 +124,7 @@ class CollectionListFilters {
       cardSubcategories.isNotEmpty ||
       wishlistMineOnly ||
       favoritesOnly ||
+      unplayedOnly ||
       sort != CollectionSort.titleAsc;
 
   /// Filtres actifs hors tri (pour badge bouton Filtre).
@@ -139,7 +144,8 @@ class CollectionListFilters {
       cardRarities.isNotEmpty ||
       pokemonTypes.isNotEmpty ||
       cardSubcategories.isNotEmpty ||
-      favoritesOnly;
+      favoritesOnly ||
+      unplayedOnly;
 
   CollectionListFilters copyWith({
     String? searchQuery,
@@ -172,6 +178,7 @@ class CollectionListFilters {
     String? wishlistMineUserId,
     bool clearWishlistMine = false,
     bool? favoritesOnly,
+    bool? unplayedOnly,
   }) {
     return CollectionListFilters(
       searchQuery: searchQuery ?? this.searchQuery,
@@ -210,7 +217,15 @@ class CollectionListFilters {
           ? null
           : (wishlistMineUserId ?? this.wishlistMineUserId),
       favoritesOnly: favoritesOnly ?? this.favoritesOnly,
+      unplayedOnly: unplayedOnly ?? this.unplayedOnly,
     );
+  }
+
+  /// Parties enregistrées (historique détaillé, sinon compteur manuel).
+  static int playCountOf(CollectionItem item) {
+    final sessions = parseBoardgamePlays(item.metadata).length;
+    if (sessions > 0) return sessions;
+    return item.gamesPlayed ?? 0;
   }
 
   List<CollectionItem> apply(List<CollectionItem> items) {
@@ -225,6 +240,10 @@ class CollectionListFilters {
 
     if (favoritesOnly) {
       result = result.where((i) => i.isFavorite).toList();
+    }
+
+    if (unplayedOnly) {
+      result = result.where((i) => playCountOf(i) == 0).toList();
     }
 
     if (locationId != null) {

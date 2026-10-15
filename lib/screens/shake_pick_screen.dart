@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
+import '../utils/active_categories.dart';
 import '../utils/boardgame_display.dart';
 import '../utils/collection_item_filters.dart';
 import '../utils/supabase_embeds.dart';
@@ -36,6 +37,7 @@ class _ShakePickScreenState extends State<ShakePickScreen>
   List<CollectionItem> _allCandidates = [];
   ShakePickFilters _filters = const ShakePickFilters();
   CollectionCategory? _categoryFilter;
+  Set<CollectionCategory> _activeCategories = CollectionCategory.defaultActive;
   CollectionItem? _picked;
   bool _loading = true;
   bool _picking = false;
@@ -116,8 +118,11 @@ class _ShakePickScreenState extends State<ShakePickScreen>
         }
       }
 
+      // Une catégorie explicitement ouverte reste tirable même si masquée du hub.
+      final active = {...await ActiveCategories.load(), ?widget.category};
+      _activeCategories = active;
       final seen = <String>{};
-      _allCandidates = allRows
+      _allCandidates = ActiveCategories.filterRows(allRows, active)
           .where((r) => seen.add(r['id'] as String))
           .map((r) => CollectionItem.fromJson(r))
           .where(isShakePickCandidate)
@@ -303,7 +308,8 @@ class _ShakePickScreenState extends State<ShakePickScreen>
             child: Text('Toutes les catégories'),
           ),
           for (final c in CollectionCategory.menuValues)
-            DropdownMenuItem(value: c, child: Text(c.label)),
+            if (_activeCategories.contains(c))
+              DropdownMenuItem(value: c, child: Text(c.label)),
         ],
         onChanged: (c) {
           setState(() {

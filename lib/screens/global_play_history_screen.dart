@@ -12,6 +12,7 @@ import '../services/player_alias_service.dart';
 import '../widgets/boardgame_play_history_panel.dart';
 import '../widgets/boardgame_ranking_panel.dart';
 import '../widgets/bgg_network_image.dart';
+import '../widgets/orphan_attach_sheet.dart';
 import '../widgets/player_alias_linker_sheet.dart';
 
 /// Historique global des parties (tous jeux confondus).
@@ -150,6 +151,48 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
       );
     }
     if (mounted) _load();
+  }
+
+  Future<void> _attachOrphan(GlobalPlayHistoryEntry entry) async {
+    final orphanId = entry.orphanId;
+    if (orphanId == null) return;
+    final items = rankOrphanAttachCandidates(
+      await _service.fetchBoardgameItems(),
+      orphanTitle: entry.title,
+      orphanBggId: entry.bggId,
+    );
+    if (!mounted) return;
+    if (items.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Aucun jeu dans ta collection.')),
+      );
+      return;
+    }
+    final target = await showModalBottomSheet<CollectionItem>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => OrphanAttachSheet(
+        orphanTitle: entry.title,
+        candidates: items,
+      ),
+    );
+    if (target == null || !mounted) return;
+    final ok = await _service.attachOrphanToItem(
+      orphanId: orphanId,
+      item: target,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? 'Partie rattachée à « ${target.title} »'
+              : 'Partie introuvable (déjà rattachée ?)',
+        ),
+      ),
+    );
+    _load();
   }
 
   CollectionItem _fallbackItem(GlobalPlayHistoryEntry entry) {
@@ -405,6 +448,8 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
                     nested: true,
                     onTap: () => _openEntry(entry),
                     onRelaunch: () => _relaunchEntry(entry),
+                    onAttach:
+                        entry.isOrphan ? () => _attachOrphan(entry) : null,
                     onDelete: () => _deleteEntry(entry),
                   ),
               ],
@@ -419,6 +464,7 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
             imageUrl: group.imageUrl,
             onTap: () => _openEntry(entry),
             onRelaunch: () => _relaunchEntry(entry),
+            onAttach: entry.isOrphan ? () => _attachOrphan(entry) : null,
             onDelete: () => _deleteEntry(entry),
           );
         },
@@ -698,6 +744,7 @@ class _EntryTile extends StatelessWidget {
   final String title;
   final VoidCallback onTap;
   final VoidCallback? onRelaunch;
+  final VoidCallback? onAttach;
   final VoidCallback? onDelete;
   final String? imageUrl;
   final bool nested;
@@ -708,6 +755,7 @@ class _EntryTile extends StatelessWidget {
     required this.title,
     required this.onTap,
     this.onRelaunch,
+    this.onAttach,
     this.onDelete,
     this.imageUrl,
     this.nested = false,
@@ -834,6 +882,13 @@ class _EntryTile extends StatelessWidget {
                     icon: const Icon(Icons.add, size: 18),
                     label: const Text('Partie'),
                   ),
+                ),
+              if (onAttach != null)
+                IconButton(
+                  key: const ValueKey('attach_orphan'),
+                  icon: const Icon(Icons.link),
+                  tooltip: 'Rattacher à un jeu de ma collection',
+                  onPressed: onAttach,
                 ),
               if (onDelete != null)
                 IconButton(

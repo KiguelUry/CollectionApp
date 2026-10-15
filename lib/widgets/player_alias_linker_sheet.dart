@@ -15,6 +15,50 @@ Future<void> showPlayerAliasLinkerSheet(
   );
 }
 
+/// Avertissement « pseudos quasi identiques » avec action de fusion.
+class AliasCollisionWarning extends StatelessWidget {
+  final List<String> names;
+  final VoidCallback onMerge;
+  final bool enabled;
+
+  const AliasCollisionWarning({
+    super.key,
+    required this.names,
+    required this.onMerge,
+    this.enabled = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Colors.amber.shade800;
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+      decoration: BoxDecoration(
+        color: Colors.amber.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.45)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.warning_amber_rounded, color: color, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Doublon probable : ${names.map((n) => '« $n »').join(' · ')}',
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+          ),
+          TextButton(
+            onPressed: enabled ? onMerge : null,
+            child: const Text('Fusionner'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _PlayerAliasLinkerSheet extends StatefulWidget {
   final List<String> knownNames;
 
@@ -61,6 +105,41 @@ class _PlayerAliasLinkerSheetState extends State<_PlayerAliasLinkerSheet> {
         }
       }
     });
+  }
+
+  List<List<String>> get _collisions => findAliasCollisions(
+        widget.knownNames,
+        identityIdOf: (n) => PlayerAliasService.instance.identityFor(n)?.id,
+      ).where((g) => !_mergedCollisionKeys.contains(aliasCollisionKey(g.first)))
+          .toList();
+
+  final _mergedCollisionKeys = <String>{};
+
+  Future<void> _mergeCollision(List<String> names) async {
+    final existing = names
+        .map(PlayerAliasService.instance.identityFor)
+        .whereType<PlayerIdentity>()
+        .firstOrNull;
+    final display = existing?.displayName ?? names.first;
+    setState(() => _saving = true);
+    try {
+      final identity = await PlayerAliasService.instance.linkNames(
+        names,
+        displayName: display,
+        isMe: existing?.isMe ?? false,
+      );
+      await GlobalPlayHistoryService().renamePlayerAcrossHistory(
+        fromNames: identity.names,
+        toName: identity.displayName,
+      );
+      if (!mounted) return;
+      setState(() => _mergedCollisionKeys.add(aliasCollisionKey(names.first)));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Pseudos fusionnés sous « $display »')),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   Future<void> _confirm() async {
@@ -129,6 +208,12 @@ class _PlayerAliasLinkerSheetState extends State<_PlayerAliasLinkerSheet> {
                   color: scheme.onSurfaceVariant,
                 ),
               ),
+              for (final group in _collisions.take(3))
+                AliasCollisionWarning(
+                  names: group,
+                  enabled: !_saving,
+                  onMerge: () => _mergeCollision(group),
+                ),
               if (identities.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 Text(

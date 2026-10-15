@@ -156,6 +156,9 @@ enum CollectionCategory {
   static List<CollectionCategory> get focusMenuValues =>
       menuValues.where((c) => !labCategories.contains(c)).toList();
 
+  /// Catégories actives par défaut (hub « focus ») : base des stats et tirages.
+  static Set<CollectionCategory> get defaultActive => focusMenuValues.toSet();
+
   /// Libellé court pour les totaux (ex. « 5 jeux », « 1 livre »).
   String countSummary(int total) {
     if (total == 0) return 'Vide';

@@ -37,6 +37,9 @@ import '../widgets/friend_ratings_panel.dart';
 import '../widgets/item_aspect_ratings_section.dart';
 import '../widgets/videogame_platform_picker.dart';
 import '../widgets/restaurant_visits_panel.dart';
+import '../widgets/temporary_loan_toggle.dart';
+import '../widgets/cost_per_play_badge.dart';
+import '../utils/wishlist_market_metadata.dart';
 import '../services/boardgame_expansion_service.dart';
 import '../utils/tech_warranty.dart';
 import '../utils/boardgame_display.dart';
@@ -1112,6 +1115,21 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                           _saveNow();
                         },
                       ),
+                      if (!isWishlist && !_item.isSold)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: CostPerPlayBadge(
+                            purchasePrice: _item.purchasePrice,
+                            estimatedValue:
+                                marketSecondhandPriceFromMetadata(
+                                      _item.metadata,
+                                    ) ??
+                                    marketNewPriceMinFromMetadata(
+                                      _item.metadata,
+                                    ),
+                            plays: parseBoardgamePlays(_item.metadata).length,
+                          ),
+                        ),
                       if (!isWishlist) ...[
                         const SizedBox(height: 12),
                         BoardgameRulesBento(
@@ -1284,6 +1302,30 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                                     }
                                   },
                             ),
+                            if (!ro &&
+                                isAwayFromHome(
+                                  _item,
+                                  meUserId: Supabase
+                                      .instance.client.auth.currentUser?.id,
+                                )) ...[
+                              const SizedBox(height: 8),
+                              TemporaryLoanToggle(
+                                isLoan: _item.isOnLoan,
+                                loanedAt: _item.loanedAt,
+                                onChanged: (isLoan, date) {
+                                  setState(() {
+                                    _item = applyTemporaryLoan(
+                                      _item,
+                                      isLoan: isLoan,
+                                      loanedAt: date,
+                                      meUserId: Supabase
+                                          .instance.client.auth.currentUser?.id,
+                                    );
+                                  });
+                                  _saveNow();
+                                },
+                              ),
+                            ],
                           ],
                         ),
                       ),

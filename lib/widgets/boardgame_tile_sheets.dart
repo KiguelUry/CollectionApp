@@ -13,6 +13,7 @@ import 'bgg_community_rating_panel.dart';
 import 'compact_whereabouts_dropdown.dart';
 import 'favorite_heart_button.dart';
 import 'star_rating_bar.dart';
+import 'temporary_loan_toggle.dart';
 
 Future<void> showBoardgameTileRatingSheet(
   BuildContext context, {
@@ -239,6 +240,8 @@ class _BoardgameTileLocationSheetState
   bool _saving = false;
   Timer? _saveDebounce;
 
+  String? get _meUserId => Supabase.instance.client.auth.currentUser?.id;
+
   @override
   void initState() {
     super.initState();
@@ -300,6 +303,7 @@ class _BoardgameTileLocationSheetState
       await Supabase.instance.client.from('collection_items').update({
         'location_user_id': whereabouts['location_user_id'],
         'metadata': meta,
+        ...loanDbFields(_item),
       }).eq('id', _item.id);
       CollectionRefresh.instance.bump();
     } catch (_) {
@@ -378,6 +382,26 @@ class _BoardgameTileLocationSheetState
                     }
                   },
                 ),
+              if (!widget.readOnly &&
+                  isAwayFromHome(_item, meUserId: _meUserId)) ...[
+                const SizedBox(height: 8),
+                TemporaryLoanToggle(
+                  isLoan: _item.isOnLoan,
+                  loanedAt: _item.loanedAt,
+                  enabled: !_saving,
+                  onChanged: (isLoan, date) {
+                    setState(() {
+                      _item = applyTemporaryLoan(
+                        _item,
+                        isLoan: isLoan,
+                        loanedAt: date,
+                        meUserId: _meUserId,
+                      );
+                    });
+                    _schedulePersist();
+                  },
+                ),
+              ],
               if (_saving) ...[
                 const SizedBox(height: 12),
                 const LinearProgressIndicator(minHeight: 2),

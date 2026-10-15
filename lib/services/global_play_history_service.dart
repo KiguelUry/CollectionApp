@@ -337,6 +337,34 @@ class GlobalPlayHistoryService {
     await saveOrphans(orphans);
   }
 
+  /// Rattache une partie orpheline à un jeu de la collection.
+  Future<bool> attachOrphanToItem({
+    required String orphanId,
+    required CollectionItem item,
+  }) async {
+    final orphans = await loadOrphans();
+    final i = orphans.indexWhere((o) => o.id == orphanId);
+    if (i < 0) return false;
+
+    final row = await _client
+        .from('collection_items')
+        .select(SupabaseEmbeds.collectionItemDetail)
+        .eq('id', item.id)
+        .maybeSingle();
+    final fresh = row == null
+        ? item
+        : CollectionItem.fromJson(Map<String, dynamic>.from(row as Map));
+
+    final sessions = mergeSessionIntoHistory(
+      parseBoardgamePlays(fresh.metadata),
+      orphans[i].session,
+    );
+    await saveSessionToItem(fresh, sessions);
+    orphans.removeAt(i);
+    await saveOrphans(orphans);
+    return true;
+  }
+
   Future<void> linkOrphansToItem(CollectionItem item) async {
     final bggId = item.metadata?['bgg_id']?.toString();
     if (bggId == null || bggId.isEmpty) return;
@@ -354,6 +382,52 @@ class GlobalPlayHistoryService {
       orphans.where((o) => o.bggId != bggId).toList(),
     );
   }
+}
+
+/// Ajoute [session] à l'historique et retrie (plus récent en premier).
+List<BoardgamePlaySession> mergeSessionIntoHistory(
+  List<BoardgamePlaySession> sessions,
+  BoardgamePlaySession session,
+) {
+  final indexed = [
+    for (var i = 0; i < sessions.length; i++) (index: i + 1, s: sessions[i]),
+    (index: 0, s: session),
+  ];
+  indexed.sort((a, b) => compareBoardgamePlaySessions(a.s, a.index, b.s, b.index));
+  return [for (final e in indexed) e.s];
+}
+
+/// Jeux candidats pour rattacher une partie orpheline : même BGG id d'abord,
+/// puis titres proches, puis le reste par ordre alphabétique.
+List<CollectionItem> rankOrphanAttachCandidates(
+  List<CollectionItem> items, {
+  required String orphanTitle,
+  String? orphanBggId,
+}) {
+  String norm(String s) => s.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+  final target = norm(orphanTitle);
+  int score(CollectionItem item) {
+    final bgg = item.metadata?['bgg_id']?.toString();
+    if (orphanBggId != null && orphanBggId.isNotEmpty && bgg == orphanBggId) {
+      return 0;
+    }
+    final t = norm(item.title);
+    if (t == target) return 1;
+    if (target.isNotEmpty &&
+        t.isNotEmpty &&
+        (t.contains(target) || target.contains(t))) {
+      return 2;
+    }
+    return 3;
+  }
+
+  final sorted = List<CollectionItem>.from(items);
+  sorted.sort((a, b) {
+    final s = score(a).compareTo(score(b));
+    if (s != 0) return s;
+    return norm(a.title).compareTo(norm(b.title));
+  });
+  return sorted;
 }
 
 /// Regroupe les parties consécutives d'un même jeu.

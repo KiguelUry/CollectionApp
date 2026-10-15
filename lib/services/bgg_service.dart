@@ -8,6 +8,7 @@ import 'package:xml/xml.dart';
 import '../config/app_env.dart';
 import '../config/supabase_public_config.dart';
 import '../models/bgg_expansion.dart';
+import '../utils/retry_backoff.dart';
 import '../utils/search_relevance.dart';
 
 enum BggSearchSort {
@@ -55,6 +56,11 @@ class BggService {
   static const _maxMetaLookup = 24;
   static const _thingChunkSize = 8;
   static const _maxPollAttempts = 10;
+  static const _rateLimitBackoff = BackoffPolicy(
+    initialDelay: Duration(milliseconds: 900),
+    maxDelay: Duration(seconds: 15),
+    maxAttempts: 5,
+  );
 
   /// Jeux de société + JDR narratifs (ex. Alice is Missing) + extensions.
   static const _searchTypes = 'boardgame,rpgitem,boardgameexpansion';
@@ -97,7 +103,20 @@ class BggService {
         'apikey': anon,
         'Authorization': 'Bearer $anon',
       };
-      final response = await http.get(uri, headers: headers);
+      final response = await retryWithBackoff<http.Response>(
+        (_) async {
+          await _throttleBggRequest();
+          return http.get(uri, headers: headers);
+        },
+        shouldRetry: (r) =>
+            isRetryableHttpStatus(r.statusCode) ||
+            isRateLimitedJsonBody(r.body),
+        policy: _rateLimitBackoff,
+        onRetry: (attempt, _) {
+          lastSearchStatus =
+              'BGG surchargé — nouvel essai ($attempt/${_rateLimitBackoff.maxAttempts})…';
+        },
+      );
       if (response.statusCode != 200 || response.body.isEmpty) {
         lastSearchError = response.statusCode == 0
             ? 'Réseau bloqué. Vérifie la fonction bgg-api sur Supabase.'
@@ -217,15 +236,16 @@ class BggService {
     final headers = _headers;
 
     http.Response? last;
+    var rateLimitRetries = 0;
     for (var attempt = 0; attempt < _maxPollAttempts; attempt++) {
       await _throttleBggRequest();
       last = await http.get(target, headers: headers);
-      if (last.statusCode == 429) {
+      if (isRetryableHttpStatus(last.statusCode)) {
         lastSearchStatus =
             'BGG surchargé — nouvel essai (${attempt + 1}/$_maxPollAttempts)…';
         lastSearchError =
             'BGG limite les requêtes (trop d’appels). Nouvel essai automatique…';
-        await Future.delayed(Duration(milliseconds: 900 + attempt * 700));
+        await Future.delayed(_rateLimitBackoff.delayFor(rateLimitRetries++));
         continue;
       }
       final pending =

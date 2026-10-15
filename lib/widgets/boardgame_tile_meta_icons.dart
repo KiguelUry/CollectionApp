@@ -199,9 +199,14 @@ class BoardgameTileMetaIcons extends StatelessWidget {
                 onTap: () => _showLocationSheet(context),
                 behavior: HitTestBehavior.opaque,
                 child: _metaChip(
-                  icon: Icons.place_outlined,
+                  key: item.isOnLoan ? const ValueKey('loan_location_chip') : null,
+                  icon: item.isOnLoan
+                      ? Icons.handshake_outlined
+                      : Icons.place_outlined,
                   suffix: location ?? '—',
-                  color: Colors.deepOrange.shade400,
+                  color: item.isOnLoan
+                      ? Colors.blue.shade600
+                      : Colors.deepOrange.shade400,
                 ),
               ),
             ),
@@ -226,12 +231,14 @@ class BoardgameTileMetaIcons extends StatelessWidget {
   }
 
   Widget _metaChip({
+    Key? key,
     required IconData icon,
     String? suffix,
     required Color color,
     bool shrinkSuffix = false,
   }) {
     return Container(
+      key: key,
       padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),

@@ -23,6 +23,7 @@ import '../utils/category_hub_order.dart';
 import '../utils/collection_item_scope.dart';
 import '../utils/boardgame_expansions.dart';
 import '../utils/hub_category_visibility.dart';
+import '../utils/hub_greeting.dart';
 import '../services/profile_cache_service.dart';
 import '../widgets/profile_avatar.dart';
 import 'category_manage_screen.dart';
@@ -64,6 +65,16 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
 
   String get _username =>
       ProfileCacheService.instance.profile?.username ?? 'Aventurier';
+
+  HubGreeting? _greeting;
+
+  String get _greetingText {
+    final g = _greeting;
+    if (g == null || g.source == HubGreetingSource.pseudo) {
+      return 'Salut $_username';
+    }
+    return g.text;
+  }
 
   Color get _profileAccent {
     final hex = ProfileCacheService.instance.profile?.accentColor;
@@ -167,6 +178,13 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
         _boardgameExpansionCount = boardgameExpansionCount;
         _customCounts = customCounts;
         _orderedTiles = orderedTiles;
+        _greeting ??= pickHubGreeting(
+          username: _username,
+          counts: counts,
+          active: CategoryHubPreferences.instance
+              .filterVisible(CollectionCategory.menuValues)
+              .toSet(),
+        );
         _loadingCounts = false;
       });
       if (loadError != null) {
@@ -359,13 +377,13 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
                       ],
                     ).createShader(bounds),
                     child: Text(
-                      'Salut $_username',
+                      _greetingText,
                       style: greetingStyle?.copyWith(color: Colors.white),
                     ),
                   )
                 else
                   Text(
-                    'Salut $_username',
+                    _greetingText,
                     style: greetingStyle?.copyWith(
                       color: Color.lerp(accent, const Color(0xFF1A1033), 0.72),
                     ),
