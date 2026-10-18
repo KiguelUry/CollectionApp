@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/friend_service.dart';
-import 'profile_avatar.dart';
+import 'friend_identity.dart';
 
 /// Résultat d'un dialogue de prêt.
 class LoanDialogResult {
@@ -156,36 +156,34 @@ class _LoanItemDialogState extends State<LoanItemDialog> {
                       style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
                     )
                   else
-                    DropdownButtonFormField<String>(
-                      initialValue: _selectedProfileId,
-                      decoration: const InputDecoration(
-                        labelText: 'Choisir un ami',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: _friends
-                          .map(
-                            (f) => DropdownMenuItem(
-                              value: f['profile_id'] as String,
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  ProfileAvatar(
-                                    avatarUrl: f['avatar_url'] as String?,
-                                    accentColorHex:
-                                        f['accent_color'] as String?,
-                                    fallbackInitial:
-                                        f['username'] as String? ?? '?',
-                                    radius: 16,
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Text(f['username'] as String),
-                                ],
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 240),
+                      child: ListView(
+                        shrinkWrap: true,
+                        children: [
+                          for (final f in _friends)
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: FriendAvatarButton(
+                                profileId: f['profile_id'] as String,
+                                username: f['username'] as String? ?? 'Ami',
+                                avatarUrl: f['avatar_url'] as String?,
+                                accentColor: f['accent_color'] as String?,
+                              ),
+                              title: Text(f['username'] as String? ?? 'Ami'),
+                              trailing: Radio<String>(
+                                value: f['profile_id'] as String,
+                                groupValue: _selectedProfileId,
+                                onChanged: (v) =>
+                                    setState(() => _selectedProfileId = v),
+                              ),
+                              onTap: () => setState(
+                                () => _selectedProfileId =
+                                    f['profile_id'] as String,
                               ),
                             ),
-                          )
-                          .toList(),
-                      onChanged: (v) =>
-                          setState(() => _selectedProfileId = v),
+                        ],
+                      ),
                     ),
                 ],
               ),

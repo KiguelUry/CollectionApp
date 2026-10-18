@@ -17,7 +17,7 @@ class CollectionInsightsService {
 
     final insights = <CollectionInsight>[];
 
-    final rows = await CollectionItemScope.personal(
+    final rows = await CollectionItemScope.ownedByUser(
       _client.from('collection_items').select(
         'category, title, metadata, loaned_to_id, loaned_to_name, loaned_at',
       ),

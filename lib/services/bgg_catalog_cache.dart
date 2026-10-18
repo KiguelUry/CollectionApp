@@ -64,7 +64,7 @@ class SupabaseBggCacheStore implements BggCacheStore {
 class BggCatalogCache {
   BggCatalogCache({
     BggCacheStore? store,
-    this.ttl = const Duration(days: 14),
+    this.ttl = const Duration(days: 30),
     DateTime Function()? clock,
   }) : _store = store ?? SupabaseBggCacheStore(),
        _clock = clock ?? DateTime.now;
@@ -83,6 +83,13 @@ class BggCatalogCache {
 
   @visibleForTesting
   int get inFlightCount => _inFlight.length;
+
+  /// Lecture synchrone du cache mémoire (aucun appel réseau).
+  Object? peekFresh(String bggId, BggCacheKind kind) {
+    final mem = _memory[_key(bggId.trim(), kind)];
+    if (mem != null && mem.isFresh(_clock(), ttl)) return mem.payload;
+    return null;
+  }
 
   /// [fetch] renvoie `null` si BGG n'a rien donné (non mis en cache).
   Future<Object?> getOrFetch(
@@ -147,4 +154,60 @@ class BggCatalogCache {
 
   @visibleForTesting
   void clearMemory() => _memory.clear();
+}
+
+/// Résultats de recherche BGG partagés entre utilisateurs (`bgg_search_cache`).
+/// Table optionnelle : toute erreur (table absente, hors ligne) est ignorée.
+class BggSearchSharedCache {
+  static const _table = 'bgg_search_cache';
+  static const ttl = Duration(days: 7);
+
+  static String normalizeKey(String key) =>
+      key.toLowerCase().trim().replaceAll(RegExp(r'\s+'), ' ');
+
+  /// Renvoie les jeux et leur fraîcheur, ou `null` si absent.
+  static Future<({List<Map<String, String>> games, bool fresh})?> read(
+    String key,
+  ) async {
+    try {
+      final row = await Supabase.instance.client
+          .from(_table)
+          .select('payload, fetched_at')
+          .eq('query_key', normalizeKey(key))
+          .maybeSingle();
+      if (row == null || row['payload'] is! List) return null;
+      final at = DateTime.tryParse(row['fetched_at']?.toString() ?? '');
+      final games = [
+        for (final g in row['payload'] as List)
+          if (g is Map)
+            {
+              for (final e in g.entries)
+                if (e.value != null) e.key.toString(): e.value.toString(),
+            },
+      ];
+      if (games.isEmpty) return null;
+      final fresh = at != null && DateTime.now().difference(at) < ttl;
+      return (games: games, fresh: fresh);
+    } catch (e) {
+      if (kDebugMode) debugPrint('BGG search cache read: $e');
+      return null;
+    }
+  }
+
+  static Future<void> write(
+    String key,
+    List<Map<String, String>> games,
+  ) async {
+    if (games.isEmpty) return;
+    try {
+      if (Supabase.instance.client.auth.currentUser == null) return;
+      await Supabase.instance.client.from(_table).upsert({
+        'query_key': normalizeKey(key),
+        'payload': games,
+        'fetched_at': DateTime.now().toUtc().toIso8601String(),
+      });
+    } catch (e) {
+      if (kDebugMode) debugPrint('BGG search cache write: $e');
+    }
+  }
 }

@@ -57,15 +57,12 @@ void main() {
 
       expect(
         find.text('Cette personne est dans ma liste d\'amis'),
-        findsOneWidget,
+        findsNothing,
       );
-      expect(find.byKey(const ValueKey('friend_selector')), findsNothing);
 
-      await tester.tap(find.byKey(const ValueKey('is_friend_checkbox')));
+      await tester.tap(find.byKey(const ValueKey('pick_from_contacts')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('friend_selector')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('igor42').last);
+      await tester.tap(find.text('igor42'));
       await tester.pumpAndSettle();
 
       final nameField = find.widgetWithText(TextField, 'Nom');
@@ -94,7 +91,7 @@ void main() {
       await _pumpEditor(tester, friends: const []);
       await tester.tap(find.text('Ajouter un joueur'));
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('is_friend_checkbox')), findsNothing);
+      expect(find.byKey(const ValueKey('pick_from_contacts')), findsNothing);
     });
   });
 

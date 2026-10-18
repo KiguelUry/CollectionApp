@@ -58,7 +58,7 @@ class _MarketplaceInquirySheetState extends State<_MarketplaceInquirySheet> {
       return;
     }
     try {
-      final rows = await CollectionItemScope.personal(
+      final rows = await CollectionItemScope.ownedByUser(
         Supabase.instance.client
             .from('collection_items')
             .select(SupabaseEmbeds.collectionItemList),

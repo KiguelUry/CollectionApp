@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/group_service.dart';
+import 'friend_identity.dart';
 import 'profile_avatar.dart';
 
 Future<void> showGroupMembersSheet(
@@ -172,6 +173,17 @@ class _GroupMembersSheetState extends State<_GroupMembersSheet> {
                                     isSelf || canEdit;
 
                                 return ListTile(
+                                  onTap: profileId == null || isSelf
+                                      ? null
+                                      : () => openFriendProfile(
+                                            context,
+                                            profileId: profileId,
+                                            username: username,
+                                            avatarUrl:
+                                                profile?['avatar_url'] as String?,
+                                            accentColor: profile?['accent_color']
+                                                as String?,
+                                          ),
                                   leading: ProfileAvatar(
                                     avatarUrl:
                                         profile?['avatar_url'] as String?,

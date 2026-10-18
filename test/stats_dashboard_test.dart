@@ -141,13 +141,26 @@ void main() {
         _row('4', 'boardgame'),
       ];
       final d = StatsDashboard.fromRows(rows, active: active);
-      expect(d.purchaseValue, 80);
+      // Prix de la ligne = 1er exemplaire seulement (pas × quantité).
+      expect(d.purchaseValue, 40);
       expect(d.estimatedValue, closeTo(43.5, 0.001));
       expect(d.valuedCount, 3);
       expect(d.hasValue, isTrue);
       expect(d.topValued.first.id, '1');
       expect(d.topValued.first.isEstimate, isFalse);
       expect(d.topValued[1].isEstimate, isTrue);
+    });
+
+    test('prix par exemplaire (copy_units) additionnés', () {
+      final d = StatsDashboard.fromRows([
+        _row('1', 'boardgame', price: 15, qty: 2, meta: {
+          'copy_units': [
+            {'purchase_price': 15},
+            {'purchase_price': 22},
+          ],
+        }),
+      ], active: active);
+      expect(d.purchaseValue, 37);
     });
 
     test('aucune valeur → hasValue faux', () {

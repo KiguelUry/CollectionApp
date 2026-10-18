@@ -5,7 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../models/boardgame_score_grid.dart';
 import '../models/friend_choice.dart';
-import 'friend_link_selector.dart';
+import 'friend_identity.dart';
 
 /// Palette de 20 couleurs contrastées pour colonnes joueur / équipe.
 const List<Color> kBoardgameColumnPalette = [
@@ -99,6 +99,9 @@ class BoardgameScoreGridEditor extends StatefulWidget {
   /// Injectable pour les tests (tirage « Qui commence ? »).
   final Random? random;
 
+  /// Scores ou joueurs modifiés (recalcul gagnant auto côté parent).
+  final VoidCallback? onScoresChanged;
+
   const BoardgameScoreGridEditor({
     super.key,
     required this.initialGrid,
@@ -114,6 +117,7 @@ class BoardgameScoreGridEditor extends StatefulWidget {
     this.friendChoices = const [],
     this.onFriendLinked,
     this.random,
+    this.onScoresChanged,
   });
 
   @override
@@ -333,7 +337,10 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     );
   }
 
-  void _localRefresh() => setState(() => _revision++);
+  void _localRefresh() {
+    setState(() => _revision++);
+    widget.onScoresChanged?.call();
+  }
 
   bool get _hasTableContent {
     if (_playerControllers.any((c) => c.text.trim().isNotEmpty)) return true;
@@ -782,20 +789,86 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                     decoration: InputDecoration(
                       labelText: 'Nom',
                       hintText: 'Prénom ou pseudo',
-                      suffixIcon: widget.onPickPlayer == null
+                      suffixIcon: widget.onPickPlayer == null &&
+                              widget.friendChoices.isEmpty
                           ? null
                           : IconButton(
                               key: const ValueKey('pick_from_contacts'),
                               icon: const Icon(Icons.person_search_outlined),
-                              tooltip: 'Depuis mes contacts',
+                              tooltip: 'Amis ou contacts',
                               onPressed: () async {
-                                final picked = await widget.onPickPlayer!();
-                                final name = picked?.trim() ?? '';
-                                if (name.isEmpty || !context.mounted) return;
+                                final picked = await showModalBottomSheet<Object>(
+                                  context: context,
+                                  showDragHandle: true,
+                                  builder: (pickCtx) => SafeArea(
+                                    child: ListView(
+                                      shrinkWrap: true,
+                                      children: [
+                                        const ListTile(
+                                          title: Text(
+                                            'Mes amis sur l\'app',
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                        ),
+                                        if (widget.friendChoices.isEmpty)
+                                          const ListTile(
+                                            dense: true,
+                                            title: Text('Aucun ami pour l\'instant'),
+                                          )
+                                        else
+                                          for (final f in widget.friendChoices)
+                                            ListTile(
+                                              leading: FriendAvatarButton(
+                                                profileId: f.profileId,
+                                                username: f.username,
+                                                avatarUrl: f.avatarUrl,
+                                                accentColor: f.accentColor,
+                                              ),
+                                              title: Text(f.username),
+                                              trailing: const Icon(Icons.add),
+                                              onTap: () =>
+                                                  Navigator.pop(pickCtx, f),
+                                            ),
+                                        if (widget.onPickPlayer != null) ...[
+                                          const Divider(),
+                                          ListTile(
+                                            leading: const Icon(
+                                              Icons.contacts_outlined,
+                                            ),
+                                            title: const Text(
+                                              'Contacts enregistrés',
+                                            ),
+                                            onTap: () async {
+                                              final name =
+                                                  await widget.onPickPlayer!();
+                                              if (pickCtx.mounted) {
+                                                Navigator.pop(
+                                                  pickCtx,
+                                                  name ?? '',
+                                                );
+                                              }
+                                            },
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                );
+                                if (!context.mounted || picked == null) return;
                                 setSheetState(() {
-                                  nameCtrl.text = name;
+                                  if (picked is FriendChoice) {
+                                    friend = picked;
+                                    isFriend = true;
+                                    nameCtrl.text = picked.username;
+                                  } else {
+                                    final name = picked.toString().trim();
+                                    if (name.isEmpty) return;
+                                    nameCtrl.text = name;
+                                  }
                                   nameCtrl.selection = TextSelection.collapsed(
-                                    offset: name.length,
+                                    offset: nameCtrl.text.length,
                                   );
                                 });
                               },
@@ -803,21 +876,17 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                     ),
                     textInputAction: TextInputAction.done,
                   ),
-                  FriendLinkSelector(
-                    friends: widget.friendChoices,
-                    linked: isFriend,
-                    selected: friend,
-                    onLinkedChanged: (v) => setSheetState(() {
-                      isFriend = v;
-                      if (!isFriend) friend = null;
-                    }),
-                    onSelected: (f) => setSheetState(() {
-                      friend = f;
-                      if (f != null && nameCtrl.text.trim().isEmpty) {
-                        nameCtrl.text = f.username;
-                      }
-                    }),
-                  ),
+                  if (isFriend && friend != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        'Lié à ${friend!.username} sur l\'app',
+                        style: TextStyle(
+                          color: Colors.teal.shade700,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
                   if (widget.useTeams) ...[
                     const SizedBox(height: 10),
                     DropdownButtonFormField<String>(

@@ -14,26 +14,12 @@ import '../utils/boardgame_language.dart';
 
 /// Prix neufs (BoardGamePrices) + estimation occasion + enrichissement metadata.
 class BoardgameMarketService {
+  static const marketPricesTtl = Duration(hours: 24);
   static const _siteName = 'collectingo.app';
   static const _historyMax = 40;
-  static const _secondhandRatio = 0.52;
+  static const outlierFloorRatio = 0.45;
+  static const secondhandOfMedian = 0.65;
   static const _preferredCountries = {'FR', 'BE', 'NL', 'DE', 'GB', 'ES', 'IT'};
-  static const _trustedStoreHosts = {
-    'philibertnet.com',
-    'ludum.fr',
-    'amazon.fr',
-    'amazon.de',
-    'amazon.co.uk',
-    'amazon.es',
-    'amazon.it',
-    'esdevium.com',
-    'fantasy-inspirations.com',
-    'board-game.co.uk',
-    'zavvi.com',
-    'fnac.com',
-    'cultura.com',
-    'jeuxvideoclub.com',
-  };
 
   static bool get _webProxyReady =>
       AppEnv.supabaseUrl.isNotEmpty && AppEnv.supabaseAnonKey.isNotEmpty;
@@ -68,6 +54,16 @@ class BoardgameMarketService {
     }
     if (market.stores.isNotEmpty) {
       patch[kStoresPrices] = market.stores.map((e) => e.toJson()).toList();
+      final summary = summarizePositivePrices(
+        market.stores.map((s) => s.productEur ?? s.priceEur),
+      );
+      if (summary != null) {
+        patch[kMarketPriceMin] = summary.min;
+        patch[kMarketPriceMax] = summary.max;
+        patch[kMarketPriceAvg] = summary.avg;
+        patch[kMarketNewPriceMin] = summary.min;
+        patch[kMarketSecondhandPrice] = summary.secondhand;
+      }
     }
     if (market.languages.isNotEmpty) {
       patch[kBggLanguages] = market.languages.toList();
@@ -92,14 +88,14 @@ class BoardgameMarketService {
     if (bggId == null || bggId.isEmpty) return;
 
     final fetchedAt = item.metadata?[kMarketPricesFetchedAt]?.toString();
-    if (fetchedAt != null) {
+    if (fetchedAt != null && !cachedPricesNeedRefresh(item.metadata)) {
       final at = DateTime.tryParse(fetchedAt);
       final hasPrices =
           marketSecondhandPriceFromMetadata(item.metadata) != null ||
           marketNewPriceMinFromMetadata(item.metadata) != null;
       if (at != null &&
           hasPrices &&
-          DateTime.now().difference(at).inHours < 20) {
+          DateTime.now().difference(at) < marketPricesTtl) {
         return;
       }
     }
@@ -113,6 +109,31 @@ class BoardgameMarketService {
         .update({'metadata': meta})
         .eq('id', item.id);
     CollectionRefresh.instance.bump();
+  }
+
+  /// Enrichit les jeux possédés sans prix marché (tâche de fond, lot limité).
+  static Future<int> enrichOwnedBatch(
+    Iterable<CollectionItem> items, {
+    int maxItems = 10,
+  }) async {
+    var done = 0;
+    for (final item in items) {
+      if (done >= maxItems) break;
+      if (item.isWishlist || item.isSold) continue;
+      final bggId = item.metadata?['bgg_id']?.toString();
+      if (bggId == null || bggId.isEmpty) continue;
+      final hasPrice =
+          !cachedPricesNeedRefresh(item.metadata) &&
+          (marketSecondhandPriceFromMetadata(item.metadata) != null ||
+              marketNewPriceMinFromMetadata(item.metadata) != null);
+      if (hasPrice) continue;
+      try {
+        await enrichItemMetadata(item);
+        done++;
+      } catch (_) {}
+      await Future<void>.delayed(const Duration(milliseconds: 320));
+    }
+    return done;
   }
 
   static Future<void> enrichWishlistBatch(
@@ -189,20 +210,12 @@ class BoardgameMarketService {
 
     final stores = <StorePriceEntry>[];
     final languages = <String>{};
-    double? minInStock;
-    double? minAny;
 
     for (final item in items) {
       if (item is! Map) continue;
       final prices = item['prices'];
       if (prices is! List) continue;
-      final lang = (item['versions'] as Map?)?['lang'];
-      if (lang is List) {
-        for (final l in lang) {
-          final code = normalizeBoardgameLanguageCode(l.toString());
-          if (code.isNotEmpty) languages.add(code);
-        }
-      }
+      _collectLanguagesFromVersions(item['versions'], languages);
 
       for (final p in prices) {
         if (p is! Map) continue;
@@ -215,28 +228,13 @@ class BoardgameMarketService {
         final inStock = stock == 'Y';
         final country = p['country']?.toString();
         final link = p['link']?.toString();
-        if (link != null && link.isNotEmpty && !_isTrustedStore(link)) {
-          continue;
-        }
-        if (country != null &&
-            country.isNotEmpty &&
-            !_preferredCountries.contains(country)) {
-          continue;
-        }
-
-        if (inStock) {
-          minInStock = minInStock == null
-              ? productEur
-              : (productEur < minInStock ? productEur : minInStock);
-        }
-        minAny = minAny == null
-            ? productEur
-            : (productEur < minAny ? productEur : minAny);
+        final explicitName = p['name']?.toString().trim();
 
         final label = _storeLabel(
           country: country,
-          lang: lang is List && lang.isNotEmpty ? lang.first.toString() : null,
+          lang: _firstLanguageCode(item['versions']),
           url: link,
+          explicitName: explicitName,
         );
         stores.add(
           StorePriceEntry(
@@ -278,44 +276,122 @@ class BoardgameMarketService {
       uniqueStores = filteredStores;
     }
 
-    final newMin = minInStock ?? minAny;
-    final secondhand = newMin != null
-        ? (newMin * _secondhandRatio * 10).round() / 10
-        : null;
+    final summary = summarizePositivePrices(
+      uniqueStores.map((s) => s.productEur ?? s.priceEur),
+    );
+    if (summary == null) return null;
+    final floor = summary.median * outlierFloorRatio;
+    final kept = uniqueStores
+        .where((s) => (s.productEur ?? s.priceEur) + 1e-9 >= floor)
+        .toList();
 
     return _MarketFetchResult(
-      newMinEur: newMin,
-      secondhandEstimateEur: secondhand,
-      stores: uniqueStores.take(12).toList(),
+      newMinEur: summary.min,
+      secondhandEstimateEur: summary.secondhand,
+      stores: (kept.isEmpty ? uniqueStores : kept).take(12).toList(),
       languages: languages,
     );
   }
 
-  static bool _isTrustedStore(String? url) {
-    if (url == null || url.isEmpty) return false;
-    final host = Uri.tryParse(url)?.host.toLowerCase() ?? '';
-    if (host.isEmpty) return false;
-    return _trustedStoreHosts.any((h) => host.contains(h));
+  /// Médiane, puis retrait des offres sous 45 % de cette médiane.
+  /// L'occasion vaut ~65 % de la médiane des offres gardées.
+  static MarketPriceSummary? summarizePositivePrices(Iterable<double> raw) {
+    final prices = raw.where((p) => p > 0).toList()..sort();
+    if (prices.isEmpty) return null;
+    final median = _median(prices);
+    final floor = median * outlierFloorRatio;
+    final kept = prices.where((p) => p + 1e-9 >= floor).toList();
+    final use = kept.isEmpty ? <double>[median] : kept;
+    final avg = use.reduce((a, b) => a + b) / use.length;
+    final med = _median(use);
+    return MarketPriceSummary(
+      min: use.first,
+      avg: (avg * 10).round() / 10,
+      max: use.last,
+      median: med,
+      secondhand: ((med * secondhandOfMedian) * 10).round() / 10,
+    );
+  }
+
+  static bool cachedPricesNeedRefresh(Map<String, dynamic>? meta) {
+    final summary = summarizePositivePrices(
+      storesPricesFromMetadata(meta).map((s) => s.productEur ?? s.priceEur),
+    );
+    if (summary == null) return false;
+    final storedMin = marketPriceMinFromMetadata(meta);
+    final storedSecond = marketSecondhandPriceFromMetadata(meta);
+    if (storedMin != null && (storedMin - summary.min).abs() > 0.4) {
+      return true;
+    }
+    if (storedSecond != null &&
+        (storedSecond - summary.secondhand).abs() > 0.4) {
+      return true;
+    }
+    return false;
+  }
+
+  static double _median(List<double> sorted) {
+    final n = sorted.length;
+    if (n == 0) return 0;
+    if (n.isOdd) return sorted[n ~/ 2];
+    return (sorted[n ~/ 2 - 1] + sorted[n ~/ 2]) / 2;
   }
 
   static String vintedSearchUrl(String title) {
-    // catalog[]=4881 = catégorie « Jeux de société » (Vinted FR).
-    return Uri.https('www.vinted.fr', '/catalog', {
-      'search_text': title.trim(),
-      'order': 'relevance',
-      'catalog[]': '4881',
-    }).toString();
+    final q = 'jeu de societe ${title.trim()}'.replaceAll(RegExp(r'\s+'), '+');
+    return 'https://www.vinted.be/catalog?search_text=$q';
   }
+
+  static String caseDepartSearchUrl(String title) {
+    final q = Uri.encodeQueryComponent('site:casedepart.be ${title.trim()}');
+    return 'https://www.google.com/search?q=$q';
+  }
+
+  static String zebreAPoisSearchUrl(String title) {
+    final cleaned = title
+        .replaceAll(RegExp(r'[&:;,.!?/\\()\[\]"“”‘’]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    return 'https://www.lezap.be/index.php?fc=module&module=leoproductsearch&controller=productsearch&search_query=${Uri.encodeQueryComponent(cleaned)}';
+  }
+
+  static String philibertSearchUrl(String title) =>
+      'https://www.philibertnet.com/fr/recherche?search_query=${Uri.encodeQueryComponent(title.trim())}';
+
+  static String fnacSearchUrl(String title) =>
+      'https://www.fnac.com/SearchResult/ResultList.aspx?Search=${Uri.encodeQueryComponent(title.trim())}';
+
+  static String okkazeoSearchUrl(String title) =>
+      'https://www.okkazeo.com/jeux/resultats?rech_nom=${Uri.encodeQueryComponent(title.trim())}';
 
   static String leboncoinSearchUrl(String title) {
     final q = Uri.encodeQueryComponent(title.trim());
     return 'https://www.leboncoin.fr/recherche?text=$q&category=25';
   }
 
-  static String _storeLabel({String? country, String? lang, String? url}) {
+  static String _storeLabel({
+    String? country,
+    String? lang,
+    String? url,
+    String? explicitName,
+  }) {
+    if (explicitName != null &&
+        explicitName.isNotEmpty &&
+        explicitName.toLowerCase() != 'null') {
+      return explicitName;
+    }
     final host = url == null
         ? ''
         : (Uri.tryParse(url)?.host.toLowerCase() ?? '');
+    final known = _knownShopName(host);
+    if (known != null) return known;
+    if (host.isNotEmpty) return _prettyDomain(host);
+    if (lang != null && lang.isNotEmpty) return 'Éd. $lang';
+    if (country != null && country.isNotEmpty) return 'Offre $country';
+    return 'Boutique';
+  }
+
+  static String? _knownShopName(String host) {
     if (host.contains('philibert')) return 'Philibert';
     if (host.contains('ludum')) return 'Ludum';
     if (host.contains('amazon')) return 'Amazon';
@@ -323,13 +399,53 @@ class BoardgameMarketService {
     if (host.contains('fnac')) return 'Fnac';
     if (host.contains('cultura')) return 'Cultura';
     if (host.contains('fantasy-inspirations')) return 'Fantasy Insp.';
-    if (country == 'FR') return 'Boutique FR';
-    if (country == 'BE') return 'Boutique BE';
-    if (country == 'DE') return 'Boutique DE';
-    if (country == 'GB') return 'Boutique UK';
-    if (lang != null && lang.isNotEmpty) return 'Éd. $lang';
-    if (country != null && country.isNotEmpty) return 'Offre $country';
-    return 'Boutique';
+    if (host.contains('casedepart')) return 'Case Départ';
+    if (host.contains('lezebreapois')) return 'Le Zèbre à Pois';
+    if (host.contains('okkazeo')) return 'Okkazeo';
+    if (host.contains('geekdo') || host.contains('boardgamegeek')) {
+      return 'GeekMarket';
+    }
+    return null;
+  }
+
+  static String _prettyDomain(String host) {
+    var h = host.toLowerCase();
+    if (h.startsWith('www.')) h = h.substring(4);
+    final parts = h.split('.');
+    final base = parts.length >= 2 ? parts[parts.length - 2] : parts.first;
+    if (base.isEmpty) return host;
+    return base[0].toUpperCase() + base.substring(1);
+  }
+
+  static String? _firstLanguageCode(dynamic versions) {
+    final langs = <String>{};
+    _collectLanguagesFromVersions(versions, langs);
+    if (langs.isEmpty) return null;
+    return langs.first;
+  }
+
+  static void _collectLanguagesFromVersions(
+    dynamic versions,
+    Set<String> languages,
+  ) {
+    if (versions is Map) {
+      final lang = versions['lang'];
+      if (lang is List) {
+        for (final l in lang) {
+          final code = normalizeBoardgameLanguageCode(l.toString());
+          if (code.isNotEmpty) languages.add(code);
+        }
+      } else if (lang != null) {
+        final code = normalizeBoardgameLanguageCode(lang.toString());
+        if (code.isNotEmpty) languages.add(code);
+      }
+      return;
+    }
+    if (versions is List) {
+      for (final v in versions) {
+        if (v is Map) _collectLanguagesFromVersions(v, languages);
+      }
+    }
   }
 
   static double? _toDouble(dynamic raw) {
@@ -361,20 +477,24 @@ class BoardgameMarketService {
     if (withoutToday.length > _historyMax) {
       return withoutToday.sublist(withoutToday.length - _historyMax);
     }
-    if (withoutToday.length == 1) {
-      final only = withoutToday.first;
-      final at = only.at ?? dayKey;
-      withoutToday.insert(
-        0,
-        MarketPriceHistoryPoint(
-          at: at.subtract(const Duration(days: 6)),
-          secondhandEur: only.secondhandEur,
-          newMinEur: only.newMinEur,
-        ),
-      );
-    }
     return withoutToday;
   }
+}
+
+class MarketPriceSummary {
+  final double min;
+  final double avg;
+  final double max;
+  final double median;
+  final double secondhand;
+
+  const MarketPriceSummary({
+    required this.min,
+    required this.avg,
+    required this.max,
+    required this.median,
+    required this.secondhand,
+  });
 }
 
 class _MarketFetchResult {

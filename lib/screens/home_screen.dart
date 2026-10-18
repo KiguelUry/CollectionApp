@@ -13,6 +13,7 @@ import '../models/media_format_ui.dart';
 import '../services/boardgame_collection_preferences.dart';
 import '../services/collection_display_preferences.dart';
 import '../services/boardgame_market_service.dart';
+import '../utils/wishlist_market_metadata.dart';
 import '../services/bgg_service.dart';
 import '../services/book_catalog_service.dart';
 import '../services/card_catalog_service.dart';
@@ -36,6 +37,7 @@ import '../models/item_tag.dart';
 import '../models/storage_location.dart';
 import '../services/item_group_service.dart';
 import '../services/group_service.dart';
+import '../services/household_service.dart';
 import '../services/location_service.dart';
 import '../services/collection_refresh.dart';
 import '../services/tag_service.dart';
@@ -59,10 +61,13 @@ import '../models/videogame_platform.dart';
 import '../services/lego_catalog_service.dart';
 import '../services/movie_catalog_service.dart';
 import '../services/videogame_catalog_service.dart';
+import 'boardgame/boardgame_discover_screen.dart';
 import '../widgets/watch_quick_search_sheet.dart';
+import '../services/collection_local_cache.dart';
 import '../utils/catalog_hit_metadata.dart';
 import '../widgets/book_subcategory_picker.dart';
 import '../widgets/catalog_search_sheet.dart';
+import '../widgets/bgg_category_import_prompt.dart';
 import '../widgets/videogame_platform_picker.dart';
 import '../utils/videogame_metadata.dart';
 import 'book/book_collection_screen.dart';
@@ -126,8 +131,10 @@ class _HomeScreenState extends State<HomeScreen>
   List<CollectionGroup> _groups = [];
   Map<String, String> _groupNamesById = {};
   Set<String> _myGroupIds = {};
+  bool _groupsReady = false;
   bool _bggRatingEnrichInFlight = false;
   bool _wishlistMarketEnrichInFlight = false;
+  bool _ownedMarketPrefetchInFlight = false;
   bool _showOwnedExpansions = false;
   int _gridMobileColumns = 3;
   final _reloadDebounce = DebouncedRunner();
@@ -155,6 +162,15 @@ class _HomeScreenState extends State<HomeScreen>
     _itemsStream = rawStream.map(_filterAndScopeRows);
     _itemsSub = _itemsStream.listen((_) => _scheduleReloadItemsFromDb());
     CollectionRefresh.instance.addListener(_scheduleReloadItemsFromDb);
+    HouseholdService.instance.addListener(_onHouseholdsChanged);
+    final cachedRows = CollectionLocalCache.peek(_userId, _cacheScope);
+    if (cachedRows != null) {
+      _itemRows = _filterAndScopeRows(cachedRows);
+      _itemsLoading = false;
+      _scheduleEnrich();
+    } else {
+      unawaited(_restoreFromDiskCache());
+    }
     _reloadItemsFromDb();
     _loadFilterData();
     unawaited(_loadGridDisplayPrefs());
@@ -167,6 +183,7 @@ class _HomeScreenState extends State<HomeScreen>
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _maybeReconcileExpansions();
         unawaited(_loadBoardgameDisplayPrefs());
+        BggCategoryImportPrompt.maybeShow(context);
       });
       _tabController.addListener(_onTabChanged);
     }
@@ -265,6 +282,7 @@ class _HomeScreenState extends State<HomeScreen>
     _itemsSub?.cancel();
     _reloadDebounce.dispose();
     CollectionRefresh.instance.removeListener(_scheduleReloadItemsFromDb);
+    HouseholdService.instance.removeListener(_onHouseholdsChanged);
     _tabController.dispose();
     super.dispose();
   }
@@ -278,6 +296,16 @@ class _HomeScreenState extends State<HomeScreen>
     _scheduleEnrich();
   }
 
+  String get _cacheScope => 'category:${widget.category.dbValue}';
+
+  bool _syncedFromDb = false;
+
+  Future<void> _restoreFromDiskCache() async {
+    final rows = await CollectionLocalCache.read(_userId, _cacheScope);
+    if (rows == null || !mounted || _syncedFromDb) return;
+    _onItemRows(_filterAndScopeRows(rows));
+  }
+
   Future<void> _reloadItemsFromDb() async {
     try {
       var query = Supabase.instance.client
@@ -286,7 +314,11 @@ class _HomeScreenState extends State<HomeScreen>
           .eq('category', widget.category.dbValue);
       final data = await query;
       if (!mounted) return;
-      _onItemRows(_filterAndScopeRows(List<Map<String, dynamic>>.from(data)));
+      final rows = List<Map<String, dynamic>>.from(data);
+      _syncedFromDb = true;
+      final scoped = _filterAndScopeRows(rows);
+      CollectionLocalCache.write(_userId, _cacheScope, scoped);
+      _onItemRows(scoped);
     } catch (_) {
       if (mounted) setState(() => _itemsLoading = false);
     }
@@ -295,6 +327,9 @@ class _HomeScreenState extends State<HomeScreen>
   void _scheduleEnrich() {
     final gen = ++_enrichGeneration;
     final parsed = _parseItems(_itemRows);
+    if (widget.category == CollectionCategory.boardgame) {
+      unawaited(_prefetchOwnedMarketPrices(parsed));
+    }
     _tagService.enrichItems(parsed).then((items) {
       if (!mounted || gen != _enrichGeneration) return;
       setState(() => _enrichedItems = items);
@@ -336,6 +371,36 @@ class _HomeScreenState extends State<HomeScreen>
         playingTime: item.playingTime ?? base.playingTime,
       );
     }).toList();
+  }
+
+  Future<void> _prefetchOwnedMarketPrices(List<CollectionItem> items) async {
+    if (_ownedMarketPrefetchInFlight) return;
+    final queue = items.where((i) {
+      if (i.isWishlist || i.isSold) return false;
+      final bgg = i.metadata?['bgg_id']?.toString();
+      if (bgg == null || bgg.isEmpty) return false;
+      if (BoardgameMarketService.cachedPricesNeedRefresh(i.metadata)) {
+        return true;
+      }
+      return marketSecondhandPriceFromMetadata(i.metadata) == null &&
+          marketNewPriceMinFromMetadata(i.metadata) == null;
+    }).toList();
+    if (queue.isEmpty) return;
+    _ownedMarketPrefetchInFlight = true;
+    try {
+      for (var i = 0; i < queue.length; i += 8) {
+        if (!mounted) break;
+        final slice = queue.skip(i).take(8).toList();
+        final done = await BoardgameMarketService.enrichOwnedBatch(
+          slice,
+          maxItems: 8,
+        );
+        if (done > 0 && mounted) _scheduleReloadItemsFromDb();
+        await Future<void>.delayed(const Duration(milliseconds: 400));
+      }
+    } finally {
+      _ownedMarketPrefetchInFlight = false;
+    }
   }
 
   Future<void> _enrichWishlistMarketData(List<CollectionItem> items) async {
@@ -429,13 +494,19 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
+  void _onHouseholdsChanged() {
+    if (mounted) setState(() {});
+  }
+
   Future<void> _loadFilterData() async {
     try {
       final results = await Future.wait([
         LocationService().fetchLocations(),
         _tagService.fetchMyTags(),
         GroupService().fetchMyGroups(),
+        HouseholdService.instance.ensureLoaded(),
       ]);
+      unawaited(HouseholdService.instance.refreshPeers());
       if (mounted) {
         final groups = results[2] as List<CollectionGroup>;
         setState(() {
@@ -444,6 +515,7 @@ class _HomeScreenState extends State<HomeScreen>
           _groups = groups;
           _groupNamesById = {for (final g in groups) g.id: g.name};
           _myGroupIds = groups.map((g) => g.id).toSet();
+          _groupsReady = true;
         });
         _scheduleReloadItemsFromDb();
       }
@@ -514,7 +586,11 @@ class _HomeScreenState extends State<HomeScreen>
       final locUser = row['location_user_id'] as String?;
       if (addedBy == _userId || locUser == _userId) return true;
       final gid = row['group_id'] as String?;
-      return gid != null && _myGroupIds.contains(gid);
+      if (gid == null || gid.isEmpty) return false;
+      // Tant que les groupes ne sont pas connus, on garde les lignes déjà
+      // fusionnées (cache ou RLS) pour ne pas masquer un jeu partagé.
+      if (!_groupsReady) return true;
+      return _myGroupIds.contains(gid);
     }).toList();
   }
 
@@ -1359,9 +1435,9 @@ class _HomeScreenState extends State<HomeScreen>
     final toolbar = compact
         ? 36.0
         : (narrow && widget.category == CollectionCategory.boardgame
-            ? 84.0
+            ? 108.0
             : 44.0);
-    return top + 40 + 36 + toolbar;
+    return top + 40 + 36 + toolbar + 6;
   }
 
   @override
@@ -1392,13 +1468,13 @@ class _HomeScreenState extends State<HomeScreen>
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       body: NestedScrollView(
-        floatHeaderSlivers: true,
+        floatHeaderSlivers: false,
         headerSliverBuilder: (context, innerBoxIsScrolled) {
           return [
             SliverAppBar(
-              floating: true,
-              snap: true,
-              pinned: false,
+              floating: false,
+              snap: false,
+              pinned: true,
               primary: true,
               forceElevated: innerBoxIsScrolled,
               automaticallyImplyLeading: false,
@@ -1436,6 +1512,21 @@ class _HomeScreenState extends State<HomeScreen>
   List<CategoryQuickAction> _quickActions() {
     return switch (widget.category) {
       CollectionCategory.boardgame => [
+        CategoryQuickAction(
+          label: 'Découvrir',
+          icon: Icons.auto_awesome,
+          onTap: () {
+            final owned = _filterHubScope(_parseItems(_itemRows))
+                .where((i) => !i.isWishlist && !i.isSold)
+                .toList();
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => BoardgameDiscoverScreen(owned: owned),
+              ),
+            );
+          },
+        ),
         CategoryQuickAction(
           label: 'Tirage au sort',
           icon: Icons.casino_outlined,

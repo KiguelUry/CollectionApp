@@ -111,6 +111,8 @@ void main() {
 
     await tester.tap(suffix);
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Contacts enregistrés'));
+    await tester.pumpAndSettle();
     final tf = tester.widget<TextField>(field);
     expect(tf.controller!.text, 'Lou');
   });

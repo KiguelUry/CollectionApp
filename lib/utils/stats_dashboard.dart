@@ -1,7 +1,9 @@
 import '../models/boardgame_play_session.dart';
 import '../models/collection_category.dart';
 import 'active_categories.dart';
+import 'boardgame_display.dart';
 import 'boardgame_expansions.dart';
+import 'item_copy_units.dart';
 import 'wishlist_market_metadata.dart';
 
 /// Objet valorisé ou joué, prêt à afficher dans le dashboard.
@@ -13,6 +15,7 @@ class StatsDashboardItem {
   final double value;
   final bool isEstimate;
   final int plays;
+  final double? ratingScore;
 
   const StatsDashboardItem({
     required this.id,
@@ -22,6 +25,7 @@ class StatsDashboardItem {
     this.value = 0,
     this.isEstimate = false,
     this.plays = 0,
+    this.ratingScore,
   });
 }
 
@@ -53,9 +57,18 @@ class StatsDashboard {
   final double purchaseValue;
   final double estimatedValue;
   final int valuedCount;
+
+  /// Somme des prix d'achat renseignés (par exemplaire).
+  final double paidTotal;
+  final int paidCopies;
+
+  /// Somme des estimations marché BGG (par exemplaire, même si prix payé connu).
+  final double marketTotal;
+  final int marketCopies;
   final List<StatsCategoryBar> categories;
   final List<StatsDashboardItem> topValued;
   final List<StatsDashboardItem> topPlayed;
+  final List<StatsDashboardItem> topRated;
 
   const StatsDashboard({
     this.ownedCount = 0,
@@ -72,9 +85,14 @@ class StatsDashboard {
     this.purchaseValue = 0,
     this.estimatedValue = 0,
     this.valuedCount = 0,
+    this.paidTotal = 0,
+    this.paidCopies = 0,
+    this.marketTotal = 0,
+    this.marketCopies = 0,
     this.categories = const [],
     this.topValued = const [],
     this.topPlayed = const [],
+    this.topRated = const [],
   });
 
   /// Total valeur (achat sinon estimation marché).
@@ -93,7 +111,7 @@ class StatsDashboard {
     Iterable<Map<String, dynamic>> rawRows, {
     required Set<CollectionCategory> active,
     String? meUserId,
-    int topLimit = 5,
+    int topLimit = 10,
   }) {
     final rows = ActiveCategories.filterRows(rawRows, active);
     final seen = <String>{};
@@ -110,11 +128,16 @@ class StatsDashboard {
     var purchase = 0.0;
     var estimated = 0.0;
     var valued = 0;
+    var paidTotal = 0.0;
+    var paidCopies = 0;
+    var marketTotal = 0.0;
+    var marketCopies = 0;
     final counts = <CollectionCategory, int>{};
     final values = <CollectionCategory, double>{};
     final boardgameRows = <Map<String, dynamic>>[];
     final valuedItems = <StatsDashboardItem>[];
     final playedItems = <StatsDashboardItem>[];
+    final ratedItems = <StatsDashboardItem>[];
 
     for (final row in rows) {
       final id = row['id']?.toString() ?? '';
@@ -155,13 +178,26 @@ class StatsDashboard {
 
       double? itemValue;
       var isEstimate = false;
-      if (purchasePrice != null && purchasePrice > 0) {
-        itemValue = purchasePrice * (qty < 1 ? 1 : qty);
-        purchase += itemValue;
-      } else if (market != null && market > 0) {
-        itemValue = market * (qty < 1 ? 1 : qty);
-        isEstimate = true;
-        estimated += itemValue;
+      final copyPrices = copyPurchasePricesFromRow(
+        quantity: qty,
+        purchasePrice: purchasePrice,
+        metadata: meta,
+      );
+      for (final price in copyPrices) {
+        if (market != null && market > 0) {
+          marketTotal += market;
+          marketCopies++;
+        }
+        if (price != null && price > 0) {
+          paidTotal += price;
+          paidCopies++;
+          purchase += price;
+          itemValue = (itemValue ?? 0) + price;
+        } else if (market != null && market > 0) {
+          estimated += market;
+          itemValue = (itemValue ?? 0) + market;
+          isEstimate = true;
+        }
       }
       if (itemValue != null) {
         valued++;
@@ -198,10 +234,30 @@ class StatsDashboard {
           );
         }
       }
+
+      final personalRating = _num(row['rating']);
+      final community = parseBggAvgRating(meta?['bgg_avg_rating']);
+      final ratingScore = (personalRating != null && personalRating > 0)
+          ? personalRating
+          : (community != null && community > 0 ? community : null);
+      if (ratingScore != null) {
+        ratedItems.add(
+          StatsDashboardItem(
+            id: id,
+            title: title,
+            category: cat,
+            imageUrl: image,
+            ratingScore: ratingScore,
+          ),
+        );
+      }
     }
 
     valuedItems.sort((a, b) => b.value.compareTo(a.value));
     playedItems.sort((a, b) => b.plays.compareTo(a.plays));
+    ratedItems.sort(
+      (a, b) => (b.ratingScore ?? 0).compareTo(a.ratingScore ?? 0),
+    );
 
     final bars = [
       for (final e in counts.entries)
@@ -228,9 +284,14 @@ class StatsDashboard {
       purchaseValue: purchase,
       estimatedValue: estimated,
       valuedCount: valued,
+      paidTotal: paidTotal,
+      paidCopies: paidCopies,
+      marketTotal: marketTotal,
+      marketCopies: marketCopies,
       categories: bars,
       topValued: valuedItems.take(topLimit).toList(),
-      topPlayed: playedItems.take(3).toList(),
+      topPlayed: playedItems.take(topLimit).toList(),
+      topRated: ratedItems.take(topLimit).toList(),
     );
   }
 

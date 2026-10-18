@@ -1,8 +1,15 @@
+enum ManualHolderKind { person, place }
+
 /// Préfixe adapté pour un lieu ou une personne (« Chez », « En », « Au », « À »).
-String formatManualHolderLabel(String raw) {
-  final trimmed = raw.trim();
+/// [kind] force le choix : un lieu devient « À … », une personne « Chez … ».
+String formatManualHolderLabel(String raw, {ManualHolderKind? kind}) {
+  var trimmed = raw.trim();
   if (trimmed.isEmpty) return trimmed;
-  if (RegExp(r'^(chez|en|au|à|a)\s+', caseSensitive: false).hasMatch(trimmed)) {
+  final prefix = RegExp(r'^(chez|en|au|à|a)\s+', caseSensitive: false);
+  if (kind != null) {
+    trimmed = trimmed.replaceFirst(prefix, '').trim();
+    if (trimmed.isEmpty) return raw.trim();
+  } else if (prefix.hasMatch(trimmed)) {
     return trimmed[0].toUpperCase() + trimmed.substring(1);
   }
 
@@ -25,6 +32,13 @@ String formatManualHolderLabel(String raw) {
 
   String cap(String s) =>
       s.isEmpty ? s : '${s[0].toUpperCase()}${s.substring(1)}';
+
+  if (kind == ManualHolderKind.person) return 'Chez ${cap(trimmed)}';
+  if (kind == ManualHolderKind.place) {
+    if (enPlaces.contains(lower)) return 'En ${cap(trimmed)}';
+    if (auPlaces.contains(lower)) return 'Au ${cap(trimmed)}';
+    return 'À ${cap(trimmed)}';
+  }
 
   if (enPlaces.contains(lower)) return 'En ${cap(trimmed)}';
   if (auPlaces.contains(lower)) return 'Au ${cap(trimmed)}';

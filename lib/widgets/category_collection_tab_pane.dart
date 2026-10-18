@@ -439,7 +439,7 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
               child: TextButton.icon(
                 onPressed: () => setState(() => _selectionMode = true),
                 style: TextButton.styleFrom(
-                  foregroundColor: Colors.white,
+                  foregroundColor: Theme.of(context).colorScheme.primary,
                 ),
                 icon: const Icon(Icons.checklist_rounded, size: 18),
                 label: const Text('Sélection multiple'),
@@ -734,12 +734,15 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
             onRefresh: widget.onReload,
             child: _withMarqueeOverlay(
               CustomScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
+                physics: const AlwaysScrollableScrollPhysics(
+                  parent: ClampingScrollPhysics(),
+                ),
+                cacheExtent: 400,
                 slivers: [
                   SliverAppBar(
-                    floating: true,
-                    snap: true,
-                    pinned: false,
+                    floating: false,
+                    snap: false,
+                    pinned: true,
                     primary: false,
                     automaticallyImplyLeading: false,
                     toolbarHeight: 0,
@@ -886,18 +889,10 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
     return SliverPadding(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
       sliver: SliverGrid(
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: CollectionGridLayout.crossAxisCount(
-            context,
-            mobile: mobileCols,
-          ),
-          crossAxisSpacing: CollectionGridLayout.gridCrossSpacing,
-          mainAxisSpacing: CollectionGridLayout.gridMainSpacing,
-          childAspectRatio: CollectionGridLayout.aspectRatio(
-            widget.category,
-            context,
-            mobileColumns: mobileCols,
-          ),
+        gridDelegate: CollectionGridLayout.collectionDelegate(
+          context,
+          widget.category,
+          mobileColumns: mobileCols,
         ),
         delegate: SliverChildBuilderDelegate(
           (context, index) {

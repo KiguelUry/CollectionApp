@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/book_subcategory.dart';
@@ -10,6 +11,8 @@ import '../models/collection_group.dart';
 import '../models/collection_item.dart';
 import '../models/item_condition.dart';
 import '../services/group_service.dart';
+import '../services/profile_service.dart';
+import '../utils/bgg_text.dart';
 import '../utils/supabase_embeds.dart';
 import '../services/item_group_service.dart';
 import '../services/loan_service.dart';
@@ -57,6 +60,10 @@ import '../utils/friend_item_overlap.dart';
 import '../utils/whereabouts_apply.dart';
 import '../utils/whereabouts_persistence.dart';
 import '../utils/owned_quantity_index.dart';
+import '../utils/item_copy_units.dart';
+import '../widgets/item_condition_pill.dart';
+import '../widgets/item_copy_units_panel.dart';
+import '../widgets/item_market_value_panel.dart';
 import '../utils/navigate_to_card_set.dart';
 import '../utils/wishlist_promote.dart';
 import '../utils/app_page_route.dart';
@@ -105,12 +112,15 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
   bool _saveInFlight = false;
   bool _saveQueued = false;
   String? _bggDescription;
+  String? _bggLongDescription;
   bool _bggDescriptionLoading = false;
   int? _bggBestPlayers;
   double? _bggAvgRating;
 
   int _ownedDisplayQty = 0;
   String? _expandedBento;
+  bool _marketPanelOpen = false;
+  bool _bggDescExpanded = false;
   int? _expansionCatalogTotal;
 
   @override
@@ -225,28 +235,39 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       });
     }
 
-    final shortFromMeta = meta?['bgg_short_description']?.toString().trim();
+    final shortFromMeta = cleanBggText(meta?['bgg_short_description']?.toString());
+    final longFromMeta = cleanBggText(meta?['bgg_description']?.toString());
     final galleryFromMeta = _bggGalleryUrls(meta);
-    if (shortFromMeta != null && shortFromMeta.isNotEmpty) {
-      if (mounted) setState(() => _bggDescription = shortFromMeta);
-      if (bestFromMeta != null &&
-          avgFromMeta != null &&
-          galleryFromMeta.isNotEmpty) {
-        return;
+    if (shortFromMeta.isNotEmpty || longFromMeta.isNotEmpty) {
+      if (mounted) {
+        setState(() {
+          if (shortFromMeta.isNotEmpty) _bggDescription = shortFromMeta;
+          if (longFromMeta.isNotEmpty) _bggLongDescription = longFromMeta;
+        });
       }
+    }
+    final needsLong = longFromMeta.isEmpty;
+    if (!needsLong &&
+        shortFromMeta.isNotEmpty &&
+        bestFromMeta != null &&
+        avgFromMeta != null &&
+        galleryFromMeta.isNotEmpty) {
+      return;
     }
 
     final bggId = meta?['bgg_id']?.toString();
     if (bggId == null || bggId.isEmpty) return;
 
-    if (mounted) setState(() => _bggDescriptionLoading = true);
+    if (mounted && shortFromMeta.isEmpty && longFromMeta.isEmpty) {
+      setState(() => _bggDescriptionLoading = true);
+    }
     final details = await BggService.getGameFullDetails(bggId);
     if (!mounted) return;
-    final short = details?['bgg_short_description']?.toString().trim();
+    final short = cleanBggText(details?['bgg_short_description']?.toString());
+    final long = cleanBggText(details?['bgg_description']?.toString());
     setState(() {
-      if (short != null && short.isNotEmpty) {
-        _bggDescription = short;
-      }
+      if (short.isNotEmpty) _bggDescription = short;
+      if (long.isNotEmpty) _bggLongDescription = long;
       _bggBestPlayers =
           _bggBestPlayers ?? parseBggBestPlayers(details?['bgg_best_players']);
       _bggAvgRating =
@@ -265,6 +286,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     var dirty = false;
     for (final key in [
       'bgg_short_description',
+      'bgg_description',
       'bgg_avg_rating',
       'bgg_best_players',
       'bgg_gallery_urls',
@@ -857,9 +879,20 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       BoardgameDetailCompactHeader(
                         item: _item,
                         expansionOfLabel: expansionOf,
+                        belowTitle: _bggShortHook(),
                       ),
+                      if (_bggDescExpanded) _bggLongBody(),
                       const SizedBox(height: 16),
                     ],
+                    if (!ro && isBoardgame && !_item.isWishlist)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: _offerPantheonSlot,
+                          icon: const Icon(Icons.emoji_events_outlined),
+                          label: const Text('Ajouter au Panthéon'),
+                        ),
+                      ),
                     if (ro)
                       Card(
                         color: Colors.blue.shade50,
@@ -1104,136 +1137,135 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         ),
                       ),
                     ],
-                    const SizedBox(height: 16),
                     if (isBoardgame) ...[
-                      BoardgameBentoGrid(
-                        children: [
-                          BoardgameBentoSummaryTile(
-                            icon: Icons.inventory_2_outlined,
-                            title: 'Ma boîte',
-                            subtitle: _boardgameMaBoiteSubtitle(ownedQty),
-                            accent: _item.category.color,
-                            onOpenDetail: () => showBoardgameBentoDetailSheet(
-                              context,
-                              title: 'Ma boîte',
-                              child: _buildBoardgameMaBoitePanel(ro),
-                            ),
-                          ),
-                          BoardgameBentoSummaryTile(
-                            icon: Icons.info_outline,
-                            title: 'Infos & galerie BGG',
-                            subtitle: _bggDescription?.trim().isNotEmpty == true
-                                ? _bggDescription!.trim()
-                                : 'Description, notes communautaires, galerie',
-                            accent: Colors.blue.shade700,
-                            onOpenDetail: () => showBoardgameBentoDetailSheet(
-                              context,
-                              title: 'Infos BoardGameGeek',
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  _buildBggDescriptionSection(),
-                                  const SizedBox(height: 12),
-                                  BggCommunityRatingPanel(
-                                    avgRating:
-                                        _bggAvgRating ??
-                                        parseBggAvgRating(
-                                          _item.metadata?['bgg_avg_rating'],
-                                        ),
-                                    loading: _bggDescriptionLoading,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          BoardgameBentoSummaryTile(
-                            icon: Icons.history_edu_outlined,
-                            title: 'Historique & classement',
-                            subtitle: _boardgameHistoriqueSubtitle(),
-                            accent: Colors.orange.shade800,
-                            onOpenDetail: () => showBoardgameBentoDetailSheet(
-                              context,
-                              title: 'Parties & scores',
-                              child: BoardgamePlayHubBento(
-                                item: _item,
-                                readOnly: ro,
-                                onMetadataChanged: _onBoardgamePlaysMetadataChanged,
-                              ),
-                            ),
-                          ),
-                          BoardgameBentoSummaryTile(
-                            icon: Icons.payments_outlined,
-                            title: 'Prix & observations',
-                            subtitle: _boardgamePrixSubtitle(),
-                            accent: _item.category.color,
-                            onOpenDetail: () => showBoardgameBentoDetailSheet(
-                              context,
-                              title: 'Prix & observations',
-                              child: _buildBoardgamePrixObsPanel(ro),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 8),
+                      _buildBggDescriptionSection(),
                     ],
+                    const SizedBox(height: 16),
                     _buildInformationsSection(
                       isBoardgame: isBoardgame,
                       metadataRows: metadataRows,
                     ),
-                    if (isBoardgame) ...[
-                      if (!isWishlist) ...[
-                        const SizedBox(height: 12),
-                        BoardgameRulesBento(
+                    if (isBoardgame && !isWishlist) ...[
+                      const SizedBox(height: 12),
+                      DetailBentoTile(
+                        icon: Icons.history_edu_outlined,
+                        title: 'Parties et classements',
+                        subtitle: _boardgameHistoriqueSubtitle(),
+                        accent: Colors.orange.shade800,
+                        expanded: _expandedBento == 'plays',
+                        onTap: () => setState(
+                          () => _expandedBento =
+                              _expandedBento == 'plays' ? null : 'plays',
+                        ),
+                        child: BoardgamePlaySectionsPanel(
                           item: _item,
                           readOnly: ro,
-                          expanded: _expandedBento == 'rules',
-                          onToggle: () => setState(
+                          onMetadataChanged: _onBoardgamePlaysMetadataChanged,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DetailBentoTile(
+                        icon: Icons.star_outline,
+                        title: 'Notes et avis',
+                        subtitle: _boardgameNotesBentoSubtitle(),
+                        accent: _item.category.color,
+                        expanded: _expandedBento == 'rating',
+                        onTap: () => setState(
+                          () => _expandedBento =
+                              _expandedBento == 'rating' ? null : 'rating',
+                        ),
+                        child: _buildNotesAndReviewsPanel(
+                          ro,
+                          showCommunityRating: true,
+                        ),
+                      ),
+                      if (BoardgameExpansionService.itemActsAsBase(_item)) ...[
+                        const SizedBox(height: 12),
+                        DetailBentoTile(
+                          icon: Icons.extension_outlined,
+                          title: 'Extensions',
+                          subtitle: _boardgameExtensionsSubtitle(),
+                          accent: _item.category.color,
+                          expanded: _expandedBento == 'extensions',
+                          onTap: () => setState(
                             () => _expandedBento =
-                                _expandedBento == 'rules' ? null : 'rules',
+                                _expandedBento == 'extensions'
+                                    ? null
+                                    : 'extensions',
                           ),
-                          onPersonalRulesChanged: (encoded) {
-                            _personalRulesController.text = encoded;
-                            setState(() {
-                              _item = _item.copyWith(
-                                personalRules: encoded.isEmpty ? null : encoded,
-                              );
-                            });
-                            _scheduleSave();
-                          },
+                          child: BoardgameExpansionsSection(
+                            item: _item,
+                            readOnly: ro,
+                            onItemUpdated: (updated) =>
+                                setState(() => _item = updated),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 12),
+                      DetailBentoTile(
+                        icon: Icons.share_location_outlined,
+                        title: 'Localisation et partages',
+                        subtitle: _boardgameLocationShareSubtitle(),
+                        accent: _item.category.color,
+                        expanded: _expandedBento == 'share',
+                        onTap: () => setState(
+                          () => _expandedBento =
+                              _expandedBento == 'share' ? null : 'share',
+                        ),
+                        child: _buildShareGroupsPanel(ro),
+                      ),
+                      const SizedBox(height: 12),
+                      BoardgameRulesBento(
+                        item: _item,
+                        readOnly: ro,
+                        expanded: _expandedBento == 'rules',
+                        onToggle: () => setState(
+                          () => _expandedBento =
+                              _expandedBento == 'rules' ? null : 'rules',
+                        ),
+                        onPersonalRulesChanged: (encoded) {
+                          _personalRulesController.text = encoded;
+                          setState(() {
+                            _item = _item.copyWith(
+                              personalRules: encoded.isEmpty ? null : encoded,
+                            );
+                          });
+                          _scheduleSave();
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      DetailBentoTile(
+                        icon: Icons.payments_outlined,
+                        title: 'Valeur',
+                        subtitle: _boardgamePrixSubtitle(),
+                        accent: _item.category.color,
+                        expanded: _expandedBento == 'price',
+                        onTap: () => setState(
+                          () => _expandedBento =
+                              _expandedBento == 'price' ? null : 'price',
+                        ),
+                        child: _buildBoardgamePrixObsPanel(ro),
+                      ),
+                      if (!ro && ownedQty > 0) ...[
+                        const SizedBox(height: 12),
+                        DetailBentoTile(
+                          icon: Icons.sell_outlined,
+                          title: 'Doubles et ventes',
+                          subtitle: _saleDispositionSubtitle(
+                            includeCopyCount: true,
+                          ),
+                          accent: _item.category.color,
+                          expanded: _expandedBento == 'sale',
+                          onTap: () => setState(
+                            () => _expandedBento =
+                                _expandedBento == 'sale' ? null : 'sale',
+                          ),
+                          child: _buildDoublesSalePanel(ro, isBoardgame),
                         ),
                       ],
                     ],
-                    if (isBoardgame &&
-                        BoardgameExpansionService.itemActsAsBase(_item)) ...[
-                      const SizedBox(height: 12),
-                      DetailBentoTile(
-                        icon: Icons.extension_outlined,
-                        title: 'Extensions',
-                        subtitle: () {
-                          final owned = ownedExpansionCount(_item);
-                          final total = _expansionCatalogTotal;
-                          if (total != null && total > 0) {
-                            return '$owned / $total possédées';
-                          }
-                          if (owned <= 0) return '0 possédée';
-                          return '$owned possédée${owned > 1 ? 's' : ''}';
-                        }(),
-                        accent: _item.category.color,
-                        expanded: _expandedBento == 'extensions',
-                        onTap: () => setState(
-                          () => _expandedBento = _expandedBento == 'extensions'
-                              ? null
-                              : 'extensions',
-                        ),
-                        child: BoardgameExpansionsSection(
-                          item: _item,
-                          readOnly: ro,
-                          onItemUpdated: (updated) =>
-                              setState(() => _item = updated),
-                        ),
-                      ),
-                    ],
-                    if (!isWishlist) ...[
+                    if (!isWishlist && !isBoardgame) ...[
                       const SizedBox(height: 12),
                       DetailBentoTile(
                         icon: Icons.group_outlined,
@@ -1245,140 +1277,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                           () => _expandedBento =
                               _expandedBento == 'share' ? null : 'share',
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            if (!ro)
-                              Align(
-                                alignment: Alignment.centerLeft,
-                                child: OutlinedButton.icon(
-                                  onPressed: () async {
-                                    if (_groups.isEmpty) await _loadGroups();
-                                    if (!mounted) return;
-                                    if (_groups.isEmpty) {
-                                      if (!context.mounted) return;
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        const SnackBar(
-                                          content: Text(
-                                            'Crée d\'abord un groupe dans le menu « Groupes »',
-                                          ),
-                                        ),
-                                      );
-                                      return;
-                                    }
-                                    final picked = await _pickGroups(
-                                      initial: _selectedGroupIds,
-                                    );
-                                    if (!mounted || picked == null) return;
-                                    if (picked.isEmpty) {
-                                      setState(() {
-                                        _selectedGroupIds = {};
-                                        _item = _item.copyWith(
-                                          clearGroup: true,
-                                        );
-                                      });
-                                    } else {
-                                      final first = picked.first;
-                                      final g = _groups.firstWhere(
-                                        (x) => x.id == first,
-                                      );
-                                      setState(() {
-                                        _selectedGroupIds = picked;
-                                        _item = _item.copyWith(
-                                          groupId: first,
-                                          groupName: g.name,
-                                          metadata: _metadataWithGroups(
-                                            picked.toList(),
-                                          ),
-                                          clearLocation: true,
-                                        );
-                                      });
-                                    }
-                                    _saveNow();
-                                  },
-                                  icon: const Icon(
-                                    Icons.group_outlined,
-                                    size: 18,
-                                  ),
-                                  label: const Text('Gestion des groupes'),
-                                ),
-                              ),
-                            if (_selectedGroupIds.isNotEmpty) ...[
-                              const SizedBox(height: 10),
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 6,
-                                children: _groups
-                                    .where(
-                                      (g) => _selectedGroupIds.contains(g.id),
-                                    )
-                                    .map(
-                                      (g) => Chip(
-                                        label: Text(g.name),
-                                        visualDensity: VisualDensity.compact,
-                                      ),
-                                    )
-                                    .toList(),
-                              ),
-                            ],
-                            const SizedBox(height: 12),
-                            CompactWhereaboutsDropdown(
-                              groups: _groups,
-                              selectedGroupIds: _selectedGroupIds,
-                              locationUserId: _item.locationUserId,
-                              holderLabel: _item.locationLabel,
-                              readOnly: ro,
-                              applyDefaultIfEmpty: !itemHasManualHolder(_item),
-                              onChanged:
-                                  ({
-                                    locationUserId,
-                                    holderLabel,
-                                    clearHolder = false,
-                                    manualHolder = false,
-                                  }) {
-                                    setState(() {
-                                      _item = applyWhereaboutsChange(
-                                        _item,
-                                        locationUserId: locationUserId,
-                                        holderLabel: holderLabel,
-                                        clearHolder: clearHolder,
-                                        manualHolder: manualHolder,
-                                      );
-                                    });
-                                    if (manualHolder ||
-                                        locationUserId != null) {
-                                      _saveNow();
-                                    }
-                                  },
-                            ),
-                            if (!ro &&
-                                isAwayFromHome(
-                                  _item,
-                                  meUserId: Supabase
-                                      .instance.client.auth.currentUser?.id,
-                                )) ...[
-                              const SizedBox(height: 8),
-                              TemporaryLoanToggle(
-                                isLoan: _item.isOnLoan,
-                                loanedAt: _item.loanedAt,
-                                onChanged: (isLoan, date) {
-                                  setState(() {
-                                    _item = applyTemporaryLoan(
-                                      _item,
-                                      isLoan: isLoan,
-                                      loanedAt: date,
-                                      meUserId: Supabase
-                                          .instance.client.auth.currentUser?.id,
-                                    );
-                                  });
-                                  _saveNow();
-                                },
-                              ),
-                            ],
-                          ],
-                        ),
+                        child: _buildShareGroupsPanel(ro),
                       ),
                     ],
                     if (isBook && !_item.isWishlist && !_item.isSold) ...[
@@ -1410,76 +1309,24 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         ),
                       ),
                     ],
-                    const SizedBox(height: 12),
-                    DetailBentoTile(
-                      icon: Icons.star_outline,
-                      title: 'Ma note & avis',
-                      subtitle: _ratingBentoSubtitle(),
-                      accent: _item.category.color,
-                      expanded: _expandedBento == 'rating',
-                      onTap: () => setState(
-                        () => _expandedBento =
-                            _expandedBento == 'rating' ? null : 'rating',
+                    if (!(isBoardgame && !isWishlist)) ...[
+                      const SizedBox(height: 12),
+                      DetailBentoTile(
+                        icon: Icons.star_outline,
+                        title: 'Ma note & avis',
+                        subtitle: _ratingBentoSubtitle(),
+                        accent: _item.category.color,
+                        expanded: _expandedBento == 'rating',
+                        onTap: () => setState(
+                          () => _expandedBento =
+                              _expandedBento == 'rating' ? null : 'rating',
+                        ),
+                        child: _buildNotesAndReviewsPanel(
+                          ro,
+                          showCommunityRating: isBoardgame,
+                        ),
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          StarRatingBar(
-                            rating: _item.rating ?? 0,
-                            onChanged: ro
-                                ? (_) {}
-                                : (value) {
-                                    setState(() {
-                                      _item = _item.copyWith(
-                                        rating: value <= 0 ? null : value,
-                                        clearRating: value <= 0,
-                                      );
-                                    });
-                                    _saveNow();
-                                  },
-                          ),
-                          const SizedBox(height: 16),
-                          TextField(
-                            controller: _reviewController,
-                            readOnly: ro,
-                            maxLines: 2,
-                            minLines: 1,
-                            decoration: const InputDecoration(
-                              labelText: 'Mon avis',
-                              border: OutlineInputBorder(),
-                              isDense: true,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          ItemAspectRatingsSection(
-                            category: _item.category,
-                            metadata: _item.metadata,
-                            readOnly: ro,
-                            onMetadataChanged: (meta) {
-                              setState(
-                                () => _item = _item.copyWith(metadata: meta),
-                              );
-                              _saveNow();
-                            },
-                          ),
-                          if (!isBoardgame) ...[
-                            const SizedBox(height: 16),
-                            BggCommunityRatingPanel(
-                              avgRating:
-                                  _bggAvgRating ??
-                                  parseBggAvgRating(
-                                    _item.metadata?['bgg_avg_rating'],
-                                  ),
-                              loading: _bggDescriptionLoading,
-                            ),
-                          ],
-                          if (!ro) ...[
-                            const SizedBox(height: 16),
-                            FriendRatingsPanel(item: _item),
-                          ],
-                        ],
-                      ),
-                    ),
+                    ],
                     if (_item.category == CollectionCategory.media &&
                         !isWishlist) ...[
                       const SizedBox(height: 16),
@@ -1536,7 +1383,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                           ),
                         ),
                     ],
-                    if (!ro && !isWishlist && ownedQty > 0) ...[
+                    if (!ro && !isWishlist && ownedQty > 0 && !isBoardgame) ...[
                       const SizedBox(height: 12),
                       DetailBentoTile(
                         icon: Icons.sell_outlined,
@@ -1548,144 +1395,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                           () => _expandedBento =
                               _expandedBento == 'sale' ? null : 'sale',
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            SwitchListTile(
-                              contentPadding: EdgeInsets.zero,
-                              title: const Text('À vendre'),
-                              subtitle: const Text(
-                                'Apparaît dans l\'onglet « À vendre »',
-                              ),
-                              value: _item.isForSale && !_item.isSold,
-                              onChanged: _item.isSold
-                                  ? null
-                                  : (v) {
-                                      setState(() {
-                                        _item = _item.copyWith(
-                                          isForSale: v,
-                                          isSold: false,
-                                          metadata: _dispositionMeta(
-                                            keep: !v,
-                                            sell: v,
-                                            trade: false,
-                                          ),
-                                        );
-                                      });
-                                      _saveNow();
-                                    },
-                            ),
-                            SwitchListTile(
-                              contentPadding: EdgeInsets.zero,
-                              title: const Text('Envie d\'échanger'),
-                              value: _dispositionIsTrade && !_item.isSold,
-                              onChanged: _item.isSold
-                                  ? null
-                                  : (v) {
-                                      setState(() {
-                                        _item = _item.copyWith(
-                                          isForSale: v ? true : _item.isForSale,
-                                          metadata: _dispositionMeta(
-                                            keep: !v && !_item.isForSale,
-                                            sell: !v && _item.isForSale,
-                                            trade: v,
-                                          ),
-                                        );
-                                      });
-                                      _saveNow();
-                                    },
-                            ),
-                            SwitchListTile(
-                              contentPadding: EdgeInsets.zero,
-                              title: const Text('Marquer comme vendu'),
-                              subtitle: const Text(
-                                'Retire de la collection active',
-                              ),
-                              value: _item.isSold,
-                              onChanged: (v) {
-                                setState(() {
-                                  _item = _item.copyWith(
-                                    isSold: v,
-                                    isForSale: v ? false : _item.isForSale,
-                                    metadata: _dispositionMeta(
-                                      keep: !v && !_item.isForSale,
-                                      sell: false,
-                                      trade: false,
-                                      sold: v,
-                                    ),
-                                  );
-                                });
-                                _saveNow();
-                              },
-                            ),
-                            if (_item.isSold) ...[
-                              const SizedBox(height: 8),
-                              TextField(
-                                controller: _soldToController,
-                                readOnly: ro,
-                                decoration: const InputDecoration(
-                                  labelText: 'Vendu à',
-                                  border: OutlineInputBorder(),
-                                  isDense: true,
-                                ),
-                                onChanged: (_) => _scheduleSave(),
-                              ),
-                              const SizedBox(height: 8),
-                              TextField(
-                                controller: _soldPriceController,
-                                readOnly: ro,
-                                keyboardType:
-                                    const TextInputType.numberWithOptions(
-                                  decimal: true,
-                                ),
-                                decoration: const InputDecoration(
-                                  labelText: 'Prix de vente (€)',
-                                  border: OutlineInputBorder(),
-                                  isDense: true,
-                                ),
-                                onChanged: (_) => _scheduleSave(),
-                              ),
-                            ],
-                            if (_dispositionIsTrade && !_item.isSold) ...[
-                              const SizedBox(height: 8),
-                              TextField(
-                                controller: _tradedForController,
-                                readOnly: ro,
-                                decoration: const InputDecoration(
-                                  labelText: 'Échangé contre',
-                                  border: OutlineInputBorder(),
-                                  isDense: true,
-                                ),
-                                onChanged: (_) => _scheduleSave(),
-                              ),
-                              const SizedBox(height: 8),
-                              TextField(
-                                controller: _tradedWithController,
-                                readOnly: ro,
-                                decoration: const InputDecoration(
-                                  labelText: 'Avec',
-                                  border: OutlineInputBorder(),
-                                  isDense: true,
-                                ),
-                                onChanged: (_) => _scheduleSave(),
-                              ),
-                            ],
-                            const SizedBox(height: 12),
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: ActionChip(
-                                avatar: const Icon(Icons.storefront_outlined,
-                                    size: 18),
-                                label: const Text('Accès Vinted'),
-                                onPressed: () => _openVintedSearch(
-                                  isBoardgame: isBoardgame,
-                                  isMedia: _item.category ==
-                                      CollectionCategory.media,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                        child: _buildDoublesSalePanel(ro, isBoardgame),
                       ),
                     ],
                     if (isWishlist && isBoardgame) ...[
@@ -1828,18 +1538,32 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     );
   }
 
-  String _boardgameMaBoiteSubtitle(int ownedQty) {
-    final parts = <String>['Quantité ×$ownedQty'];
-    final loc = _item.locationLabel?.trim();
-    if (loc != null && loc.isNotEmpty) parts.add(loc);
-    if (_item.isOnLoan) parts.add('Prêt · ${_item.loaneeDisplayName}');
-    return parts.join(' · ');
-  }
-
   String _boardgameHistoriqueSubtitle() {
     final sessions = parseBoardgamePlays(_item.metadata);
     if (sessions.isEmpty) return 'Aucune partie — lance un score';
-    return '${sessions.length} partie${sessions.length > 1 ? 's' : ''} · podium & matrices';
+    final last = sessions
+        .map((s) => s.date)
+        .reduce((a, b) => a.isAfter(b) ? a : b);
+    final wins = <String, int>{};
+    for (final s in sessions) {
+      final w = s.effectiveWinner?.trim();
+      if (w == null || w.isEmpty) continue;
+      wins[w] = (wins[w] ?? 0) + 1;
+    }
+    String? dominant;
+    var best = 0;
+    for (final e in wins.entries) {
+      if (e.value > best) {
+        best = e.value;
+        dominant = e.key;
+      }
+    }
+    final date =
+        '${last.day.toString().padLeft(2, '0')}/${last.month.toString().padLeft(2, '0')}/${last.year}';
+    final n = sessions.length;
+    final base = '$n partie${n > 1 ? 's' : ''} · Dernière partie le $date';
+    if (dominant == null) return base;
+    return '$base · Top 1 : $dominant';
   }
 
   String _boardgamePrixSubtitle() => _valueConditionSubtitle(isTech: false);
@@ -1854,50 +1578,90 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
   }
 
   Widget _buildBoardgamePrixObsPanel(bool ro) {
+    final multi = itemUsesCopyUnits(_item);
+    final second = marketSecondhandPriceFromMetadata(_item.metadata);
+    final newMin = marketNewPriceMinFromMetadata(_item.metadata);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (!_item.isWishlist && !_item.isSold)
           CostPerPlayBadge(
             purchasePrice: _item.purchasePrice,
-            estimatedValue:
-                marketSecondhandPriceFromMetadata(_item.metadata) ??
-                marketNewPriceMinFromMetadata(_item.metadata),
+            estimatedValue: second ?? newMin,
             plays: parseBoardgamePlays(_item.metadata).length,
           ),
         const SizedBox(height: 12),
-        TextField(
-          controller: _priceController,
-          readOnly: ro,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(
-            labelText: 'Prix d\'achat (€)',
-            border: OutlineInputBorder(),
-          ),
+        DetailBentoSubTile(
+          icon: Icons.query_stats_rounded,
+          title: 'Estimations du marché',
+          subtitle: second != null || newMin != null
+              ? [
+                  if (second != null) 'Occasion ≈ ${formatEuroChip(second, compact: false)}',
+                  if (newMin != null) 'Neuf dès ${formatEuroChip(newMin, compact: false)}',
+                ].join(' · ')
+              : 'Prix neuf, occasion et boutiques',
+          accent: Colors.teal,
+          selected: _marketPanelOpen,
+          onTap: () => setState(() => _marketPanelOpen = !_marketPanelOpen),
         ),
+        if (_marketPanelOpen) ...[
+          const SizedBox(height: 10),
+          ItemMarketValuePanel(
+            item: _item,
+            readOnly: ro,
+            onItemUpdated: (next) => setState(
+              () => _item = _item.copyWith(metadata: next.metadata),
+            ),
+          ),
+        ],
         const SizedBox(height: 12),
-        DropdownButtonFormField<ItemCondition?>(
-          initialValue: _condition,
-          decoration: const InputDecoration(
-            labelText: 'État',
-            border: OutlineInputBorder(),
+        if (multi)
+          ItemCopyUnitsPanel(
+            item: _item,
+            groups: _groups,
+            selectedGroupIds: _selectedGroupIds,
+            readOnly: ro,
+            mode: ItemCopyUnitsMode.value,
+            onItemChanged: (next) {
+              setState(() => _item = next);
+              _saveNow();
+            },
+          )
+        else ...[
+          TextField(
+            controller: _priceController,
+            readOnly: ro,
+            keyboardType:
+                const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              labelText: 'Prix d\'achat (€)',
+              border: OutlineInputBorder(),
+            ),
           ),
-          items: [
-            const DropdownMenuItem<ItemCondition?>(
-              value: null,
-              child: Text('— Non renseigné —'),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<ItemCondition?>(
+            initialValue: _condition,
+            decoration: const InputDecoration(
+              labelText: 'État',
+              border: OutlineInputBorder(),
             ),
-            ...ItemCondition.values.map(
-              (c) => DropdownMenuItem(value: c, child: Text(c.label)),
-            ),
-          ],
-          onChanged: ro
-              ? null
-              : (val) {
-                  setState(() => _condition = val);
-                  _scheduleSave();
-                },
-        ),
+            items: [
+              const DropdownMenuItem<ItemCondition?>(
+                value: null,
+                child: Text('— Non renseigné —'),
+              ),
+              ...ItemCondition.values.map(
+                (c) => DropdownMenuItem(value: c, child: Text(c.label)),
+              ),
+            ],
+            onChanged: ro
+                ? null
+                : (val) {
+                    setState(() => _condition = val);
+                    _scheduleSave();
+                  },
+          ),
+        ],
         const SizedBox(height: 16),
         TextField(
           controller: _personalRulesController,
@@ -1913,60 +1677,141 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     );
   }
 
-  Widget _buildBoardgameMaBoitePanel(bool ro) {
-    final meId = Supabase.instance.client.auth.currentUser?.id;
+  Widget _buildShareGroupsPanel(bool ro) {
+    final multi = itemUsesCopyUnits(_item);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (!_item.isWishlist && !_item.isSold)
-          CostPerPlayBadge(
-            purchasePrice: _item.purchasePrice,
-            estimatedValue:
-                marketSecondhandPriceFromMetadata(_item.metadata) ??
-                marketNewPriceMinFromMetadata(_item.metadata),
-            plays: parseBoardgamePlays(_item.metadata).length,
-          ),
-        const SizedBox(height: 12),
-        CompactWhereaboutsDropdown(
-          groups: _groups,
-          selectedGroupIds: _selectedGroupIds,
-          locationUserId: _item.locationUserId,
-          holderLabel: _item.locationLabel,
-          readOnly: ro,
-          applyDefaultIfEmpty: !itemHasManualHolder(_item),
-          onChanged:
-              ({
-                locationUserId,
-                holderLabel,
-                clearHolder = false,
-                manualHolder = false,
-              }) {
-                setState(() {
-                  _item = applyWhereaboutsChange(
-                    _item,
-                    locationUserId: locationUserId,
-                    holderLabel: holderLabel,
-                    clearHolder: clearHolder,
-                    manualHolder: manualHolder,
+        if (!ro && !multi)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              onPressed: () async {
+                if (_groups.isEmpty) await _loadGroups();
+                if (!mounted) return;
+                if (_groups.isEmpty) {
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Crée d\'abord un groupe dans le menu « Groupes »',
+                      ),
+                    ),
                   );
-                });
-                if (manualHolder || locationUserId != null) {
-                  _saveNow();
+                  return;
                 }
+                final picked = await _pickGroups(initial: _selectedGroupIds);
+                if (!mounted || picked == null) return;
+                if (picked.isEmpty) {
+                  setState(() {
+                    _selectedGroupIds = {};
+                    _item = _item.copyWith(clearGroup: true);
+                  });
+                } else {
+                  final first = picked.first;
+                  final g = _groups.firstWhere((x) => x.id == first);
+                  setState(() {
+                    _selectedGroupIds = picked;
+                    _item = _item.copyWith(
+                      groupId: first,
+                      groupName: g.name,
+                      metadata: _metadataWithGroups(picked.toList()),
+                      clearLocation: true,
+                    );
+                  });
+                }
+                _saveNow();
               },
-        ),
-        if (!ro && isAwayFromHome(_item, meUserId: meId)) ...[
+              icon: const Icon(Icons.group_outlined, size: 18),
+              label: const Text('Gestion des groupes'),
+            ),
+          ),
+        if (_selectedGroupIds.isNotEmpty && !multi) ...[
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: _groups
+                .where((g) => _selectedGroupIds.contains(g.id))
+                .map(
+                  (g) => Chip(
+                    label: Text(g.name),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                )
+                .toList(),
+          ),
+        ],
+        if (!multi) const SizedBox(height: 12),
+        if (multi)
+          ItemCopyUnitsPanel(
+            item: _item,
+            groups: _groups,
+            selectedGroupIds: _selectedGroupIds,
+            readOnly: ro,
+            mode: ItemCopyUnitsMode.whereabouts,
+            onItemChanged: (next) {
+              setState(() {
+                _item = next;
+                _syncGroupSelectionFromItem();
+              });
+              _saveNow();
+            },
+          )
+        else
+          CompactWhereaboutsDropdown(
+            groups: _groups,
+            selectedGroupIds: _selectedGroupIds,
+            locationUserId: _item.locationUserId,
+            holderLabel: _item.locationLabel,
+            readOnly: ro,
+            applyDefaultIfEmpty: !itemHasManualHolder(_item),
+            onChanged: ({
+              locationUserId,
+              holderLabel,
+              clearHolder = false,
+              manualHolder = false,
+            }) {
+              setState(() {
+                _item = applyWhereaboutsChange(
+                  _item,
+                  locationUserId: locationUserId,
+                  holderLabel: holderLabel,
+                  clearHolder: clearHolder,
+                  manualHolder: manualHolder,
+                );
+              });
+              if (manualHolder || locationUserId != null) {
+                _saveNow();
+              }
+            },
+          ),
+        if (!ro &&
+            !multi &&
+            isAwayFromHome(
+              _item,
+              meUserId: Supabase.instance.client.auth.currentUser?.id,
+            )) ...[
           const SizedBox(height: 8),
           TemporaryLoanToggle(
             isLoan: _item.isOnLoan,
             loanedAt: _item.loanedAt,
+            borrowerName: _item.loanedToName,
+            onBorrowerChanged: (name) {
+              setState(() {
+                _item = _item.copyWith(
+                  loanedToName: name.isEmpty ? null : name,
+                );
+              });
+              _scheduleSave();
+            },
             onChanged: (isLoan, date) {
               setState(() {
                 _item = applyTemporaryLoan(
                   _item,
                   isLoan: isLoan,
                   loanedAt: date,
-                  meUserId: meId,
+                  meUserId: Supabase.instance.client.auth.currentUser?.id,
                 );
               });
               _saveNow();
@@ -1974,6 +1819,400 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
           ),
         ],
       ],
+    );
+  }
+
+  Widget _buildNotesAndReviewsPanel(
+    bool ro, {
+    required bool showCommunityRating,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Ma note',
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+        ),
+        const SizedBox(height: 6),
+        StarRatingBar(
+          rating: _item.rating ?? 0,
+          onChanged: ro
+              ? (_) {}
+              : (value) {
+                  setState(() {
+                    _item = _item.copyWith(
+                      rating: value <= 0 ? null : value,
+                      clearRating: value <= 0,
+                    );
+                  });
+                  _saveNow();
+                },
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _reviewController,
+          readOnly: ro,
+          maxLines: 2,
+          minLines: 1,
+          decoration: const InputDecoration(
+            labelText: 'Mon avis',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 16),
+        ItemAspectRatingsSection(
+          category: _item.category,
+          metadata: _item.metadata,
+          readOnly: ro,
+          onMetadataChanged: (meta) {
+            setState(() => _item = _item.copyWith(metadata: meta));
+            _saveNow();
+          },
+        ),
+        if (showCommunityRating) ...[
+          const SizedBox(height: 16),
+          BggCommunityRatingPanel(
+            avgRating:
+                _bggAvgRating ??
+                parseBggAvgRating(_item.metadata?['bgg_avg_rating']),
+            loading: _bggDescriptionLoading,
+          ),
+        ],
+        if (!ro) ...[
+          const SizedBox(height: 16),
+          FriendRatingsPanel(item: _item),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildDoublesSalePanel(bool ro, bool isBoardgame) {
+    final copies = itemUsesCopyUnits(_item) ? readCopyUnits(_item) : const <ItemCopyUnit>[];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (copies.length >= 2) ...[
+          for (var i = 0; i < copies.length; i++)
+            Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: Theme.of(context)
+                    .colorScheme
+                    .surfaceContainerHighest
+                    .withValues(alpha: 0.45),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.inventory_2_outlined, size: 16, color: Colors.teal.shade600),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      copies[i].defaultLabel(i + 1),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  if (copies[i].condition != null)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ItemConditionPill(condition: copies[i].condition),
+                    ),
+                  Text(
+                    formatEuroChip(copies[i].purchasePrice, compact: false),
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ],
+              ),
+            ),
+          const SizedBox(height: 4),
+        ],
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('À vendre'),
+          subtitle: const Text('Apparaît dans l\'onglet « À vendre »'),
+          value: _item.isForSale && !_item.isSold,
+          onChanged: _item.isSold
+              ? null
+              : (v) {
+                  setState(() {
+                    _item = _item.copyWith(
+                      isForSale: v,
+                      isSold: false,
+                      metadata: _dispositionMeta(
+                        keep: !v,
+                        sell: v,
+                        trade: false,
+                      ),
+                    );
+                  });
+                  _saveNow();
+                },
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Envie d\'échanger'),
+          value: _dispositionIsTrade && !_item.isSold,
+          onChanged: _item.isSold
+              ? null
+              : (v) {
+                  setState(() {
+                    _item = _item.copyWith(
+                      isForSale: v ? true : _item.isForSale,
+                      metadata: _dispositionMeta(
+                        keep: !v && !_item.isForSale,
+                        sell: !v && _item.isForSale,
+                        trade: v,
+                      ),
+                    );
+                  });
+                  _saveNow();
+                },
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Marquer comme vendu'),
+          subtitle: const Text('Retire de la collection active'),
+          value: _item.isSold,
+          onChanged: (v) {
+            setState(() {
+              _item = _item.copyWith(
+                isSold: v,
+                isForSale: v ? false : _item.isForSale,
+                metadata: _dispositionMeta(
+                  keep: !v && !_item.isForSale,
+                  sell: false,
+                  trade: false,
+                  sold: v,
+                ),
+              );
+            });
+            _saveNow();
+          },
+        ),
+        if (_item.isSold) ...[
+          const SizedBox(height: 8),
+          TextField(
+            controller: _soldToController,
+            readOnly: ro,
+            decoration: const InputDecoration(
+              labelText: 'Vendu à',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+            onChanged: (_) => _scheduleSave(),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _soldPriceController,
+            readOnly: ro,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              labelText: 'Prix de vente (€)',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+            onChanged: (_) => _scheduleSave(),
+          ),
+        ],
+        if (_dispositionIsTrade && !_item.isSold) ...[
+          const SizedBox(height: 8),
+          TextField(
+            controller: _tradedForController,
+            readOnly: ro,
+            decoration: const InputDecoration(
+              labelText: 'Échangé contre',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+            onChanged: (_) => _scheduleSave(),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _tradedWithController,
+            readOnly: ro,
+            decoration: const InputDecoration(
+              labelText: 'Avec',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+            onChanged: (_) => _scheduleSave(),
+          ),
+        ],
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: ActionChip(
+            avatar: const Icon(Icons.storefront_outlined, size: 18),
+            label: const Text('Accès Vinted'),
+            onPressed: () => _openVintedSearch(
+              isBoardgame: isBoardgame,
+              isMedia: _item.category == CollectionCategory.media,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _boardgameExtensionsSubtitle() {
+    final owned = ownedExpansionCount(_item);
+    final total = _expansionCatalogTotal;
+    if (total != null && total > 0) {
+      return '$owned / $total possédées';
+    }
+    if (owned <= 0) return '0 possédée';
+    return '$owned possédée${owned > 1 ? 's' : ''}';
+  }
+
+  String _boardgameNotesBentoSubtitle() {
+    final parts = <String>[];
+    final perso = _item.rating;
+    if (perso != null && perso > 0) {
+      parts.add('Perso ${perso.toStringAsFixed(1)}/5');
+    }
+    final onFive = bggRatingOnFive(
+      _bggAvgRating ?? _item.metadata?['bgg_avg_rating'],
+    );
+    if (onFive != null) {
+      parts.add('Commu ${onFive.toStringAsFixed(1)}/5');
+    }
+    if (parts.isEmpty) return 'Perso — · Commu —';
+    return parts.join(' · ');
+  }
+
+  String _boardgameLocationShareSubtitle() {
+    final me = Supabase.instance.client.auth.currentUser;
+    final loc = quickWhereaboutsSummaryLabel(
+      _item,
+      meUserId: me?.id,
+      meDisplayName: me?.userMetadata?['display_name']?.toString(),
+    );
+    final groupNames = _groups
+        .where((g) => _selectedGroupIds.contains(g.id))
+        .map((g) => g.name)
+        .toList();
+    if (groupNames.isEmpty) return loc;
+    return '$loc · partagé avec ${groupNames.join(', ')}';
+  }
+
+  Future<void> _offerPantheonSlot() async {
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    if (uid == null) return;
+    final svc = ProfileService();
+    final current = List<String>.from(await svc.fetchPantheonIds(uid) ?? []);
+    final prefs = await SharedPreferences.getInstance();
+    final cap = (prefs.getInt('pantheon_cap:$uid') ?? 10).clamp(10, 20);
+    if (!mounted) return;
+    final slot = await showDialog<int>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Place dans le Panthéon'),
+        children: [
+          for (var i = 0; i < cap; i++)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(ctx, i),
+              child: Text('Place ${i + 1}'),
+            ),
+        ],
+      ),
+    );
+    if (slot == null || !mounted) return;
+    final next = current.where((id) => id != _item.id).toList();
+    next.insert(slot.clamp(0, next.length), _item.id);
+    if (next.length > cap) {
+      next.removeLast();
+      final drop = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Panthéon complet'),
+          content: const Text(
+            'Un jeu sort du panthéon. Le retirer ?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Non'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Oui, le retirer'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted) return;
+      if (drop != true) {
+        final replace = await showDialog<int>(
+          context: context,
+          builder: (ctx) => SimpleDialog(
+            title: const Text('À la place de qui ?'),
+            children: [
+              for (var i = 0; i < current.length && i < cap; i++)
+                SimpleDialogOption(
+                  onPressed: () => Navigator.pop(ctx, i),
+                  child: Text('Place ${i + 1}'),
+                ),
+            ],
+          ),
+        );
+        if (replace == null || !mounted) return;
+        final swapped = current.where((id) => id != _item.id).toList();
+        if (replace < swapped.length) {
+          swapped[replace] = _item.id;
+        } else {
+          swapped.add(_item.id);
+        }
+        await svc.savePantheonIds(swapped);
+        return;
+      }
+    }
+    await svc.savePantheonIds(next);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Panthéon mis à jour')),
+    );
+  }
+
+  Future<void> _openBggGallery(List<String> known) async {
+    final bggId = _item.metadata?['bgg_id']?.toString();
+    var urls = [...known];
+    if (bggId != null && bggId.isNotEmpty) {
+      final extra = await BggService.fetchCommunityImages(bggId);
+      urls = {...urls, ...extra}.toList();
+    }
+    if (!mounted) return;
+    if (urls.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Aucune photo BGG pour ce jeu')),
+      );
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.sizeOf(ctx).height * 0.72,
+          child: GridView.builder(
+            padding: const EdgeInsets.all(12),
+            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+              maxCrossAxisExtent: 180,
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
+            ),
+            itemCount: urls.length,
+            itemBuilder: (_, i) => ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: BggNetworkImage(url: urls[i]),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -1985,48 +2224,101 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       );
     }
 
-    final text = _bggDescription;
     final galleryUrls = _bggGalleryUrls(_item.metadata);
-    if ((text == null || text.isEmpty) && galleryUrls.isEmpty) {
+    final bggId = _item.metadata?['bgg_id']?.toString();
+    if (galleryUrls.isEmpty && (bggId == null || bggId.isEmpty)) {
       return const SizedBox.shrink();
     }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (galleryUrls.length > 1) ...[
-          SizedBox(
-            height: 180,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: galleryUrls.length,
-              padding: const EdgeInsets.only(bottom: 4),
-              separatorBuilder: (_, _) => const SizedBox(width: 10),
-              itemBuilder: (context, index) => ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: AspectRatio(
-                  aspectRatio: 1.35,
-                  child: BggNetworkImage(url: galleryUrls[index]),
+        TextButton.icon(
+          onPressed: () => _openBggGallery(galleryUrls),
+          icon: const Icon(Icons.photo_library_outlined),
+          label: const Text('Photos BoardGameGeek'),
+        ),
+      ],
+    );
+  }
+
+  String? get _bggHookText {
+    final short = _bggDescription?.trim();
+    if (short != null && short.isNotEmpty) return short;
+    final long = _bggLongDescription?.trim();
+    if (long == null || long.isEmpty) return null;
+    final end = RegExp(r'[.!?]').firstMatch(long)?.start ?? -1;
+    if (end <= 0 || end > 180) {
+      return long.length > 140 ? long.substring(0, 140).trim() : long;
+    }
+    return long.substring(0, end + 1).trim();
+  }
+
+  Widget _bggShortHook() {
+    final hook = _bggHookText;
+    if (hook == null || hook.isEmpty) {
+      if (!_bggDescriptionLoading) return const SizedBox.shrink();
+      return const LinearProgressIndicator(minHeight: 2);
+    }
+    final long = _bggLongDescription?.trim() ?? '';
+    final canToggle = long.isNotEmpty && long != hook;
+    final style = GoogleFonts.lora(
+      fontSize: 14,
+      height: 1.4,
+      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.85),
+    );
+    return Text.rich(
+      TextSpan(
+        style: style,
+        children: [
+          TextSpan(text: hook),
+          if (canToggle && !_bggDescExpanded)
+            WidgetSpan(
+              alignment: PlaceholderAlignment.middle,
+              child: TextButton(
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.only(left: 6),
+                  minimumSize: const Size(0, 28),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
+                onPressed: () => setState(() => _bggDescExpanded = true),
+                child: const Text('+ Voir plus'),
               ),
             ),
-          ),
-          if (text != null && text.isNotEmpty) const SizedBox(height: 12),
         ],
-        if (text != null && text.isNotEmpty)
-          Text(
-            text,
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.lora(
-              fontSize: 15,
-              height: 1.55,
-              color: Theme.of(
-                context,
-              ).colorScheme.onSurface.withValues(alpha: 0.85),
+      ),
+    );
+  }
+
+  Widget _bggLongBody() {
+    final hook = _bggHookText ?? '';
+    var long = _bggLongDescription?.trim() ?? '';
+    if (long.startsWith(hook)) {
+      long = long.substring(hook.length).trim();
+    }
+    if (long.isEmpty) return const SizedBox.shrink();
+    final style = GoogleFonts.lora(
+      fontSize: 15,
+      height: 1.55,
+      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.85),
+    );
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(long, style: style),
+          TextButton(
+            style: TextButton.styleFrom(
+              padding: EdgeInsets.zero,
+              minimumSize: const Size(0, 32),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
+            onPressed: () => setState(() => _bggDescExpanded = false),
+            child: const Text('- Voir moins'),
           ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -2250,21 +2542,31 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     final parts = <String>[];
     final perso = _item.rating;
     if (perso != null && perso > 0) {
-      parts.add('Perso ${perso.toStringAsFixed(1)}');
+      parts.add('Perso ${perso.toStringAsFixed(1)}/5');
     } else {
       parts.add('Perso —');
     }
-    final bgg = _bggAvgRating ??
-        parseBggAvgRating(_item.metadata?['bgg_avg_rating']);
-    if (bgg != null && bgg > 0) {
-      parts.add('Commu ${bgg.toStringAsFixed(1)}');
+    final onFive = bggRatingOnFive(
+      _bggAvgRating ?? _item.metadata?['bgg_avg_rating'],
+    );
+    if (onFive != null) {
+      parts.add('Commu ${onFive.toStringAsFixed(1)}/5');
     } else {
       parts.add('Commu —');
     }
     return parts.join(' · ');
   }
 
-  String _saleDispositionSubtitle() {
+  String _saleDispositionSubtitle({bool includeCopyCount = false}) {
+    final qty = _item.quantity;
+    if (includeCopyCount && qty > 1) {
+      final base = _saleDispositionSubtitleCore();
+      return '$qty exemplaires · $base';
+    }
+    return _saleDispositionSubtitleCore();
+  }
+
+  String _saleDispositionSubtitleCore() {
     if (_item.isSold) {
       final to = _item.metadata?['sold_to']?.toString().trim();
       final price = _item.metadata?['sold_price']?.toString().trim();

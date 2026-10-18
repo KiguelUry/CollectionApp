@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
+import '../models/collection_group.dart';
 import '../services/friend_service.dart';
+import '../services/group_service.dart';
 import '../widgets/add_friend_sheet.dart';
 import '../widgets/app_app_bar.dart';
 import '../widgets/friends_activity_feed.dart';
+import '../widgets/households_sheet.dart';
+import '../widgets/group_badge.dart';
 import '../widgets/profile_avatar.dart';
 import 'friend_collection_screen.dart';
+import 'group_detail_screen.dart';
 
 class FriendsScreen extends StatefulWidget {
   const FriendsScreen({super.key});
@@ -15,8 +20,10 @@ class FriendsScreen extends StatefulWidget {
 
 class _FriendsScreenState extends State<FriendsScreen> {
   final _service = FriendService();
+  final _groupService = GroupService();
   final _filterController = TextEditingController();
   List<Map<String, dynamic>> _friends = [];
+  List<CollectionGroup> _groups = [];
   List<Map<String, dynamic>> _filtered = [];
   List<Map<String, dynamic>> _pendingRequests = [];
   bool _loading = true;
@@ -47,9 +54,11 @@ class _FriendsScreenState extends State<FriendsScreen> {
       final results = await Future.wait([
         _service.fetchFriends(),
         _service.fetchIncomingFriendRequests(),
+        _groupService.fetchMyGroups(),
       ]);
-      _friends = results[0];
-      _pendingRequests = results[1];
+      _friends = results[0] as List<Map<String, dynamic>>;
+      _pendingRequests = results[1] as List<Map<String, dynamic>>;
+      _groups = results[2] as List<CollectionGroup>;
       _applyFilter();
     } catch (e) {
       if (mounted) {
@@ -339,6 +348,11 @@ class _FriendsScreenState extends State<FriendsScreen> {
           ),
           actions: [
             IconButton(
+              icon: const Icon(Icons.home_outlined),
+              tooltip: 'Foyers & lieux liés',
+              onPressed: () => showHouseholdsSheet(context),
+            ),
+            IconButton(
               icon: const Icon(Icons.person_add_alt_1_rounded),
               tooltip: 'Ajouter un ami',
               onPressed: _openAddFriend,
@@ -350,11 +364,88 @@ class _FriendsScreenState extends State<FriendsScreen> {
           icon: const Icon(Icons.person_add),
           label: const Text('Ami'),
         ),
-        body: TabBarView(
+        body: Column(
           children: [
-            const FriendsActivityFeed(),
-            _buildFriendsList(),
+            _avatarStrip(),
+            Expanded(
+              child: TabBarView(
+                children: [
+                  const FriendsActivityFeed(),
+                  _buildFriendsList(),
+                ],
+              ),
+            ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _avatarStrip() {
+    if (_groups.isEmpty && _friends.isEmpty) return const SizedBox.shrink();
+    return SizedBox(
+      height: 96,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+        children: [
+          for (final group in _groups)
+            _roundTarget(
+              label: group.name,
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => GroupDetailScreen(group: group),
+                ),
+              ),
+              child: GroupBadge.fromGroup(
+                name: group.name,
+                avatarUrl: group.avatarUrl,
+                accentColor: group.accentColor,
+                iconKey: group.iconKey,
+                radius: 26,
+              ),
+            ),
+          for (final friend in _friends)
+            _roundTarget(
+              label: friend['username'] as String? ?? 'Ami',
+              onTap: () => _openFriend(friend),
+              child: ProfileAvatar(
+                avatarUrl: friend['avatar_url'] as String?,
+                accentColorHex: friend['accent_color'] as String?,
+                fallbackInitial: friend['username'] as String? ?? '?',
+                radius: 26,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _roundTarget({
+    required String label,
+    required VoidCallback onTap,
+    required Widget child,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(40),
+        child: SizedBox(
+          width: 72,
+          child: Column(
+            children: [
+              child,
+              const SizedBox(height: 4),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
         ),
       ),
     );

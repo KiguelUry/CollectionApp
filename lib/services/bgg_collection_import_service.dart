@@ -236,7 +236,6 @@ class BggCollectionImportService {
         .from('collection_items')
         .select('title, metadata')
         .eq('category', CollectionCategory.boardgame.dbValue)
-        .eq('is_wishlist', false)
         .or('added_by.eq.$uid,location_user_id.eq.$uid');
     final ids = <String>{};
     final titles = <String>[];

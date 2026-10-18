@@ -54,15 +54,55 @@ class CollectionCoverImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final padded = bookCover || boxedCover;
+    final imageFit = padded ? BoxFit.contain : fit;
+    final w = width;
+    final h = height;
+
+    Widget image;
+    final thumb = compact
+        ? gridThumbnailUrl(
+            url,
+            crop: !padded && fit == BoxFit.cover,
+            size: _thumbnailBucket(w ?? h, MediaQuery.devicePixelRatioOf(context)),
+          )
+        : url;
+    if (thumb != url) {
+      image = CachedNetworkImage(
+        imageUrl: thumb,
+        width: w,
+        height: h,
+        fit: imageFit,
+        filterQuality: FilterQuality.medium,
+        fadeInDuration: const Duration(milliseconds: 180),
+        fadeOutDuration: Duration.zero,
+        placeholder: (_, _) => _fallback(child: const SizedBox.shrink()),
+        errorWidget: (context, _, _) => _buildOriginal(context, imageFit),
+      );
+    } else {
+      image = _buildOriginal(context, imageFit);
+    }
+
+    if (padded) {
+      image = ColoredBox(
+        color: Colors.grey.shade100,
+        child: image,
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(padded ? 6 : 8),
+      child: image,
+    );
+  }
+
+  Widget _buildOriginal(BuildContext context, BoxFit imageFit) {
     final displayUrl = coverUrlForDisplay(url, large: largeSource);
     final dpr = MediaQuery.devicePixelRatioOf(context);
     final w = width;
     final h = height;
     final cacheW = _cachePixelSize(w, dpr);
     final cacheH = _cachePixelSize(h, dpr);
-
-    final padded = bookCover || boxedCover;
-    final imageFit = padded ? BoxFit.contain : fit;
     Widget image;
 
     if (_preferWebHtmlImage(displayUrl)) {
@@ -122,18 +162,7 @@ class CollectionCoverImage extends StatelessWidget {
         errorWidget: (_, _, _) => _fallback(),
       );
     }
-
-    if (padded) {
-      image = ColoredBox(
-        color: Colors.grey.shade100,
-        child: image,
-      );
-    }
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(padded ? 6 : 8),
-      child: image,
-    );
+    return image;
   }
 
   Widget _fallback({Widget? child}) {
@@ -155,6 +184,17 @@ class CollectionCoverImage extends StatelessWidget {
             ),
       ),
     );
+  }
+
+  /// Paliers fixes pour maximiser les hits du cache CDN.
+  static int _thumbnailBucket(double? logicalPx, double dpr) {
+    if (logicalPx == null || !logicalPx.isFinite || logicalPx <= 0) {
+      return kThumbnailSize;
+    }
+    final px = logicalPx * dpr;
+    if (px <= 300) return 300;
+    if (px <= 450) return 450;
+    return 600;
   }
 
   /// Évite cacheWidth/cacheHeight avec [double.infinity] → crash « infinity to int ».

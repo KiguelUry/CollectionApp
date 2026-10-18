@@ -443,7 +443,11 @@ List<CollectionItem> rankOrphanAttachCandidates(
 
 /// Regroupe les parties consécutives d'un même jeu.
 class GlobalPlayHistoryGroup {
+  /// Clé du jeu (partagée par toutes les séries d'un même jeu).
   final String groupKey;
+
+  /// Unique par série : un même jeu peut avoir plusieurs séries non contiguës.
+  final String streakKey;
   final String title;
   final String? imageUrl;
   final List<GlobalPlayHistoryEntry> entries;
@@ -451,6 +455,7 @@ class GlobalPlayHistoryGroup {
 
   const GlobalPlayHistoryGroup({
     required this.groupKey,
+    required this.streakKey,
     required this.title,
     this.imageUrl,
     required this.entries,
@@ -475,6 +480,7 @@ List<GlobalPlayHistoryGroup> groupPlayHistoryEntries(
     groups.add(
       GlobalPlayHistoryGroup(
         groupKey: key,
+        streakKey: '$key#$i',
         title: entries[i].title,
         imageUrl: entries[i].imageUrl,
         entries: batch,

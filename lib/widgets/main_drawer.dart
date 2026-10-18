@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../screens/login_screen.dart';
-import '../screens/profile_edit_screen.dart';
-import '../screens/inventory_manage_screen.dart';
-import '../screens/loans_screen.dart';
-import '../screens/marketplace/marketplace_screen.dart';
+import '../screens/friend_collection_screen.dart';
+import '../screens/all_collection_screen.dart';
+import '../screens/exchanges_screen.dart';
 import '../screens/stats_screen.dart';
 import '../services/auth_service.dart';
 import '../services/profile_cache_service.dart';
@@ -40,13 +41,23 @@ class _MainDrawerState extends State<MainDrawer> {
   }
 
   Future<void> _openProfile() async {
-    final changed = await Navigator.push<bool>(
+    final profile = _cache.profile;
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    if (uid == null) return;
+    Navigator.pop(context);
+    await Navigator.push<void>(
       context,
-      MaterialPageRoute(builder: (_) => const ProfileEditScreen()),
+      MaterialPageRoute(
+        builder: (_) => FriendCollectionScreen(
+          profileId: uid,
+          username: profile?.username ?? 'Moi',
+          avatarUrl: profile?.avatarUrl,
+          accentColor: profile?.accentColor,
+          shareCollections: true,
+        ),
+      ),
     );
-    if (changed == true) {
-      await _cache.refresh();
-    }
+    await _cache.refresh();
   }
 
   void _closeAndPush(Widget screen) {
@@ -151,10 +162,9 @@ class _MainDrawerState extends State<MainDrawer> {
                   ),
                   const SizedBox(height: 8),
                   _item(
-                    icon: Icons.grid_view_rounded,
-                    label: 'Collections',
-                    onTap: () =>
-                        Navigator.pushReplacementNamed(context, '/categories'),
+                    icon: Icons.all_inbox_rounded,
+                    label: 'Toute ma collection',
+                    onTap: () => _closeAndPush(const AllCollectionScreen()),
                   ),
                   _item(
                     icon: Icons.bar_chart_rounded,
@@ -170,19 +180,9 @@ class _MainDrawerState extends State<MainDrawer> {
                     },
                   ),
                   _item(
-                    icon: Icons.handshake_rounded,
-                    label: 'Prêts',
-                    onTap: () => _closeAndPush(const LoansScreen()),
-                  ),
-                  _item(
-                    icon: Icons.storefront_outlined,
-                    label: 'Hôtel des Ventes / Échanges',
-                    onTap: () => _closeAndPush(const MarketplaceScreen()),
-                  ),
-                  _item(
-                    icon: Icons.copy_all_rounded,
-                    label: 'Doubles & ventes',
-                    onTap: () => _closeAndPush(const InventoryManageScreen()),
+                    icon: Icons.swap_horiz_rounded,
+                    label: 'Échanges & Doublons',
+                    onTap: () => _closeAndPush(const ExchangesScreen()),
                   ),
                   const Divider(height: 20),
                   _item(

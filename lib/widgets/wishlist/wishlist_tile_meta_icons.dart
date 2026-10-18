@@ -6,9 +6,8 @@ import '../../utils/boardgame_display.dart';
 import '../../utils/wishlist_market_metadata.dart';
 import '../boardgame_tile_inventory_sheets.dart';
 import '../boardgame_tile_sheets.dart';
-import 'wishlist_price_sheet.dart';
 
-/// Badges wishlist — même échelle que [CollectionItemTile] (2 lignes × 20 px).
+/// Badges wishlist — même échelle / puce € que la collection.
 class WishlistTileMetaIcons extends StatefulWidget {
   final CollectionItem item;
   final bool readOnly;
@@ -47,23 +46,33 @@ class _WishlistTileMetaIconsState extends State<WishlistTileMetaIcons> {
     final missingPrices =
         marketSecondhandPriceFromMetadata(widget.item.metadata) == null &&
             marketNewPriceMinFromMetadata(widget.item.metadata) == null;
-    final missingExt = bggExpansionCountFromMetadata(widget.item.metadata) == null;
+    final missingExt =
+        bggExpansionCountFromMetadata(widget.item.metadata) == null;
     if (!missingPrices && !missingExt) return;
     _fetchingMeta = true;
     try {
       await BoardgameMarketService.enrichItemMetadata(widget.item);
-    } catch (_) {}
-    finally {
+    } catch (_) {
+    } finally {
       _fetchingMeta = false;
     }
+  }
+
+  String get _valueChipLabel {
+    final avg = marketPriceAvgFromMetadata(widget.item.metadata);
+    if (avg != null && avg > 0) return '~${formatEuroChip(avg)}';
+    final market = marketSecondhandPriceFromMetadata(widget.item.metadata);
+    if (market != null) return '~${formatEuroChip(market)}';
+    final neu = marketNewPriceMinFromMetadata(widget.item.metadata);
+    if (neu != null) return '~${formatEuroChip(neu)}';
+    return '—';
   }
 
   @override
   Widget build(BuildContext context) {
     final extCount = bggExpansionCountFromMetadata(widget.item.metadata) ?? 0;
-    final rating = formatBggRatingChipLabel(widget.item.metadata?['bgg_avg_rating']);
-    final used = marketSecondhandPriceFromMetadata(widget.item.metadata);
-    final neu = marketNewPriceMinFromMetadata(widget.item.metadata);
+    final rating =
+        formatBggRatingChipLabel(widget.item.metadata?['bgg_avg_rating']);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -88,14 +97,15 @@ class _WishlistTileMetaIconsState extends State<WishlistTileMetaIcons> {
               const SizedBox(width: 4),
               Expanded(
                 child: _chip(
-                  icon: Icons.star_rounded,
-                  suffix: rating ?? '—',
-                  color: Colors.amber.shade700,
+                  icon: Icons.euro_rounded,
+                  suffix: _valueChipLabel,
+                  color: Colors.teal.shade500,
                   shrinkSuffix: true,
-                  onTap: () => showBoardgameTileRatingSheet(
+                  onTap: () => showBoardgameTileValueSheet(
                     context,
                     item: widget.item,
                     readOnly: widget.readOnly,
+                    showPurchaseBlock: false,
                   ),
                 ),
               ),
@@ -106,49 +116,19 @@ class _WishlistTileMetaIconsState extends State<WishlistTileMetaIcons> {
         SizedBox(
           height: _rowHeight,
           width: double.infinity,
-          child: Row(
-            children: [
-              Expanded(
-                child: _chip(
-                  icon: Icons.recycling_rounded,
-                  suffix: formatEuroChip(used),
-                  color: Colors.teal.shade600,
-                  shrinkSuffix: true,
-                  onTap: () => _openPriceSheet(
-                    context,
-                    focus: WishlistPriceFocus.secondhand,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 4),
-              Expanded(
-                child: _chip(
-                  icon: Icons.shopping_bag_outlined,
-                  suffix: formatEuroChip(neu),
-                  color: Colors.indigo.shade500,
-                  shrinkSuffix: true,
-                  onTap: () => _openPriceSheet(
-                    context,
-                    focus: WishlistPriceFocus.newPrice,
-                  ),
-                ),
-              ),
-            ],
+          child: _chip(
+            icon: Icons.star_rounded,
+            suffix: rating ?? '—',
+            color: Colors.amber.shade700,
+            shrinkSuffix: true,
+            onTap: () => showBoardgameTileRatingSheet(
+              context,
+              item: widget.item,
+              readOnly: widget.readOnly,
+            ),
           ),
         ),
       ],
-    );
-  }
-
-  Future<void> _openPriceSheet(
-    BuildContext context, {
-    required WishlistPriceFocus focus,
-  }) {
-    return showWishlistPriceSheet(
-      context,
-      item: widget.item,
-      initialFocus: focus,
-      readOnly: widget.readOnly,
     );
   }
 

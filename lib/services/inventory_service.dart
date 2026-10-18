@@ -10,11 +10,14 @@ class InventoryService {
 
   static const _select = SupabaseEmbeds.collectionItem;
 
+  /// Tous les objets dont je suis propriétaire ou détenteur (groupes inclus).
+  Future<List<CollectionItem>> fetchOwnedItems() => _fetchAll();
+
   Future<List<CollectionItem>> _fetchAll() async {
     final userId = CollectionItemScope.currentUserId;
     if (userId == null) return [];
 
-    final rows = await CollectionItemScope.personal(
+    final rows = await CollectionItemScope.ownedByUser(
       _client.from('collection_items').select(_select),
       userId: userId,
     );

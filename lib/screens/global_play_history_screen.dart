@@ -14,6 +14,7 @@ import '../widgets/boardgame_play_history_panel.dart';
 import '../widgets/boardgame_ranking_panel.dart';
 import '../widgets/bgg_network_image.dart';
 import '../widgets/empty_state_view.dart';
+import '../utils/collection_pick_dedupe.dart';
 import '../widgets/orphan_attach_sheet.dart';
 import '../widgets/player_alias_linker_sheet.dart';
 
@@ -298,13 +299,14 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
       }
     }
     if (!mounted) return;
+    var changed = false;
     await showPlayerAliasLinkerSheet(
       context,
       knownNames: names.toList()
         ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())),
+      onMutated: () => changed = true,
     );
-    // Recharge les parties (renommages) + refresh classements (aliases).
-    if (mounted) await _load();
+    if (changed && mounted) await _load();
   }
 
   Future<_GamePick?> _pickGame() async {
@@ -324,28 +326,52 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
     final dateFmt = DateFormat('d MMM yyyy', 'fr_FR');
     final allSessions = _entries.map((e) => e.session).toList();
 
+    final topPlayed = [..._groups]
+      ..sort((a, b) => b.entries.length.compareTo(a.entries.length));
+    final wide = MediaQuery.sizeOf(context).width > 900;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Historique des parties'),
-        actions: [
-          TextButton.icon(
-            onPressed: _openAliasLinker,
-            icon: const Icon(Icons.people_alt_outlined, size: 20),
-            label: const Text('Identités'),
-          ),
-        ],
       ),
       floatingActionButton: _tabIndex == 0
           ? FloatingActionButton.extended(
               onPressed: _addSession,
-              icon: const Icon(Icons.add),
-              label: const Text('Partie'),
+              icon: const Icon(Icons.add_rounded, size: 26),
+              label: const Text(
+                'Nouvelle partie',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              ),
+              extendedPadding: const EdgeInsets.symmetric(horizontal: 28),
             )
           : null,
+      floatingActionButtonLocation: wide
+          ? FloatingActionButtonLocation.centerFloat
+          : FloatingActionButtonLocation.endFloat,
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : Column(
+          : _GlobalPlayHistoryLayout(
+              gameCount: _groups.length,
+              playCount: allSessions.length,
+              topPlayed: topPlayed
+                  .take(5)
+                  .map((g) => _PlayHistoryTopGame(g.title, g.entries.length))
+                  .toList(),
+              onOpenIdentities: _openAliasLinker,
+              child: Column(
               children: [
+                if (MediaQuery.sizeOf(context).width <= 1100)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _openAliasLinker,
+                        icon: const Icon(Icons.people_alt_outlined),
+                        label: const Text('Identités joueurs'),
+                      ),
+                    ),
+                  ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
                   child: SegmentedButton<int>(
@@ -395,6 +421,7 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
                       : _buildHistoryList(dateFmt),
                 ),
               ],
+            ),
             ),
     );
   }
@@ -468,12 +495,12 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
         itemCount: _visibleGroups.length,
         itemBuilder: (context, index) {
           final group = _visibleGroups[index];
-          final expanded = _expanded.contains(group.groupKey);
+          final expanded = _expanded.contains(group.streakKey);
 
           if (group.isStreak && !expanded) {
             return _StreakTile(
               group: group,
-              onTap: () => setState(() => _expanded.add(group.groupKey)),
+              onTap: () => setState(() => _expanded.add(group.streakKey)),
             );
           }
 
@@ -485,7 +512,7 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
                   group: group,
                   expanded: true,
                   onTap: () =>
-                      setState(() => _expanded.remove(group.groupKey)),
+                      setState(() => _expanded.remove(group.streakKey)),
                 ),
                 for (final entry in group.entries)
                   _EntryTile(
@@ -552,10 +579,10 @@ class _PickGameBottomSheetState extends State<_PickGameBottomSheet> {
 
   List<CollectionItem> get _filteredCollection {
     final q = _query.toLowerCase();
-    if (q.length < 2) return widget.items;
-    return widget.items
-        .where((i) => i.title.toLowerCase().contains(q))
-        .toList();
+    final base = q.length < 2
+        ? widget.items
+        : widget.items.where((i) => i.title.toLowerCase().contains(q));
+    return dedupeCollectionItemsForPick(base);
   }
 
   void _onQueryChanged() {
@@ -566,13 +593,13 @@ class _PickGameBottomSheetState extends State<_PickGameBottomSheet> {
       return;
     }
     setState(() {});
-    _debounce = Timer(const Duration(milliseconds: 350), () => _searchBgg(q));
+    _debounce = Timer(const Duration(milliseconds: 450), () => _searchBgg(q));
   }
 
   Future<void> _searchBgg(String q) async {
     setState(() => _searching = true);
     try {
-      final r = await BggService.searchGames(q);
+      final r = await BggService.searchGames(q, lightweight: true);
       if (mounted) setState(() => _bggResults = r);
     } catch (_) {
       if (mounted) setState(() => _bggResults = []);
@@ -648,7 +675,12 @@ class _PickGameBottomSheetState extends State<_PickGameBottomSheet> {
                     ),
                     for (final item in collection)
                       ListTile(
-                        leading: _historyThumb(item.imageUrl),
+                        key: ValueKey('pick-owned-${item.id}'),
+                        leading: _historyThumb(
+                          item.imageUrl,
+                          size: _thumbSize(context),
+                          key: ValueKey('pick-thumb-${item.id}'),
+                        ),
                         title: Text(item.title),
                         onTap: () => Navigator.pop(
                           context,
@@ -664,7 +696,12 @@ class _PickGameBottomSheetState extends State<_PickGameBottomSheet> {
                       ),
                       for (final g in _bggResults)
                         ListTile(
-                          leading: _historyThumb(g['image_url']),
+                          key: ValueKey('pick-bgg-${g['id']}'),
+                          leading: _historyThumb(
+                            g['image_url']?.toString(),
+                            key: ValueKey('pick-bgg-thumb-${g['id']}'),
+                            size: _thumbSize(context),
+                          ),
                           title: Text(g['title'] ?? 'Jeu'),
                           subtitle: const Text(
                             'Partie sans ajouter à la collection',
@@ -742,19 +779,23 @@ class _GamePick {
       );
 }
 
-Widget _historyThumb(String? url) {
+Widget _historyThumb(String? url, {Key? key, double size = 40}) {
   if (url == null || url.isEmpty) {
-    return const Icon(Icons.extension_outlined);
+    return Icon(Icons.extension_outlined, key: key, size: size * 0.7);
   }
   return ClipRRect(
-    borderRadius: BorderRadius.circular(6),
+    key: key,
+    borderRadius: BorderRadius.circular(8),
     child: SizedBox(
-      width: 40,
-      height: 40,
-      child: BggNetworkImage(url: url, boxedCover: true),
+      width: size,
+      height: size,
+      child: BggNetworkImage(url: url, boxedCover: true, compact: true),
     ),
   );
 }
+
+double _thumbSize(BuildContext context) =>
+    MediaQuery.sizeOf(context).width > 1100 ? 64 : 40;
 
 class _StreakTile extends StatelessWidget {
   final GlobalPlayHistoryGroup group;
@@ -772,7 +813,7 @@ class _StreakTile extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
-        leading: _historyThumb(group.imageUrl),
+        leading: _historyThumb(group.imageUrl, size: _thumbSize(context)),
         title: Text(group.title),
         subtitle: Text(
           '${group.entries.length} parties jouées d\'affilée !',
@@ -829,7 +870,7 @@ class _EntryTile extends StatelessWidget {
                 Stack(
                   clipBehavior: Clip.none,
                   children: [
-                    _historyThumb(imageUrl),
+                    _historyThumb(imageUrl, size: _thumbSize(context)),
                     if (session.isInProgress)
                       Positioned(
                         right: -2,
@@ -947,6 +988,222 @@ class _EntryTile extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _PlayHistoryTopGame {
+  final String title;
+  final int plays;
+
+  const _PlayHistoryTopGame(this.title, this.plays);
+}
+
+/// Contenu centré (max 950 px) + panneaux latéraux sur grand écran.
+class _GlobalPlayHistoryLayout extends StatelessWidget {
+  static const maxContentWidth = 950.0;
+
+  final int gameCount;
+  final int playCount;
+  final List<_PlayHistoryTopGame> topPlayed;
+  final VoidCallback onOpenIdentities;
+  final Widget child;
+
+  const _GlobalPlayHistoryLayout({
+    required this.gameCount,
+    required this.playCount,
+    required this.topPlayed,
+    required this.onOpenIdentities,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final showSide = constraints.maxWidth > 1100;
+        final center = ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: maxContentWidth),
+          child: child,
+        );
+
+        if (!showSide) {
+          return Align(alignment: Alignment.topCenter, child: center);
+        }
+
+        Widget statCard({
+          required String title,
+          required String value,
+          required IconData icon,
+          String? caption,
+        }) {
+          return Card(
+            elevation: 0,
+            color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(icon, size: 20, color: scheme.primary),
+                  const SizedBox(height: 6),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    value,
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  if (caption != null && caption.isNotEmpty)
+                    Text(
+                      caption,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        Widget identitiesCard() {
+          return Card(
+            elevation: 0,
+            color: scheme.primaryContainer.withValues(alpha: 0.45),
+            child: InkWell(
+              onTap: onOpenIdentities,
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Icon(Icons.people_alt_outlined, color: scheme.primary),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text(
+                        'Identités joueurs',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                    Icon(
+                      Icons.chevron_right,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+
+        Widget topPlayedCard() {
+          if (topPlayed.isEmpty) return const SizedBox.shrink();
+          return Card(
+            elevation: 0,
+            color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.emoji_events_outlined, color: scheme.primary),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Top jeux joués',
+                        style: TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  for (var i = 0; i < topPlayed.length; i++)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        children: [
+                          Text(
+                            '#${i + 1}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              topPlayed[i].title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Text(
+                            '${topPlayed[i].plays}',
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: SizedBox(
+                  width: 250,
+                  child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 56, 12, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    statCard(
+                      title: 'Parties enregistrées',
+                      value: '$playCount',
+                      icon: Icons.history_edu_outlined,
+                    ),
+                    const SizedBox(height: 12),
+                    statCard(
+                      title: 'Jeux distincts',
+                      value: '$gameCount',
+                      icon: Icons.extension_outlined,
+                      caption: 'Historique global',
+                    ),
+                    const SizedBox(height: 12),
+                    identitiesCard(),
+                    const SizedBox(height: 12),
+                    topPlayedCard(),
+                  ],
+                ),
+              ),
+                ),
+              ),
+            ),
+            Flexible(child: center),
+            const Expanded(child: SizedBox.shrink()),
+          ],
+        );
+      },
     );
   }
 }

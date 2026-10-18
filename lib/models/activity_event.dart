@@ -31,10 +31,12 @@ class ActivityEvent {
     final name = actorUsername;
     final item = itemTitle ?? 'un objet';
     return switch (eventType) {
-      'item_added' => '$name a ajouté $item',
+      'item_added' => 'Nouvel ajout · $name a ajouté $item',
       'wishlist_added' => '$name a mis $item en wishlist',
       'item_rated' => '$name a noté $item${rating != null ? ' ($rating★)' : ''}',
       'trophies_updated' => '$name a mis à jour ses trophées',
+      'play_win' => 'Victoire de partie · $name sur $item',
+      'loan_created' => 'Nouveau prêt · $name prête $item',
       _ => '$name a une activité',
     };
   }

@@ -14,7 +14,7 @@ class LoanService {
     final userId = CollectionItemScope.currentUserId;
     if (userId == null) return [];
 
-    final rows = await CollectionItemScope.personal(
+    final rows = await CollectionItemScope.ownedByUser(
       _client
           .from('collection_items')
           .select(_select)

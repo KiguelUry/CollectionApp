@@ -124,13 +124,16 @@ class BggImportPlan {
 String _normTitle(String s) =>
     s.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
 
+/// Titre normalisé pour anti-doublon (import BGG, recherche partie, etc.).
+String normalizeBggImportTitle(String title) => _normTitle(title);
+
 /// Sépare les jeux à importer de ceux déjà possédés (même BGG id ou titre).
 BggImportPlan planBggImport(
   Iterable<BggCollectionEntry> entries, {
   Set<String> existingBggIds = const {},
   Iterable<String> existingTitles = const [],
 }) {
-  final titles = existingTitles.map(_normTitle).toSet();
+  final titles = existingTitles.map(normalizeBggImportTitle).toSet();
   final ids = {...existingBggIds};
   final toInsert = <BggCollectionEntry>[];
   final owned = <BggCollectionEntry>[];
@@ -141,12 +144,13 @@ BggImportPlan planBggImport(
       expansions.add(e);
       continue;
     }
-    if (ids.contains(e.bggId) || titles.contains(_normTitle(e.title))) {
+    if (ids.contains(e.bggId) ||
+        titles.contains(normalizeBggImportTitle(e.title))) {
       owned.add(e);
       continue;
     }
     ids.add(e.bggId);
-    titles.add(_normTitle(e.title));
+    titles.add(normalizeBggImportTitle(e.title));
     toInsert.add(e);
   }
   return BggImportPlan(

@@ -15,7 +15,7 @@ class TcgCompletionService {
     final userId = _userId;
     if (userId == null) return [];
 
-    final rows = await CollectionItemScope.personal(
+    final rows = await CollectionItemScope.ownedByUser(
       _client
           .from('collection_items')
           .select('subcategory, metadata')

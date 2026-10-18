@@ -32,7 +32,7 @@ class CollectionExportService {
     final userId = CollectionItemScope.currentUserId;
     if (userId == null) throw Exception('Non connecté');
 
-    final rows = await CollectionItemScope.personal(
+    final rows = await CollectionItemScope.ownedByUser(
       _client.from('collection_items').select(
         'id, title, category, subcategory, quantity, purchase_price, rating, '
         'review, condition, is_wishlist, is_for_sale, is_sold, '

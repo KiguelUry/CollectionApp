@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import '../../utils/stats_dashboard.dart';
 
 /// Vue d'ensemble « Bento » des statistiques (sans accès réseau).
-class StatsDashboardView extends StatelessWidget {
+class StatsDashboardView extends StatefulWidget {
   final StatsDashboard data;
   final double musicMarketValue;
   final List<Widget> footer;
@@ -20,12 +20,21 @@ class StatsDashboardView extends StatelessWidget {
   });
 
   @override
+  State<StatsDashboardView> createState() => _StatsDashboardViewState();
+}
+
+class _StatsDashboardViewState extends State<StatsDashboardView> {
+  var _showAllPlayed = false;
+
+  StatsDashboard get data => widget.data;
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Align(
       alignment: Alignment.topCenter,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: maxContentWidth),
+        constraints: const BoxConstraints(maxWidth: StatsDashboardView.maxContentWidth),
         child: LayoutBuilder(
           builder: (context, constraints) {
             final wide = constraints.maxWidth >= 600;
@@ -41,7 +50,7 @@ class StatsDashboardView extends StatelessWidget {
                 const SizedBox(height: 12),
                 _KpiGrid(
                   columns: wide ? 4 : 2,
-                  children: _kpis(context),
+                  children: _kpis(context, data),
                 ),
                 if (data.categories.isNotEmpty) ...[
                   const SizedBox(height: 20),
@@ -53,23 +62,58 @@ class StatsDashboardView extends StatelessWidget {
                     columns: wide ? 2 : 1,
                   ),
                 ],
-                if (data.hasValue || musicMarketValue > 0) ...[
+                if (data.hasValue || widget.musicMarketValue > 0) ...[
                   const SizedBox(height: 20),
-                  _ValueSection(data: data, musicMarketValue: musicMarketValue),
+                  _ValueSection(
+                    data: data,
+                    musicMarketValue: widget.musicMarketValue,
+                  ),
                 ],
                 if (data.topPlayed.isNotEmpty) ...[
                   const SizedBox(height: 20),
-                  _SectionTitle('Top 3 des plus joués'),
+                  _SectionTitle('Top 5 des plus joués'),
                   const SizedBox(height: 8),
-                  for (var i = 0; i < data.topPlayed.length; i++)
+                  for (
+                    var i = 0;
+                    i <
+                        (_showAllPlayed
+                            ? data.topPlayed.length.clamp(0, 10)
+                            : data.topPlayed.length.clamp(0, 5));
+                    i++
+                  )
                     _RankedRow(
                       rank: i + 1,
                       item: data.topPlayed[i],
                       trailing: '${data.topPlayed[i].plays} '
                           '${data.topPlayed[i].plays > 1 ? 'parties' : 'partie'}',
                     ),
+                  if (data.topPlayed.length > 5)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton(
+                        onPressed: () =>
+                            setState(() => _showAllPlayed = !_showAllPlayed),
+                        child: Text(
+                          _showAllPlayed
+                              ? 'Afficher le top 5'
+                              : 'Voir le top 10',
+                        ),
+                      ),
+                    ),
                 ],
-                ...footer,
+                if (data.topRated.isNotEmpty) ...[
+                  const SizedBox(height: 20),
+                  _SectionTitle('Les mieux notés (toutes collections)'),
+                  const SizedBox(height: 8),
+                  for (var i = 0; i < data.topRated.length; i++)
+                    _RankedRow(
+                      rank: i + 1,
+                      item: data.topRated[i],
+                      trailing:
+                          '${data.topRated[i].ratingScore?.toStringAsFixed(1) ?? '—'} / 10',
+                    ),
+                ],
+                ...widget.footer,
               ],
             );
           },
@@ -78,8 +122,7 @@ class StatsDashboardView extends StatelessWidget {
     );
   }
 
-  List<Widget> _kpis(BuildContext context) {
-    final d = data;
+  List<Widget> _kpis(BuildContext context, StatsDashboard d) {
     final hasGames = d.boardgameCount > 0;
     return [
       StatsKpiCard(
@@ -378,6 +421,44 @@ class _ValueSection extends StatelessWidget {
             ],
           ),
         ),
+        if (data.paidCopies > 0 || data.marketCopies > 0) ...[
+          const SizedBox(height: 10),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _MoneyCard(
+                  icon: Icons.receipt_long_outlined,
+                  title: 'Payé',
+                  amount: data.paidTotal,
+                  caption:
+                      '${data.paidCopies} exemplaire${data.paidCopies > 1 ? 's' : ''} avec prix',
+                  color: Colors.indigo,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _MoneyCard(
+                  icon: Icons.trending_up_rounded,
+                  title: 'Valeur marché',
+                  amount: data.marketTotal,
+                  caption:
+                      '${data.marketCopies} exemplaire${data.marketCopies > 1 ? 's' : ''} estimé${data.marketCopies > 1 ? 's' : ''} (BGG)',
+                  color: Colors.teal,
+                ),
+              ),
+            ],
+          ),
+          if (data.paidTotal > 0 && data.marketTotal > 0) ...[
+            const SizedBox(height: 6),
+            Text(
+              data.marketTotal >= data.paidTotal
+                  ? 'Valeur marché supérieure de ${formatEuroAmount(data.marketTotal - data.paidTotal)} à ce que tu as payé (tous jeux confondus).'
+                  : 'Valeur marché inférieure de ${formatEuroAmount(data.paidTotal - data.marketTotal)} à ce que tu as payé (tous jeux confondus).',
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+            ),
+          ],
+        ],
         if (data.topValued.isNotEmpty) ...[
           const SizedBox(height: 12),
           const _SectionTitle('Pièces les plus valorisées'),
@@ -391,6 +472,56 @@ class _ValueSection extends StatelessWidget {
             ),
         ],
       ],
+    );
+  }
+}
+
+class _MoneyCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final double amount;
+  final String caption;
+  final Color color;
+
+  const _MoneyCard({
+    required this.icon,
+    required this.title,
+    required this.amount,
+    required this.caption,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: color),
+              const SizedBox(width: 6),
+              Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            formatEuroAmount(amount),
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
+          ),
+          Text(
+            caption,
+            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -6,11 +6,13 @@ import '../models/collection_group.dart';
 import '../models/collection_item.dart';
 import '../screens/group_detail_screen.dart';
 import '../services/boardgame_expansion_service.dart';
+import '../services/bgg_catalog_cache.dart';
 import '../services/bgg_service.dart';
 import '../services/collection_refresh.dart';
 import '../services/item_group_service.dart';
 import '../utils/boardgame_display.dart';
 import '../utils/boardgame_expansions.dart';
+import '../utils/item_copy_units.dart';
 import '../utils/item_stock_persistence.dart';
 import '../utils/transaction_history.dart';
 import '../utils/wishlist_collection_bridge.dart';
@@ -202,9 +204,13 @@ class _BoardgameTileQuantitySheetState
         await addOneToCollectionFromWishlist(widget.item);
         if (mounted) await _promptRemoveFromWishlist();
       } else if (!widget.item.isWishlist) {
+        final synced = syncCopyUnitsQuantity(
+          widget.item.copyWith(quantity: next),
+        );
         await persistOwnedQuantity(
           itemId: widget.item.id,
           quantity: next,
+          metadata: synced.metadata,
         );
       }
       CollectionRefresh.instance.bump();
@@ -825,6 +831,22 @@ class _BoardgameTileExpansionSheetState
   void initState() {
     super.initState();
     _owned = ownedExpansionBggIds(widget.item.metadata).toSet();
+    final bggId = widget.item.metadata?['bgg_id']?.toString() ?? '';
+    final peeked = BggCatalogCache.instance.peekFresh(
+      bggId,
+      BggCacheKind.expansions,
+    );
+    if (peeked is List) {
+      final list = peeked
+          .whereType<Map>()
+          .map(BggExpansion.fromJson)
+          .where((e) => e.bggId.isNotEmpty)
+          .toList();
+      if (list.isNotEmpty) {
+        _expansions = list;
+        _loading = false;
+      }
+    }
     _load();
   }
 

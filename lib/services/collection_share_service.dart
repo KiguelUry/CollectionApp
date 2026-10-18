@@ -15,7 +15,7 @@ class CollectionShareService {
     final userId = CollectionItemScope.currentUserId;
     if (userId == null) return [];
 
-    final rows = await CollectionItemScope.personal(
+    final rows = await CollectionItemScope.ownedByUser(
       _client.from('collection_items').select(
         'id, title, category, quantity, rating, is_wishlist, is_for_sale, '
         'is_sold',

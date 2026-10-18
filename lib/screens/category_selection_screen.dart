@@ -6,8 +6,8 @@ import '../widgets/main_drawer.dart';
 import '../models/user_collection_type.dart';
 import '../models/user_profile.dart';
 import '../utils/collection_grid_layout.dart';
+import 'all_collection_screen.dart';
 import 'books_collection_screen.dart';
-import 'boardgame/boardgames_collection_screen.dart';
 import 'cards_collection_screen.dart';
 import 'home_screen.dart';
 import 'lego_collection_screen.dart';
@@ -21,12 +21,15 @@ import '../theme/app_theme.dart';
 import '../utils/app_haptics.dart';
 import '../utils/category_hub_order.dart';
 import '../utils/collection_item_scope.dart';
+import '../models/collection_item.dart';
 import '../utils/boardgame_expansions.dart';
+import '../utils/hub_owned_count.dart';
 import '../utils/hub_category_visibility.dart';
 import '../utils/hub_greeting.dart';
+import '../widgets/onboarding/onboarding_flow.dart';
 import '../services/profile_cache_service.dart';
 import '../widgets/notifications/notification_bell.dart';
-import '../widgets/onboarding/onboarding_flow.dart';
+import '../navigation/app_route_observer.dart';
 import '../widgets/profile_avatar.dart';
 import 'category_manage_screen.dart';
 import 'wildlife/wildlife_collection_screen.dart';
@@ -40,11 +43,14 @@ class CategorySelectionScreen extends StatefulWidget {
       _CategorySelectionScreenState();
 }
 
-class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
+class _CategorySelectionScreenState extends State<CategorySelectionScreen>
+    with RouteAware {
   Map<CollectionCategory, int> _counts = {};
   Map<CollectionCategory, int> _groupCounts = {};
   Map<CollectionCategory, int> _wishlistCounts = {};
+  Map<CollectionCategory, int> _duplicateCounts = {};
   int _boardgameExpansionCount = 0;
+  bool _onboardingChecked = false;
   Map<String, int> _customCounts = {};
   bool _loadingCounts = true;
   List<HubTileEntry> _orderedTiles = [];
@@ -53,15 +59,43 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     super.initState();
     ProfileCacheService.instance.addListener(_onProfileCacheChanged);
     _load();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      showOnboardingIfNeeded(context);
-    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route is PageRoute) {
+      appRouteObserver.unsubscribe(this);
+      appRouteObserver.subscribe(this, route);
+    }
   }
 
   @override
   void dispose() {
+    appRouteObserver.unsubscribe(this);
     ProfileCacheService.instance.removeListener(_onProfileCacheChanged);
     super.dispose();
+  }
+
+  @override
+  void didPopNext() {
+    _rollGreeting();
+  }
+
+  GrammarGender _grammar = GrammarGender.masculine;
+
+  Future<void> _rollGreeting() async {
+    if (!mounted) return;
+    _grammar = await loadGrammarGender();
+    if (!mounted) return;
+    setState(() {
+      _greeting = pickHubGreeting(
+        username: _username,
+        previous: _greeting?.name,
+        grammar: _grammar,
+      );
+    });
   }
 
   void _onProfileCacheChanged() {
@@ -94,47 +128,49 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     final groupCounts = emptyCategoryCounts();
     final wishCounts = emptyCategoryCounts();
     final customCounts = <String, int>{};
+    final duplicateCounts = <CollectionCategory, int>{};
     var boardgameExpansionCount = 0;
     var orderedTiles = <HubTileEntry>[];
     String? loadError;
 
     try {
       final userId = Supabase.instance.client.auth.currentUser!.id;
-      final rows = await CollectionItemScope.personal(
+      const hubSelect =
+          'id, title, quantity, category, subcategory, is_wishlist, is_sold, '
+          'is_expansion, parent_game_id, added_by, metadata';
+      final rows = await CollectionItemScope.ownedByUser(
         Supabase.instance.client
             .from('collection_items')
-            .select(
-              'category, subcategory, is_wishlist, is_expansion, metadata',
-            ),
+            .select(hubSelect),
         userId: userId,
       );
 
       final boardgameRows = <Map<String, dynamic>>[];
+      final seenIds = <String>{};
+      final ownedMaps = <Map<String, dynamic>>[];
+
+      void collectOwned(Map<String, dynamic> map) {
+        final id = map['id']?.toString() ?? '';
+        if (id.isNotEmpty && !seenIds.add(id)) return;
+        if (_hubRowFlag(map, 'is_wishlist') || _hubRowFlag(map, 'is_sold')) {
+          return;
+        }
+        ownedMaps.add(map);
+        if (CollectionCategory.fromDbValue(map['category'] as String) ==
+            CollectionCategory.boardgame) {
+          boardgameRows.add(map);
+        }
+      }
 
       for (final row in rows as List) {
         final map = Map<String, dynamic>.from(row as Map);
-        final cat = CollectionCategory.fromDbValue(map['category'] as String);
-        final isWishlist = map['is_wishlist'] as bool? ?? false;
-        final isExpansion = map['is_expansion'] as bool? ?? false;
-        if (cat == CollectionCategory.custom) {
-          final sub = map['subcategory'] as String?;
-          if (sub != null) {
-            if (isWishlist) {
-              // wishlist custom — ignore for tile badge for now
-            } else {
-              customCounts[sub] = (customCounts[sub] ?? 0) + 1;
-            }
+        if (_hubRowFlag(map, 'is_wishlist') && !_hubRowIsExpansion(map)) {
+          final cat = CollectionCategory.fromDbValue(map['category'] as String);
+          if (cat != CollectionCategory.custom) {
+            wishCounts[cat] = (wishCounts[cat] ?? 0) + 1;
           }
-          continue;
         }
-        if (cat == CollectionCategory.boardgame && !isWishlist) {
-          boardgameRows.add(map);
-        }
-        if (isWishlist) {
-          wishCounts[cat] = (wishCounts[cat] ?? 0) + 1;
-        } else if (!isExpansion) {
-          counts[cat] = (counts[cat] ?? 0) + 1;
-        }
+        collectOwned(map);
       }
 
       boardgameExpansionCount = countUniqueOwnedExpansions(boardgameRows);
@@ -144,30 +180,33 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
         if (groupIds.isNotEmpty) {
           final gRows = await Supabase.instance.client
               .from('collection_items')
-              .select(
-                'category, is_wishlist, is_sold, is_for_sale, is_expansion, metadata',
-              )
+              .select(hubSelect)
               .inFilter('group_id', groupIds);
           for (final row in gRows as List) {
-            final map = Map<String, dynamic>.from(row as Map);
-            final isWishlist = map['is_wishlist'] as bool? ?? false;
-            final isSold = map['is_sold'] as bool? ?? false;
-            final isForSale = map['is_for_sale'] as bool? ?? false;
-            if (isWishlist || isSold || isForSale) continue;
-            final cat =
-                CollectionCategory.fromDbValue(map['category'] as String);
-            final isExpansion = map['is_expansion'] as bool? ?? false;
-            if (cat == CollectionCategory.boardgame) {
-              boardgameRows.add(map);
-            }
-            if (!isExpansion) {
-              groupCounts[cat] = (groupCounts[cat] ?? 0) + 1;
-            }
+            collectOwned(Map<String, dynamic>.from(row as Map));
           }
           boardgameExpansionCount = countUniqueOwnedExpansions(boardgameRows);
         }
       } catch (_) {
         // group_members RLS : compteurs perso OK, groupes ignorés
+      }
+
+      final visible = visibleOwnedLikeGrid([
+        for (final map in ownedMaps) CollectionItem.fromJson(map),
+      ]);
+      final byCategory = <CollectionCategory, List<CollectionItem>>{};
+      for (final item in visible) {
+        if (item.category == CollectionCategory.custom) {
+          final sub = item.subcategory;
+          if (sub != null) customCounts[sub] = (customCounts[sub] ?? 0) + 1;
+          continue;
+        }
+        counts[item.category] = (counts[item.category] ?? 0) + 1;
+        byCategory.putIfAbsent(item.category, () => []).add(item);
+      }
+      for (final entry in byCategory.entries) {
+        final n = countDuplicateGames(entry.value);
+        if (n > 0) duplicateCounts[entry.key] = n;
       }
 
       orderedTiles = await loadVisibleHubTiles();
@@ -176,22 +215,28 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     }
 
     if (mounted) {
+      _grammar = await loadGrammarGender();
+      if (!mounted) return;
       setState(() {
         _counts = counts;
         _groupCounts = groupCounts;
         _wishlistCounts = wishCounts;
+        _duplicateCounts = duplicateCounts;
         _boardgameExpansionCount = boardgameExpansionCount;
         _customCounts = customCounts;
         _orderedTiles = orderedTiles;
         _greeting ??= pickHubGreeting(
           username: _username,
-          counts: counts,
-          active: CategoryHubPreferences.instance
-              .filterVisible(CollectionCategory.menuValues)
-              .toSet(),
+          grammar: _grammar,
         );
         _loadingCounts = false;
       });
+      _maybeShowOnboarding(
+        counts,
+        groupCounts,
+        customCounts,
+        failed: loadError != null,
+      );
       if (loadError != null) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -209,14 +254,34 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     }
   }
 
+  void _maybeShowOnboarding(
+    Map<CollectionCategory, int> counts,
+    Map<CollectionCategory, int> groupCounts,
+    Map<String, int> customCounts, {
+    required bool failed,
+  }) {
+    if (_onboardingChecked || !mounted || failed) return;
+    _onboardingChecked = true;
+    final total = counts.values.fold<int>(0, (a, b) => a + b) +
+        groupCounts.values.fold<int>(0, (a, b) => a + b) +
+        customCounts.values.fold<int>(0, (a, b) => a + b);
+    if (total != 0) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) showOnboardingIfNeeded(context);
+    });
+  }
+
   void _openCategory(CollectionCategory category) {
     AppHaptics.selection();
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => switch (category) {
-          CollectionCategory.boardgame =>
-            const BoardgamesCollectionScreen(),
+          CollectionCategory.boardgame => const HomeScreen(
+              category: CollectionCategory.boardgame,
+              screenTitle: 'Mes jeux de société',
+              accentOverride: Colors.orange,
+            ),
           CollectionCategory.book => const BooksCollectionScreen(),
           CollectionCategory.card => const CardsCollectionScreen(),
           CollectionCategory.media => const MediaCollectionScreen(),
@@ -404,6 +469,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
               ],
             ),
           ),
+          _buildAllCollectionBanner(accent),
           Expanded(
             child: _loadingCounts
                 ? const Center(child: CircularProgressIndicator())
@@ -424,6 +490,88 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     );
   }
 
+  int get _totalOwned {
+    var n = 0;
+    for (final entry in _orderedTiles) {
+      if (entry.category != null) {
+        n += _counts[entry.category] ?? 0;
+        n += _groupCounts[entry.category] ?? 0;
+      } else if (entry.customType != null) {
+        n += _customCounts[entry.customType!.id] ?? 0;
+      }
+    }
+    return n;
+  }
+
+  Widget _buildAllCollectionBanner(Color accent) {
+    final scheme = Theme.of(context).colorScheme;
+    final total = _totalOwned;
+    final icons = [
+      for (final e in _orderedTiles.take(5))
+        if (e.category != null) (e.category!.icon, e.category!.color),
+    ];
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Material(
+        color: accent.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: () {
+            AppHaptics.selection();
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const AllCollectionScreen()),
+            ).then((_) => _load());
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                Icon(Icons.all_inbox_rounded, color: accent, size: 28),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Toute ma collection',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 16,
+                        ),
+                      ),
+                      Text(
+                        _loadingCounts
+                            ? 'Toutes catégories confondues'
+                            : '$total objet${total > 1 ? 's' : ''} · toutes catégories',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                for (final (icon, color) in icons)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 2),
+                    child: CircleAvatar(
+                      radius: 13,
+                      backgroundColor: color.withValues(alpha: 0.18),
+                      child: Icon(icon, size: 14, color: color),
+                    ),
+                  ),
+                const SizedBox(width: 4),
+                Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildCategoryCard(CollectionCategory category) {
     final count = _counts[category] ?? 0;
     final groupCount = _groupCounts[category] ?? 0;
@@ -431,6 +579,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
     final total = count + groupCount;
     final countLabel = category.countSummary(total);
     final wishLabel = wishCount > 0 ? '♥ $wishCount en wishlist' : null;
+    final dup = _duplicateCounts[category] ?? 0;
     final expansionCount = category == CollectionCategory.boardgame
         ? _boardgameExpansionCount
         : 0;
@@ -479,9 +628,15 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen> {
               ),
             ),
             const SizedBox(height: 4),
-            Text(
-              countLabel,
-              style: TextStyle(fontSize: 12, color: category.color),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Text(
+                dup > 0 ? '$countLabel · Double(s) : $dup' : countLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: category.color),
+              ),
             ),
             if (wishLabel != null) ...[
               const SizedBox(height: 2),
@@ -628,4 +783,17 @@ class _AnimatedCategoryCard extends StatelessWidget {
       },
     );
   }
+}
+
+bool _hubRowFlag(Map<String, dynamic> map, String key) {
+  final v = map[key];
+  return v == true || v == 'true' || v == 1;
+}
+
+bool _hubRowIsExpansion(Map<String, dynamic> map) {
+  if (_hubRowFlag(map, 'is_expansion')) return true;
+  final parent = map['parent_game_id']?.toString();
+  if (parent != null && parent.isNotEmpty) return true;
+  final meta = map['metadata'];
+  return meta is Map && meta['bgg_is_expansion'] == true;
 }

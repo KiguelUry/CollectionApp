@@ -35,7 +35,7 @@ class RecommendationService {
     final userId = CollectionItemScope.currentUserId;
     if (userId == null) return [];
 
-    final mineRows = await CollectionItemScope.personal(
+    final mineRows = await CollectionItemScope.ownedByUser(
       _client.from('collection_items').select(
         'title, category, rating, metadata, is_wishlist, is_sold, is_for_sale',
       ),

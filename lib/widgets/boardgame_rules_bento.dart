@@ -1,16 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:url_launcher/url_launcher.dart';
-
 import '../models/collection_item.dart';
 import '../models/rule_section.dart';
 import '../services/community_rules_service.dart';
 import 'detail_bento_tile.dart';
 import 'modular_rule_editor.dart';
 
-enum _RulesSub { none, create, display, community, official }
+enum _RulesSub { none, create, display, community }
 
-/// Bento « Règles » : perso, affichage, communauté, officielles.
+/// Bento « Règles » : perso, affichage, communauté.
 class BoardgameRulesBento extends StatefulWidget {
   final CollectionItem item;
   final bool readOnly;
@@ -176,20 +174,9 @@ class _BoardgameRulesBentoState extends State<BoardgameRulesBento> {
     );
   }
 
-  Future<void> _openOfficial() async {
-    final bggId = widget.item.metadata?['bgg_id']?.toString();
-    final uri = bggId != null && bggId.isNotEmpty
-        ? Uri.parse('https://boardgamegeek.com/boardgame/$bggId')
-        : Uri.parse(
-            'https://www.google.com/search?q=${Uri.encodeComponent('${widget.item.title} règles PDF')}',
-          );
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  }
-
   @override
   Widget build(BuildContext context) {
     final accent = Colors.orange.shade800;
-    final scheme = Theme.of(context).colorScheme;
 
     return DetailBentoTile(
       icon: Icons.menu_book_outlined,
@@ -235,15 +222,6 @@ class _BoardgameRulesBentoState extends State<BoardgameRulesBento> {
             selected: _sub == _RulesSub.community,
             onTap: () => _select(_RulesSub.community),
           ),
-          const SizedBox(height: 8),
-          DetailBentoSubTile(
-            icon: Icons.picture_as_pdf_outlined,
-            title: 'Règles officielles',
-            subtitle: 'Lien BGG / recherche PDF',
-            accent: accent,
-            selected: _sub == _RulesSub.official,
-            onTap: () => _select(_RulesSub.official),
-          ),
           if (_sub != _RulesSub.none) ...[
             const SizedBox(height: 14),
             switch (_sub) {
@@ -277,25 +255,6 @@ class _BoardgameRulesBentoState extends State<BoardgameRulesBento> {
                   },
                   onAdd: _pinCommunityRule,
                   onPublish: widget.readOnly ? null : _publishPersonal,
-                ),
-              _RulesSub.official => Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      'Pas de PDF intégré pour l\'instant — ouvre la fiche BGG '
-                      'ou cherche le livret officiel.',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    FilledButton.tonalIcon(
-                      onPressed: _openOfficial,
-                      icon: const Icon(Icons.open_in_new, size: 18),
-                      label: const Text('Ouvrir les règles officielles'),
-                    ),
-                  ],
                 ),
               _RulesSub.none => const SizedBox.shrink(),
             },

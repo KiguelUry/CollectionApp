@@ -433,6 +433,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
   final _targetScoreController = TextEditingController();
   List<Map<String, dynamic>> _pickableProfiles = [];
   List<FriendChoice> _friendChoices = const [];
+  bool _winnerManuallyForced = false;
 
   @override
   void initState() {
@@ -479,7 +480,13 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     } else {
       _initialGrid = BoardgameScoreGrid.empty(playerCount: 0);
     }
-    _winnerController.text = s?.winner ?? '';
+    if (s != null) {
+      _winnerManuallyForced =
+          BoardgamePlaySession.inferWinnerManuallyForced(s);
+      if (_winnerManuallyForced) {
+        _winnerController.text = s.winner ?? '';
+      }
+    }
     _notesController.text = s?.notes ?? '';
     _playersOnlyController.text = (s ?? t)?.players.join(', ') ?? '';
     _coopVictory = s?.coopVictory;
@@ -503,10 +510,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
         _pickableProfiles = list;
         _friendChoices = [
           for (final f in friends)
-            FriendChoice(
-              profileId: f['profile_id'] as String,
-              username: f['username'] as String? ?? 'Ami',
-            ),
+            FriendChoice.fromFriendRow(f),
         ];
       });
     }
@@ -631,9 +635,12 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
         grid?.winnerNames(_winCondition, targetScore: _targetScore) ??
         const <String>[];
     final manualWinner = _winnerController.text.trim();
-    final winner = manualWinner.isNotEmpty
+    final autoWinnerStr = _isCoop
+        ? null
+        : (autoNames.isEmpty ? null : autoNames.join(' & '));
+    final winner = _winnerManuallyForced && manualWinner.isNotEmpty
         ? manualWinner
-        : (_isCoop ? null : (autoNames.isEmpty ? null : autoNames.join(' & ')));
+        : autoWinnerStr;
 
     final session = BoardgamePlaySession(
         date: _date,
@@ -656,6 +663,8 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
         status: _status,
         createdAt: widget.initial?.createdAt ?? DateTime.now(),
         shareId: widget.initial?.shareId ?? newPlayShareId(),
+        winnerManuallyForced:
+            _winnerManuallyForced && winner != null && winner.isNotEmpty,
       );
     final item = widget.item;
     if (item != null &&
@@ -911,6 +920,14 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
                 BoardgameScoreGridEditor(
                   key: _gridKey,
                   initialGrid: _initialGrid,
+                  onScoresChanged: () {
+                    if (_winnerManuallyForced) {
+                      setState(() {
+                        _winnerManuallyForced = false;
+                        _winnerController.clear();
+                      });
+                    }
+                  },
                   suggestedPlayerNames: pastPlayerNamesFromSessions(
                     parseBoardgamePlays(widget.item?.metadata),
                   ),
@@ -944,13 +961,31 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
                 const SizedBox(height: 16),
                 TextField(
                   controller: _winnerController,
+                  onChanged: (_) {
+                    if (!_winnerManuallyForced) {
+                      setState(() => _winnerManuallyForced = true);
+                    }
+                  },
                   decoration: InputDecoration(
                     labelText: 'Gagnant (forcer manuellement)',
-                    hintText: 'Couronne auto si vide',
+                    hintText: 'Calculé depuis la grille si vide',
                     prefixIcon: Icon(
                       Icons.emoji_events_outlined,
                       color: scheme.primary,
                     ),
+                    suffixIcon: _winnerManuallyForced
+                        ? IconButton(
+                            tooltip: 'Revenir au gagnant automatique',
+                            onPressed: () => setState(() {
+                              _winnerManuallyForced = false;
+                              _winnerController.clear();
+                            }),
+                            icon: const Icon(Icons.close),
+                          )
+                        : null,
+                    helperText: _winnerManuallyForced
+                        ? 'Forçage manuel actif'
+                        : 'Auto depuis les scores',
                   ),
                 ),
               ],

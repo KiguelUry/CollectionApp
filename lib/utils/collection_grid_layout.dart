@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../models/collection_category.dart';
 
@@ -79,6 +80,32 @@ abstract final class CollectionGridLayout {
     return base;
   }
 
+  /// Délégué de grille adapté à la catégorie : pour les jeux, la hauteur
+  /// d'une case = largeur réelle (couverture carrée) + pied fixe, quelle que
+  /// soit la contrainte de largeur appliquée au parent.
+  static SliverGridDelegate collectionDelegate(
+    BuildContext context,
+    CollectionCategory category, {
+    int mobileColumns = 3,
+  }) {
+    final cols = columns(context, mobile: mobileColumns);
+    if (category == CollectionCategory.boardgame) {
+      return SquarePlusFooterGridDelegate(
+        crossAxisCount: cols,
+        footerHeight: boardgameMaxFooterHeight,
+        crossAxisSpacing: gridCrossSpacing,
+        mainAxisSpacing: gridMainSpacing,
+      );
+    }
+    return SliverGridDelegateWithFixedCrossAxisCount(
+      crossAxisCount: cols,
+      crossAxisSpacing: gridCrossSpacing,
+      mainAxisSpacing: gridMainSpacing,
+      childAspectRatio: aspectRatio(category, context,
+          mobileColumns: mobileColumns),
+    );
+  }
+
   static SliverGridDelegateWithFixedCrossAxisCount gridDelegate(
     BuildContext context, {
     required int mobileColumns,
@@ -107,4 +134,42 @@ abstract final class CollectionGridLayout {
       ),
     );
   }
+}
+
+/// Grille à colonnes fixes dont chaque case = carré (largeur réelle) + pied.
+class SquarePlusFooterGridDelegate extends SliverGridDelegate {
+  const SquarePlusFooterGridDelegate({
+    required this.crossAxisCount,
+    required this.footerHeight,
+    this.crossAxisSpacing = 0,
+    this.mainAxisSpacing = 0,
+  });
+
+  final int crossAxisCount;
+  final double footerHeight;
+  final double crossAxisSpacing;
+  final double mainAxisSpacing;
+
+  @override
+  SliverGridLayout getLayout(SliverConstraints constraints) {
+    final usable = constraints.crossAxisExtent -
+        crossAxisSpacing * (crossAxisCount - 1);
+    final cellWidth = usable / crossAxisCount;
+    final cellHeight = cellWidth + footerHeight;
+    return SliverGridRegularTileLayout(
+      crossAxisCount: crossAxisCount,
+      mainAxisStride: cellHeight + mainAxisSpacing,
+      crossAxisStride: cellWidth + crossAxisSpacing,
+      childMainAxisExtent: cellHeight,
+      childCrossAxisExtent: cellWidth,
+      reverseCrossAxis: axisDirectionIsReversed(constraints.crossAxisDirection),
+    );
+  }
+
+  @override
+  bool shouldRelayout(SquarePlusFooterGridDelegate oldDelegate) =>
+      oldDelegate.crossAxisCount != crossAxisCount ||
+      oldDelegate.footerHeight != footerHeight ||
+      oldDelegate.crossAxisSpacing != crossAxisSpacing ||
+      oldDelegate.mainAxisSpacing != mainAxisSpacing;
 }

@@ -76,11 +76,11 @@ void main() {
     expect(calls, 3);
   });
 
-  test('entrée Supabase fraîche (< 14 j) : aucun appel BGG', () async {
+  test('entrée Supabase fraîche (< 30 j) : aucun appel BGG', () async {
     store.rows['details:13'] = BggCacheEntry({
       'bgg_id': '13',
       'from': 'cache',
-    }, _now.subtract(const Duration(days: 13)));
+    }, _now.subtract(const Duration(days: 29)));
     var calls = 0;
     final r = await cache.getOrFetch('13', BggCacheKind.details, () async {
       calls++;
@@ -90,10 +90,10 @@ void main() {
     expect((r as Map)['from'], 'cache');
   });
 
-  test('entrée périmée (> 14 j) : rafraîchie depuis BGG et réécrite', () async {
+  test('entrée périmée (> 30 j) : rafraîchie depuis BGG et réécrite', () async {
     store.rows['details:13'] = BggCacheEntry({
       'from': 'old',
-    }, _now.subtract(const Duration(days: 15)));
+    }, _now.subtract(const Duration(days: 31)));
     final r = await cache.getOrFetch(
       '13',
       BggCacheKind.details,
@@ -107,7 +107,7 @@ void main() {
   test('échec BGG : on sert la version périmée plutôt que rien', () async {
     store.rows['details:13'] = BggCacheEntry({
       'from': 'old',
-    }, _now.subtract(const Duration(days: 30)));
+    }, _now.subtract(const Duration(days: 60)));
     final r = await cache.getOrFetch(
       '13',
       BggCacheKind.details,
@@ -154,11 +154,11 @@ void main() {
     expect(store.reads, readsAfterFirst);
   });
 
-  test('mémoire périmée après 14 jours → nouvel appel', () async {
+  test('mémoire périmée après 30 jours → nouvel appel', () async {
     var calls = 0;
     Future<Object?> fetch() async => {'n': ++calls};
     await cache.getOrFetch('13', BggCacheKind.details, fetch);
-    _now = _now.add(const Duration(days: 15));
+    _now = _now.add(const Duration(days: 31));
     final r = await cache.getOrFetch('13', BggCacheKind.details, fetch);
     expect(calls, 2);
     expect((r as Map)['n'], 2);

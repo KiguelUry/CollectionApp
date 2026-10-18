@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config/auth_redirect.dart';
+import 'collection_local_cache.dart';
 import 'profile_cache_service.dart';
 import 'profile_service.dart';
 
@@ -44,6 +45,7 @@ class AuthService {
   Future<void> signOut() async {
     await _supabase.auth.signOut();
     await ProfileCacheService.instance.clear();
+    await CollectionLocalCache.clearAll();
   }
 
   static final _emailRegex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');

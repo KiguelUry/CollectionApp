@@ -22,7 +22,44 @@ String openLibraryAuthorPhotoUrl(String authorOlid, {CoverSize size = CoverSize.
 }
 
 /// Choisit une URL plus nette pour l'affichage (listes vs fiche détail).
-String coverUrlForDisplay(String url, {required bool large}) {
+String coverUrlForDisplay(String url, {required bool large}) =>
+    coverUrlForWeb(resolveCoverSourceUrl(url, large: large));
+
+const kThumbnailCdnHost = 'wsrv.nl';
+const kThumbnailSize = 300;
+
+/// Vignette de grille/liste : 300 px WebP servie par le CDN wsrv.nl.
+/// CORS ouvert (décodage CanvasKit sur le web) et ~10× plus léger que
+/// l'original. Renvoie [url] inchangée si elle n'est pas transformable.
+String gridThumbnailUrl(
+  String url, {
+  bool crop = false,
+  int size = kThumbnailSize,
+}) {
+  final src = resolveCoverSourceUrl(url, large: size > 320);
+  final uri = Uri.tryParse(src);
+  if (uri == null || (uri.scheme != 'https' && uri.scheme != 'http')) {
+    return url;
+  }
+  final host = uri.host.toLowerCase();
+  if (host.isEmpty ||
+      host == kThumbnailCdnHost ||
+      host == 'localhost' ||
+      host.startsWith('127.')) {
+    return url;
+  }
+  // Stockage Supabase : seules les URLs publiques sont stables.
+  if (uri.path.contains('/storage/v1/object/') &&
+      !uri.path.contains('/storage/v1/object/public/')) {
+    return url;
+  }
+  return 'https://$kThumbnailCdnHost/?url=${Uri.encodeComponent(src)}'
+      '&w=$size&h=$size'
+      '&fit=${crop ? 'cover' : 'inside'}&we&output=webp&q=80';
+}
+
+/// URL source normalisée (taille adaptée), sans proxy web.
+String resolveCoverSourceUrl(String url, {required bool large}) {
   var resolved = url.trim();
   if (resolved.startsWith('//')) {
     resolved = 'https:$resolved';
@@ -66,7 +103,7 @@ String coverUrlForDisplay(String url, {required bool large}) {
     }
   }
 
-  return coverUrlForWeb(resolved);
+  return resolved;
 }
 
 /// Passe d'une vignette BGG à une image plus nette (sans casser l'URL).

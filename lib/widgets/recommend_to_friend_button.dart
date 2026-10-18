@@ -6,6 +6,7 @@ import '../models/friend_choice.dart';
 import '../services/friend_service.dart';
 import '../services/notification_service.dart';
 import '../services/profile_cache_service.dart';
+import 'friend_identity.dart';
 import '../utils/item_recommendation.dart';
 
 class RecommendSelection {
@@ -65,18 +66,25 @@ class _RecommendFriendSheetState extends State<RecommendFriendSheet> {
                 shrinkWrap: true,
                 children: [
                   for (final f in widget.friends)
-                    CheckboxListTile(
-                      key: ValueKey('recommend_friend_${f.profileId}'),
-                      value: _selected.contains(f.profileId),
-                      title: Text(f.username),
-                      secondary: const Icon(Icons.person_outline),
-                      onChanged: (v) => setState(() {
-                        if (v == true) {
-                          _selected.add(f.profileId);
-                        } else {
-                          _selected.remove(f.profileId);
-                        }
-                      }),
+                    ListTile(
+                      leading: FriendAvatarButton(
+                        profileId: f.profileId,
+                        username: f.username,
+                        avatarUrl: f.avatarUrl,
+                        accentColor: f.accentColor,
+                      ),
+                      title: FriendNameButton(friend: f),
+                      trailing: Checkbox(
+                        key: ValueKey('recommend_friend_${f.profileId}'),
+                        value: _selected.contains(f.profileId),
+                        onChanged: (v) => setState(() {
+                          if (v == true) {
+                            _selected.add(f.profileId);
+                          } else {
+                            _selected.remove(f.profileId);
+                          }
+                        }),
+                      ),
                     ),
                 ],
               ),
@@ -133,10 +141,7 @@ class RecommendToFriendButton extends StatelessWidget {
     final rows = await FriendService().fetchFriends();
     final friends = [
       for (final r in rows)
-        FriendChoice(
-          profileId: r['profile_id'] as String,
-          username: r['username'] as String? ?? 'Ami',
-        ),
+        FriendChoice.fromFriendRow(r),
     ];
     if (!context.mounted) return;
     if (friends.isEmpty) {
@@ -184,10 +189,14 @@ class RecommendToFriendButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return IconButton(
+    return TextButton.icon(
       key: const ValueKey('recommend_to_friend'),
-      icon: const Icon(Icons.share_rounded),
-      tooltip: 'Recommander à un ami',
+      icon: const Icon(Icons.ios_share_rounded, size: 18),
+      label: const Text('Recommander'),
+      style: TextButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+      ),
       onPressed: () => _open(context),
     );
   }

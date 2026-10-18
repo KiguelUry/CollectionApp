@@ -21,6 +21,8 @@ class BoardgamePlaySession {
   final DateTime? createdAt;
   /// Identifiant stable d'une partie partagée entre amis (anti-doublon).
   final String? shareId;
+  /// Gagnant imposé à la main (sinon dérivé de la grille).
+  final bool winnerManuallyForced;
 
   const BoardgamePlaySession({
     required this.date,
@@ -39,6 +41,7 @@ class BoardgamePlaySession {
     this.status = BoardgamePlayStatus.finished,
     this.createdAt,
     this.shareId,
+    this.winnerManuallyForced = false,
   });
 
   factory BoardgamePlaySession.fromJson(Map<String, dynamic> json) {
@@ -116,6 +119,7 @@ class BoardgamePlaySession {
       shareId: (json['share_id']?.toString().trim().isEmpty ?? true)
           ? null
           : json['share_id'].toString().trim(),
+      winnerManuallyForced: json['winner_manually_forced'] as bool? ?? false,
     );
   }
 
@@ -139,6 +143,7 @@ class BoardgamePlaySession {
         if (targetScore != null) 'target_score': targetScore,
         if (notes != null && notes!.trim().isNotEmpty) 'notes': notes!.trim(),
         if (shareId != null) 'share_id': shareId,
+        if (winnerManuallyForced) 'winner_manually_forced': true,
       };
 
   bool get isCooperative =>
@@ -156,9 +161,16 @@ class BoardgamePlaySession {
   }
 
   String? get effectiveWinner {
-    final manual = winner?.trim();
-    if (manual != null && manual.isNotEmpty) return manual;
-    return autoWinner;
+    if (isCooperative) return winner;
+    final computed = autoWinner;
+    if (winnerManuallyForced) {
+      final manual = winner?.trim();
+      if (manual != null && manual.isNotEmpty) return manual;
+      return computed;
+    }
+    if (computed != null && computed.isNotEmpty) return computed;
+    final legacy = winner?.trim();
+    return legacy != null && legacy.isNotEmpty ? legacy : null;
   }
 
   /// Ligne scores / joueurs uniquement (sans gagnant).
@@ -248,6 +260,8 @@ class BoardgamePlaySession {
     BoardgamePlayStatus? status,
     DateTime? createdAt,
     String? shareId,
+    bool? winnerManuallyForced,
+    bool clearWinnerManuallyForced = false,
   }) {
     return BoardgamePlaySession(
       date: date ?? this.date,
@@ -266,7 +280,21 @@ class BoardgamePlaySession {
       status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
       shareId: shareId ?? this.shareId,
+      winnerManuallyForced: clearWinnerManuallyForced
+          ? false
+          : (winnerManuallyForced ?? this.winnerManuallyForced),
     );
+  }
+
+  /// Déduit si le gagnant enregistré diffère du calcul automatique (legacy).
+  /// Préremplit le champ « forcer manuellement » à l'édition (pas les parties legacy).
+  static bool inferWinnerManuallyForced(BoardgamePlaySession s) {
+    if (s.winnerManuallyForced) return true;
+    if (s.isCooperative) return false;
+    final manual = s.winner?.trim();
+    if (manual == null || manual.isEmpty) return false;
+    if (!s.trackScores || s.scoreGrid?.hasScores != true) return true;
+    return false;
   }
 
   /// Remplace les noms de joueurs selon [map] (clés en minuscules).

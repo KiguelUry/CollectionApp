@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/collection_group.dart';
 import '../models/collection_item.dart';
@@ -6,8 +7,9 @@ import '../screens/item_detail_screen.dart';
 import '../services/boardgame_expansion_service.dart';
 import '../utils/boardgame_display.dart';
 import '../utils/boardgame_expansions.dart';
-import '../utils/holder_label_utils.dart';
+import '../utils/item_copy_units.dart';
 import '../utils/item_group_count.dart';
+import '../utils/wishlist_market_metadata.dart';
 import 'boardgame_tile_inventory_sheets.dart';
 import 'boardgame_tile_sheets.dart';
 import 'wishlist/wishlist_tile_meta_icons.dart';
@@ -38,16 +40,38 @@ class BoardgameTileMetaIcons extends StatelessWidget {
   int get _groupCount =>
       groupMembershipCount(item, contextGroupId: contextGroupId);
 
+  String? _meUserIdSafe() {
+    try {
+      return Supabase.instance.client.auth.currentUser?.id;
+    } catch (_) {
+      return null;
+    }
+  }
+
   String? get _locationChipLabel {
+    if (item.isOnLoan) return item.loaneeDisplayName;
+    if (itemUsesCopyUnits(item)) {
+      final summary = quickWhereaboutsSummaryLabel(
+        item,
+        meUserId: _meUserIdSafe(),
+      );
+      if (summary.startsWith('Chez ')) {
+        return summary.substring(5).trim();
+      }
+      if (summary.startsWith('À ')) {
+        return summary.substring(2).trim();
+      }
+      return summary.trim().isEmpty ? null : summary;
+    }
     final label = item.locationLabel?.trim();
     if (label != null && label.isNotEmpty) {
-      final plain = holderLabelStorageValue(label).trim();
-      if (plain.isNotEmpty) return plain;
+      if (label.toLowerCase().startsWith('chez ')) {
+        return label.substring(5).trim();
+      }
+      return label;
     }
     final custom = item.metadata?['holder_label']?.toString().trim();
-    if (custom != null && custom.isNotEmpty) {
-      return holderLabelStorageValue(custom);
-    }
+    if (custom != null && custom.isNotEmpty) return custom;
     return null;
   }
 
@@ -63,12 +87,24 @@ class BoardgameTileMetaIcons extends StatelessWidget {
     );
   }
 
-  Future<void> _showGroupSheet(BuildContext context) {
-    return showBoardgameTileGroupSheet(
+  /// Moyenne marché en cache (`~`), sinon prix payé sans tilde.
+  String get _valueChipLabel {
+    final avg = marketPriceAvgFromMetadata(item.metadata);
+    if (avg != null && avg > 0) return '~${formatEuroChip(avg)}';
+    final market = marketSecondhandPriceFromMetadata(item.metadata);
+    if (market != null) return '~${formatEuroChip(market)}';
+    final paid = copyPurchasePricesFromRow(
+      quantity: item.quantity,
+      purchasePrice: item.purchasePrice,
+      metadata: item.metadata,
+    ).whereType<double>().fold<double>(0, (a, b) => a + b);
+    return paid > 0 ? formatEuroChip(paid) : '—';
+  }
+
+  Future<void> _showValueSheet(BuildContext context) {
+    return showBoardgameTileValueSheet(
       context,
       item: item,
-      groups: groups,
-      groupActivityCounts: groupActivityCounts,
       readOnly: readOnly,
     );
   }
@@ -163,12 +199,13 @@ class BoardgameTileMetaIcons extends StatelessWidget {
             const SizedBox(width: 4),
             Expanded(
               child: GestureDetector(
-                onTap: () => _showGroupSheet(context),
+                onTap: () => _showValueSheet(context),
                 behavior: HitTestBehavior.opaque,
                 child: _metaChip(
-                  icon: groupCount > 1 ? Icons.groups : Icons.group_outlined,
-                  suffix: '$groupCount',
+                  icon: Icons.euro_rounded,
+                  suffix: _valueChipLabel,
                   color: Colors.teal.shade500,
+                  shrinkSuffix: true,
                 ),
               ),
             ),
@@ -207,6 +244,7 @@ class BoardgameTileMetaIcons extends StatelessWidget {
                   color: item.isOnLoan
                       ? Colors.blue.shade600
                       : Colors.deepOrange.shade400,
+                  groupCount: groupCount,
                 ),
               ),
             ),
@@ -236,6 +274,7 @@ class BoardgameTileMetaIcons extends StatelessWidget {
     String? suffix,
     required Color color,
     bool shrinkSuffix = false,
+    int groupCount = 0,
   }) {
     return Container(
       key: key,
@@ -277,6 +316,18 @@ class BoardgameTileMetaIcons extends StatelessWidget {
                         height: 1,
                       ),
                     ),
+            ),
+          ],
+          if (groupCount > 0) ...[
+            Icon(Icons.group, size: 11, color: Colors.teal.shade600),
+            Text(
+              '$groupCount',
+              style: TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.w800,
+                color: Colors.teal.shade600,
+                height: 1,
+              ),
             ),
           ],
         ],

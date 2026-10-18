@@ -112,7 +112,7 @@ void main() {
     await _pump(tester, const StatsDashboardView(data: _data));
     expect(find.textContaining('Ajoute des prix'), findsNothing);
     expect(find.text('Valeur de la collection'), findsNothing);
-    expect(find.text('Top 3 des plus joués'), findsOneWidget);
+    expect(find.text('Top 5 des plus joués'), findsOneWidget);
     expect(find.text('Azul'), findsOneWidget);
     expect(find.text('40 parties'), findsOneWidget);
   });

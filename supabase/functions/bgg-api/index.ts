@@ -330,7 +330,36 @@ function imageUrlsFromThingXml(inner: string, cover?: string): string[] {
 
 function stripHtml(html: string | undefined): string {
   if (!html) return "";
-  return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  const named: Record<string, string> = {
+    amp: "&",
+    lt: "<",
+    gt: ">",
+    quot: '"',
+    apos: "'",
+    nbsp: " ",
+    ndash: "–",
+    mdash: "—",
+    hellip: "…",
+    rsquo: "’",
+    lsquo: "‘",
+  };
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p\s*>/gi, "\n")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (all, token: string) => {
+      if (token[0] === "#") {
+        const code = token[1] === "x" || token[1] === "X"
+          ? parseInt(token.slice(2), 16)
+          : parseInt(token.slice(1), 10);
+        return Number.isFinite(code) ? String.fromCharCode(code) : all;
+      }
+      return named[token] ?? all;
+    })
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 async function fetchGeekItemExtras(
@@ -633,13 +662,17 @@ function pinExactTitleMatches(items: GameHit[], query: string): void {
   items.push(...exact, ...rest);
 }
 
-async function handleSearch(query: string, sort: string): Promise<Response> {
+async function handleSearch(
+  query: string,
+  sort: string,
+  lite = false,
+): Promise<Response> {
   const trimmed = query.trim();
   if (trimmed.length < 1) {
     return json({ games: [] });
   }
 
-  const cacheKey = searchCacheKey(trimmed, sort);
+  const cacheKey = searchCacheKey(trimmed, lite ? `${sort}:lite` : sort);
   const cached = searchCache.get(cacheKey);
   if (cached && Date.now() - cached.at < SEARCH_CACHE_TTL_MS) {
     return json({
@@ -712,7 +745,16 @@ async function handleSearch(query: string, sort: string): Promise<Response> {
       titleRelevanceScore(a.title, trimmed),
   );
 
-  const top = candidates.slice(0, MAX_META);
+  const top = candidates.slice(0, lite ? 40 : MAX_META);
+  if (lite) {
+    storeSearchCache(cacheKey, top);
+    lastBggStatus = undefined;
+    return json({
+      games: top,
+      lite: true,
+      status: "Recherche sans fiches détaillées",
+    });
+  }
   const enriched = await enrichGameHits(top);
   const meta = new Map<string, ThingMeta>();
   for (const g of enriched) {
@@ -907,11 +949,60 @@ async function handlePrices(eid: string): Promise<Response> {
   const res = await fetch(pricesUrl.toString(), {
     headers: { Accept: "application/json" },
   });
+  if (res.ok) {
+    const body = await res.json();
+    const items = (body as { items?: unknown })?.items;
+    if (Array.isArray(items) && items.length > 0) return json(body);
+  }
+  const market = await fetchGeekMarketEur(id);
+  if (market) return json(market);
   if (!res.ok) {
     return json({ error: `BoardGamePrices ${res.status}` }, res.status);
   }
-  const body = await res.json();
-  return json(body);
+  return json({ items: [] });
+}
+
+/// Annonces GeekMarket (EUR) quand BoardGamePrices ne renvoie rien.
+async function fetchGeekMarketEur(id: string): Promise<unknown | null> {
+  const url =
+    `https://api.geekdo.com/api/geekmarket/products?objecttype=thing&objectid=${id}&pageid=1&currency=EUR`;
+  try {
+    const res = await fetch(url, {
+      headers: { Accept: "application/json", "User-Agent": "Collectingo/1.1" },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const products = (data as { products?: unknown; items?: unknown })
+      ?.products ??
+      (data as { items?: unknown })?.items;
+    if (!Array.isArray(products)) return null;
+    const prices = [];
+    for (const p of products) {
+      if (!p || typeof p !== "object") continue;
+      const row = p as Record<string, unknown>;
+      const raw = row.price ?? row.convertedprice ?? row.prettyprice;
+      const eur = typeof raw === "number"
+        ? raw
+        : parseFloat(String(raw ?? "").replace(",", "."));
+      if (!eur || eur <= 0) continue;
+      const seller = row.sellername ?? row.username ?? row.user ??
+        (row.seller && typeof row.seller === "object"
+          ? (row.seller as Record<string, unknown>).username
+          : null);
+      prices.push({
+        product: eur,
+        price: eur,
+        stock: "Y",
+        country: "FR",
+        name: String(seller ?? "GeekMarket"),
+        link: String(row.listingurl ?? row.url ?? ""),
+      });
+    }
+    if (prices.length === 0) return null;
+    return { items: [{ prices, versions: [] }] };
+  } catch {
+    return null;
+  }
 }
 
 function json(body: unknown, status = 200, cacheable = true): Response {
@@ -942,6 +1033,7 @@ Deno.serve(async (req) => {
         return await handleSearch(
           url.searchParams.get("query") ?? "",
           url.searchParams.get("sort") ?? "smart",
+          url.searchParams.get("lite") === "1",
         );
       case "hot":
         return await handleHot();

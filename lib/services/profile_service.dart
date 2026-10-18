@@ -311,6 +311,34 @@ class ProfileService {
     return UserProfile.fromJson(Map<String, dynamic>.from(row));
   }
 
+  /// `null` si la colonne n'existe pas encore (script SQL non exécuté).
+  Future<List<String>?> fetchPantheonIds(String profileId) async {
+    try {
+      final row = await _client
+          .from('profiles')
+          .select('pantheon_item_ids')
+          .eq('id', profileId)
+          .maybeSingle();
+      final raw = row?['pantheon_item_ids'];
+      if (raw is! List) return const [];
+      return raw.map((e) => e.toString()).where((id) => id.isNotEmpty).toList();
+    } on PostgrestException catch (e) {
+      if (_isMissingColumnError(e) || e.message.contains('pantheon_item_ids')) {
+        return null;
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> savePantheonIds(List<String> ids) async {
+    final id = _userId;
+    if (id == null) throw Exception('Non connecté');
+    final trimmed = ids.where((e) => e.isNotEmpty).take(20).toList();
+    await _client.from('profiles').update({
+      'pantheon_item_ids': trimmed,
+    }).eq('id', id);
+  }
+
   Future<void> updateCollectionPrivacy({
     required bool hideFromNonFriends,
     required bool hideFromFriends,

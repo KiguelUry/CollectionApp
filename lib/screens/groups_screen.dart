@@ -6,7 +6,9 @@ import '../services/group_service.dart';
 import '../services/notification_service.dart';
 import '../widgets/app_app_bar.dart';
 import '../widgets/friend_picker_dialog.dart';
+import '../widgets/friends_activity_feed.dart';
 import '../widgets/group_badge.dart';
+import '../widgets/households_sheet.dart';
 import '../widgets/profile_avatar.dart';
 import '../widgets/group_members_sheet.dart';
 import 'group_detail_screen.dart';
@@ -190,27 +192,52 @@ class _GroupsScreenState extends State<GroupsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: const AppAppBar(title: 'Mes groupes'),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _createGroup,
-        icon: const Icon(Icons.group_add_rounded),
-        label: const Text('Groupe'),
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        appBar: AppAppBar(
+          title: 'Mes groupes',
+          bottom: TabBar(
+            indicatorColor: Colors.deepPurple.shade300,
+            labelColor: Colors.deepPurple.shade800,
+            tabs: const [
+              Tab(icon: Icon(Icons.bolt_rounded, size: 20), text: 'Activité'),
+              Tab(icon: Icon(Icons.groups_rounded, size: 20), text: 'Groupes'),
+            ],
+          ),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.home_outlined),
+              tooltip: 'Foyers & lieux liés',
+              onPressed: () => showHouseholdsSheet(context),
+            ),
+          ],
+        ),
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: _createGroup,
+          icon: const Icon(Icons.group_add_rounded),
+          label: const Text('Groupe'),
+        ),
+        body: TabBarView(
+          children: [
+            const FriendsActivityFeed(),
+            _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _groups.isEmpty
+                    ? _buildEmpty()
+                    : RefreshIndicator(
+                        onRefresh: _load,
+                        child: ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(14, 14, 14, 88),
+                          itemCount: _groups.length,
+                          itemBuilder: (context, index) {
+                            return _buildGroupCard(_groups[index]);
+                          },
+                        ),
+                      ),
+          ],
+        ),
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _groups.isEmpty
-              ? _buildEmpty()
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 88),
-                    itemCount: _groups.length,
-                    itemBuilder: (context, index) {
-                      return _buildGroupCard(_groups[index]);
-                    },
-                  ),
-                ),
     );
   }
 

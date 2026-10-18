@@ -7,6 +7,7 @@ import '../services/settings_service.dart';
 import '../utils/network_feedback.dart';
 import '../widgets/app_app_bar.dart';
 import '../widgets/bgg_collection_import_card.dart';
+import '../widgets/households_sheet.dart';
 import 'category_manage_screen.dart';
 import 'privacy_visibility_screen.dart';
 
@@ -131,6 +132,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         children: [
           const _SectionHeader('Collections'),
+          ListTile(
+            leading: const Icon(Icons.home_outlined),
+            title: const Text('Foyers & lieux liés'),
+            subtitle: const Text(
+              'Associer Braine-l\'Alleud à Papa, Mom…',
+            ),
+            onTap: () => showHouseholdsSheet(context),
+          ),
           ListTile(
             leading: const Icon(Icons.tune),
             title: const Text('Gérer les catégories'),

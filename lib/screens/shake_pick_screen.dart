@@ -34,6 +34,25 @@ class ShakePickScreen extends StatefulWidget {
 class _ShakePickScreenState extends State<ShakePickScreen>
     with SingleTickerProviderStateMixin {
   final _random = Random();
+  List<CollectionItem> _deck = [];
+  String _deckKey = '';
+
+  /// Mélange Fisher-Yates sur une instance de [Random] réutilisée,
+  /// puis pioche sans remise jusqu'à épuisement du filtre.
+  CollectionItem _drawFair(List<CollectionItem> pool) {
+    final key = pool.map((e) => e.id).join('\u0001');
+    if (_deck.isEmpty || _deckKey != key) {
+      _deck = List<CollectionItem>.of(pool);
+      _deckKey = key;
+      for (var i = _deck.length - 1; i > 0; i--) {
+        final j = _random.nextInt(i + 1);
+        final swap = _deck[i];
+        _deck[i] = _deck[j];
+        _deck[j] = swap;
+      }
+    }
+    return _deck.removeLast();
+  }
   List<CollectionItem> _allCandidates = [];
   ShakePickFilters _filters = const ShakePickFilters();
   CollectionCategory? _categoryFilter;
@@ -158,7 +177,7 @@ class _ShakePickScreenState extends State<ShakePickScreen>
 
     await Future<void>.delayed(const Duration(milliseconds: 400));
 
-    final item = pool[_random.nextInt(pool.length)];
+    final item = _drawFair(pool);
     if (mounted) {
       setState(() {
         _picked = item;

@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'collection_local_cache.dart';
 import 'player_alias_service.dart';
 import 'profile_cache_service.dart';
 
@@ -14,6 +15,7 @@ class AccountDeletionService {
     await _client.rpc('delete_my_account');
     await PlayerAliasService.instance.resetAllLocalData();
     await ProfileCacheService.instance.clear();
+    await CollectionLocalCache.clearAll();
     await _client.auth.signOut();
   }
 }

@@ -182,32 +182,27 @@ class _ToolbarLayout extends StatelessWidget {
         ? const <_ToolbarAction>[]
         : leftActions.skip(1).toList();
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                height: 40,
-                child: Row(children: row1),
-              ),
-              if (row2.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                SizedBox(
-                  height: 40,
-                  child: Row(children: row2),
-                ),
+    return SizedBox(
+      height: 92,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                SizedBox(height: 40, child: Row(children: row1)),
+                if (row2.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  SizedBox(height: 40, child: Row(children: row2)),
+                ],
               ],
-            ],
+            ),
           ),
-        ),
-        Padding(
-          padding: const EdgeInsets.only(top: 2),
-          child: trailing,
-        ),
-      ],
+          trailing,
+        ],
+      ),
     );
   }
 }

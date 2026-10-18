@@ -4,6 +4,7 @@ import '../catalog/services/user_catalog_service.dart';
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import 'boardgame_expansion_service.dart';
+import 'group_service.dart';
 
 /// Jeux déjà possédés / en wishlist (clé catalogue = `bgg_id` ou titre).
 class UserBoardgameCollectionService implements UserCatalogService {
@@ -54,6 +55,24 @@ class UserBoardgameCollectionService implements UserCatalogService {
         }
       }
     }
+
+    try {
+      final groups = await GroupService().fetchMyGroups();
+      final groupIds = groups.map((g) => g.id).where((id) => id.isNotEmpty).toList();
+      if (groupIds.isNotEmpty) {
+        final shared = await _client
+            .from('collection_items')
+            .select('title, metadata, parent_game_id, is_expansion')
+            .eq('category', CollectionCategory.boardgame.dbValue)
+            .eq('is_wishlist', false)
+            .inFilter('group_id', groupIds);
+        for (final row in shared as List) {
+          final title = row['title'] as String? ?? '';
+          final meta = row['metadata'] as Map<String, dynamic>?;
+          keys.add(catalogKeyFromMetadata(meta, title));
+        }
+      }
+    } catch (_) {}
     return keys;
   }
 

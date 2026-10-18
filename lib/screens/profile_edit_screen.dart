@@ -1,13 +1,12 @@
 import 'package:flutter/material.dart';
-import '../models/collection_item.dart';
 import '../models/user_profile.dart';
 import '../services/profile_cache_service.dart';
 import '../services/profile_service.dart';
 import '../services/showcase_service.dart';
 import '../services/quick_log_service.dart';
-import '../widgets/profile/favorites_showcase.dart';
 import '../widgets/profile/quick_log_timeline.dart';
-import '../widgets/profile/trophy_picker_sheet.dart';
+import 'friend_collection_screen.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../widgets/preset_avatar_picker_sheet.dart';
 import '../widgets/profile_avatar.dart';
 import '../utils/preset_avatars.dart';
@@ -33,8 +32,6 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   bool _loading = true;
   bool _saving = false;
   bool _uploadingAvatar = false;
-  bool _savingTrophies = false;
-  List<CollectionItem> _vitrineItems = [];
   List<QuickLogEntry> _quickLogs = [];
 
   @override
@@ -57,8 +54,6 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     try {
       final p = await _service.fetchCurrentProfile();
       if (!mounted) return;
-      final ids = p.favoriteItemIds;
-      final trophies = await _service.fetchFavoriteItems(ids);
       final logs = await _quickLog.fetchMyLogs();
       if (!mounted) return;
       setState(() {
@@ -66,7 +61,6 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         _usernameController.text = p.username;
         _bioController.text = p.bio ?? '';
         _accentColor = p.accentColor;
-        _vitrineItems = trophies;
         _quickLogs = logs;
         _loading = false;
       });
@@ -239,50 +233,6 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
           SnackBar(content: Text('$e')),
         );
       }
-    }
-  }
-
-  Future<void> _addVitrineItem() async {
-    if (_profile == null) return;
-    final candidates = await _service.fetchPickableTrophyCandidates();
-    if (!mounted) return;
-    final picked = await showTrophyPickerSheet(
-      context,
-      candidates: candidates,
-      alreadyPickedIds: _vitrineItems.map((e) => e.id).toSet(),
-    );
-    if (picked == null || !mounted) return;
-    if (_vitrineItems.length >= FavoritesShowcase.maxItems) return;
-    setState(() => _vitrineItems = [..._vitrineItems, picked]);
-    await _persistVitrine();
-  }
-
-  Future<void> _removeVitrineItem(String id) async {
-    setState(
-      () => _vitrineItems = _vitrineItems.where((e) => e.id != id).toList(),
-    );
-    await _persistVitrine();
-  }
-
-  Future<void> _persistVitrine() async {
-    setState(() => _savingTrophies = true);
-    try {
-      final ids = _vitrineItems.map((e) => e.id).toList();
-      final updated = await _service.updateFavoriteItemIds(ids);
-      final items = await _service.fetchFavoriteItems(updated.favoriteItemIds);
-      if (!mounted) return;
-      setState(() {
-        _profile = updated;
-        _vitrineItems = items;
-      });
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _savingTrophies = false);
     }
   }
 
@@ -484,19 +434,34 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                     }).toList(),
                   ),
                   const SizedBox(height: 28),
-                  if (_savingTrophies)
-                    const Padding(
-                      padding: EdgeInsets.all(8),
-                      child: LinearProgressIndicator(),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.emoji_events_outlined, color: accent),
+                    title: const Text('Mon Panthéon · Top 10'),
+                    subtitle: const Text(
+                      'Podium et collection sur ta page de profil',
                     ),
-                  FavoritesShowcase(
-                    items: _vitrineItems,
-                    accentColor: accent,
-                    editable: true,
-                    onAdd: _addVitrineItem,
-                    onRemove: _removeVitrineItem,
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () {
+                      final uid =
+                          Supabase.instance.client.auth.currentUser?.id;
+                      if (uid == null) return;
+                      Navigator.push(
+                        context,
+                        appPageRoute(
+                          builder: (_) => FriendCollectionScreen(
+                            profileId: uid,
+                            username: _profile?.username ??
+                                _usernameController.text,
+                            avatarUrl: _profile?.avatarUrl,
+                            accentColor: _accentColor,
+                            shareCollections: true,
+                          ),
+                        ),
+                      );
+                    },
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 8),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: Icon(Icons.ios_share, color: accent),

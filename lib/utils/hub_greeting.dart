@@ -1,209 +1,207 @@
 import 'dart:math';
 
-import '../models/collection_category.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-/// Titres généraux (tirage 20 %).
-const kGeneralGreetingTitles = <String>[
+/// Titres du hub (« Salut … »). Un seul qualificatif par famille
+/// (stellaire, lunaire, nuits blanches…) pour éviter l'effet répétitif.
+const kGreetingTitles = <String>[
   'Aventurier',
-  'Grand Archiviste',
-  'Chineur d\'Élite',
-  'Oracle de la Wishlist',
-  'Gardien du Trésor',
-  'Maître des Étagères',
-  'Conservateur Suprême',
-  'Chasseur de Reliques',
-  'Baron du Stock',
-  'Dompteur de Piles',
-  'Architecte du Rangement',
-  'Seigneur de l\'Inventaire',
-  'Détective de l\'Occasion',
-  'Empereur des Vitrines',
-  'Légende du Butin',
+  'Collectionneur',
+  'Chasseur d\'étoiles',
+  'Capitaine',
+  'Explorateur',
+  'Voyageur stellaire',
+  'Pirate des nuits blanches',
+  'Corsaire',
+  'Flibustier',
+  'Mousquetaire',
+  'Paladin',
+  'Chevalier errant',
+  'Ninja',
+  'Samouraï',
+  'Shérif',
+  'Détective',
+  'Magicien',
+  'Alchimiste',
+  'Druide',
+  'Barde',
+  'Archéologue',
+  'Cartographe',
+  'Navigateur',
+  'Astronaute',
+  'Cosmonaute',
+  'Rêveur cosmique',
+  'Voyageur lunaire',
+  'Comète',
+  'Étoile filante',
+  'Météore',
+  'Phénix',
+  'Dragon',
+  'Noctambule',
+  'Nomade',
+  'Globe-trotteur',
+  'Baroudeur',
+  'Pionnier',
+  'Prodige',
+  'Virtuose',
+  'Maestro',
+  'Rockstar',
+  'Champion',
+  'Légende',
+  'Héros du dimanche',
+  'Esprit libre',
+  'Chercheur de trésors',
+  'Gentleman cambrioleur',
+  'Funambule',
+  'Dompteur de dragons',
+  'Sentinelle de minuit',
+  'Grand stratège',
+  'Petit génie',
+  'Mystérieux inconnu',
+  'Faiseur de miracles',
+  'Gardien de la galaxie',
+  'Explorateur des abysses',
+  'Voyageur temporel',
+  'Âme vagabonde',
+  'Boss final',
+  'Roi du suspense',
 ];
 
-/// Surnoms par catégorie active (tirage 60 %, pondéré par le nombre d'objets).
-const kCategoryGreetingTitles = <CollectionCategory, List<String>>{
-  CollectionCategory.boardgame: [
-    'Maître du Jeu',
-    'Baron du Meeple',
-    'Gardien des Règles',
-    'Stratège Suprême',
-    'Seigneur des Dés',
-    'Roi de la Défausse',
-    'Chevalier du Plateau',
-    'Bourreau des Scores',
-    'Légende du Carton',
-    'Dresseur de Tuiles',
-    'Architecte du Plateau',
-    'Dompteur de Meeples',
-    'Grand Maître du Tour par Tour',
-    'Oracle des Extensions',
-    'Tyran de la Table',
-  ],
-  CollectionCategory.book: [
-    'Dévoreur de Pages',
-    'Gardien des Grimoires',
-    'Rat de Bibliothèque',
-    'Seigneur des Tomes',
-    'Maître du Marque-Page',
-    'Archiviste des Bulles',
-    'Chasseur de Premières Éditions',
-    'Samouraï du Manga',
-    'Empereur du Papier',
-    'Dompteur de Pile à Lire',
-    'Alchimiste de l\'Encre',
-    'Chevalier du Roman',
-    'Baron de la BD',
-    'Sage des Étagères',
-    'Légende du Relié',
-  ],
-  CollectionCategory.card: [
-    'Sorcier du Deckbuilding',
-    'Maître du Foil',
-    'Dresseur de Boosters',
-    'Seigneur de la Sleeve',
-    'Baron du Topdeck',
-    'Gardien du Classeur',
-    'Chasseur d\'Ultra-Rares',
-    'Roi de la Méta',
-    'Alchimiste du Mana',
-    'Oracle du Tirage',
-    'Chevalier du Mint',
-    'Légende du Playmat',
-    'Empereur de l\'Holographique',
-    'Dompteur de Mulligan',
-    'Grand Maître du Duel',
-  ],
-  CollectionCategory.media: [
-    'Seigneur du Sillon',
-    'Maître du 33 Tours',
-    'Alchimiste du Son',
-    'Baron de la Platine',
-    'Gardien du Diamant',
-    'Chasseur de Pressages',
-    'Roi du Décibel',
-    'Archiviste des Pochettes',
-    'Chevalier de l\'Analogique',
-    'Oracle du Groove',
-    'Dompteur de Galettes',
-    'Légende du 180 Grammes',
-    'Empereur de la Hi-Fi',
-    'Sorcier du Vinyle',
-    'Disquaire de l\'Ombre',
-  ],
-  CollectionCategory.lego: [
-    'Architecte en Briques',
-    'Maître Constructeur',
-    'Seigneur des Tenons',
-    'Baron de la Notice',
-    'Dompteur de Pièces',
-    'Gardien du Set Scellé',
-    'Chevalier de l\'ABS',
-    'Roi de l\'Assemblage',
-    'Ingénieur Miniature',
-    'Chasseur de Minifigs',
-    'Oracle du Modélisme',
-    'Légende de la Brique',
-    'Empereur du Diorama',
-    'Sorcier de la Pince',
-    'Grand Bâtisseur',
-  ],
-  CollectionCategory.videogame: [
-    'Chasseur de Trophées',
-    'Légende du Pixel',
-    'Seigneur du Framerate',
-    'Baron du Pad',
-    'Maître du Backlog',
-    'Gardien de la Sauvegarde',
-    'Chevalier du Boss Final',
-    'Roi du Speedrun',
-    'Sorcier du Ray-Tracing',
-    'Dompteur de Polygones',
-    'Archiviste des Cartouches',
-    'Empereur du 100%',
-    'Oracle du Respawn',
-    'Stratège du Clavier-Manette',
-    'Héros du New Game+',
-  ],
-  CollectionCategory.movie: [
-    'Cinéphile Suprême',
-    'Maître de la Bobine',
-    'Seigneur du Blu-Ray',
-    'Baron du 7ème Art',
-    'Gardien du Steelbook',
-    'Roi du Director\'s Cut',
-    'Archiviste de la Pellicule',
-    'Chevalier du Grand Écran',
-    'Chasseur de Coffrets',
-    'Oracle du Générique',
-    'Dompteur de Séquences',
-    'Légende du Home-Cinéma',
-    'Empereur de la VOSTFR',
-    'Sorcier du Montage',
-    'Critique de l\'Ombre',
-  ],
-};
+enum HubGreetingSource { pseudo, title }
 
-enum HubGreetingSource { pseudo, general, category }
+/// Accord grammatical des titres d'accueil.
+enum GrammarGender { masculine, feminine, neutral }
+
+const kGreetingTitlesFeminine = <String>[
+  'Aventurière',
+  'Collectionneuse',
+  'Chasseuse d\'étoiles',
+  'Capitaine',
+  'Exploratrice',
+  'Voyageuse stellaire',
+  'Pirate des nuits blanches',
+  'Corsaire',
+  'Flibustière',
+  'Mousquetaire',
+  'Paladine',
+  'Chevalière errante',
+  'Ninja',
+  'Samouraï',
+  'Shérif',
+  'Détective',
+  'Magicienne',
+  'Alchimiste',
+  'Druidesse',
+  'Barde',
+  'Archéologue',
+  'Cartographe',
+  'Navigatrice',
+  'Astronaute',
+  'Cosmonaute',
+  'Rêveuse cosmique',
+  'Voyageuse lunaire',
+  'Comète',
+  'Étoile filante',
+  'Météore',
+  'Phénix',
+  'Dragonne',
+  'Noctambule',
+  'Nomade',
+  'Globe-trotteuse',
+  'Baroudeuse',
+  'Pionnière',
+  'Prodige',
+  'Virtuose',
+  'Maestra',
+  'Rockstar',
+  'Championne',
+  'Légende',
+  'Héroïne du dimanche',
+  'Esprit libre',
+  'Chercheuse de trésors',
+  'Gentleman cambrioleur',
+  'Funambule',
+  'Dompteuse de dragons',
+  'Sentinelle de minuit',
+  'Grande stratège',
+  'Petit génie',
+  'Mystérieuse inconnue',
+  'Faiseuse de miracles',
+  'Gardienne de la galaxie',
+  'Exploratrice des abysses',
+  'Voyageuse temporelle',
+  'Âme vagabonde',
+  'Boss final',
+  'Reine du suspense',
+];
+
+const kGenderIdentities = <String>[
+  'Femme',
+  'Homme',
+  'Non-binaire',
+  'Genre fluide',
+  'Agenre',
+  'Transgenre',
+  'Intersexe',
+  'Bispirituel·le',
+  'Autre',
+];
 
 class HubGreeting {
   final String name;
   final HubGreetingSource source;
-  final CollectionCategory? category;
 
-  const HubGreeting({
-    required this.name,
-    required this.source,
-    this.category,
-  });
+  const HubGreeting({required this.name, required this.source});
 
   String get text => 'Salut $name';
 }
 
-/// Tirage pondéré : 20 % pseudo, 20 % titre général, 60 % surnom de catégorie
-/// (catégorie choisie au prorata des objets possédés dans [counts]).
+/// 20 % pseudo, 80 % titre tiré uniformément dans [kGreetingTitles].
+/// [previous] évite de retomber sur le même titre deux fois de suite.
 HubGreeting pickHubGreeting({
   required String username,
-  required Map<CollectionCategory, int> counts,
-  Set<CollectionCategory>? active,
+  String? previous,
   Random? random,
+  GrammarGender grammar = GrammarGender.masculine,
 }) {
   final rng = random ?? Random();
-  final roll = rng.nextDouble();
-
-  if (roll < 0.2) {
+  if (grammar == GrammarGender.neutral || rng.nextDouble() < 0.2) {
     return HubGreeting(name: username, source: HubGreetingSource.pseudo);
   }
+  final pool = grammar == GrammarGender.feminine
+      ? kGreetingTitlesFeminine
+      : kGreetingTitles;
+  var name = pool[rng.nextInt(pool.length)];
+  if (name == previous && pool.length > 1) {
+    final i = pool.indexOf(name);
+    name = pool[(i < 0 ? 0 : i + 1) % pool.length];
+  }
+  return HubGreeting(name: name, source: HubGreetingSource.title);
+}
 
-  final weighted = <CollectionCategory, int>{
-    for (final e in counts.entries)
-      if (e.value > 0 &&
-          kCategoryGreetingTitles.containsKey(e.key) &&
-          (active == null || active.contains(e.key)))
-        e.key: e.value,
+const kGrammarPrefsKey = 'greeting_grammar_v1';
+const kIdentityPrefsKey = 'gender_identity_v1';
+
+Future<GrammarGender> loadGrammarGender() async {
+  final prefs = await SharedPreferences.getInstance();
+  return switch (prefs.getString(kGrammarPrefsKey)) {
+    'feminine' => GrammarGender.feminine,
+    'neutral' => GrammarGender.neutral,
+    _ => GrammarGender.masculine,
   };
+}
 
-  if (roll < 0.4 || weighted.isEmpty) {
-    return HubGreeting(
-      name: kGeneralGreetingTitles[rng.nextInt(kGeneralGreetingTitles.length)],
-      source: HubGreetingSource.general,
-    );
-  }
+Future<void> saveGrammarGender(GrammarGender gender) async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setString(kGrammarPrefsKey, gender.name);
+}
 
-  final total = weighted.values.fold<int>(0, (a, b) => a + b);
-  var target = rng.nextInt(total);
-  var chosen = weighted.keys.first;
-  for (final e in weighted.entries) {
-    if (target < e.value) {
-      chosen = e.key;
-      break;
-    }
-    target -= e.value;
-  }
-  final titles = kCategoryGreetingTitles[chosen]!;
-  return HubGreeting(
-    name: titles[rng.nextInt(titles.length)],
-    source: HubGreetingSource.category,
-    category: chosen,
-  );
+Future<String?> loadGenderIdentity() async {
+  final prefs = await SharedPreferences.getInstance();
+  return prefs.getString(kIdentityPrefsKey);
+}
+
+Future<void> saveGenderIdentity(String identity) async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setString(kIdentityPrefsKey, identity);
 }

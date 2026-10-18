@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/dev_auth_config.dart';
 import '../services/auth_service.dart';
 import '../services/profile_cache_service.dart';
 import '../services/profile_service.dart';
+import '../services/social_directory_cache.dart';
 import '../widgets/splash/collectingo_splash.dart';
 import 'login_screen.dart';
 
@@ -60,6 +63,7 @@ class _SplashScreenState extends State<SplashScreen> {
         await ProfileService().ensureCurrentUserProfile();
         await ProfileCacheService.instance.hydrate();
         await ProfileCacheService.instance.refresh();
+        unawaited(SocialDirectoryCache.instance.warm());
       } catch (e) {
         debugPrint('Profil utilisateur : $e');
       }

@@ -272,7 +272,11 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
           ],
         ),
       ),
-      body: StreamBuilder<List<Map<String, dynamic>>>(
+      body: Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 950),
+          child: StreamBuilder<List<Map<String, dynamic>>>(
         stream: _stream,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
@@ -312,6 +316,24 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
                         wishlistItems: wishlist,
                         accent: accent,
                       ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                        child: FilledButton.icon(
+                          onPressed: () async {
+                            final members =
+                                await _groupService.fetchMembers(_group.id);
+                            if (!context.mounted) return;
+                            await showGroupGameNightSheet(
+                              context,
+                              group: _group,
+                              memberCount:
+                                  members.isEmpty ? 1 : members.length,
+                            );
+                          },
+                          icon: const Text('🎲'),
+                          label: const Text('On joue à quoi ce soir ?'),
+                        ),
+                      ),
                       Expanded(
                         child: TabBarView(
                           controller: _scopeTabController,
@@ -348,6 +370,8 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
             },
           );
         },
+      ),
+        ),
       ),
     );
   }
@@ -474,13 +498,8 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
       builder: (context) {
         final grid = GridView.builder(
           padding: const EdgeInsets.all(12),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: CollectionGridLayout.crossAxisCount(context),
-            crossAxisSpacing: CollectionGridLayout.gridCrossSpacing,
-            mainAxisSpacing: CollectionGridLayout.gridMainSpacing,
-            childAspectRatio:
-                CollectionGridLayout.aspectRatio(category, context),
-          ),
+          gridDelegate:
+              CollectionGridLayout.collectionDelegate(context, category),
           itemCount: grouped.length,
           itemBuilder: (context, index) {
             final entry = grouped[index];

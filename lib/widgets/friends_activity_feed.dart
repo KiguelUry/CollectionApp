@@ -1,4 +1,8 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/activity_event.dart';
 import '../models/collection_category.dart';
@@ -24,11 +28,63 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
   bool _loading = true;
   String? _error;
   String? _addingItemId;
+  Map<String, String> _reactions = {};
+  Map<String, Map<String, int>> _reactionCounts = {};
+
+  static const _emoji = ['🔥', '👏', '❤️', '🎲'];
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  Future<void> _loadReactions(List<String> eventIds) async {
+    if (eventIds.isEmpty) return;
+    final mine = await _service.fetchMyReactions(eventIds);
+    final counts = await _service.fetchReactionCounts(eventIds);
+    if (!mounted) return;
+    if (mine.isEmpty) {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('activity_reactions_v1');
+      if (raw != null) {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) {
+          mine.addAll(decoded.map((k, v) => MapEntry('$k', '$v')));
+        }
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _reactions = mine;
+      _reactionCounts = counts;
+    });
+  }
+
+  Future<void> _react(String eventId, String emoji) async {
+    final next = Map<String, String>.from(_reactions);
+    final remove = next[eventId] == emoji;
+    if (remove) {
+      next.remove(eventId);
+    } else {
+      next[eventId] = emoji;
+    }
+    setState(() => _reactions = next);
+    try {
+      await _service.setReaction(eventId, remove ? null : emoji);
+      final counts = await _service.fetchReactionCounts([eventId]);
+      if (mounted) {
+        setState(() {
+          _reactionCounts = {..._reactionCounts, ...counts};
+          if (!counts.containsKey(eventId)) {
+            _reactionCounts.remove(eventId);
+          }
+        });
+      }
+    } catch (_) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('activity_reactions_v1', jsonEncode(next));
+    }
   }
 
   String _timeAgo(DateTime at) {
@@ -48,6 +104,10 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
     try {
       final events = await _service.fetchFriendsFeed(limit: 80);
       _groups = groupActivityEvents(events);
+      final ids = [
+        for (final group in _groups) group.head.id,
+      ];
+      unawaited(_loadReactions(ids));
     } catch (e) {
       _groups = [];
       _error = e.toString();
@@ -163,8 +223,8 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 36),
               child: Text(
-                'Quand tes amis partagent leurs collections et ajoutent des objets, '
-                'tu les verras ici — regroupés pour rester lisibles.',
+                'Tes ajouts et ceux de tes amis apparaissent ici — '
+                'tu peux déjà réagir avec 🔥 👏 ❤️ 🎲 sur tes propres événements.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Colors.grey.shade600, height: 1.35),
               ),
@@ -265,6 +325,39 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
                   const SizedBox(height: 10),
                   _buildSinglePreview(e, showAdd: _canAddFrom(e)),
                 ],
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    for (final emoji in _emoji)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 4),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(16),
+                          onTap: () => _react(e.id, emoji),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _reactions[e.id] == emoji
+                                  ? accent.withValues(alpha: 0.2)
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: accent.withValues(alpha: 0.25),
+                              ),
+                            ),
+                            child: Text(
+                              (_reactionCounts[e.id]?[emoji] ?? 0) > 1
+                                  ? '$emoji ${_reactionCounts[e.id]![emoji]}'
+                                  : emoji,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ],
             ),
           ),

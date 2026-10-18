@@ -14,12 +14,14 @@ class BoardgameDetailCompactHeader extends StatelessWidget {
   final CollectionItem item;
   final List<Widget> badges;
   final String? expansionOfLabel;
+  final Widget? belowTitle;
 
   const BoardgameDetailCompactHeader({
     super.key,
     required this.item,
     this.badges = const [],
     this.expansionOfLabel,
+    this.belowTitle,
   });
 
   @override
@@ -71,6 +73,10 @@ class BoardgameDetailCompactHeader extends StatelessWidget {
                   height: 1.2,
                 ),
               ),
+              if (belowTitle != null) ...[
+                const SizedBox(height: 6),
+                belowTitle!,
+              ],
               const SizedBox(height: 8),
               Wrap(
                 spacing: 6,

@@ -4,17 +4,22 @@ import '../models/friend_choice.dart';
 import '../services/friend_service.dart';
 import '../services/global_play_history_service.dart';
 import '../services/player_alias_service.dart';
+import 'friend_identity.dart';
 import 'friend_link_selector.dart';
 
 Future<void> showPlayerAliasLinkerSheet(
   BuildContext context, {
   required List<String> knownNames,
+  VoidCallback? onMutated,
 }) {
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
-    builder: (ctx) => PlayerAliasLinkerSheet(knownNames: knownNames),
+    builder: (ctx) => PlayerAliasLinkerSheet(
+      knownNames: knownNames,
+      onMutated: onMutated,
+    ),
   );
 }
 
@@ -23,10 +28,7 @@ Future<List<FriendChoice>> _loadFriendChoices() async {
     final rows = await FriendService().fetchFriends();
     return [
       for (final r in rows)
-        FriendChoice(
-          profileId: r['profile_id'] as String,
-          username: r['username'] as String? ?? 'Ami',
-        ),
+        FriendChoice.fromFriendRow(r),
     ];
   } catch (_) {
     return const [];
@@ -82,11 +84,13 @@ class PlayerAliasLinkerSheet extends StatefulWidget {
 
   /// Injectable pour les tests (sinon amis Supabase).
   final Future<List<FriendChoice>> Function()? loadFriends;
+  final VoidCallback? onMutated;
 
   const PlayerAliasLinkerSheet({
     super.key,
     required this.knownNames,
     this.loadFriends,
+    this.onMutated,
   });
 
   @override
@@ -124,12 +128,25 @@ class _PlayerAliasLinkerSheetState extends State<PlayerAliasLinkerSheet> {
             SimpleDialogOption(
               key: ValueKey('pick_friend_${f.profileId}'),
               onPressed: () => Navigator.pop(ctx, f),
-              child: Text(f.username),
+              child: Row(
+                children: [
+                  FriendAvatarButton(
+                    profileId: f.profileId,
+                    username: f.username,
+                    avatarUrl: f.avatarUrl,
+                    accentColor: f.accentColor,
+                    radius: 16,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(f.username)),
+                ],
+              ),
             ),
         ],
       ),
     );
     if (picked == null) return;
+    widget.onMutated?.call();
     await PlayerAliasService.instance.linkFriend(
       identity.displayName,
       profileId: picked.profileId,
@@ -188,6 +205,7 @@ class _PlayerAliasLinkerSheetState extends State<PlayerAliasLinkerSheet> {
         toName: identity.displayName,
       );
       if (!mounted) return;
+      widget.onMutated?.call();
       setState(() => _mergedCollisionKeys.add(aliasCollisionKey(names.first)));
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Pseudos fusionnés sous « $display »')),
@@ -225,6 +243,7 @@ class _PlayerAliasLinkerSheetState extends State<PlayerAliasLinkerSheet> {
       );
 
       if (!mounted) return;
+      widget.onMutated?.call();
       setState(() {
         _selected.clear();
         _displayController.clear();

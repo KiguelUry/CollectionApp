@@ -35,7 +35,7 @@ Future<FriendOverlapIndex> buildFriendOverlapIndex(
 
   final categories = friendItems.map((i) => i.category.dbValue).toSet();
 
-  final rows = await CollectionItemScope.personal(
+  final rows = await CollectionItemScope.ownedByUser(
     client
         .from('collection_items')
         .select('title, category, is_wishlist')

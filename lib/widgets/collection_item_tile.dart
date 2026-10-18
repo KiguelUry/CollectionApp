@@ -9,7 +9,9 @@ import '../utils/boardgame_collection_visibility.dart';
 import '../utils/boardgame_expansions.dart';
 import '../utils/friend_item_overlap.dart';
 import '../utils/holder_label_utils.dart';
+import '../utils/item_copy_units.dart';
 import '../utils/item_group_count.dart';
+import '../utils/wishlist_market_metadata.dart';
 import '../utils/tcg_card_display.dart';
 import 'boardgame_tile_inventory_sheets.dart';
 import 'boardgame_tile_sheets.dart';
@@ -484,6 +486,7 @@ class CollectionItemTile extends StatelessWidget {
 
   String? get _locationChipLabel {
     if (!_isBoardgame) return null;
+    if (item.isOnLoan) return 'Prêté à ${item.loaneeDisplayName}';
     final label = item.locationLabel?.trim();
     if (label != null && label.isNotEmpty) {
       final plain = holderLabelStorageValue(label).trim();
@@ -524,6 +527,27 @@ class CollectionItemTile extends StatelessWidget {
       item: item,
       groups: boardgameQuickEditGroups ?? const [],
       groupActivityCounts: groupActivityCounts,
+      readOnly: boardgameQuickEditGroups == null,
+    );
+  }
+
+  String get _valueChipLabel {
+    final avg = marketPriceAvgFromMetadata(item.metadata);
+    if (avg != null && avg > 0) return '~${formatEuroChip(avg)}';
+    final second = marketSecondhandPriceFromMetadata(item.metadata);
+    if (second != null && second > 0) return '~${formatEuroChip(second)}';
+    final paid = copyPurchasePricesFromRow(
+      quantity: item.quantity,
+      purchasePrice: item.purchasePrice,
+      metadata: item.metadata,
+    ).whereType<double>().fold<double>(0, (a, b) => a + b);
+    return paid > 0 ? formatEuroChip(paid) : '—';
+  }
+
+  Future<void> _showValueSheet(BuildContext context) {
+    return showBoardgameTileValueSheet(
+      context,
+      item: item,
       readOnly: boardgameQuickEditGroups == null,
     );
   }
@@ -589,7 +613,6 @@ class CollectionItemTile extends StatelessWidget {
           item.metadata?['bgg_is_expansion'] == true);
 
   Widget _buildIconRowTop(BuildContext context) {
-    final groupCount = !item.isSold ? _groupCount : 0;
     final expansionCount = ownedExpansionCount(item);
 
     return Row(
@@ -608,12 +631,13 @@ class CollectionItemTile extends StatelessWidget {
         const SizedBox(width: 4),
         Expanded(
           child: GestureDetector(
-            onTap: () => _showGroupSheet(context),
+            onTap: () => _showValueSheet(context),
             behavior: HitTestBehavior.opaque,
             child: _metaChip(
-              icon: groupCount > 1 ? Icons.groups : Icons.group_outlined,
-              suffix: '$groupCount',
+              icon: Icons.euro_rounded,
+              suffix: _valueChipLabel,
               color: Colors.teal.shade500,
+              shrinkSuffix: true,
             ),
           ),
         ),
@@ -649,9 +673,13 @@ class CollectionItemTile extends StatelessWidget {
             onTap: () => _showLocationSheet(context),
             behavior: HitTestBehavior.opaque,
             child: _metaChip(
-              icon: Icons.place_outlined,
+              icon: item.isOnLoan
+                  ? Icons.handshake_outlined
+                  : Icons.place_outlined,
               suffix: location ?? '—',
-              color: Colors.deepOrange.shade400,
+              color: item.isOnLoan
+                  ? Colors.blue.shade600
+                  : Colors.deepOrange.shade400,
             ),
           ),
         ),

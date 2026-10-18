@@ -8,6 +8,9 @@ const kMarketNewPriceMin = 'market_new_price_min';
 const kStoresPrices = 'stores_prices';
 const kMarketPriceHistory = 'market_price_history';
 const kMarketPricesFetchedAt = 'market_prices_fetched_at';
+const kMarketPriceMin = 'market_price_min';
+const kMarketPriceAvg = 'market_price_avg';
+const kMarketPriceMax = 'market_price_max';
 const kPriceSightings = 'price_sightings';
 
 int purchasePriorityFromMetadata(Map<String, dynamic>? metadata) {
@@ -26,6 +29,15 @@ double? marketSecondhandPriceFromMetadata(Map<String, dynamic>? metadata) {
 double? marketNewPriceMinFromMetadata(Map<String, dynamic>? metadata) {
   return _parseEuro(metadata?[kMarketNewPriceMin]);
 }
+
+double? marketPriceMinFromMetadata(Map<String, dynamic>? metadata) =>
+    _parseEuro(metadata?[kMarketPriceMin]);
+
+double? marketPriceAvgFromMetadata(Map<String, dynamic>? metadata) =>
+    _parseEuro(metadata?[kMarketPriceAvg]);
+
+double? marketPriceMaxFromMetadata(Map<String, dynamic>? metadata) =>
+    _parseEuro(metadata?[kMarketPriceMax]);
 
 int? bggExpansionCountFromMetadata(Map<String, dynamic>? metadata) {
   final raw = metadata?[kBggExpansionCount];

@@ -8,10 +8,15 @@ import 'transaction_history.dart';
 Future<void> persistOwnedQuantity({
   required String itemId,
   required int quantity,
+  Map<String, dynamic>? metadata,
 }) async {
+  final payload = <String, dynamic>{
+    'quantity': quantity.clamp(0, 9999),
+    if (metadata != null) 'metadata': metadata,
+  };
   await Supabase.instance.client
       .from('collection_items')
-      .update({'quantity': quantity.clamp(0, 9999)})
+      .update(payload)
       .eq('id', itemId);
   CollectionRefresh.instance.bump();
 }

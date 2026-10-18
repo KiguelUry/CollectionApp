@@ -9,13 +9,13 @@ import 'detail_bento_tile.dart';
 
 enum _PlayHubTab { none, history, stats, ranking }
 
-/// Hub « Parties & scores » : une tuile qui ouvre 3 sous-choix.
-class BoardgamePlayHubBento extends StatefulWidget {
+/// Contenu du bento « Parties et classements » (sous-tuiles directes, sans hub intermédiaire).
+class BoardgamePlaySectionsPanel extends StatefulWidget {
   final CollectionItem item;
   final bool readOnly;
   final ValueChanged<Map<String, dynamic>> onMetadataChanged;
 
-  const BoardgamePlayHubBento({
+  const BoardgamePlaySectionsPanel({
     super.key,
     required this.item,
     required this.readOnly,
@@ -23,11 +23,11 @@ class BoardgamePlayHubBento extends StatefulWidget {
   });
 
   @override
-  State<BoardgamePlayHubBento> createState() => _BoardgamePlayHubBentoState();
+  State<BoardgamePlaySectionsPanel> createState() =>
+      _BoardgamePlaySectionsPanelState();
 }
 
-class _BoardgamePlayHubBentoState extends State<BoardgamePlayHubBento> {
-  bool _hubOpen = false;
+class _BoardgamePlaySectionsPanelState extends State<BoardgamePlaySectionsPanel> {
   _PlayHubTab _tab = _PlayHubTab.none;
 
   @override
@@ -40,13 +40,6 @@ class _BoardgamePlayHubBentoState extends State<BoardgamePlayHubBento> {
 
   List<BoardgamePlaySession> get _sessions =>
       parseBoardgamePlays(widget.item.metadata);
-
-  void _openHub() {
-    setState(() {
-      _hubOpen = !_hubOpen;
-      if (!_hubOpen) _tab = _PlayHubTab.none;
-    });
-  }
 
   void _select(_PlayHubTab tab) {
     setState(() => _tab = _tab == tab ? _PlayHubTab.none : tab);
@@ -61,112 +54,71 @@ class _BoardgamePlayHubBentoState extends State<BoardgamePlayHubBento> {
       sessions,
       resolveName: aliases.canonical,
     );
-    final subtitle = _hubSubtitle(sessions, stats);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        DetailBentoTile(
-          icon: Icons.casino_outlined,
-          title: 'Parties & scores',
-          subtitle: subtitle,
+        DetailBentoSubTile(
+          icon: Icons.history,
+          title: 'Historique & parties',
+          subtitle: sessions.isEmpty
+              ? 'Ajouter une partie'
+              : '${sessions.length} partie${sessions.length > 1 ? 's' : ''}',
           accent: accent,
-          expanded: _hubOpen,
-          onTap: _openHub,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              DetailBentoSubTile(
-                icon: Icons.history,
-                title: 'Historique & parties',
-                subtitle: sessions.isEmpty
-                    ? 'Ajouter une partie'
-                    : '${sessions.length} partie${sessions.length > 1 ? 's' : ''}',
-                accent: accent,
-                selected: _tab == _PlayHubTab.history,
-                onTap: () => _select(_PlayHubTab.history),
-              ),
-              const SizedBox(height: 8),
-              DetailBentoSubTile(
-                icon: Icons.insights_outlined,
-                title: 'Stats',
-                subtitle: sessions.isEmpty ? 'Résumé des parties' : 'Victoires & scores',
-                accent: accent,
-                selected: _tab == _PlayHubTab.stats,
-                onTap: () => _select(_PlayHubTab.stats),
-              ),
-              const SizedBox(height: 8),
-              DetailBentoSubTile(
-                icon: Icons.emoji_events_outlined,
-                title: 'Classement',
-                subtitle: stats.podiumSlots.isEmpty
-                    ? 'Podium & matrices'
-                    : '${stats.winPodium.length} joueur${stats.winPodium.length > 1 ? 's' : ''}',
-                accent: accent,
-                selected: _tab == _PlayHubTab.ranking,
-                onTap: () => _select(_PlayHubTab.ranking),
-              ),
-              if (_tab != _PlayHubTab.none) ...[
-                const SizedBox(height: 12),
-                switch (_tab) {
-                  _PlayHubTab.history => BoardgamePlayHistoryPanel(
-                      item: widget.item,
-                      readOnly: widget.readOnly,
-                      mode: BoardgamePlayPanelMode.history,
-                      onMetadataChanged: widget.onMetadataChanged,
-                    ),
-                  _PlayHubTab.stats => _StatsBody(
-                      sessions: sessions,
-                      stats: stats,
-                    ),
-                  _PlayHubTab.ranking => BoardgamePlayHistoryPanel(
-                      item: widget.item,
-                      readOnly: widget.readOnly,
-                      mode: BoardgamePlayPanelMode.ranking,
-                      onMetadataChanged: widget.onMetadataChanged,
-                    ),
-                  _PlayHubTab.none => const SizedBox.shrink(),
-                },
-              ],
-            ],
-          ),
+          selected: _tab == _PlayHubTab.history,
+          onTap: () => _select(_PlayHubTab.history),
         ),
+        const SizedBox(height: 8),
+        DetailBentoSubTile(
+          icon: Icons.insights_outlined,
+          title: 'Statistiques',
+          subtitle: sessions.isEmpty
+              ? 'Résumé des parties'
+              : 'Victoires & scores',
+          accent: accent,
+          selected: _tab == _PlayHubTab.stats,
+          onTap: () => _select(_PlayHubTab.stats),
+        ),
+        const SizedBox(height: 8),
+        DetailBentoSubTile(
+          icon: Icons.emoji_events_outlined,
+          title: 'Classement',
+          subtitle: stats.podiumSlots.isEmpty
+              ? 'Podium & matrices'
+              : '${stats.winPodium.length} joueur${stats.winPodium.length > 1 ? 's' : ''}',
+          accent: accent,
+          selected: _tab == _PlayHubTab.ranking,
+          onTap: () => _select(_PlayHubTab.ranking),
+        ),
+        if (_tab != _PlayHubTab.none) ...[
+          const SizedBox(height: 12),
+          switch (_tab) {
+            _PlayHubTab.history => BoardgamePlayHistoryPanel(
+                item: widget.item,
+                readOnly: widget.readOnly,
+                mode: BoardgamePlayPanelMode.history,
+                onMetadataChanged: widget.onMetadataChanged,
+              ),
+            _PlayHubTab.stats => _StatsBody(
+                sessions: sessions,
+                stats: stats,
+              ),
+            _PlayHubTab.ranking => BoardgamePlayHistoryPanel(
+                item: widget.item,
+                readOnly: widget.readOnly,
+                mode: BoardgamePlayPanelMode.ranking,
+                onMetadataChanged: widget.onMetadataChanged,
+              ),
+            _PlayHubTab.none => const SizedBox.shrink(),
+          },
+        ],
       ],
     );
   }
-
-  String _hubSubtitle(
-    List<BoardgamePlaySession> sessions,
-    BoardgameRankingStats stats,
-  ) {
-    if (sessions.isEmpty) return 'Aucune partie';
-    final parts = <String>[
-      '${sessions.length} partie${sessions.length > 1 ? 's' : ''}',
-    ];
-    if (stats.allPlayerNames.isNotEmpty) {
-      parts.add(
-        '${stats.allPlayerNames.length} joueur'
-        '${stats.allPlayerNames.length > 1 ? 's' : ''}',
-      );
-    }
-    if (stats.podiumSlots.isNotEmpty) {
-      final top = stats.podiumSlots.first.players;
-      if (top.length > 1) {
-        final names = top.take(2).map((p) => p.name).join(' & ');
-        parts.add('ex æquo $names');
-      } else if (top.isNotEmpty) {
-        final w = top.first;
-        parts.add(
-          '${w.name} · ${w.wins} victoire${w.wins > 1 ? 's' : ''}',
-        );
-      }
-    } else if (stats.allScores.isNotEmpty) {
-      final best = stats.allScores.first;
-      parts.add('best ${best.score}');
-    }
-    return parts.take(3).join(' · ');
-  }
 }
+
+/// @deprecated Utiliser [BoardgamePlaySectionsPanel] dans le bento parent.
+typedef BoardgamePlayHubBento = BoardgamePlaySectionsPanel;
 
 class _StatsBody extends StatelessWidget {
   final List<BoardgamePlaySession> sessions;

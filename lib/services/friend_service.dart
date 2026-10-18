@@ -5,6 +5,7 @@ import '../models/collection_item.dart';
 import '../utils/collection_item_filters.dart';
 import '../utils/supabase_embeds.dart';
 import '../utils/search_relevance.dart';
+import 'group_service.dart';
 
 class FriendService {
   final _client = Supabase.instance.client;
@@ -312,6 +313,9 @@ class FriendService {
   }
 
   Future<bool> canViewFriendCollection(String friendProfileId) async {
+    final userId = _client.auth.currentUser?.id;
+    if (userId != null && userId == friendProfileId) return true;
+
     final friendship = await friendshipWith(friendProfileId);
     if (friendship == null) return false;
     if (friendship['share_collections'] != true) return false;
@@ -403,7 +407,27 @@ class FriendService {
         .toList();
   }
 
+  /// Objets des groupes dont je suis membre (collection commune, ex. Famille).
+  Future<List<CollectionItem>> fetchItemsInMyGroups() async {
+    final groups = await GroupService().fetchMyGroups();
+    final ids = groups.map((g) => g.id).where((id) => id.isNotEmpty).toList();
+    if (ids.isEmpty) return [];
+
+    final rows = await _client
+        .from('collection_items')
+        .select(SupabaseEmbeds.collectionItem)
+        .inFilter('group_id', ids)
+        .eq('is_wishlist', false);
+
+    return (rows as List)
+        .map((r) => CollectionItem.fromJson(Map<String, dynamic>.from(r)))
+        .where(isActiveCollectionItem)
+        .toList();
+  }
+
   Future<bool> canViewFriendWishlist(String friendProfileId) async {
+    final userId = _client.auth.currentUser?.id;
+    if (userId != null && userId == friendProfileId) return true;
     if (!await canViewFriendCollection(friendProfileId)) return false;
 
     final row = await _client

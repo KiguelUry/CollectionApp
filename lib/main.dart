@@ -10,12 +10,15 @@ import 'screens/reset_password_screen.dart';
 import 'screens/category_selection_screen.dart';
 import 'screens/friends_screen.dart';
 import 'screens/groups_screen.dart';
-import 'screens/profile_edit_screen.dart';
+import 'screens/friend_collection_screen.dart';
+import 'services/profile_cache_service.dart';
+import 'services/social_directory_cache.dart';
 import 'screens/settings_screen.dart';
 import 'screens/splash_screen.dart';
 import 'config/app_env.dart';
 import 'config/app_brand.dart';
 import 'services/settings_service.dart';
+import 'navigation/app_route_observer.dart';
 import 'theme/app_theme.dart';
 
 Future<void> main() async {
@@ -35,6 +38,9 @@ Future<void> main() async {
 
   // Après Supabase : SettingsService peut synchroniser le profil (ProfileService).
   await SettingsService.instance.load();
+  if (Supabase.instance.client.auth.currentUser != null) {
+    unawaited(SocialDirectoryCache.instance.warm());
+  }
 
   runApp(const MyApp());
 }
@@ -56,6 +62,9 @@ class _MyAppState extends State<MyApp> {
     super.initState();
     _settings.addListener(_rebuild);
     _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+      if (data.session != null) {
+        unawaited(SocialDirectoryCache.instance.warm());
+      }
       if (data.event == AuthChangeEvent.passwordRecovery) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _navigatorKey.currentState?.pushNamedAndRemoveUntil(
@@ -95,16 +104,35 @@ class _MyAppState extends State<MyApp> {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
+      navigatorObservers: [appRouteObserver],
       home: const SplashScreen(),
       routes: {
         '/categories': (context) => const CategorySelectionScreen(),
         '/groups': (context) => const GroupsScreen(),
         '/friends': (context) => const FriendsScreen(),
-        '/profile': (context) => const ProfileEditScreen(),
+        '/profile': (context) => const _OwnProfileRoute(),
         '/settings': (context) => const SettingsScreen(),
         '/login': (context) => const LoginScreen(),
         '/reset-password': (context) => const ResetPasswordScreen(),
       },
+    );
+  }
+}
+
+class _OwnProfileRoute extends StatelessWidget {
+  const _OwnProfileRoute();
+
+  @override
+  Widget build(BuildContext context) {
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    final profile = ProfileCacheService.instance.profile;
+    if (uid == null) return const LoginScreen();
+    return FriendCollectionScreen(
+      profileId: uid,
+      username: profile?.username ?? 'Moi',
+      avatarUrl: profile?.avatarUrl,
+      accentColor: profile?.accentColor,
+      shareCollections: true,
     );
   }
 }

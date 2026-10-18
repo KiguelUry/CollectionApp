@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -9,6 +10,7 @@ import '../config/app_env.dart';
 import '../config/supabase_public_config.dart';
 import '../models/bgg_expansion.dart';
 import '../utils/bgg_collection_parse.dart';
+import '../utils/bgg_text.dart';
 import '../utils/retry_backoff.dart';
 import 'bgg_catalog_cache.dart';
 import '../utils/search_relevance.dart';
@@ -491,13 +493,50 @@ class BggService {
     );
   }
 
+  /// Mémoire (15 min) → cache partagé Supabase (7 j) → BGG.
   static Future<List<Map<String, String>>> searchGames(
     String query, {
     BggSearchSort sort = BggSearchSort.smart,
+    bool lightweight = false,
   }) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return [];
+    final cacheKey = _searchCacheKey(trimmed, sort);
 
+    final mem = _searchCache[cacheKey];
+    final memFresh =
+        mem != null && DateTime.now().difference(mem.at) < _searchCacheTtl;
+    ({List<Map<String, String>> games, bool fresh})? shared;
+    if (!memFresh) {
+      shared = await BggSearchSharedCache.read(cacheKey);
+      if (shared != null && shared.fresh) {
+        lastSearchError = null;
+        lastSearchStatus = 'Résultats en cache (moins d’appels BGG)';
+        _storeSearchCache(cacheKey, shared.games);
+        return shared.games;
+      }
+    }
+
+    final live = await _searchGamesLive(trimmed, sort, lightweight: lightweight);
+    if (live.isNotEmpty) {
+      if (!memFresh && !lightweight) {
+        unawaited(BggSearchSharedCache.write(cacheKey, live));
+      }
+      return live;
+    }
+    if (shared != null) {
+      lastSearchError = null;
+      lastSearchStatus = 'BGG indisponible : anciens résultats affichés';
+      return shared.games;
+    }
+    return live;
+  }
+
+  static Future<List<Map<String, String>>> _searchGamesLive(
+    String trimmed,
+    BggSearchSort sort, {
+    bool lightweight = false,
+  }) async {
     lastSearchError = null;
     lastSearchStatus = 'Recherche sur BoardGameGeek…';
     if (!supportsWebSearch) {
@@ -530,14 +569,17 @@ class BggService {
           BggSearchSort.popularity => 'popularity',
           _ => 'smart',
         },
+        if (lightweight) 'lite': '1',
       });
       if (data == null) {
         lastSearchStatus = null;
         return [];
       }
       final games = _gamesFromJsonList(data['games']);
-      final enriched = games.isEmpty ? games : await enrichGameMaps(games);
-      if (enriched.isNotEmpty) {
+      final enriched = games.isEmpty || lightweight
+          ? games
+          : await enrichGameMaps(games);
+      if (enriched.isNotEmpty && !lightweight) {
         _storeSearchCache(cacheKey, enriched);
         if (data['cached'] == true) {
           lastSearchStatus = 'Résultats en cache (moins d’appels BGG)';
@@ -555,6 +597,8 @@ class BggService {
       if (candidates.isEmpty) return [];
 
       sortByScore(candidates, (g) => titleRelevanceScore(g['title']!, trimmed));
+
+      if (lightweight) return candidates.take(40).toList();
 
       final top = candidates.take(_maxMetaLookup).toList();
       Map<String, _BggThingMeta> meta = {};
@@ -580,7 +624,7 @@ class BggService {
       _pinExactTitleMatches(ranked, trimmed);
 
       final results = ranked.take(40).toList();
-      if (results.isNotEmpty) {
+      if (results.isNotEmpty && !lightweight) {
         _storeSearchCache(cacheKey, results);
         lastSearchStatus = null;
       }
@@ -1175,6 +1219,34 @@ class BggService {
     return urls.toList();
   }
 
+  /// Photos publiées sur BoardGameGeek (galerie du site), à la demande.
+  static Future<List<String>> fetchCommunityImages(String bggId) async {
+    if (bggId.trim().isEmpty) return const [];
+    try {
+      final uri = Uri.parse(
+        'https://api.geekdo.com/api/images?ajax=1&gallery=all'
+        '&objectid=$bggId&objecttype=thing&pageid=1&showcount=24&size=medium',
+      );
+      final response = await http.get(uri, headers: {'Accept': 'application/json'});
+      if (response.statusCode != 200 || response.body.isEmpty) {
+        return const [];
+      }
+      final decoded = jsonDecode(response.body);
+      final images = decoded is Map ? decoded['images'] : null;
+      if (images is! List) return const [];
+      final urls = <String>[];
+      for (final raw in images) {
+        if (raw is! Map) continue;
+        final url = (raw['imageurl'] ?? raw['imageurl_lg'] ?? raw['url'])
+            ?.toString();
+        if (url != null && url.startsWith('http')) urls.add(url);
+      }
+      return urls;
+    } catch (_) {
+      return const [];
+    }
+  }
+
   /// Fiche BGG du jeu (règles, fichiers, forum).
   static String? gamePageUrl(String? bggId) {
     if (bggId == null || bggId.isEmpty) return null;
@@ -1264,13 +1336,7 @@ class BggService {
   @Deprecated('Use gamePageUrl')
   static String? rulesFilesUrl(String? bggId) => gamePageUrl(bggId);
 
-  static String _stripHtml(String? html) {
-    if (html == null || html.isEmpty) return '';
-    return html
-        .replaceAll(RegExp(r'<[^>]*>'), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-  }
+  static String _stripHtml(String? html) => cleanBggText(html);
 
   static String? _expansionSummary(XmlElement item) {
     final desc = item.findElements('description').firstOrNull?.innerText;
@@ -1292,7 +1358,7 @@ class BggService {
   }
 
   /// Extensions BGG du jeu de base (`inbound="true"` sur le lien expansion).
-  /// Passe par le cache partagé `bgg_catalog_cache` (14 jours).
+  /// Passe par le cache partagé `bgg_catalog_cache` (30 jours).
   static Future<List<BggExpansion>> fetchExpansions(
     String baseGameBggId,
   ) async {

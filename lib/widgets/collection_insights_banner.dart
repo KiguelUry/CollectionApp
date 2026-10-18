@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../models/collection_insight.dart';
 
-import '../screens/loans_screen.dart';
+import '../screens/exchanges_screen.dart';
 
 import '../screens/tech_collection_screen.dart';
 
@@ -30,7 +30,7 @@ class CollectionInsightsBanner extends StatelessWidget {
 
       CollectionInsightKind.warranty => const TechCollectionScreen(),
 
-      CollectionInsightKind.loan => const LoansScreen(),
+      CollectionInsightKind.loan => const ExchangesScreen(),
 
       CollectionInsightKind.tcg => const TcgCompletionScreen(),
 
