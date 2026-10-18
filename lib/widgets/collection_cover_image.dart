@@ -71,28 +71,11 @@ class CollectionCoverImage extends StatelessWidget {
             size: thumbSize,
           )
         : url;
-    if (kIsWeb) {
-      // Balise <img> du navigateur, pas une texture WebGL. Firefox affiche
-      // « Uploading zeros » puis une case vide quand on remonte la grille.
-      image = Image.network(
-        thumb,
-        // Sans cette clé, la balise <img> de la case est réutilisée et garde
-        // la jaquette de l'onglet précédent (Découvrir : Pour toi → Tendances).
-        key: ValueKey(thumb),
-        width: w,
-        height: h,
-        fit: imageFit,
-        gaplessPlayback: true,
-        filterQuality: FilterQuality.low,
-        webHtmlElementStrategy: WebHtmlElementStrategy.prefer,
-        loadingBuilder: (context, child, progress) {
-          if (progress == null) return child;
-          return _fallback(child: const SizedBox.shrink());
-        },
-        errorBuilder: (_, _, _) => _fallback(),
-      );
-    } else if (thumb != url) {
+    if (thumb != url) {
+      // Image décodée dans la case. Une balise <img> du navigateur se
+      // repositionne mal et colle la jaquette d'un autre jeu sur le titre.
       image = CachedNetworkImage(
+        key: ValueKey(thumb),
         imageUrl: thumb,
         width: w,
         height: h,
@@ -138,6 +121,7 @@ class CollectionCoverImage extends StatelessWidget {
         size: largeSource ? 1000 : 600,
       );
       image = CachedNetworkImage(
+        key: ValueKey(proxied),
         imageUrl: proxied,
         width: w,
         height: h,
@@ -158,15 +142,7 @@ class CollectionCoverImage extends StatelessWidget {
             ),
           ),
         ),
-        errorWidget: (_, _, _) => Image.network(
-          displayUrl,
-          key: ValueKey(displayUrl),
-          width: w,
-          height: h,
-          fit: imageFit,
-          webHtmlElementStrategy: WebHtmlElementStrategy.prefer,
-          errorBuilder: (_, _, _) => _fallback(),
-        ),
+        errorWidget: (_, _, _) => _fallback(),
       );
     } else {
       image = CachedNetworkImage(

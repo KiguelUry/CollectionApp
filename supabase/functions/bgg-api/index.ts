@@ -815,6 +815,40 @@ async function handleGame(id: string): Promise<Response> {
   return json({ game: { ...game, ...extras } });
 }
 
+async function handleImages(id: string): Promise<Response> {
+  if (!/^\d+$/.test(id)) {
+    return json({ error: "Invalid id" }, 400);
+  }
+  const target = new URL("https://api.geekdo.com/api/images");
+  target.searchParams.set("ajax", "1");
+  target.searchParams.set("gallery", "all");
+  target.searchParams.set("objectid", id);
+  target.searchParams.set("objecttype", "thing");
+  target.searchParams.set("pageid", "1");
+  target.searchParams.set("showcount", "12");
+  target.searchParams.set("size", "medium");
+  try {
+    const res = await fetch(target.toString(), {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "CollectionFamille/1.0",
+      },
+    });
+    if (!res.ok) return json({ images: [] });
+    const body = await res.json();
+    const raw = Array.isArray(body?.images) ? body.images : [];
+    const images: string[] = [];
+    for (const item of raw) {
+      const url = item?.imageurl || item?.imageurl_lg || item?.url;
+      if (typeof url === "string" && url.startsWith("http")) images.push(url);
+      if (images.length >= 8) break;
+    }
+    return json({ images });
+  } catch {
+    return json({ images: [] });
+  }
+}
+
 async function handleExpansions(id: string): Promise<Response> {
   if (!/^\d+$/.test(id)) {
     return json({ error: "Invalid id" }, 400);
@@ -1042,6 +1076,10 @@ Deno.serve(async (req) => {
       case "game": {
         const id = url.searchParams.get("id") ?? "";
         return await handleGame(id);
+      }
+      case "images": {
+        const id = url.searchParams.get("id") ?? "";
+        return await handleImages(id);
       }
       case "expansions": {
         const id = url.searchParams.get("id") ?? "";

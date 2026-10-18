@@ -1219,13 +1219,25 @@ class BggService {
     return urls.toList();
   }
 
-  /// Photos publiées sur BoardGameGeek (galerie du site), à la demande.
+  /// Huit premières photos de la galerie BGG. Passe par `bgg-api` : le
+  /// navigateur ne peut pas appeler api.geekdo.com (CORS).
   static Future<List<String>> fetchCommunityImages(String bggId) async {
     if (bggId.trim().isEmpty) return const [];
+    if (_webProxyReady) {
+      final data = await _jsonApiGet('images', {'id': bggId});
+      final raw = data?['images'];
+      if (raw is List) {
+        return raw
+            .map((e) => e.toString())
+            .where((url) => url.startsWith('http'))
+            .take(8)
+            .toList();
+      }
+    }
     try {
       final uri = Uri.parse(
         'https://api.geekdo.com/api/images?ajax=1&gallery=all'
-        '&objectid=$bggId&objecttype=thing&pageid=1&showcount=24&size=medium',
+        '&objectid=$bggId&objecttype=thing&pageid=1&showcount=12&size=medium',
       );
       final response = await http.get(uri, headers: {'Accept': 'application/json'});
       if (response.statusCode != 200 || response.body.isEmpty) {
@@ -1240,6 +1252,7 @@ class BggService {
         final url = (raw['imageurl'] ?? raw['imageurl_lg'] ?? raw['url'])
             ?.toString();
         if (url != null && url.startsWith('http')) urls.add(url);
+        if (urls.length >= 8) break;
       }
       return urls;
     } catch (_) {

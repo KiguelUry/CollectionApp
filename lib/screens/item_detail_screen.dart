@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -27,7 +28,6 @@ import '../widgets/assign_book_series_sheet.dart';
 import '../widgets/item_tags_editor.dart';
 import '../widgets/boardgame_expansions_section.dart';
 import '../widgets/bgg_community_rating_panel.dart';
-import '../widgets/bgg_network_image.dart';
 import '../models/boardgame_play_session.dart';
 import '../widgets/boardgame/boardgame_item_bento_layout.dart';
 import '../widgets/boardgame_detail_bento.dart';
@@ -122,6 +122,11 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
   bool _marketPanelOpen = false;
   bool _bggDescExpanded = false;
   int? _expansionCatalogTotal;
+  List<String> _bggPhotos = const [];
+  bool _bggPhotosLoading = false;
+  List<String>? _pantheonIds;
+  int _pantheonCap = 10;
+  bool _pantheonReady = false;
 
   @override
   void initState() {
@@ -161,6 +166,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     }
     _syncGroupSelectionFromItem();
     _loadBggDescription();
+    _prefetchPantheon();
     _loadExpansionCatalogTotal();
     PlayerAliasService.instance.ensureLoaded();
     if (!widget.readOnly) {
@@ -246,6 +252,10 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
         });
       }
     }
+    final bggId = meta?['bgg_id']?.toString();
+    if (bggId != null && bggId.isNotEmpty) {
+      unawaited(_loadBggPhotos(bggId));
+    }
     final needsLong = longFromMeta.isEmpty;
     if (!needsLong &&
         shortFromMeta.isNotEmpty &&
@@ -255,7 +265,6 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       return;
     }
 
-    final bggId = meta?['bgg_id']?.toString();
     if (bggId == null || bggId.isEmpty) return;
 
     if (mounted && shortFromMeta.isEmpty && longFromMeta.isEmpty) {
@@ -2099,14 +2108,88 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     return '$loc · partagé avec ${groupNames.join(', ')}';
   }
 
+  Future<void> _prefetchPantheon() async {
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    if (uid == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final cap = (prefs.getInt('pantheon_cap:$uid') ?? 10).clamp(10, 20);
+    List<String> ids = const [];
+    try {
+      final remote = await ProfileService().fetchPantheonIds(uid);
+      if (remote != null) {
+        ids = remote;
+      } else {
+        final raw = prefs.getString('pantheon:$uid');
+        if (raw != null) {
+          final decoded = jsonDecode(raw);
+          if (decoded is List) {
+            ids = decoded.map((e) => e.toString()).where((id) => id.isNotEmpty).toList();
+          }
+        }
+      }
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _pantheonIds = ids;
+      _pantheonCap = cap;
+      _pantheonReady = true;
+    });
+  }
+
+  Future<void> _loadBggPhotos(String bggId) async {
+    if (mounted) setState(() => _bggPhotosLoading = true);
+    final urls = await BggService.fetchCommunityImages(bggId);
+    if (!mounted) return;
+    setState(() {
+      _bggPhotos = urls.take(8).toList();
+      _bggPhotosLoading = false;
+    });
+  }
+
+  void _zoomBggPhoto(String url) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        final size = MediaQuery.sizeOf(ctx);
+        return Dialog(
+          insetPadding: const EdgeInsets.all(16),
+          child: SizedBox(
+            width: size.width,
+            height: size.height * 0.8,
+            child: Stack(
+              children: [
+                InteractiveViewer(
+                  child: CollectionCoverImage(
+                    url: url,
+                    width: size.width,
+                    height: size.height * 0.8,
+                    largeSource: true,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: IconButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    icon: const Icon(Icons.close),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _offerPantheonSlot() async {
     final uid = Supabase.instance.client.auth.currentUser?.id;
     if (uid == null) return;
-    final svc = ProfileService();
-    final current = List<String>.from(await svc.fetchPantheonIds(uid) ?? []);
-    final prefs = await SharedPreferences.getInstance();
-    final cap = (prefs.getInt('pantheon_cap:$uid') ?? 10).clamp(10, 20);
+    if (!_pantheonReady) await _prefetchPantheon();
     if (!mounted) return;
+    final current = List<String>.from(_pantheonIds ?? const []);
+    final cap = _pantheonCap;
     final slot = await showDialog<int>(
       context: context,
       builder: (ctx) => SimpleDialog(
@@ -2166,54 +2249,33 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
         } else {
           swapped.add(_item.id);
         }
-        await svc.savePantheonIds(swapped);
+        await _persistPantheon(swapped);
         return;
       }
     }
-    await svc.savePantheonIds(next);
+    await _persistPantheon(next);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Panthéon mis à jour')),
     );
   }
 
-  Future<void> _openBggGallery(List<String> known) async {
-    final bggId = _item.metadata?['bgg_id']?.toString();
-    var urls = [...known];
-    if (bggId != null && bggId.isNotEmpty) {
-      final extra = await BggService.fetchCommunityImages(bggId);
-      urls = {...urls, ...extra}.toList();
+  Future<void> _persistPantheon(List<String> ids) async {
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    if (uid == null) return;
+    final unique = <String>[];
+    for (final id in ids) {
+      if (id.isEmpty || unique.contains(id)) continue;
+      unique.add(id);
+      if (unique.length >= _pantheonCap) break;
     }
-    if (!mounted) return;
-    if (urls.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Aucune photo BGG pour ce jeu')),
-      );
-      return;
-    }
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (ctx) => SafeArea(
-        child: SizedBox(
-          height: MediaQuery.sizeOf(ctx).height * 0.72,
-          child: GridView.builder(
-            padding: const EdgeInsets.all(12),
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 180,
-              mainAxisSpacing: 8,
-              crossAxisSpacing: 8,
-            ),
-            itemCount: urls.length,
-            itemBuilder: (_, i) => ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: BggNetworkImage(url: urls[i]),
-            ),
-          ),
-        ),
-      ),
-    );
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('pantheon:$uid', jsonEncode(unique));
+    await prefs.setInt('pantheon_cap:$uid', _pantheonCap);
+    if (mounted) setState(() => _pantheonIds = unique);
+    try {
+      await ProfileService().savePantheonIds(unique);
+    } catch (_) {}
   }
 
   Widget _buildBggDescriptionSection() {
@@ -2224,20 +2286,52 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       );
     }
 
-    final galleryUrls = _bggGalleryUrls(_item.metadata);
     final bggId = _item.metadata?['bgg_id']?.toString();
-    if (galleryUrls.isEmpty && (bggId == null || bggId.isEmpty)) {
+    if (_bggPhotos.isEmpty &&
+        !_bggPhotosLoading &&
+        (bggId == null || bggId.isEmpty)) {
       return const SizedBox.shrink();
     }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        TextButton.icon(
-          onPressed: () => _openBggGallery(galleryUrls),
-          icon: const Icon(Icons.photo_library_outlined),
-          label: const Text('Photos BoardGameGeek'),
+        const Text(
+          'Photos BoardGameGeek',
+          style: TextStyle(fontWeight: FontWeight.w700),
         ),
+        const SizedBox(height: 8),
+        if (_bggPhotosLoading && _bggPhotos.isEmpty)
+          const LinearProgressIndicator(minHeight: 2)
+        else
+          SizedBox(
+            height: 96,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: _bggPhotos.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (context, i) {
+                final url = _bggPhotos[i];
+                return GestureDetector(
+                  onTap: () => _zoomBggPhoto(url),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: SizedBox(
+                      width: 128,
+                      child: CollectionCoverImage(
+                        key: ValueKey(url),
+                        url: url,
+                        width: 128,
+                        height: 96,
+                        fit: BoxFit.cover,
+                        compact: true,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
       ],
     );
   }
