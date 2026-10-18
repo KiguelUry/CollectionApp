@@ -61,14 +61,34 @@ class CollectionCoverImage extends StatelessWidget {
     final h = height;
 
     Widget image;
-    final thumb = compact
+    final thumbSize = compact
+        ? _thumbnailBucket(w ?? h, MediaQuery.devicePixelRatioOf(context))
+        : (largeSource ? 1000 : 600);
+    final thumb = (compact || kIsWeb)
         ? gridThumbnailUrl(
             url,
             crop: !padded && fit == BoxFit.cover,
-            size: _thumbnailBucket(w ?? h, MediaQuery.devicePixelRatioOf(context)),
+            size: thumbSize,
           )
         : url;
-    if (thumb != url) {
+    if (kIsWeb) {
+      // Balise <img> du navigateur, pas une texture WebGL. Firefox affiche
+      // « Uploading zeros » puis une case vide quand on remonte la grille.
+      image = Image.network(
+        thumb,
+        width: w,
+        height: h,
+        fit: imageFit,
+        gaplessPlayback: true,
+        filterQuality: FilterQuality.low,
+        webHtmlElementStrategy: WebHtmlElementStrategy.prefer,
+        loadingBuilder: (context, child, progress) {
+          if (progress == null) return child;
+          return _fallback(child: const SizedBox.shrink());
+        },
+        errorBuilder: (_, _, _) => _fallback(),
+      );
+    } else if (thumb != url) {
       image = CachedNetworkImage(
         imageUrl: thumb,
         width: w,

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -23,6 +24,13 @@ import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (kIsWeb) {
+    // Firefox vide les textures WebGL au scroll. Un cache plus grand évite
+    // de jeter les jaquettes encore à l'écran ou juste au-dessus.
+    final cache = PaintingBinding.instance.imageCache;
+    cache.maximumSize = 2500;
+    cache.maximumSizeBytes = 256 << 20;
+  }
 
   try {
     await dotenv.load(fileName: '.env');

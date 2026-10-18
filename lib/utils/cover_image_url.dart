@@ -28,9 +28,10 @@ String coverUrlForDisplay(String url, {required bool large}) =>
 const kThumbnailCdnHost = 'wsrv.nl';
 const kThumbnailSize = 300;
 
-/// Vignette de grille/liste : 300 px WebP servie par le CDN wsrv.nl.
-/// CORS ouvert (décodage CanvasKit sur le web) et ~10× plus léger que
-/// l'original. Renvoie [url] inchangée si elle n'est pas transformable.
+/// Vignette de grille/liste : 300 px JPEG servie par le CDN wsrv.nl.
+/// JPEG plutôt que WebP : Firefox + CanvasKit réaffiche une texture vide
+/// (« Uploading zeros ») après un scroll si l'image est un WebP. Renvoie
+/// [url] inchangée si elle n'est pas transformable.
 String gridThumbnailUrl(
   String url, {
   bool crop = false,
@@ -55,7 +56,7 @@ String gridThumbnailUrl(
   }
   return 'https://$kThumbnailCdnHost/?url=${Uri.encodeComponent(src)}'
       '&w=$size&h=$size'
-      '&fit=${crop ? 'cover' : 'inside'}&we&output=webp&q=80';
+      '&fit=${crop ? 'cover' : 'inside'}&we&output=jpg&q=80';
 }
 
 /// URL source normalisée (taille adaptée), sans proxy web.
