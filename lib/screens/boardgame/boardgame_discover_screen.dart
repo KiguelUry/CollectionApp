@@ -550,6 +550,7 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
               final game = _game(seed);
               final key = game.catalogKey;
               return _DiscoverCard(
+                key: ValueKey(game.bggId),
                 game: game,
                 rating: _cardMeta(seed),
                 inCollection: _ownedKeys.contains(key),
@@ -764,6 +765,7 @@ class _DiscoverCard extends StatelessWidget {
   final VoidCallback onWishlist;
 
   const _DiscoverCard({
+    super.key,
     required this.game,
     required this.rating,
     required this.inCollection,
@@ -800,6 +802,7 @@ class _DiscoverCard extends StatelessWidget {
                             child: const Icon(Icons.casino_outlined),
                           )
                         : CollectionCoverImage(
+                            key: ValueKey(game.imageUrl),
                             url: game.imageUrl!,
                             boxedCover: true,
                             compact: true,

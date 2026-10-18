@@ -76,6 +76,9 @@ class CollectionCoverImage extends StatelessWidget {
       // « Uploading zeros » puis une case vide quand on remonte la grille.
       image = Image.network(
         thumb,
+        // Sans cette clé, la balise <img> de la case est réutilisée et garde
+        // la jaquette de l'onglet précédent (Découvrir : Pour toi → Tendances).
+        key: ValueKey(thumb),
         width: w,
         height: h,
         fit: imageFit,
@@ -157,6 +160,7 @@ class CollectionCoverImage extends StatelessWidget {
         ),
         errorWidget: (_, _, _) => Image.network(
           displayUrl,
+          key: ValueKey(displayUrl),
           width: w,
           height: h,
           fit: imageFit,
