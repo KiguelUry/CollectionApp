@@ -1,4 +1,5 @@
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cached_network_image_platform_interface/cached_network_image_platform_interface.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -74,6 +75,9 @@ class CollectionCoverImage extends StatelessWidget {
         height: h,
         fit: imageFit,
         filterQuality: FilterQuality.medium,
+        // Octets, pas une balise <img>. Flutter 3.47 (build GitHub Pages)
+        // peint en noir les images HTML dès que le cache les lâche.
+        imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
         fadeInDuration: const Duration(milliseconds: 180),
         fadeOutDuration: Duration.zero,
         placeholder: (_, _) => _fallback(child: const SizedBox.shrink()),
@@ -106,33 +110,39 @@ class CollectionCoverImage extends StatelessWidget {
     Widget image;
 
     if (_preferWebHtmlImage(displayUrl)) {
-      image = Image.network(
+      final proxied = gridThumbnailUrl(
         displayUrl,
+        size: largeSource ? 1000 : 600,
+      );
+      image = CachedNetworkImage(
+        imageUrl: proxied,
         width: w,
         height: h,
         fit: imageFit,
         filterQuality: compact ? FilterQuality.low : FilterQuality.medium,
-        webHtmlElementStrategy: WebHtmlElementStrategy.prefer,
-        loadingBuilder: (context, child, progress) {
-          if (progress == null) return child;
-          return _fallback(
-            child: Center(
-              child: SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.grey.shade500,
-                  value: progress.expectedTotalBytes != null
-                      ? progress.cumulativeBytesLoaded /
-                          progress.expectedTotalBytes!
-                      : null,
-                ),
+        imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
+        fadeInDuration: Duration.zero,
+        fadeOutDuration: Duration.zero,
+        placeholder: (_, _) => _fallback(
+          child: Center(
+            child: SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.grey.shade500,
               ),
             ),
-          );
-        },
-        errorBuilder: (_, _, _) => _fallback(),
+          ),
+        ),
+        errorWidget: (_, _, _) => Image.network(
+          displayUrl,
+          width: w,
+          height: h,
+          fit: imageFit,
+          webHtmlElementStrategy: WebHtmlElementStrategy.prefer,
+          errorBuilder: (_, _, _) => _fallback(),
+        ),
       );
     } else {
       image = CachedNetworkImage(
@@ -141,6 +151,7 @@ class CollectionCoverImage extends StatelessWidget {
         height: h,
         fit: imageFit,
         filterQuality: compact ? FilterQuality.low : FilterQuality.medium,
+        imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
         memCacheWidth: cacheW,
         memCacheHeight: cacheH,
         maxWidthDiskCache: cacheW,
