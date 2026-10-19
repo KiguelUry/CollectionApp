@@ -23,7 +23,16 @@
       color: #fff;
       padding: 2rem 1.25rem 2.5rem;
     }
-    .wrap { max-width: 640px; margin: 0 auto; padding: 0 1rem 3rem; }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 0 1rem 3rem; }
+    .columns {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1rem;
+      align-items: start;
+    }
+    @media (min-width: 860px) {
+      .columns { grid-template-columns: 1fr 1fr; }
+    }
     .profile {
       display: flex;
       align-items: center;
@@ -79,6 +88,20 @@
     ul { margin: 0; padding-left: 1.2rem; }
     li { margin: 0.2rem 0; }
     .meta { color: #666; font-size: 0.85em; }
+    .series-toggle {
+      background: none;
+      border: 0;
+      padding: 0;
+      font: inherit;
+      color: inherit;
+      cursor: pointer;
+      text-align: left;
+    }
+    .series-toggle + ul { margin-top: 0.2rem; }
+    .avatar-slot { position: relative; width: 72px; height: 72px; flex: none; }
+    .avatar-slot .avatar, .avatar-slot .avatar-fallback {
+      position: absolute; inset: 0;
+    }
     .state {
       text-align: center;
       padding: 3rem 1rem;
@@ -127,15 +150,100 @@
         .replace(/>/g, '&gt;');
     }
 
+    const ACTIVE_CATEGORIES = new Set([
+      'boardgame', 'book', 'manga', 'card', 'media', 'lego', 'videogame', 'movie'
+    ]);
+
+    function isListedCategory(cat) {
+      return ACTIVE_CATEGORIES.has(cat || 'boardgame');
+    }
+
     function isActive(item) {
-      return !item.is_wishlist && !item.is_sold && !item.is_for_sale;
+      return !item.is_wishlist && !item.is_sold && !item.is_for_sale
+        && isListedCategory(item.category);
+    }
+
+    function decodeEntities(text) {
+      const node = document.createElement('textarea');
+      node.innerHTML = String(text || '');
+      return node.value.replace(/\s+/g, ' ').trim();
+    }
+
+    function dedupeItems(list) {
+      const map = new Map();
+      for (const item of list) {
+        const title = decodeEntities(item.title);
+        const key = [
+          item.category || '',
+          item.is_wishlist ? 'w' : 'o',
+          title.toLowerCase(),
+        ].join('|');
+        const qty = Number(item.quantity) || 1;
+        if (!map.has(key)) {
+          map.set(key, { ...item, title, quantity: qty });
+        } else {
+          map.get(key).quantity += qty;
+        }
+      }
+      return [...map.values()];
+    }
+
+    function bookSeriesName(title) {
+      const match = String(title).match(/^(.*?)\s+-\s+tome\b/i);
+      return match ? match[1].trim() : null;
+    }
+
+    function itemLine(item) {
+      let line = escapeHtml(item.title);
+      if (item.is_expansion) line += ' <span class="meta">(Extension)</span>';
+      const meta = item.metadata || {};
+      const extra = [meta.set_name || meta.extension, meta.rarity]
+        .map((v) => (v == null ? '' : String(v).trim()))
+        .filter(Boolean);
+      if (extra.length) line += ` <span class="meta">(${escapeHtml(extra.join(' · '))})</span>`;
+      if (item.quantity > 1) line += ` <span class="meta">×${item.quantity}</span>`;
+      if (item.rating != null) line += ` <span class="meta">★ ${Number(item.rating).toFixed(1)}</span>`;
+      return `<li>${line}</li>`;
+    }
+
+    function renderBookList(list) {
+      const singles = [];
+      const series = new Map();
+      for (const item of list) {
+        const name = bookSeriesName(item.title);
+        if (!name) {
+          singles.push(item);
+          continue;
+        }
+        if (!series.has(name)) series.set(name, []);
+        series.get(name).push(item);
+      }
+      let html = '<ul>';
+      for (const item of singles) {
+        if (bookSeriesName(item.title)) continue;
+        html += itemLine(item);
+      }
+      for (const [name, tomes] of series) {
+        tomes.sort((a, b) => a.title.localeCompare(b.title, 'fr', { numeric: true }));
+        if (tomes.length < 2) {
+          html += itemLine(tomes[0]);
+          continue;
+        }
+        const id = 'series-' + Math.random().toString(36).slice(2);
+        html += `<li><button type="button" class="series-toggle" aria-expanded="false" data-target="${id}">▶ ${escapeHtml(name)} (${tomes.length} tomes)</button><ul id="${id}" hidden>`;
+        for (const tome of tomes) html += itemLine(tome);
+        html += '</ul></li>';
+      }
+      html += '</ul>';
+      return html;
     }
 
     function renderSection(title, items) {
       if (!items.length) return '';
       const byCat = {};
       for (const item of items) {
-        const cat = item.category || 'boardgame';
+        const cat = item.category === 'manga' ? 'book' : (item.category || 'boardgame');
+        if (!isListedCategory(item.category)) continue;
         if (!byCat[cat]) byCat[cat] = [];
         byCat[cat].push(item);
       }
@@ -144,14 +252,9 @@
         (CATEGORY_LABELS[a[0]] || a[0]).localeCompare(CATEGORY_LABELS[b[0]] || b[0])
       )) {
         const label = CATEGORY_LABELS[cat] || cat;
-        html += `<h3>${escapeHtml(label)} <span class="n">(${list.length})</span></h3><ul>`;
-        for (const item of list) {
-          let line = escapeHtml(item.title);
-          if (item.quantity > 1) line += ` <span class="meta">×${item.quantity}</span>`;
-          if (item.rating != null) line += ` <span class="meta">★ ${Number(item.rating).toFixed(1)}</span>`;
-          html += `<li>${line}</li>`;
-        }
-        html += '</ul>';
+        const counted = list.filter((item) => !item.is_expansion).length;
+        html += `<h3>${escapeHtml(label)} <span class="n">(${counted})</span></h3>`;
+        html += cat === 'book' ? renderBookList(list) : `<ul>${list.map(itemLine).join('')}</ul>`;
       }
       html += '</div>';
       return html;
@@ -164,7 +267,13 @@
         return;
       }
 
-      const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false,
+        },
+      });
       const { data, error } = await client.rpc('get_public_showcase', { p_token: token });
 
       if (error || !data || data.error) {
@@ -180,25 +289,22 @@
       document.documentElement.style.setProperty('--accent-soft', accent + '22');
       document.title = `Collection de ${data.username}`;
 
+      const params = new URLSearchParams(location.search);
+      const showOwnedOnly = params.get('show') === 'owned';
       const items = Array.isArray(data.items) ? data.items : [];
-      const owned = items.filter(isActive);
-      const wishlist = items.filter((i) => i.is_wishlist);
+      const owned = dedupeItems(items.filter(isActive));
+      const wishlist = showOwnedOnly
+        ? []
+        : dedupeItems(items.filter((i) => i.is_wishlist && isListedCategory(i.category)));
 
       const initial = (data.username || '?')[0].toUpperCase();
-      const avatar = data.avatar_url
-        ? `<img class="avatar" src="${escapeHtml(data.avatar_url)}" alt="">`
+      const avatarUrl = typeof data.avatar_url === 'string' ? data.avatar_url.trim() : '';
+      const avatar = /^https?:\/\//i.test(avatarUrl)
+        ? `<div class="avatar-slot"><div class="avatar-fallback">${escapeHtml(initial)}</div><img class="avatar" src="${escapeHtml(avatarUrl)}" alt="" onerror="this.remove()"></div>`
         : `<div class="avatar-fallback">${escapeHtml(initial)}</div>`;
 
-      let body = renderSection(
-        `Ce que j'ai (${owned.length} objet${owned.length > 1 ? 's' : ''})`,
-        owned
-      );
-      if (wishlist.length) {
-        body += renderSection(
-          `Wishlist — ce que je cherche (${wishlist.length})`,
-          wishlist
-        );
-      }
+      const collectionCard = renderSection('Ma collection', owned);
+      const wishlistCard = wishlist.length ? renderSection('Wishlist', wishlist) : '';
 
       app.innerHTML = `
         <header class="hero">
@@ -208,18 +314,30 @@
               <div>
                 <h1>Collection de ${escapeHtml(data.username)}</h1>
                 ${data.bio ? `<p class="bio">${escapeHtml(data.bio)}</p>` : ''}
-                <span class="badge">Collection Famille · vitrine publique</span>
               </div>
             </div>
           </div>
         </header>
         <main class="wrap">
-          ${body || '<div class="card"><p>Aucun objet pour l\'instant.</p></div>'}
+          <div class="columns">
+            ${collectionCard || '<div class="card"><p>Aucun objet pour l\'instant.</p></div>'}
+            ${wishlistCard}
+          </div>
           <footer>
             Liste en lecture seule — pour la version interactive, installe l'app Collection Famille.
           </footer>
         </main>
       `;
+      app.querySelectorAll('.series-toggle').forEach((button) => {
+        button.addEventListener('click', () => {
+          const list = document.getElementById(button.dataset.target);
+          if (!list) return;
+          const open = list.hidden;
+          list.hidden = !open;
+          button.setAttribute('aria-expanded', open ? 'true' : 'false');
+          button.textContent = (open ? '▼ ' : '▶ ') + button.textContent.replace(/^[▶▼]\s/, '');
+        });
+      });
     }
 
     main().catch(() => {
