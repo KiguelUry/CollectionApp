@@ -183,9 +183,15 @@ class _LoginScreenState extends State<LoginScreen> {
                 controller: _emailController,
                 decoration: const InputDecoration(labelText: 'Email'),
                 keyboardType: TextInputType.emailAddress,
+                textInputAction: TextInputAction.done,
                 autocorrect: false,
+                onSubmitted: (_) => _handleAuth(),
               ),
-              PasswordTextField(controller: _passwordController),
+              PasswordTextField(
+                controller: _passwordController,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => _handleAuth(),
+              ),
               const SizedBox(height: 20),
               ElevatedButton(
                 onPressed: _handleAuth,

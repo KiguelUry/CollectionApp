@@ -60,11 +60,13 @@ class _WishlistTileMetaIconsState extends State<WishlistTileMetaIcons> {
 
   String get _valueChipLabel {
     final avg = marketPriceAvgFromMetadata(widget.item.metadata);
-    if (avg != null && avg > 0) return '~${formatEuroChip(avg)}';
+    if (avg != null && avg > 0) {
+      return '~${formatEuroChip(avg, compact: false)}';
+    }
     final market = marketSecondhandPriceFromMetadata(widget.item.metadata);
-    if (market != null) return '~${formatEuroChip(market)}';
+    if (market != null) return '~${formatEuroChip(market, compact: false)}';
     final neu = marketNewPriceMinFromMetadata(widget.item.metadata);
-    if (neu != null) return '~${formatEuroChip(neu)}';
+    if (neu != null) return '~${formatEuroChip(neu, compact: false)}';
     return '—';
   }
 
@@ -95,18 +97,15 @@ class _WishlistTileMetaIconsState extends State<WishlistTileMetaIcons> {
                 ),
               ),
               const SizedBox(width: 4),
-              Expanded(
-                child: _chip(
-                  icon: Icons.euro_rounded,
-                  suffix: _valueChipLabel,
-                  color: Colors.teal.shade500,
-                  shrinkSuffix: true,
-                  onTap: () => showBoardgameTileValueSheet(
-                    context,
-                    item: widget.item,
-                    readOnly: widget.readOnly,
-                    showPurchaseBlock: false,
-                  ),
+              _chip(
+                suffix: _valueChipLabel,
+                color: Colors.teal.shade500,
+                textOnly: true,
+                onTap: () => showBoardgameTileValueSheet(
+                  context,
+                  item: widget.item,
+                  readOnly: widget.readOnly,
+                  showPurchaseBlock: false,
                 ),
               ),
             ],
@@ -133,22 +132,37 @@ class _WishlistTileMetaIconsState extends State<WishlistTileMetaIcons> {
   }
 
   Widget _chip({
-    required IconData icon,
+    IconData? icon,
     required String suffix,
     required Color color,
     bool shrinkSuffix = false,
+    bool textOnly = false,
     VoidCallback? onTap,
   }) {
     final child = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(5),
         border: Border.all(color: color.withValues(alpha: 0.35)),
       ),
-      child: Row(
+      child: textOnly
+          ? Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Text(
+                suffix,
+                maxLines: 1,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                  height: 1,
+                ),
+              ),
+            )
+          : Row(
         children: [
-          Icon(icon, size: 12, color: color),
+          if (icon != null) Icon(icon, size: 13, color: color),
           const SizedBox(width: 2),
           Expanded(
             child: shrinkSuffix
@@ -159,8 +173,8 @@ class _WishlistTileMetaIconsState extends State<WishlistTileMetaIcons> {
                       suffix,
                       maxLines: 1,
                       style: TextStyle(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
                         color: color,
                         height: 1,
                       ),
@@ -171,8 +185,8 @@ class _WishlistTileMetaIconsState extends State<WishlistTileMetaIcons> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 9,
-                      fontWeight: FontWeight.w700,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
                       color: color,
                       height: 1,
                     ),

@@ -12,7 +12,12 @@ import '../models/collection_group.dart';
 import '../models/collection_item.dart';
 import '../models/item_condition.dart';
 import '../services/group_service.dart';
+import '../services/activity_service.dart';
+import '../services/bgg_service.dart';
+import '../services/pantheon_memory.dart';
 import '../services/profile_service.dart';
+import '../utils/pantheon_ranking.dart';
+import '../widgets/bgg_photo_strip.dart';
 import '../utils/bgg_text.dart';
 import '../utils/supabase_embeds.dart';
 import '../services/item_group_service.dart';
@@ -35,6 +40,7 @@ import '../widgets/boardgame_rules_bento.dart';
 import '../widgets/collapsible_section.dart';
 import '../widgets/detail_bento_tile.dart';
 import '../widgets/favorite_heart_button.dart';
+import '../widgets/profile/pantheon_bento.dart';
 import '../widgets/compact_whereabouts_dropdown.dart';
 import '../widgets/discogs_market_value_card.dart';
 import '../widgets/friend_ratings_panel.dart';
@@ -51,7 +57,6 @@ import '../utils/boardgame_display.dart';
 import '../utils/boardgame_collection_visibility.dart';
 import '../utils/boardgame_expansion_flow.dart';
 import '../utils/boardgame_expansions.dart';
-import '../services/bgg_service.dart';
 import '../services/global_play_history_service.dart';
 import '../services/player_alias_service.dart';
 import '../services/collection_change_history_service.dart';
@@ -122,7 +127,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
   bool _marketPanelOpen = false;
   bool _bggDescExpanded = false;
   int? _expansionCatalogTotal;
-  List<String> _bggPhotos = const [];
+  List<BggGalleryPhoto> _bggPhotos = const [];
   bool _bggPhotosLoading = false;
   List<String>? _pantheonIds;
   int _pantheonCap = 10;
@@ -270,7 +275,10 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     if (mounted && shortFromMeta.isEmpty && longFromMeta.isEmpty) {
       setState(() => _bggDescriptionLoading = true);
     }
-    final details = await BggService.getGameFullDetails(bggId);
+    var details = await BggService.getGameFullDetails(bggId);
+    if (details == null || !details.containsKey('bgg_designers')) {
+      details = await BggService.fetchUncachedGameDetails(bggId) ?? details;
+    }
     if (!mounted) return;
     final short = cleanBggText(details?['bgg_short_description']?.toString());
     final long = cleanBggText(details?['bgg_description']?.toString());
@@ -299,6 +307,8 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       'bgg_avg_rating',
       'bgg_best_players',
       'bgg_gallery_urls',
+      'bgg_designers',
+      'bgg_publishers',
     ]) {
       final v = details[key];
       if (v == null) continue;
@@ -1584,6 +1594,13 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       _gamesPlayedController.text = count > 0 ? count.toString() : '';
     });
     _saveNow();
+    unawaited(
+      ActivityService().logPlayEdited(
+        itemId: _item.id,
+        ownerId: _item.addedBy,
+        itemTitle: _item.title,
+      ),
+    );
   }
 
   Widget _buildBoardgamePrixObsPanel(bool ro) {
@@ -2138,49 +2155,37 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
 
   Future<void> _loadBggPhotos(String bggId) async {
     if (mounted) setState(() => _bggPhotosLoading = true);
-    final urls = await BggService.fetchCommunityImages(bggId);
+    final photos = await BggService.fetchCommunityGallery(bggId);
     if (!mounted) return;
     setState(() {
-      _bggPhotos = urls.take(8).toList();
+      _bggPhotos = photos;
       _bggPhotosLoading = false;
     });
   }
 
-  void _zoomBggPhoto(String url) {
-    showDialog<void>(
-      context: context,
-      builder: (ctx) {
-        final size = MediaQuery.sizeOf(ctx);
-        return Dialog(
-          insetPadding: const EdgeInsets.all(16),
-          child: SizedBox(
-            width: size.width,
-            height: size.height * 0.8,
-            child: Stack(
-              children: [
-                InteractiveViewer(
-                  child: CollectionCoverImage(
-                    url: url,
-                    width: size.width,
-                    height: size.height * 0.8,
-                    largeSource: true,
-                    fit: BoxFit.contain,
-                  ),
-                ),
-                Positioned(
-                  top: 4,
-                  right: 4,
-                  child: IconButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    icon: const Icon(Icons.close),
-                  ),
-                ),
-              ],
-            ),
-          ),
+  Future<Map<String, (String, String?)>> _pantheonFaces(List<String> ids) async {
+    final wanted = ids.where((id) => id.isNotEmpty).toList();
+    if (wanted.isEmpty) return {};
+    try {
+      final rows = await Supabase.instance.client
+          .from('collection_items')
+          .select('id, title, image_url')
+          .inFilter('id', wanted);
+      final out = <String, (String, String?)>{};
+      for (final row in rows as List) {
+        final map = Map<String, dynamic>.from(row as Map);
+        final id = map['id']?.toString();
+        if (id == null) continue;
+        final image = map['image_url']?.toString();
+        out[id] = (
+          map['title']?.toString() ?? 'Sans titre',
+          image != null && image.isNotEmpty ? image : null,
         );
-      },
-    );
+      }
+      return out;
+    } catch (_) {
+      return {};
+    }
   }
 
   Future<void> _offerPantheonSlot() async {
@@ -2189,70 +2194,38 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     if (!_pantheonReady) await _prefetchPantheon();
     if (!mounted) return;
     final current = List<String>.from(_pantheonIds ?? const []);
-    final cap = _pantheonCap;
-    final slot = await showDialog<int>(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        title: const Text('Place dans le Panthéon'),
-        children: [
-          for (var i = 0; i < cap; i++)
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(ctx, i),
-              child: Text('Place ${i + 1}'),
-            ),
-        ],
-      ),
+    const cap = 20;
+    final filled = current.where((id) => id.isNotEmpty).length;
+    final shown = filled < 10 ? 10 : (filled >= cap ? cap : filled + 1);
+    final faces = await _pantheonFaces(current);
+    if (!mounted) return;
+    final already = current.indexOf(_item.id);
+    final slot = await showPantheonPlacePicker(
+      context,
+      alreadyAt: already >= 0 ? already + 1 : null,
+      places: [
+        for (var i = 0; i < shown; i++)
+          PantheonPlaceOption(
+            index: i,
+            itemId: i < current.length ? current[i] : null,
+            title: i < current.length ? faces[current[i]]?.$1 : null,
+            imageUrl: i < current.length ? faces[current[i]]?.$2 : null,
+          ),
+      ],
     );
     if (slot == null || !mounted) return;
-    final next = current.where((id) => id != _item.id).toList();
-    next.insert(slot.clamp(0, next.length), _item.id);
-    if (next.length > cap) {
-      next.removeLast();
-      final drop = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Panthéon complet'),
-          content: const Text(
-            'Un jeu sort du panthéon. Le retirer ?',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Non'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Oui, le retirer'),
-            ),
-          ],
-        ),
-      );
-      if (!mounted) return;
-      if (drop != true) {
-        final replace = await showDialog<int>(
-          context: context,
-          builder: (ctx) => SimpleDialog(
-            title: const Text('À la place de qui ?'),
-            children: [
-              for (var i = 0; i < current.length && i < cap; i++)
-                SimpleDialogOption(
-                  onPressed: () => Navigator.pop(ctx, i),
-                  child: Text('Place ${i + 1}'),
-                ),
-            ],
-          ),
-        );
-        if (replace == null || !mounted) return;
-        final swapped = current.where((id) => id != _item.id).toList();
-        if (replace < swapped.length) {
-          swapped[replace] = _item.id;
-        } else {
-          swapped.add(_item.id);
-        }
-        await _persistPantheon(swapped);
-        return;
-      }
-    }
+    final titleKey = _item.title.trim().toLowerCase();
+    final alsoRemove = <String>{
+      for (final entry in faces.entries)
+        if ((entry.value.$1).trim().toLowerCase() == titleKey) entry.key,
+    };
+    final next = placeInPantheon(
+      current,
+      _item.id,
+      targetIndex: slot,
+      cap: cap,
+      alsoRemove: alsoRemove,
+    );
     await _persistPantheon(next);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -2267,12 +2240,13 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     for (final id in ids) {
       if (id.isEmpty || unique.contains(id)) continue;
       unique.add(id);
-      if (unique.length >= _pantheonCap) break;
+      if (unique.length >= 20) break;
     }
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('pantheon:$uid', jsonEncode(unique));
     await prefs.setInt('pantheon_cap:$uid', _pantheonCap);
     if (mounted) setState(() => _pantheonIds = unique);
+    PantheonMemory.instance.publish(uid, unique);
     try {
       await ProfileService().savePantheonIds(unique);
     } catch (_) {}
@@ -2297,41 +2271,14 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          'Photos BoardGameGeek',
+          'Aperçus & matériel du jeu',
           style: TextStyle(fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 8),
         if (_bggPhotosLoading && _bggPhotos.isEmpty)
           const LinearProgressIndicator(minHeight: 2)
         else
-          SizedBox(
-            height: 96,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: _bggPhotos.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 8),
-              itemBuilder: (context, i) {
-                final url = _bggPhotos[i];
-                return GestureDetector(
-                  onTap: () => _zoomBggPhoto(url),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: SizedBox(
-                      width: 128,
-                      child: CollectionCoverImage(
-                        key: ValueKey(url),
-                        url: url,
-                        width: 128,
-                        height: 96,
-                        fit: BoxFit.cover,
-                        compact: true,
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
+          BggPhotoStrip(photos: _bggPhotos),
       ],
     );
   }
@@ -2361,25 +2308,29 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       height: 1.4,
       color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.85),
     );
-    return Text.rich(
-      TextSpan(
-        style: style,
-        children: [
-          TextSpan(text: hook),
-          if (canToggle && !_bggDescExpanded)
-            WidgetSpan(
-              alignment: PlaceholderAlignment.middle,
-              child: TextButton(
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.only(left: 6),
-                  minimumSize: const Size(0, 28),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: canToggle
+          ? () => setState(() => _bggDescExpanded = !_bggDescExpanded)
+          : null,
+      child: Text.rich(
+        TextSpan(
+          style: style,
+          children: [
+            TextSpan(text: hook),
+            if (canToggle && !_bggDescExpanded)
+              WidgetSpan(
+                alignment: PlaceholderAlignment.middle,
+                child: Text(
+                  '  + Voir plus',
+                  style: style.copyWith(
+                    color: Theme.of(context).colorScheme.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-                onPressed: () => setState(() => _bggDescExpanded = true),
-                child: const Text('+ Voir plus'),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -2396,24 +2347,39 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       height: 1.55,
       color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.85),
     );
-    return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(long, style: style),
-          TextButton(
-            style: TextButton.styleFrom(
-              padding: EdgeInsets.zero,
-              minimumSize: const Size(0, 32),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => setState(() => _bggDescExpanded = false),
+      child: Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(long, style: style),
+            Text(
+              '− Voir moins',
+              style: style.copyWith(
+                color: Theme.of(context).colorScheme.primary,
+                fontWeight: FontWeight.w700,
+                fontSize: 14,
+              ),
             ),
-            onPressed: () => setState(() => _bggDescExpanded = false),
-            child: const Text('- Voir moins'),
-          ),
-        ],
+          ],
+        ),
       ),
     );
+  }
+
+  String? _creditLine(dynamic raw) {
+    if (raw is List) {
+      final text = raw
+          .map((e) => e.toString().trim())
+          .where((e) => e.isNotEmpty)
+          .join(', ');
+      return text.isEmpty ? null : text;
+    }
+    if (raw is String && raw.trim().isNotEmpty) return raw.trim();
+    return null;
   }
 
   List<String> _bggGalleryUrls(Map<String, dynamic>? metadata) {
@@ -2450,6 +2416,8 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     final bggPageUrl = BggService.gamePageUrl(bggId);
     final year = m['year_published'] ?? m['year'];
     final minAge = m['min_age'];
+    final designers = _creditLine(m['bgg_designers']);
+    final publishers = _creditLine(m['bgg_publishers']);
     final boardAccent = Colors.orange.shade800;
 
     final extraRows = isBoardgame
@@ -2467,6 +2435,8 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
         year == null &&
         minAge == null &&
         extraRows.isEmpty &&
+        designers == null &&
+        publishers == null &&
         bggPageUrl == null) {
       return const SizedBox.shrink();
     }
@@ -2495,6 +2465,16 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildSectionTitle('Informations'),
+        if (designers != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text('Créateur · $designers'),
+          ),
+        if (publishers != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text('Maison d\'édition · $publishers'),
+          ),
         if (boardTiles.isNotEmpty) ...[
           if (boardTiles.length >= 2)
             Row(

@@ -11,10 +11,13 @@ import '../services/profile_service.dart';
 import '../utils/collection_grid_grouper.dart';
 import '../utils/collection_grid_layout.dart';
 import '../navigation/app_navigation.dart';
+import '../navigation/app_route_observer.dart';
+import '../services/pantheon_memory.dart';
 import '../utils/copy_friend_item.dart';
 import '../utils/friend_item_overlap.dart';
 import '../utils/active_categories.dart';
 import '../utils/holder_label_utils.dart';
+import '../utils/hub_owned_count.dart';
 import '../utils/pantheon_ranking.dart';
 import '../widgets/collection_item_tile.dart';
 import '../widgets/profile/own_profile_panel.dart';
@@ -31,6 +34,7 @@ class FriendCollectionScreen extends StatefulWidget {
   final String? avatarUrl;
   final String? accentColor;
   final bool shareCollections;
+  final bool collectionView;
 
   const FriendCollectionScreen({
     super.key,
@@ -38,6 +42,7 @@ class FriendCollectionScreen extends StatefulWidget {
     required this.username,
     this.avatarUrl,
     this.accentColor,
+    this.collectionView = false,
     required this.shareCollections,
   });
 
@@ -45,7 +50,8 @@ class FriendCollectionScreen extends StatefulWidget {
   State<FriendCollectionScreen> createState() => _FriendCollectionScreenState();
 }
 
-class _FriendCollectionScreenState extends State<FriendCollectionScreen> {
+class _FriendCollectionScreenState extends State<FriendCollectionScreen>
+    with RouteAware {
   final _friendService = FriendService();
   List<CollectionItem> _collectionItems = [];
   List<CollectionItem> _groupItems = [];
@@ -67,14 +73,75 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen> {
   void initState() {
     super.initState();
     _mine = Supabase.instance.client.auth.currentUser?.id == widget.profileId;
+    final cached = _ProfileSessionCache.of(widget.profileId);
+    if (cached != null) {
+      _collectionItems = cached.collection;
+      _groupItems = cached.groups;
+      _wishlistItems = cached.wishlist;
+      _wishlistShared = cached.wishlistShared;
+      _pantheonIds = List<String>.from(cached.pantheonIds);
+      _pantheonConfigured = cached.pantheonIds.isNotEmpty;
+      _activeCategories = cached.active;
+      _loading = false;
+    }
+    final memory = PantheonMemory.instance.idsFor(widget.profileId);
+    if (memory != null) {
+      _pantheonIds = memory;
+      _pantheonConfigured = memory.isNotEmpty;
+      if (cached == null) {
+        _loading = _collectionItems.isEmpty && _pantheonIds.isEmpty;
+      }
+    }
+    PantheonMemory.instance.addListener(_onPantheonMemory);
     _load();
   }
 
-  Future<void> _load() async {
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route is PageRoute) {
+      appRouteObserver.unsubscribe(this);
+      appRouteObserver.subscribe(this, route);
+    }
+  }
+
+  @override
+  void dispose() {
+    appRouteObserver.unsubscribe(this);
+    PantheonMemory.instance.removeListener(_onPantheonMemory);
+    super.dispose();
+  }
+
+  @override
+  void didPopNext() {
+    final memory = PantheonMemory.instance.idsFor(widget.profileId);
+    if (memory != null && mounted) {
+      setState(() {
+        _pantheonIds = memory;
+        _pantheonConfigured = memory.isNotEmpty;
+      });
+    }
+    _load(silent: true);
+  }
+
+  void _onPantheonMemory() {
+    final memory = PantheonMemory.instance.idsFor(widget.profileId);
+    if (memory == null || !mounted) return;
     setState(() {
-      _loading = true;
-      _error = null;
+      _pantheonIds = memory;
+      _pantheonConfigured = memory.isNotEmpty;
     });
+  }
+
+  Future<void> _load({bool silent = false}) async {
+    final keepShown = silent || _collectionItems.isNotEmpty || _pantheonIds.isNotEmpty;
+    if (!keepShown) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
 
     if (!widget.shareCollections && !_mine) {
       if (mounted) {
@@ -112,13 +179,26 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen> {
       await _loadPantheon();
       _categorySynced = false;
     } catch (e) {
-      _collectionItems = [];
-      _wishlistItems = [];
-      _overlap = null;
-      _error = e.toString();
+      if (!keepShown) {
+        _collectionItems = [];
+        _wishlistItems = [];
+        _overlap = null;
+        _error = e.toString();
+      }
     }
 
     if (mounted) {
+      if (_error == null) {
+        _ProfileSessionCache.save(
+          widget.profileId,
+          collection: _collectionItems,
+          groups: _groupItems,
+          wishlist: _wishlistItems,
+          wishlistShared: _wishlistShared,
+          pantheonIds: _pantheonIds,
+          active: _activeCategories,
+        );
+      }
       setState(() => _loading = false);
       _pickInitialCategory([..._collectionItems, ..._wishlistItems]);
     }
@@ -140,6 +220,7 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen> {
   }
 
   Widget? _overlapBanner() {
+    if (_mine) return null;
     final o = _overlap;
     if (o == null || (o.inCollectionCount == 0 && o.inWishlistCount == 0)) {
       return null;
@@ -222,13 +303,21 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen> {
     }
   }
 
-  int _countFor(CollectionCategory category) =>
-      _itemsForScope().where((i) => i.category == category).length;
+  int _countFor(CollectionCategory category) => _itemsForScope()
+      .where(
+        (i) => i.category == category && !i.isExpansion && !i.isWishlist,
+      )
+      .length;
 
   List<CollectionItem> _pantheonItems() {
     if (!_pantheonConfigured) return const [];
     final games = _sharedItems()
-        .where((i) => i.category == CollectionCategory.boardgame && !i.isWishlist)
+        .where(
+          (i) =>
+              !i.isWishlist &&
+              _activeCategories.contains(i.category) &&
+              i.category != CollectionCategory.custom,
+        )
         .toList();
     final byId = {for (final g in games) g.id: g};
     final picked = <CollectionItem>[];
@@ -243,13 +332,26 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen> {
       if (!seen.add(key)) continue;
       picked.add(item);
     }
-    return picked.take(10).toList();
+    return picked.take(20).toList();
   }
+
+  int get _visiblePantheonSlots {
+    final filled = _pantheonIds.where((id) => id.isNotEmpty).length;
+    if (filled < 10) return 10;
+    if (filled >= 20) return 20;
+    return filled + 1;
+  }
+
+  int get _ownedVisibleCount => hubOwnedItems(
+        _sharedItems(),
+        active: _activeCategories,
+      ).length;
 
   List<PantheonCandidate> _pantheonCandidates() {
     return [
       for (final item in _sharedItems())
-        if (item.category == CollectionCategory.boardgame)
+        if (_activeCategories.contains(item.category) &&
+            item.category != CollectionCategory.custom)
           PantheonCandidate(
             id: item.id,
             title: item.title,
@@ -257,11 +359,22 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen> {
             isExpansion: item.isExpansion,
             isWishlist: item.isWishlist,
             rating: item.rating ?? 0,
+            plays: item.gamesPlayed ?? 0,
+            bggRating: double.tryParse(
+                  '${item.metadata?['bgg_avg_rating'] ?? ''}',
+                ) ??
+                0,
           ),
     ];
   }
 
   Future<void> _loadPantheon() async {
+    final memory = PantheonMemory.instance.idsFor(widget.profileId);
+    if (memory != null) {
+      _pantheonIds = memory;
+      _pantheonConfigured = memory.isNotEmpty;
+      return;
+    }
     final prefs = await SharedPreferences.getInstance();
     final cap = prefs.getInt('pantheon_cap:${widget.profileId}');
     if (cap != null && mounted) _pantheonCap = cap.clamp(10, 20);
@@ -286,7 +399,7 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen> {
     for (final id in ids) {
       if (id.isEmpty || unique.contains(id)) continue;
       unique.add(id);
-      if (unique.length == _pantheonCap) break;
+      if (unique.length == 20) break;
     }
     try {
       await ProfileService().savePantheonIds(unique);
@@ -294,6 +407,7 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('pantheon_cap:${widget.profileId}', _pantheonCap);
     await prefs.setString('pantheon:${widget.profileId}', jsonEncode(unique));
+    PantheonMemory.instance.publish(widget.profileId, unique);
     if (mounted) {
       setState(() {
         _pantheonIds = unique;
@@ -306,9 +420,10 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen> {
     final seen = <String>{};
     final games = <CollectionItem>[];
     for (final item in _sharedItems()) {
-      if (item.category != CollectionCategory.boardgame ||
-          item.isWishlist ||
-          item.isExpansion) {
+      if (item.isWishlist ||
+          item.isExpansion ||
+          item.category == CollectionCategory.custom ||
+          !_activeCategories.contains(item.category)) {
         continue;
       }
       final bgg = item.metadata?['bgg_id']?.toString().trim();
@@ -318,27 +433,16 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen> {
       if (!seen.add(key)) continue;
       games.add(item);
     }
-    games.sort((a, b) => a.title.compareTo(b.title));
-    final picked = await showDialog<String>(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        title: Text('Place #${index + 1}'),
-        children: [
-          for (final game in games.take(40))
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(ctx, game.id),
-              child: Text(game.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-            ),
-        ],
-      ),
+    games.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+    final picked = await showPantheonGamePicker(
+      context,
+      rank: index + 1,
+      games: games,
     );
     if (picked == null) return;
-    final next = [..._pantheonIds];
-    while (next.length <= index) {
-      next.add('');
-    }
-    next[index] = picked;
-    await _savePantheon(next.where((id) => id.isNotEmpty).toList());
+    await _savePantheon(
+      placeInPantheon(_pantheonIds, picked, targetIndex: index),
+    );
   }
 
   @override
@@ -347,53 +451,58 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: [
-            ProfileAvatar(
-              avatarUrl: widget.avatarUrl,
-              accentColorHex: widget.accentColor,
-              fallbackInitial: widget.username,
-              radius: 18,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        title: widget.collectionView
+            ? Text('Collection de ${widget.username}')
+            : _mine
+            ? const Text('Profil')
+            : Row(
                 children: [
-                  Text(widget.username),
-                  const Text(
-                    'Profil',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.normal,
+                  ProfileAvatar(
+                    avatarUrl: widget.avatarUrl,
+                    accentColorHex: widget.accentColor,
+                    fallbackInitial: widget.username,
+                    radius: 18,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(widget.username),
+                        const Text(
+                          'Profil',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.normal,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
               ),
-            ),
-          ],
-        ),
         backgroundColor: accent,
         foregroundColor: Colors.white,
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.add_circle_outline),
-            tooltip: 'Appui long sur un objet pour l\'ajouter chez toi',
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'Appui long sur une vignette → ajouter à ta collection ou wishlist',
+          if (!_mine)
+            IconButton(
+              icon: const Icon(Icons.add_circle_outline),
+              tooltip: 'Appui long sur un objet pour l\'ajouter chez toi',
+              onPressed: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Appui long sur une vignette → ajouter à ta collection ou wishlist',
+                    ),
+                    duration: Duration(seconds: 3),
                   ),
-                  duration: Duration(seconds: 3),
-                ),
-              );
-            },
-          ),
+                );
+              },
+            ),
           IconButton(
-            icon: const Icon(Icons.grid_view_rounded),
-            tooltip: 'Collections',
+            icon: const Icon(Icons.home_rounded),
+            tooltip: 'Accueil',
             onPressed: () => AppNavigation.openCollections(context),
           ),
         ],
@@ -406,9 +515,158 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen> {
     );
   }
 
+  void _swapPantheon(int from, int to) {
+    if (from == to || from < 0) return;
+    final next = [..._pantheonIds];
+    if (from >= next.length) return;
+    if (to >= next.length) {
+      next.add(next.removeAt(from));
+    } else {
+      final tmp = next[from];
+      next[from] = next[to];
+      next[to] = tmp;
+    }
+    _savePantheon(next);
+  }
+
+  void _openFriendCollection() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FriendCollectionScreen(
+          profileId: widget.profileId,
+          username: widget.username,
+          avatarUrl: widget.avatarUrl,
+          accentColor: widget.accentColor,
+          shareCollections: widget.shareCollections,
+          collectionView: true,
+        ),
+      ),
+    );
+  }
+
+  Widget _profileStats() {
+    final owned = _ownedVisibleCount;
+    final wishlist = _wishlistItems
+        .where(
+          (item) =>
+              _activeCategories.contains(item.category) && !item.isExpansion,
+        )
+        .length;
+    final plays = _sharedItems().fold<int>(
+      0,
+      (sum, item) => sum + (item.gamesPlayed ?? 0),
+    );
+    final tiles = [
+      ('Objets possédés', '$owned', Icons.inventory_2_outlined),
+      (
+        'Collections actives',
+        '${_activeCategories.length}',
+        Icons.category_outlined,
+      ),
+      ('Wishlist', '$wishlist', Icons.favorite_border),
+      ('Parties jouées', '$plays', Icons.sports_esports_outlined),
+    ];
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth >= 720;
+        final children = [
+          for (final (label, value, icon) in tiles)
+            _statCard(label, value, icon),
+        ];
+        if (!wide) {
+          return Wrap(spacing: 8, runSpacing: 8, children: children);
+        }
+        return Row(
+          children: [
+            for (var i = 0; i < children.length; i++) ...[
+              if (i > 0) const SizedBox(width: 8),
+              Expanded(child: children[i]),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _statCard(String label, String value, IconData icon) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: 160,
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 16, color: scheme.primary),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+          ),
+          Text(
+            label,
+            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _pantheonBlock() {
+    if (!_mine && !_pantheonConfigured) return const SizedBox.shrink();
+    return PantheonBento(
+      ranked: _pantheonItems(),
+      editable: _mine,
+      slotCount: _visiblePantheonSlots,
+      onAutoFill: _mine && _pantheonIds.every((id) => id.isEmpty)
+          ? () {
+              _savePantheon(
+                pickAutoPantheonIds(_pantheonCandidates(), limit: 10),
+              );
+            }
+          : null,
+      onEditSlot: _mine ? _editPantheonSlot : null,
+      onRemove: _mine
+          ? (index) {
+              final next = [..._pantheonIds];
+              if (index < next.length) next.removeAt(index);
+              _savePantheon(next);
+            }
+          : null,
+      onReorder: _mine ? _swapPantheon : null,
+    );
+  }
+
   Widget _buildProfile() {
-    final shared = _sharedItems();
-    final atHome = shared.where(_isAtThisPerson).length;
+    if (!widget.collectionView) {
+      final owned = _ownedVisibleCount;
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        children: [
+          if (_mine) const OwnProfilePanel(),
+          if (_mine) ...[
+            const SizedBox(height: 12),
+            _profileStats(),
+            const SizedBox(height: 16),
+          ],
+          _pantheonBlock(),
+          if (!_mine) ...[
+            const SizedBox(height: 16),
+            FilledButton.tonalIcon(
+              onPressed: _openFriendCollection,
+              icon: const Text('📚'),
+              label: Text('Voir sa collection ($owned objets)'),
+            ),
+          ],
+        ],
+      );
+    }
+
     final overlapBanner = _overlapBanner();
     return CustomScrollView(
       slivers: [
@@ -416,53 +674,6 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen> {
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
           sliver: SliverList(
             delegate: SliverChildListDelegate([
-              if (_mine) const OwnProfilePanel(),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _stat('${shared.length} jeux & objets'),
-                  _stat('$atHome chez ${widget.username}'),
-                  _stat('${_wishlistItems.length} en wishlist'),
-                ],
-              ),
-              if (_mine || _pantheonConfigured) ...[
-                const SizedBox(height: 12),
-                PantheonBento(
-                  ranked: _pantheonItems(),
-                  editable: _mine,
-                  slotCount: _pantheonCap,
-                  onAutoFill: _mine
-                      ? () => _savePantheon(
-                            pickAutoPantheonIds(_pantheonCandidates()),
-                          )
-                      : null,
-                  onExtend: _mine && _pantheonCap < 20
-                      ? () async {
-                          setState(() => _pantheonCap = 20);
-                          await _savePantheon(_pantheonIds);
-                        }
-                      : null,
-                  onEditSlot: _mine ? _editPantheonSlot : null,
-                  onRemove: _mine
-                      ? (index) {
-                          final next = [..._pantheonIds];
-                          if (index < next.length) next.removeAt(index);
-                          _savePantheon(next);
-                        }
-                      : null,
-                  onReorder: _mine
-                      ? (oldIndex, newIndex) {
-                          final next = [..._pantheonIds];
-                          if (oldIndex >= next.length) return;
-                          final id = next.removeAt(oldIndex);
-                          final at = newIndex.clamp(0, next.length);
-                          next.insert(at, id);
-                          _savePantheon(next);
-                        }
-                      : null,
-                ),
-              ],
               if (overlapBanner != null) ...[
                 const SizedBox(height: 8),
                 overlapBanner,
@@ -475,18 +686,29 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen> {
                   ChoiceChip(
                     label: const Text('Collection & Groupes communs'),
                     selected: _scope == _ProfileScope.shared,
+                    showCheckmark: false,
                     onSelected: (_) =>
                         setState(() => _scope = _ProfileScope.shared),
                   ),
                   ChoiceChip(
-                    label: Text('📍 Actuellement chez ${widget.username}'),
+                    label: Text(
+                      _mine
+                          ? '📍 Actuellement chez toi'
+                          : '📍 Actuellement chez ${widget.username}',
+                    ),
                     selected: _scope == _ProfileScope.atHome,
+                    showCheckmark: false,
                     onSelected: (_) =>
                         setState(() => _scope = _ProfileScope.atHome),
                   ),
                   ChoiceChip(
-                    label: Text('Ajoutés par ${widget.username}'),
+                    label: Text(
+                      _mine
+                          ? 'Ajoutés par toi'
+                          : 'Ajoutés par ${widget.username}',
+                    ),
                     selected: _scope == _ProfileScope.added,
+                    showCheckmark: false,
                     onSelected: (_) =>
                         setState(() => _scope = _ProfileScope.added),
                   ),
@@ -509,6 +731,7 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen> {
                         style: const TextStyle(fontSize: 12),
                       ),
                       selected: selected,
+                      showCheckmark: false,
                       onSelected: (_) =>
                           setState(() => _selectedCategory = cat),
                       avatar: Icon(cat.icon, size: 16),
@@ -527,17 +750,6 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen> {
   List<CollectionCategory> get _visibleCategories => CollectionCategory.values
       .where((c) => _activeCategories.contains(c))
       .toList();
-
-  Widget _stat(String label) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.teal.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
-    );
-  }
 
   Widget _buildCategoryGridSliver(CollectionCategory category) {
     final items =
@@ -602,6 +814,47 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen> {
           childCount: grouped.length,
         ),
       ),
+    );
+  }
+}
+
+class _ProfileSessionCache {
+  final List<CollectionItem> collection;
+  final List<CollectionItem> groups;
+  final List<CollectionItem> wishlist;
+  final bool? wishlistShared;
+  final List<String> pantheonIds;
+  final Set<CollectionCategory> active;
+
+  const _ProfileSessionCache({
+    required this.collection,
+    required this.groups,
+    required this.wishlist,
+    required this.wishlistShared,
+    required this.pantheonIds,
+    required this.active,
+  });
+
+  static final Map<String, _ProfileSessionCache> _byId = {};
+
+  static _ProfileSessionCache? of(String profileId) => _byId[profileId];
+
+  static void save(
+    String profileId, {
+    required List<CollectionItem> collection,
+    required List<CollectionItem> groups,
+    required List<CollectionItem> wishlist,
+    required bool? wishlistShared,
+    required List<String> pantheonIds,
+    required Set<CollectionCategory> active,
+  }) {
+    _byId[profileId] = _ProfileSessionCache(
+      collection: List<CollectionItem>.from(collection),
+      groups: List<CollectionItem>.from(groups),
+      wishlist: List<CollectionItem>.from(wishlist),
+      wishlistShared: wishlistShared,
+      pantheonIds: List<String>.from(pantheonIds),
+      active: Set<CollectionCategory>.from(active),
     );
   }
 }

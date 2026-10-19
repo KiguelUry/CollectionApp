@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_category.dart';
@@ -23,6 +25,7 @@ import '../utils/category_hub_order.dart';
 import '../utils/collection_item_scope.dart';
 import '../models/collection_item.dart';
 import '../utils/boardgame_expansions.dart';
+import '../utils/active_categories.dart';
 import '../utils/hub_owned_count.dart';
 import '../utils/hub_category_visibility.dart';
 import '../utils/hub_greeting.dart';
@@ -54,11 +57,26 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
   Map<String, int> _customCounts = {};
   bool _loadingCounts = true;
   List<HubTileEntry> _orderedTiles = [];
+  int _ownedShown = 0;
+  bool _collectionFolded = false;
+
   @override
   void initState() {
     super.initState();
     ProfileCacheService.instance.addListener(_onProfileCacheChanged);
-    _load();
+    final snap = _HubSnapshot.current;
+    if (snap != null) {
+      _counts = snap.counts;
+      _groupCounts = snap.groupCounts;
+      _wishlistCounts = snap.wishlistCounts;
+      _duplicateCounts = snap.duplicateCounts;
+      _boardgameExpansionCount = snap.boardgameExpansionCount;
+      _customCounts = snap.customCounts;
+      _orderedTiles = snap.orderedTiles;
+      _ownedShown = snap.ownedShown;
+      _loadingCounts = false;
+    }
+    _load(silent: snap != null);
   }
 
   @override
@@ -81,6 +99,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
   @override
   void didPopNext() {
     _rollGreeting();
+    _load(silent: true);
   }
 
   GrammarGender _grammar = GrammarGender.masculine;
@@ -120,8 +139,10 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
     return ProfileAvatar.colorFromHex(hex ?? profileAccentPresets.first);
   }
 
-  Future<void> _load() async {
-    setState(() => _loadingCounts = true);
+  Future<void> _load({bool silent = false}) async {
+    if (!silent && _orderedTiles.isEmpty) {
+      setState(() => _loadingCounts = true);
+    }
 
     await CategoryHubPreferences.instance.load();
     final counts = emptyCategoryCounts();
@@ -131,6 +152,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
     final duplicateCounts = <CollectionCategory, int>{};
     var boardgameExpansionCount = 0;
     var orderedTiles = <HubTileEntry>[];
+    var ownedTotal = 0;
     String? loadError;
 
     try {
@@ -210,11 +232,27 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
       }
 
       orderedTiles = await loadVisibleHubTiles();
+      final active = await ActiveCategories.load();
+      ownedTotal = hubOwnedItems(
+        visible,
+        active: active,
+      ).length;
     } catch (e) {
       loadError = e.toString();
     }
 
+    if (loadError != null && _orderedTiles.isNotEmpty) {
+      if (mounted) setState(() => _loadingCounts = false);
+      return;
+    }
+
     if (mounted) {
+      final cached = ProfileCacheService.instance.profile;
+      if (cached != null && loadError == null) {
+        unawaited(
+          ProfileCacheService.instance.apply(cached, itemCount: ownedTotal),
+        );
+      }
       _grammar = await loadGrammarGender();
       if (!mounted) return;
       setState(() {
@@ -225,12 +263,26 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
         _boardgameExpansionCount = boardgameExpansionCount;
         _customCounts = customCounts;
         _orderedTiles = orderedTiles;
-        _greeting ??= pickHubGreeting(
+        if (loadError == null) _ownedShown = ownedTotal;
+        _loadingCounts = false;
+        _greeting = pickHubGreeting(
           username: _username,
+          previous: _greeting?.name,
           grammar: _grammar,
         );
-        _loadingCounts = false;
       });
+      if (loadError == null) {
+        _HubSnapshot.current = _HubSnapshot(
+          counts: _counts,
+          groupCounts: _groupCounts,
+          wishlistCounts: _wishlistCounts,
+          duplicateCounts: _duplicateCounts,
+          boardgameExpansionCount: _boardgameExpansionCount,
+          customCounts: _customCounts,
+          orderedTiles: _orderedTiles,
+          ownedShown: _ownedShown,
+        );
+      }
       _maybeShowOnboarding(
         counts,
         groupCounts,
@@ -426,149 +478,189 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
         ],
       ),
       drawer: const MainDrawer(),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
-            decoration: AppTheme.heroGradient(
-              accent,
-              brightness: Theme.of(context).brightness,
+      body: NotificationListener<ScrollNotification>(
+        onNotification: (notification) {
+          if (notification.metrics.axis != Axis.vertical) return false;
+          final fold = notification.metrics.pixels > 28;
+          if (fold != _collectionFolded) {
+            setState(() => _collectionFolded = fold);
+          }
+          return false;
+        },
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(20, 8, 12, 12),
+              decoration: AppTheme.heroGradient(
+                accent,
+                brightness: Theme.of(context).brightness,
+              ),
+              child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (isDark)
+                              ShaderMask(
+                                shaderCallback: (bounds) => LinearGradient(
+                                  colors: [
+                                    accent,
+                                    Colors.white.withValues(alpha: 0.88),
+                                  ],
+                                ).createShader(bounds),
+                                child: Text(
+                                  _greetingText,
+                                  style: greetingStyle?.copyWith(
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              )
+                            else
+                              Text(
+                                _greetingText,
+                                style: greetingStyle?.copyWith(
+                                  color: Color.lerp(
+                                    accent,
+                                    const Color(0xFF1A1033),
+                                    0.72,
+                                  ),
+                                ),
+                              ),
+                            Text(
+                              'Quelle collection ouvrir ?',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: subtitleColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (_collectionFolded)
+                        IconButton(
+                          tooltip: 'Toute ma collection',
+                          onPressed: _openAllCollection,
+                          icon: Icon(Icons.all_inbox_rounded, color: accent),
+                        ),
+                    ],
+                  ),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (isDark)
-                  ShaderMask(
-                    shaderCallback: (bounds) => LinearGradient(
-                      colors: [
-                        accent,
-                        Colors.white.withValues(alpha: 0.88),
-                      ],
-                    ).createShader(bounds),
-                    child: Text(
-                      _greetingText,
-                      style: greetingStyle?.copyWith(color: Colors.white),
-                    ),
-                  )
-                else
-                  Text(
-                    _greetingText,
-                    style: greetingStyle?.copyWith(
-                      color: Color.lerp(accent, const Color(0xFF1A1033), 0.72),
-                    ),
-                  ),
-                Text(
-                  'Quelle collection ouvrir ?',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: subtitleColor,
-                  ),
-                ),
-              ],
+            AnimatedSize(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOut,
+              alignment: Alignment.topCenter,
+              child: _collectionFolded
+                  ? const SizedBox(width: double.infinity)
+                  : _buildAllCollectionBanner(accent),
             ),
-          ),
-          _buildAllCollectionBanner(accent),
-          Expanded(
-            child: _loadingCounts
-                ? const Center(child: CircularProgressIndicator())
-                : GridView.builder(
-                    padding: const EdgeInsets.all(16),
-                    gridDelegate: CollectionGridLayout.gridDelegate(
-                      context,
-                      mobileColumns: 2,
-                      childAspectRatio: 0.88,
-                      spacing: 14,
+            Expanded(
+              child: _loadingCounts
+                  ? const Center(child: CircularProgressIndicator())
+                  : GridView.builder(
+                      padding: const EdgeInsets.all(16),
+                      gridDelegate: CollectionGridLayout.gridDelegate(
+                        context,
+                        mobileColumns: 2,
+                        childAspectRatio: 0.88,
+                        spacing: 14,
+                      ),
+                      itemCount: _gridItemCount,
+                      itemBuilder: (context, index) => _buildGridItem(index),
                     ),
-                    itemCount: _gridItemCount,
-                    itemBuilder: (context, index) => _buildGridItem(index),
-                  ),
-          ),
-        ],
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  int get _totalOwned {
-    var n = 0;
-    for (final entry in _orderedTiles) {
-      if (entry.category != null) {
-        n += _counts[entry.category] ?? 0;
-        n += _groupCounts[entry.category] ?? 0;
-      } else if (entry.customType != null) {
-        n += _customCounts[entry.customType!.id] ?? 0;
-      }
-    }
-    return n;
+  void _openAllCollection() {
+    AppHaptics.selection();
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const AllCollectionScreen()),
+    ).then((_) => _load());
   }
 
   Widget _buildAllCollectionBanner(Color accent) {
     final scheme = Theme.of(context).colorScheme;
-    final total = _totalOwned;
-    final icons = [
+    final total = _ownedShown;
+    final icons = <(IconData, Color)>[
       for (final e in _orderedTiles.take(5))
         if (e.category != null) (e.category!.icon, e.category!.color),
     ];
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       child: Material(
-        color: accent.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(18),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(18),
-          onTap: () {
-            AppHaptics.selection();
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const AllCollectionScreen()),
-            ).then((_) => _load());
-          },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              children: [
-                Icon(Icons.all_inbox_rounded, color: accent, size: 28),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Toute ma collection',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 16,
+            color: accent.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(18),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(18),
+              onTap: _openAllCollection,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text.rich(
+                            TextSpan(
+                              children: [
+                                const TextSpan(
+                                  text: 'Toute ma collection',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                                TextSpan(
+                                  text: _loadingCounts
+                                      ? ''
+                                      : '  $total objet${total > 1 ? 's' : ''}',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 14,
+                                    color: scheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                      ),
-                      Text(
-                        _loadingCounts
-                            ? 'Toutes catégories confondues'
-                            : '$total objet${total > 1 ? 's' : ''} · toutes catégories',
-                        style: TextStyle(
-                          fontSize: 12,
+                        Icon(
+                          Icons.chevron_right,
                           color: scheme.onSurfaceVariant,
                         ),
+                      ],
+                    ),
+                    if (icons.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          for (final (icon, color) in icons)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 6),
+                              child: CircleAvatar(
+                                radius: 13,
+                                backgroundColor: color.withValues(alpha: 0.18),
+                                child: Icon(icon, size: 14, color: color),
+                              ),
+                            ),
+                        ],
                       ),
                     ],
-                  ),
+                  ],
                 ),
-                for (final (icon, color) in icons)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 2),
-                    child: CircleAvatar(
-                      radius: 13,
-                      backgroundColor: color.withValues(alpha: 0.18),
-                      child: Icon(icon, size: 14, color: color),
-                    ),
-                  ),
-                const SizedBox(width: 4),
-                Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
-              ],
+              ),
             ),
           ),
-        ),
-      ),
     );
   }
 
@@ -783,6 +875,30 @@ class _AnimatedCategoryCard extends StatelessWidget {
       },
     );
   }
+}
+
+class _HubSnapshot {
+  final Map<CollectionCategory, int> counts;
+  final Map<CollectionCategory, int> groupCounts;
+  final Map<CollectionCategory, int> wishlistCounts;
+  final Map<CollectionCategory, int> duplicateCounts;
+  final int boardgameExpansionCount;
+  final Map<String, int> customCounts;
+  final List<HubTileEntry> orderedTiles;
+  final int ownedShown;
+
+  const _HubSnapshot({
+    required this.counts,
+    required this.groupCounts,
+    required this.wishlistCounts,
+    required this.duplicateCounts,
+    required this.boardgameExpansionCount,
+    required this.customCounts,
+    required this.orderedTiles,
+    required this.ownedShown,
+  });
+
+  static _HubSnapshot? current;
 }
 
 bool _hubRowFlag(Map<String, dynamic> map, String key) {

@@ -6,6 +6,7 @@ class PasswordTextField extends StatefulWidget {
   final String labelText;
   final String? hintText;
   final void Function(String)? onSubmitted;
+  final TextInputAction textInputAction;
 
   const PasswordTextField({
     super.key,
@@ -13,6 +14,7 @@ class PasswordTextField extends StatefulWidget {
     this.labelText = 'Mot de passe',
     this.hintText,
     this.onSubmitted,
+    this.textInputAction = TextInputAction.done,
   });
 
   @override
@@ -29,6 +31,7 @@ class _PasswordTextFieldState extends State<PasswordTextField> {
       obscureText: !_visible,
       autocorrect: false,
       enableSuggestions: false,
+      textInputAction: widget.textInputAction,
       onSubmitted: widget.onSubmitted,
       decoration: InputDecoration(
         labelText: widget.labelText,

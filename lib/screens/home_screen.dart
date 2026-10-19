@@ -47,7 +47,6 @@ import '../widgets/category_collection_shell.dart';
 import '../widgets/isbn_scan_sheet.dart';
 import 'collection_change_history_screen.dart';
 import 'global_play_history_screen.dart';
-import 'shake_pick_screen.dart';
 import '../widgets/add_item_manual_dialog.dart';
 import '../widgets/add_item_options_dialog.dart';
 import '../widgets/bgg_search_dialog.dart';
@@ -1526,17 +1525,6 @@ class _HomeScreenState extends State<HomeScreen>
               ),
             );
           },
-        ),
-        CategoryQuickAction(
-          label: 'Tirage au sort',
-          icon: Icons.casino_outlined,
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (ctx) =>
-                  const ShakePickScreen(category: CollectionCategory.boardgame),
-            ),
-          ),
         ),
         CategoryQuickAction(
           label: 'Parties',

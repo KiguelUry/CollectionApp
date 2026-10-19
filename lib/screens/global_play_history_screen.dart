@@ -17,6 +17,7 @@ import '../widgets/empty_state_view.dart';
 import '../utils/collection_pick_dedupe.dart';
 import '../widgets/orphan_attach_sheet.dart';
 import '../widgets/player_alias_linker_sheet.dart';
+import 'shake_pick_screen.dart';
 
 /// Historique global des parties (tous jeux confondus).
 class GlobalPlayHistoryScreen extends StatefulWidget {
@@ -309,6 +310,16 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
     if (changed && mounted) await _load();
   }
 
+  void _openDraw() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            const ShakePickScreen(category: CollectionCategory.boardgame),
+      ),
+    );
+  }
+
   Future<_GamePick?> _pickGame() async {
     final items = await _service.fetchBoardgameItems();
     if (!mounted) return null;
@@ -358,8 +369,21 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
                   .map((g) => _PlayHistoryTopGame(g.title, g.entries.length))
                   .toList(),
               onOpenIdentities: _openAliasLinker,
+              onOpenDraw: _openDraw,
               child: Column(
               children: [
+                if (MediaQuery.sizeOf(context).width <= 1100)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.tonalIcon(
+                        onPressed: _openDraw,
+                        icon: const Icon(Icons.casino_outlined),
+                        label: const Text('Tirage au sort'),
+                      ),
+                    ),
+                  ),
                 if (MediaQuery.sizeOf(context).width <= 1100)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
@@ -951,6 +975,25 @@ class _EntryTile extends StatelessWidget {
                         ),
                       ),
                     ],
+                    if (session.players.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 4,
+                        runSpacing: 4,
+                        children: [
+                          for (final name in session.players)
+                            ActionChip(
+                              visualDensity: VisualDensity.compact,
+                              avatar: const Icon(Icons.person_outline, size: 16),
+                              label: Text(name),
+                              onPressed: () => showPlayerAliasLinkerSheet(
+                                context,
+                                knownNames: [name],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1007,6 +1050,7 @@ class _GlobalPlayHistoryLayout extends StatelessWidget {
   final int playCount;
   final List<_PlayHistoryTopGame> topPlayed;
   final VoidCallback onOpenIdentities;
+  final VoidCallback onOpenDraw;
   final Widget child;
 
   const _GlobalPlayHistoryLayout({
@@ -1014,6 +1058,7 @@ class _GlobalPlayHistoryLayout extends StatelessWidget {
     required this.playCount,
     required this.topPlayed,
     required this.onOpenIdentities,
+    required this.onOpenDraw,
     required this.child,
   });
 
@@ -1181,6 +1226,33 @@ class _GlobalPlayHistoryLayout extends StatelessWidget {
                       title: 'Parties enregistrées',
                       value: '$playCount',
                       icon: Icons.history_edu_outlined,
+                    ),
+                    const SizedBox(height: 12),
+                    Card(
+                      elevation: 0,
+                      color: scheme.secondaryContainer.withValues(alpha: 0.55),
+                      child: InkWell(
+                        onTap: onOpenDraw,
+                        borderRadius: BorderRadius.circular(12),
+                        child: Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Row(
+                            children: [
+                              Icon(Icons.casino_outlined, color: scheme.primary),
+                              const SizedBox(width: 10),
+                              const Expanded(
+                                child: Text(
+                                  'Tirage au sort',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 12),
                     statCard(

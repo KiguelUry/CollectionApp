@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:share_plus/share_plus.dart';
@@ -27,7 +28,17 @@ class ShowcaseService {
     if (fromEnv != null && fromEnv.isNotEmpty) {
       return fromEnv.replaceAll(RegExp(r'/$'), '');
     }
-    return 'http://localhost:8080';
+    if (kIsWeb) {
+      final host = Uri.base.host;
+      if (host == 'localhost' || host == '127.0.0.1') {
+        final path = Uri.base.path;
+        final prefix = path.contains('/CollectionApp/')
+            ? '/CollectionApp'
+            : '';
+        return '${Uri.base.origin}$prefix';
+      }
+    }
+    return 'https://kiguelury.github.io/CollectionApp';
   }
 
   Future<ShowcaseSettings> fetchSettings() async {
@@ -46,7 +57,10 @@ class ShowcaseService {
     );
   }
 
-  String buildUrl(String token) => '$baseUrl/showcase.html?t=$token';
+  String buildUrl(String token, {String show = 'all'}) {
+    final scope = show == 'owned' ? '&show=owned' : '';
+    return '$baseUrl/showcase.html?t=$token$scope';
+  }
 
   Future<ShowcaseSettings> setPublic(bool enabled) async {
     final id = _userId;
@@ -92,26 +106,28 @@ class ShowcaseService {
     );
   }
 
-  Future<ShareExportResult> copyLink() async {
+  Future<ShareExportResult> copyLink({String show = 'all'}) async {
     final settings = await fetchSettings();
     if (!settings.hasLink) {
       final enabled = await setPublic(true);
       if (!enabled.hasLink) {
         throw Exception('Impossible de créer le lien');
       }
-      return _copyUrl(enabled.token!);
+      return _copyUrl(enabled.token!, show: show);
     }
-    return _copyUrl(settings.token!);
+    return _copyUrl(settings.token!, show: show);
   }
 
-  Future<ShareExportResult> shareLink() async {
+  Future<ShareExportResult> shareLink({String show = 'all'}) async {
     var settings = await fetchSettings();
     if (!settings.hasLink) {
       settings = await setPublic(true);
     }
-    final url = buildUrl(settings.token!);
-    final text =
-        'Voici ma collection (ce que j\'ai + ma wishlist) :\n$url';
+    final url = buildUrl(settings.token!, show: show);
+    final intro = show == 'owned'
+        ? 'Voici ma collection :'
+        : 'Voici ma collection (ce que j\'ai + ma wishlist) :';
+    final text = '$intro\n$url';
 
     try {
       await Share.share(text, subject: 'Ma collection');
@@ -128,12 +144,12 @@ class ShowcaseService {
     }
   }
 
-  Future<ShareExportResult> _copyUrl(String token) async {
-    final url = buildUrl(token);
+  Future<ShareExportResult> _copyUrl(String token, {String show = 'all'}) async {
+    final url = buildUrl(token, show: show);
     await Clipboard.setData(ClipboardData(text: url));
     return ShareExportResult(
       kind: ShareExportKind.copiedToClipboard,
-      message: 'Lien copié :\n$url',
+      message: 'Lien copié',
     );
   }
 

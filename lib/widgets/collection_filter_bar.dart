@@ -82,7 +82,10 @@ class CollectionFilterBar extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
+            Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 860),
+                child: Row(
               children: [
                 Expanded(
                   child: TextField(
@@ -117,6 +120,8 @@ class CollectionFilterBar extends StatelessWidget {
                 const SizedBox(width: 4),
                 _filterMenuButton(context),
               ],
+                ),
+              ),
             ),
           ],
         ),

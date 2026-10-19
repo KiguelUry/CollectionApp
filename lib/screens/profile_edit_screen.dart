@@ -529,12 +529,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                           ListTile(
                             dense: true,
                             leading: const Icon(Icons.link, size: 20),
-                            title: Text(
-                              _showcase.buildUrl(_profile!.showcaseToken!),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 12),
-                            ),
+                            title: const Text('Lien de vitrine prêt à partager'),
                             trailing: TextButton(
                               onPressed: () async {
                                 try {

@@ -237,15 +237,9 @@ function parseThingItem(xml: string, id: string): Record<string, unknown> | null
     return Number.isNaN(n) ? undefined : n;
   };
 
-  const categories: string[] = [];
-  const linkRe = /<link\b([^>]*)\/?>/gi;
-  let lm: RegExpExecArray | null;
-  while ((lm = linkRe.exec(inner)) !== null) {
-    const attrs = lm[1];
-    if (!/type="boardgamecategory"/i.test(attrs)) continue;
-    const val = attrs.match(/\bvalue="([^"]*)"/i)?.[1];
-    if (val) categories.push(val);
-  }
+  const categories = linkValues(inner, "boardgamecategory", 12);
+  const designers = linkValues(inner, "boardgamedesigner", 4);
+  const publishers = linkValues(inner, "boardgamepublisher", 3);
 
   const playingTime =
     attr("playingtime") ?? attr("maxplaytime") ?? attr("minplaytime");
@@ -292,6 +286,8 @@ function parseThingItem(xml: string, id: string): Record<string, unknown> | null
     playing_time:
       playingTime != null && playingTime > 0 ? playingTime : null,
     ...(categories.length ? { bgg_categories: categories } : {}),
+    bgg_designers: designers,
+    bgg_publishers: publishers,
     ...(cleanDesc ? { bgg_description: cleanDesc } : {}),
     ...(avgRating != null && !Number.isNaN(avgRating) && avgRating > 0
       ? { bgg_avg_rating: avgRating }
@@ -305,6 +301,21 @@ function parseThingItem(xml: string, id: string): Record<string, unknown> | null
 
 // XML API2 usually supplies only a cover, but preserve extra image URLs when
 // BGG includes them in image elements or link attributes. This does not crawl.
+function linkValues(inner: string, type: string, limit: number): string[] {
+  const out: string[] = [];
+  const linkRe = /<link\b([^>]*)\/?>/gi;
+  let lm: RegExpExecArray | null;
+  const typeRe = new RegExp(`type="${type}"`, "i");
+  while ((lm = linkRe.exec(inner)) !== null) {
+    const attrs = lm[1];
+    if (!typeRe.test(attrs)) continue;
+    const val = attrs.match(/\bvalue="([^"]*)"/i)?.[1];
+    if (val && !out.includes(val)) out.push(val);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
 function imageUrlsFromThingXml(inner: string, cover?: string): string[] {
   const urls = new Set<string>();
   const add = (raw?: string) => {
@@ -821,12 +832,13 @@ async function handleImages(id: string): Promise<Response> {
   }
   const target = new URL("https://api.geekdo.com/api/images");
   target.searchParams.set("ajax", "1");
-  target.searchParams.set("gallery", "all");
+  target.searchParams.set("gallery", "game");
+  target.searchParams.set("nosession", "1");
   target.searchParams.set("objectid", id);
   target.searchParams.set("objecttype", "thing");
   target.searchParams.set("pageid", "1");
   target.searchParams.set("showcount", "12");
-  target.searchParams.set("size", "medium");
+  target.searchParams.set("sort", "hot");
   try {
     const res = await fetch(target.toString(), {
       headers: {
@@ -837,16 +849,36 @@ async function handleImages(id: string): Promise<Response> {
     if (!res.ok) return json({ images: [] });
     const body = await res.json();
     const raw = Array.isArray(body?.images) ? body.images : [];
-    const images: string[] = [];
+    const images: { url: string; caption: string }[] = [];
     for (const item of raw) {
-      const url = item?.imageurl || item?.imageurl_lg || item?.url;
-      if (typeof url === "string" && url.startsWith("http")) images.push(url);
+      const url = bggGalleryUrl(item as Record<string, unknown>);
+      if (!url) continue;
+      const caption = String(item?.caption ?? "");
+      if (caption.toLowerCase().includes("box cover")) continue;
+      images.push({ url, caption });
       if (images.length >= 8) break;
     }
     return json({ images });
   } catch {
     return json({ images: [] });
   }
+}
+
+function bggGalleryUrl(item: Record<string, unknown> | null): string | null {
+  if (!item || typeof item !== "object") return null;
+  const images = item.images as Record<string, unknown> | undefined;
+  const nested = (size: string) => {
+    const node = images?.[size] as Record<string, unknown> | undefined;
+    return typeof node?.url === "string" ? node.url : null;
+  };
+  const raw = nested("large") ||
+    nested("medium") ||
+    (typeof item.imageurl_lg === "string" ? item.imageurl_lg : null) ||
+    (typeof item.imageurl === "string" ? item.imageurl : null) ||
+    (typeof item.url === "string" ? item.url : null);
+  if (!raw) return null;
+  const url = raw.replace(/\\/g, "");
+  return url.startsWith("http") ? url : null;
 }
 
 async function handleExpansions(id: string): Promise<Response> {

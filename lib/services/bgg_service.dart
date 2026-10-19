@@ -68,6 +68,13 @@ class _BggThingMeta {
   });
 }
 
+class BggGalleryPhoto {
+  final String url;
+  final String caption;
+
+  const BggGalleryPhoto({required this.url, this.caption = ''});
+}
+
 class BggService {
   static const _maxSearchResults = 50;
 
@@ -1142,6 +1149,8 @@ class BggService {
         .whereType<String>()
         .where((v) => v.isNotEmpty)
         .toList();
+    final designers = _linkValues(item, 'boardgamedesigner', 4);
+    final publishers = _linkValues(item, 'boardgamepublisher', 3);
 
     final itemType = item.getAttribute('type');
     final isExpansion = itemType == 'boardgameexpansion';
@@ -1182,6 +1191,8 @@ class BggService {
       'max_players': parseAttr('maxplayers'),
       'playing_time': _positivePlayingTime(playingTime),
       if (categories.isNotEmpty) 'bgg_categories': categories,
+      'bgg_designers': designers,
+      'bgg_publishers': publishers,
       if (desc.isNotEmpty) 'bgg_description': desc,
       if (avgRating != null && avgRating > 0) 'bgg_avg_rating': avgRating,
       'bgg_best_players': ?bestPlayers,
@@ -1219,45 +1230,109 @@ class BggService {
     return urls.toList();
   }
 
-  /// Huit premières photos de la galerie BGG. Passe par `bgg-api` : le
-  /// navigateur ne peut pas appeler api.geekdo.com (CORS).
+  static List<String> _linkValues(XmlElement item, String type, int limit) {
+    final out = <String>[];
+    for (final link in item.findAllElements('link')) {
+      if (link.getAttribute('type') != type) continue;
+      final value = link.getAttribute('value')?.trim();
+      if (value == null || value.isEmpty || out.contains(value)) continue;
+      out.add(value);
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
+  /// Détails BGG sans le cache local (crédits, galerie à jour).
+  static Future<Map<String, dynamic>?> fetchUncachedGameDetails(
+    String bggId,
+  ) {
+    return _fetchGameFullDetailsRemote(bggId);
+  }
+
+  /// Photos de matériel BGG (galerie `game`, tri hot). Passe par `bgg-api` :
+  /// le navigateur ne peut pas appeler api.geekdo.com (CORS).
   static Future<List<String>> fetchCommunityImages(String bggId) async {
+    final photos = await fetchCommunityGallery(bggId);
+    return [for (final photo in photos) photo.url];
+  }
+
+  static Future<List<BggGalleryPhoto>> fetchCommunityGallery(String bggId) async {
     if (bggId.trim().isEmpty) return const [];
     if (_webProxyReady) {
       final data = await _jsonApiGet('images', {'id': bggId});
       final raw = data?['images'];
-      if (raw is List) {
-        return raw
-            .map((e) => e.toString())
-            .where((url) => url.startsWith('http'))
-            .take(8)
-            .toList();
-      }
+      if (raw is List) return _photosFromApiList(raw);
     }
     try {
       final uri = Uri.parse(
-        'https://api.geekdo.com/api/images?ajax=1&gallery=all'
-        '&objectid=$bggId&objecttype=thing&pageid=1&showcount=12&size=medium',
+        'https://api.geekdo.com/api/images?ajax=1&gallery=game&nosession=1'
+        '&objectid=$bggId&objecttype=thing&pageid=1&showcount=12&sort=hot',
       );
-      final response = await http.get(uri, headers: {'Accept': 'application/json'});
+      final response = await http.get(
+        uri,
+        headers: {'Accept': 'application/json'},
+      );
       if (response.statusCode != 200 || response.body.isEmpty) {
         return const [];
       }
       final decoded = jsonDecode(response.body);
       final images = decoded is Map ? decoded['images'] : null;
       if (images is! List) return const [];
-      final urls = <String>[];
-      for (final raw in images) {
-        if (raw is! Map) continue;
-        final url = (raw['imageurl'] ?? raw['imageurl_lg'] ?? raw['url'])
-            ?.toString();
-        if (url != null && url.startsWith('http')) urls.add(url);
-        if (urls.length >= 8) break;
-      }
-      return urls;
+      return _galleryPhotos(images);
     } catch (_) {
       return const [];
     }
+  }
+
+  static List<BggGalleryPhoto> _photosFromApiList(List<dynamic> raw) {
+    final photos = <BggGalleryPhoto>[];
+    for (final entry in raw) {
+      if (entry is String) {
+        final url = entry.replaceAll(r'\', '');
+        if (url.startsWith('http')) photos.add(BggGalleryPhoto(url: url));
+      } else if (entry is Map) {
+        final url = (entry['url'] ?? '').toString().replaceAll(r'\', '');
+        if (!url.startsWith('http')) continue;
+        photos.add(
+          BggGalleryPhoto(
+            url: url,
+            caption: (entry['caption'] ?? '').toString(),
+          ),
+        );
+      }
+      if (photos.length >= 8) break;
+    }
+    return photos;
+  }
+
+  static List<BggGalleryPhoto> _galleryPhotos(List<dynamic> images) {
+    final photos = <BggGalleryPhoto>[];
+    for (final raw in images) {
+      if (raw is! Map) continue;
+      final caption = raw['caption']?.toString() ?? '';
+      if (caption.toLowerCase().contains('box cover')) continue;
+      final nested = raw['images'];
+      String? nestedUrl;
+      if (nested is Map) {
+        for (final size in ['large', 'medium']) {
+          final node = nested[size];
+          if (node is Map && node['url'] is String) {
+            nestedUrl = node['url'] as String;
+            break;
+          }
+        }
+      }
+      final url = (nestedUrl ?? raw['imageurl_lg'] ?? raw['imageurl'] ?? raw['url'])
+          ?.toString()
+          .replaceAll(r'\', '');
+      if (url != null &&
+          url.startsWith('http') &&
+          photos.every((photo) => photo.url != url)) {
+        photos.add(BggGalleryPhoto(url: url, caption: caption));
+      }
+      if (photos.length >= 8) break;
+    }
+    return photos;
   }
 
   /// Fiche BGG du jeu (règles, fichiers, forum).

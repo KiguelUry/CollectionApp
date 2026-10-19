@@ -5,8 +5,6 @@ import 'package:flutter/material.dart';
 import '../../config/app_brand.dart';
 import '../../models/collection_category.dart';
 import '../../theme/app_theme.dart';
-import '../../utils/splash_audio.dart';
-
 /// Splash Palomnia : icônes de collection en orbite, titre animé.
 class CollectingoSplash extends StatefulWidget {
   const CollectingoSplash({
@@ -44,13 +42,11 @@ class _CollectingoSplashState extends State<CollectingoSplash>
         if (s == AnimationStatus.completed) _finish();
       })
       ..forward();
-    SplashAudio.playStartup();
   }
 
   @override
   void dispose() {
     _controller.dispose();
-    SplashAudio.dispose();
     super.dispose();
   }
 

@@ -8,6 +8,7 @@ import '../models/boardgame_play_session.dart';
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../utils/supabase_embeds.dart';
+import 'activity_service.dart';
 import 'play_share_service.dart';
 
 /// Partie enregistrée sur un jeu non possédé (en attente de liaison).
@@ -256,6 +257,13 @@ class GlobalPlayHistoryService {
           'games_played': sessions.length,
         })
         .eq('id', item.id);
+    unawaited(
+      ActivityService().logPlayEdited(
+        itemId: item.id,
+        ownerId: item.addedBy,
+        itemTitle: item.title,
+      ),
+    );
   }
 
   /// Renomme [fromNames] → [toName] dans toutes les parties (collection + orphelins).

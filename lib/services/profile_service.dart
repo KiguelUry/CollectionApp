@@ -351,4 +351,46 @@ class ProfileService {
       'hide_collection_from_friends': hideFromFriends,
     }).eq('id', id);
   }
+
+  /// Genre et accord des salutations. Ignoré si les colonnes ne sont pas
+  /// encore créées (voir schema_profile_greeting.sql). N'écrit jamais null.
+  Future<void> saveGreetingProfile({
+    required String identity,
+    required String grammar,
+  }) async {
+    final id = _userId;
+    if (id == null) return;
+    final safeIdentity = identity.trim();
+    final safeGrammar = grammar.trim();
+    if (safeIdentity.isEmpty || safeGrammar.isEmpty) return;
+    try {
+      await _client.from('profiles').update({
+        'gender_identity': safeIdentity,
+        'greeting_grammar': safeGrammar,
+      }).eq('id', id);
+    } catch (_) {}
+  }
+
+  Future<({String? identity, String? grammar})> fetchGreetingProfile() async {
+    final id = _userId;
+    if (id == null) return (identity: null, grammar: null);
+    try {
+      final row = await _client
+          .from('profiles')
+          .select('gender_identity, greeting_grammar')
+          .eq('id', id)
+          .maybeSingle();
+      if (row == null) return (identity: null, grammar: null);
+      final identity = row['gender_identity'] as String?;
+      final grammar = row['greeting_grammar'] as String?;
+      return (
+        identity: identity != null && identity.trim().isNotEmpty
+            ? identity
+            : null,
+        grammar: grammar != null && grammar.trim().isNotEmpty ? grammar : null,
+      );
+    } catch (_) {
+      return (identity: null, grammar: null);
+    }
+  }
 }

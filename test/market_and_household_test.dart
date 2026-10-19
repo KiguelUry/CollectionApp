@@ -100,4 +100,21 @@ void main() {
     ]);
     expect(ids, ['a', 'c']);
   });
+
+  test('déplacer le #1 vers la place #9 décale sans dupliquer', () {
+    final next = placeInPantheon(
+      ['s', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'],
+      's',
+      targetIndex: 8,
+    );
+    expect(next, ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 's', 'i']);
+    expect(next.where((id) => id == 's'), ['s']);
+  });
+
+  test('insérer un objet sur une place occupée décale la suite', () {
+    expect(
+      placeInPantheon(['a', 'b', 'c'], 'z', targetIndex: 1),
+      ['a', 'z', 'b', 'c'],
+    );
+  });
 }

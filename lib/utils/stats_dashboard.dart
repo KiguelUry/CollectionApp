@@ -65,6 +65,11 @@ class StatsDashboard {
   /// Somme des estimations marché BGG (par exemplaire, même si prix payé connu).
   final double marketTotal;
   final int marketCopies;
+
+  /// Sous-ensemble qui a à la fois un prix payé et une estimation marché.
+  final double comparablePaid;
+  final double comparableMarket;
+  final int comparableCopies;
   final List<StatsCategoryBar> categories;
   final List<StatsDashboardItem> topValued;
   final List<StatsDashboardItem> topPlayed;
@@ -89,6 +94,9 @@ class StatsDashboard {
     this.paidCopies = 0,
     this.marketTotal = 0,
     this.marketCopies = 0,
+    this.comparablePaid = 0,
+    this.comparableMarket = 0,
+    this.comparableCopies = 0,
     this.categories = const [],
     this.topValued = const [],
     this.topPlayed = const [],
@@ -132,6 +140,9 @@ class StatsDashboard {
     var paidCopies = 0;
     var marketTotal = 0.0;
     var marketCopies = 0;
+    var comparablePaid = 0.0;
+    var comparableMarket = 0.0;
+    var comparableCopies = 0;
     final counts = <CollectionCategory, int>{};
     final values = <CollectionCategory, double>{};
     final boardgameRows = <Map<String, dynamic>>[];
@@ -193,6 +204,11 @@ class StatsDashboard {
           paidCopies++;
           purchase += price;
           itemValue = (itemValue ?? 0) + price;
+          if (market != null && market > 0) {
+            comparablePaid += price;
+            comparableMarket += market;
+            comparableCopies++;
+          }
         } else if (market != null && market > 0) {
           estimated += market;
           itemValue = (itemValue ?? 0) + market;
@@ -288,6 +304,9 @@ class StatsDashboard {
       paidCopies: paidCopies,
       marketTotal: marketTotal,
       marketCopies: marketCopies,
+      comparablePaid: comparablePaid,
+      comparableMarket: comparableMarket,
+      comparableCopies: comparableCopies,
       categories: bars,
       topValued: valuedItems.take(topLimit).toList(),
       topPlayed: playedItems.take(topLimit).toList(),

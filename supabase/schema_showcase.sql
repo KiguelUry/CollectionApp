@@ -43,24 +43,40 @@ begin
   select coalesce(
     json_agg(
       json_build_object(
-        'title', title,
-        'category', category,
-        'quantity', quantity,
-        'rating', rating,
-        'is_wishlist', coalesce(is_wishlist, false),
-        'is_for_sale', coalesce(is_for_sale, false),
-        'is_sold', coalesce(is_sold, false)
+        'title', ci.title,
+        'category', ci.category,
+        'quantity', ci.quantity,
+        'rating', ci.rating,
+        'is_wishlist', coalesce(ci.is_wishlist, false),
+        'is_for_sale', coalesce(ci.is_for_sale, false),
+        'is_sold', coalesce(ci.is_sold, false),
+        'is_expansion', coalesce(ci.is_expansion, false),
+        'metadata', jsonb_build_object(
+          'set_name', ci.metadata->>'set_name',
+          'rarity', ci.metadata->>'rarity',
+          'extension', coalesce(ci.metadata->>'extension', ci.metadata->>'set_code')
+        )
       )
-      order by category, title
+      order by ci.category, ci.title
     ),
     '[]'::json
   )
   into v_items
-  from public.collection_items
-  where group_id is null
+  from public.collection_items ci
+  where coalesce(ci.is_sold, false) = false
     and (
-      added_by = v_profile_id
-      or location_user_id = v_profile_id
+      (
+        ci.group_id is null
+        and (
+          ci.added_by = v_profile_id
+          or ci.location_user_id = v_profile_id
+        )
+      )
+      or ci.group_id in (
+        select gm.group_id
+        from public.group_members gm
+        where gm.profile_id = v_profile_id
+      )
     );
 
   return json_build_object(

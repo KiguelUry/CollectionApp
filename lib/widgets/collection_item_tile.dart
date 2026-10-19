@@ -533,15 +533,19 @@ class CollectionItemTile extends StatelessWidget {
 
   String get _valueChipLabel {
     final avg = marketPriceAvgFromMetadata(item.metadata);
-    if (avg != null && avg > 0) return '~${formatEuroChip(avg)}';
+    if (avg != null && avg > 0) {
+      return '~${formatEuroChip(avg, compact: false)}';
+    }
     final second = marketSecondhandPriceFromMetadata(item.metadata);
-    if (second != null && second > 0) return '~${formatEuroChip(second)}';
+    if (second != null && second > 0) {
+      return '~${formatEuroChip(second, compact: false)}';
+    }
     final paid = copyPurchasePricesFromRow(
       quantity: item.quantity,
       purchasePrice: item.purchasePrice,
       metadata: item.metadata,
     ).whereType<double>().fold<double>(0, (a, b) => a + b);
-    return paid > 0 ? formatEuroChip(paid) : '—';
+    return paid > 0 ? formatEuroChip(paid, compact: false) : '—';
   }
 
   Future<void> _showValueSheet(BuildContext context) {
@@ -629,16 +633,13 @@ class CollectionItemTile extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 4),
-        Expanded(
-          child: GestureDetector(
-            onTap: () => _showValueSheet(context),
-            behavior: HitTestBehavior.opaque,
-            child: _metaChip(
-              icon: Icons.euro_rounded,
-              suffix: _valueChipLabel,
-              color: Colors.teal.shade500,
-              shrinkSuffix: true,
-            ),
+        GestureDetector(
+          onTap: () => _showValueSheet(context),
+          behavior: HitTestBehavior.opaque,
+          child: _metaChip(
+            suffix: _valueChipLabel,
+            color: Colors.teal.shade500,
+            textOnly: true,
           ),
         ),
         const SizedBox(width: 4),
@@ -769,21 +770,36 @@ class CollectionItemTile extends StatelessWidget {
   }
 
   Widget _metaChip({
-    required IconData icon,
+    IconData? icon,
     String? suffix,
     required Color color,
     bool shrinkSuffix = false,
+    bool textOnly = false,
   }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(5),
         border: Border.all(color: color.withValues(alpha: 0.35)),
       ),
-      child: Row(
+      child: textOnly
+          ? Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Text(
+                suffix ?? '',
+                maxLines: 1,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                  height: 1,
+                ),
+              ),
+            )
+          : Row(
         children: [
-          Icon(icon, size: 12, color: color),
+          if (icon != null) Icon(icon, size: 13, color: color),
           if (suffix != null) ...[
             const SizedBox(width: 2),
             Expanded(
@@ -795,8 +811,8 @@ class CollectionItemTile extends StatelessWidget {
                         suffix,
                         maxLines: 1,
                         style: TextStyle(
-                          fontSize: 9,
-                          fontWeight: FontWeight.w700,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
                           color: color,
                           height: 1,
                         ),
@@ -807,8 +823,8 @@ class CollectionItemTile extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
                         color: color,
                         height: 1,
                       ),

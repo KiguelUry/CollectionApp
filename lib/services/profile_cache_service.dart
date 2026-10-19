@@ -2,7 +2,11 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/collection_item.dart';
 import '../models/user_profile.dart';
+import '../utils/active_categories.dart';
+import '../utils/collection_item_scope.dart';
+import '../utils/hub_owned_count.dart';
 import 'profile_service.dart';
 
 /// Cache profil (mémoire + disque) pour éviter le flash drawer au chargement.
@@ -43,13 +47,51 @@ class ProfileCacheService extends ChangeNotifier {
 
     try {
       final p = await ProfileService().fetchCurrentProfile();
-      final rows = await Supabase.instance.client
-          .from('collection_items')
-          .select('id')
-          .or('added_by.eq.$userId,location_user_id.eq.$userId');
-      final count = (rows as List).length;
+      final count = await _ownedCountLikeHub(userId);
       await apply(p, itemCount: count);
     } catch (_) {}
+  }
+
+  /// Même total que la carte « Toute ma collection » du hub.
+  Future<int> _ownedCountLikeHub(String userId) async {
+    const hubSelect =
+        'id, title, quantity, category, subcategory, is_wishlist, is_sold, '
+        'is_expansion, parent_game_id, added_by, metadata';
+    final client = Supabase.instance.client;
+    final seen = <String>{};
+    final maps = <Map<String, dynamic>>[];
+
+    void take(List<dynamic> rows) {
+      for (final row in rows) {
+        final map = Map<String, dynamic>.from(row as Map);
+        final id = map['id']?.toString() ?? '';
+        if (id.isNotEmpty && !seen.add(id)) continue;
+        if (map['is_wishlist'] == true || map['is_sold'] == true) continue;
+        maps.add(map);
+      }
+    }
+
+    final rows = await CollectionItemScope.ownedByUser(
+      client.from('collection_items').select(hubSelect),
+      userId: userId,
+    );
+    take(rows as List);
+    try {
+      final groupIds = await CollectionItemScope.myGroupIds(userId);
+      if (groupIds.isNotEmpty) {
+        final groupRows = await client
+            .from('collection_items')
+            .select(hubSelect)
+            .inFilter('group_id', groupIds);
+        take(groupRows as List);
+      }
+    } catch (_) {}
+
+    final active = await ActiveCategories.load();
+    return hubOwnedItems(
+      [for (final map in maps) CollectionItem.fromJson(map)],
+      active: active,
+    ).length;
   }
 
   Future<void> apply(UserProfile p, {int? itemCount}) async {

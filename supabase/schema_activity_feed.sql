@@ -9,7 +9,10 @@ create table if not exists public.activity_events (
       'item_added',
       'wishlist_added',
       'item_rated',
-      'trophies_updated'
+      'trophies_updated',
+      'play_win',
+      'loan_created',
+      'play_edited'
     )
   ),
   item_id uuid references public.collection_items (id) on delete set null,
@@ -90,3 +93,21 @@ create trigger collection_items_activity_log
   after insert or update of rating on public.collection_items
   for each row
   execute function public.log_collection_item_activity();
+
+-- Bases déjà créées : élargit la liste des types (dont play_edited).
+alter table public.activity_events
+  drop constraint if exists activity_events_event_type_check;
+
+alter table public.activity_events
+  add constraint activity_events_event_type_check
+  check (
+    event_type in (
+      'item_added',
+      'wishlist_added',
+      'item_rated',
+      'trophies_updated',
+      'play_win',
+      'loan_created',
+      'play_edited'
+    )
+  );

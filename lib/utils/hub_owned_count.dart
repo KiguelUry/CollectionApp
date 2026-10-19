@@ -5,6 +5,21 @@ import 'boardgame_collection_visibility.dart';
 import 'collection_item_filters.dart';
 import 'item_copy_units.dart';
 
+/// Objets comptés comme « ma collection » : possédés, hors wishlist,
+/// extensions masquées, et seulement les catégories actives du hub.
+List<CollectionItem> hubOwnedItems(
+  List<CollectionItem> items, {
+  required Set<CollectionCategory> active,
+}) {
+  return visibleOwnedLikeGrid(items)
+      .where(
+        (item) =>
+            item.category != CollectionCategory.custom &&
+            active.contains(item.category),
+      )
+      .toList();
+}
+
 /// Même ensemble que la grille d'une catégorie : possédés, hors wishlist,
 /// hors vendus, extensions masquées comme dans la collection.
 List<CollectionItem> visibleOwnedLikeGrid(List<CollectionItem> items) {

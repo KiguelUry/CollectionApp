@@ -37,6 +37,7 @@ class ActivityEvent {
       'trophies_updated' => '$name a mis à jour ses trophées',
       'play_win' => 'Victoire de partie · $name sur $item',
       'loan_created' => 'Nouveau prêt · $name prête $item',
+      'play_edited' => '✏️ $name a modifié la partie de $item',
       _ => '$name a une activité',
     };
   }

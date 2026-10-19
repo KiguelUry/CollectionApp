@@ -61,9 +61,7 @@ class CollectionCoverImage extends StatelessWidget {
     final h = height;
 
     Widget image;
-    final thumbSize = compact
-        ? _thumbnailBucket(w ?? h, MediaQuery.devicePixelRatioOf(context))
-        : (largeSource ? 1000 : 600);
+    final thumbSize = compact ? kThumbnailSize : (largeSource ? 1000 : 600);
     final thumb = (compact || kIsWeb)
         ? gridThumbnailUrl(
             url,
@@ -80,7 +78,9 @@ class CollectionCoverImage extends StatelessWidget {
         width: w,
         height: h,
         fit: imageFit,
-        filterQuality: FilterQuality.medium,
+        filterQuality: compact ? FilterQuality.low : FilterQuality.medium,
+        memCacheWidth: compact ? kThumbnailSize : null,
+        memCacheHeight: compact ? kThumbnailSize : null,
         // Octets, pas une balise <img>. Flutter 3.47 (build GitHub Pages)
         // peint en noir les images HTML dès que le cache les lâche.
         imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
@@ -195,17 +195,6 @@ class CollectionCoverImage extends StatelessWidget {
             ),
       ),
     );
-  }
-
-  /// Paliers fixes pour maximiser les hits du cache CDN.
-  static int _thumbnailBucket(double? logicalPx, double dpr) {
-    if (logicalPx == null || !logicalPx.isFinite || logicalPx <= 0) {
-      return kThumbnailSize;
-    }
-    final px = logicalPx * dpr;
-    if (px <= 300) return 300;
-    if (px <= 450) return 450;
-    return 600;
   }
 
   /// Évite cacheWidth/cacheHeight avec [double.infinity] → crash « infinity to int ».

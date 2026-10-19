@@ -168,6 +168,22 @@ void main() {
       expect(d.hasValue, isFalse);
       expect(d.topValued, isEmpty);
     });
+
+    test('plus-value seulement si prix payé ET valeur marché', () {
+      final d = StatsDashboard.fromRows([
+        _row('1', 'boardgame', price: 19, meta: {
+          'market_secondhand_price': 40,
+        }),
+        _row('2', 'boardgame', meta: {
+          'market_secondhand_price': 1408,
+        }),
+      ], active: active);
+      expect(d.marketTotal, greaterThan(1400));
+      expect(d.paidTotal, 19);
+      expect(d.comparableCopies, 1);
+      expect(d.comparablePaid, 19);
+      expect(d.comparableMarket, 40);
+    });
   });
 
   group('Coût par partie', () {

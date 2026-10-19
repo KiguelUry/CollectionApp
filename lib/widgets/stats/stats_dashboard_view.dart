@@ -158,7 +158,7 @@ class _StatsDashboardViewState extends State<StatsDashboardView> {
       ),
       StatsKpiCard(
         key: const ValueKey('kpi_away'),
-        icon: Icons.local_shipping_outlined,
+        icon: Icons.place_outlined,
         accent: Colors.teal,
         label: 'Hors de chez moi',
         value: '${d.awayCount}',
@@ -449,12 +449,12 @@ class _ValueSection extends StatelessWidget {
               ),
             ],
           ),
-          if (data.paidTotal > 0 && data.marketTotal > 0) ...[
+          if (data.comparableCopies > 0) ...[
             const SizedBox(height: 6),
             Text(
-              data.marketTotal >= data.paidTotal
-                  ? 'Valeur marché supérieure de ${formatEuroAmount(data.marketTotal - data.paidTotal)} à ce que tu as payé (tous jeux confondus).'
-                  : 'Valeur marché inférieure de ${formatEuroAmount(data.paidTotal - data.marketTotal)} à ce que tu as payé (tous jeux confondus).',
+              data.comparableMarket >= data.comparablePaid
+                  ? 'Plus-value de ${formatEuroAmount(data.comparableMarket - data.comparablePaid)} sur ${data.comparableCopies} exemplaire${data.comparableCopies > 1 ? 's' : ''} qui ont un prix payé et une valeur marché.'
+                  : 'Moins-value de ${formatEuroAmount(data.comparablePaid - data.comparableMarket)} sur ${data.comparableCopies} exemplaire${data.comparableCopies > 1 ? 's' : ''} qui ont un prix payé et une valeur marché.',
               style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
             ),
           ],

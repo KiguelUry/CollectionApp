@@ -1,3 +1,4 @@
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/activity_event.dart';
@@ -73,6 +74,35 @@ class ActivityService {
       'actor_id': userId,
       'event_type': 'trophies_updated',
     });
+  }
+
+  /// Un ami identifié a modifié une partie dont je suis le propriétaire.
+  /// Regroupé sur 15 minutes par objet pour éviter le spam.
+  Future<void> logPlayEdited({
+    required String itemId,
+    required String? ownerId,
+    required String itemTitle,
+  }) async {
+    final me = _client.auth.currentUser?.id;
+    if (me == null || ownerId == null || ownerId.isEmpty || me == ownerId) {
+      return;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final key = 'play_edit_notify_$itemId';
+    final last = prefs.getInt(key) ?? 0;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - last < const Duration(minutes: 15).inMilliseconds) return;
+    await prefs.setInt(key, now);
+    try {
+      await _client.from('activity_events').insert({
+        'actor_id': me,
+        'event_type': 'play_edited',
+        'item_id': itemId,
+        'payload': {'title': itemTitle},
+      });
+    } catch (_) {
+      await prefs.remove(key);
+    }
   }
 
   Future<List<ActivityEvent>> fetchFriendsFeed({int limit = 40}) async {

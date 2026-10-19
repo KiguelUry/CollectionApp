@@ -4,15 +4,15 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('gridThumbnailUrl', () {
-    test('BGG : passe par wsrv.nl en JPEG 300 px', () {
+    test('BGG : passe par wsrv.nl en WebP 260 px', () {
       const src =
           'https://cf.geekdo-images.com/abc/fit-in/500x500/filters:no_upscale()/pic1.jpg';
       final out = gridThumbnailUrl(src);
       final uri = Uri.parse(out);
       expect(uri.host, 'wsrv.nl');
-      expect(uri.queryParameters['w'], '300');
-      expect(uri.queryParameters['h'], '300');
-      expect(uri.queryParameters['output'], 'jpg');
+      expect(uri.queryParameters['w'], '260');
+      expect(uri.queryParameters['h'], '260');
+      expect(uri.queryParameters['output'], 'webp');
       expect(uri.queryParameters['q'], '80');
       expect(uri.queryParameters['fit'], 'inside');
       expect(uri.queryParameters['url'], contains('/fit-in/320x320/'));
