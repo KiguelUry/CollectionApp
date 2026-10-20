@@ -507,9 +507,12 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
           ),
         ],
       ),
-      body: _loading
+      body: _loading &&
+              _collectionItems.isEmpty &&
+              _pantheonIds.isEmpty &&
+              !(_mine && OwnProfilePanel.memory != null)
           ? const Center(child: CircularProgressIndicator())
-          : _error != null
+          : _error != null && _collectionItems.isEmpty && _pantheonIds.isEmpty
               ? Center(child: Text(_error!))
               : _buildProfile(),
     );
@@ -623,6 +626,14 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
       ranked: _pantheonItems(),
       editable: _mine,
       slotCount: _visiblePantheonSlots,
+      onOpenItem: (item) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ItemDetailScreen(item: item),
+          ),
+        );
+      },
       onAutoFill: _mine && _pantheonIds.every((id) => id.isEmpty)
           ? () {
               _savePantheon(

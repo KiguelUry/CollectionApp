@@ -16,7 +16,7 @@ import '../../utils/bgg_text.dart';
 import '../../widgets/app_app_bar.dart';
 import '../../widgets/collection_cover_image.dart';
 
-enum _DiscoverMode { forYou, recent, hot, era, table }
+enum _DiscoverMode { forYou, recent, hot, upcoming, era, table }
 
 class _Seed {
   final String id;
@@ -87,7 +87,17 @@ const _popular = <_Seed>[
   _Seed('181304', 'One Night Ultimate Werewolf', ['Party'], yearHint: 2014),
   _Seed('217372', 'The Mind', ['Party', 'Cooperative'], yearHint: 2017),
   _Seed('254188', 'Mind MGMT', ['Deduction', 'Strategy'], yearHint: 2021),
-  _Seed('318184', 'Everdell', ['Strategy', 'Family'], yearHint: 2018),
+  // Sorties / annonces récentes (ids BGG exacts — image via /thing?id= uniquement).
+  _Seed('420433', 'Final Girl: Frightmare on Maple Lane', ['Cooperative'], yearHint: 2025),
+  _Seed('420546', 'Vantage', ['Adventure', 'Exploration'], yearHint: 2025),
+  _Seed('367521', 'Bomb Busters', ['Deduction', 'Family'], yearHint: 2025),
+  _Seed('416851', 'Finspan', ['Family'], yearHint: 2025),
+  _Seed('436189', 'Fromage', ['Strategy'], yearHint: 2025),
+  _Seed('413245', 'Seti: Search for Extraterrestrial Intelligence', ['Strategy'], yearHint: 2025),
+  _Seed('428097', 'Keep the Heroes Out!', ['Cooperative'], yearHint: 2025),
+  _Seed('428530', 'The Elder Scrolls: Betrayal of the Second Era', ['Adventure'], yearHint: 2025),
+  _Seed('421236', 'Seas of Strife', ['Strategy'], yearHint: 2026),
+  _Seed('439422', 'Captain Flip', ['Family'], yearHint: 2026),
   _Seed('328871', 'Terraforming Mars: Ares Expedition', ['Card Game', 'Strategy'], yearHint: 2021),
   _Seed('350184', 'Earth', ['Strategy'], yearHint: 2023),
   _Seed('342640', 'Marvel Champions: The Card Game', ['Card Game', 'Cooperative'], yearHint: 2019),
@@ -219,8 +229,12 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
 
   Future<void> _hydrateUpTo(int count) async {
     final gen = ++_hydrateGen;
+    // Image exclusivement via bgg_id exact (/thing?id=) — jamais par titre.
     final ids = _source.take(count).map((s) => s.id).where((id) {
-      return _details[id] == null;
+      final d = _details[id];
+      if (d == null) return true;
+      final img = d['image_url']?.toString() ?? '';
+      return img.isEmpty;
     }).toList();
     const width = 4;
     for (var i = 0; i < ids.length; i += width) {
@@ -229,7 +243,15 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
       await Future.wait(slice.map((id) async {
         final details = await BggService.getGameFullDetails(id);
         if (details == null || !mounted || gen != _hydrateGen) return;
-        setState(() => _details[id] = details);
+        final image = details['image_url']?.toString() ?? '';
+        // Refuse toute image sans bgg_id clairement rattaché.
+        setState(() {
+          _details[id] = {
+            ...details,
+            if (image.isNotEmpty) 'image_url': image,
+            'bgg_id': id,
+          };
+        });
       }));
     }
   }
@@ -307,6 +329,10 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
         if (year == null || year < newest) return false;
         if (rating != null && rating < 6.8) return false;
         return true;
+      case _DiscoverMode.upcoming:
+        // Année réelle BGG si connue, sinon yearHint du seed.
+        if (year == null) return false;
+        return year >= 2025 && year <= 2027;
       case _DiscoverMode.era:
         if (year == null) return false;
         return year >= _eraFrom && year <= _eraTo;
@@ -337,6 +363,13 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
       list = List<_Seed>.from(_order);
     } else if (_mode == _DiscoverMode.hot) {
       list = List<_Seed>.from(_hot);
+    } else if (_mode == _DiscoverMode.upcoming) {
+      list = _pool.where(_matches).toList();
+      list.sort((a, b) {
+        final ay = _asInt(_details[a.id]?['year_published']) ?? a.yearHint ?? 0;
+        final by = _asInt(_details[b.id]?['year_published']) ?? b.yearHint ?? 0;
+        return ay.compareTo(by);
+      });
     } else {
       list = _pool.where(_matches).toList();
       list.sort((a, b) {
@@ -370,9 +403,10 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
         final title = map['title'] ?? '';
         if (id.isEmpty || title.isEmpty) continue;
         seeds.add(_Seed(id, title, const []));
+        // Pas d'image depuis le hot-list : uniquement via getGameFullDetails(bgg_id).
         _details[id] = {
           ...?_details[id],
-          if (map['image_url'] != null) 'image_url': map['image_url'],
+          'bgg_id': id,
           if (map['year'] != null) 'year_published': int.tryParse(map['year']!),
           if (map['avg_rating'] != null)
             'bgg_avg_rating': double.tryParse(map['avg_rating']!),
@@ -454,7 +488,8 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
             children: [
               _modeChip('Pour toi', _DiscoverMode.forYou),
               _modeChip('🔥 Sorties récentes au top', _DiscoverMode.recent),
-              _modeChip('⏳ Tendances', _DiscoverMode.hot),
+              _modeChip('⏳ Prochaines sorties', _DiscoverMode.upcoming),
+              _modeChip('📈 Tendances', _DiscoverMode.hot),
               _modeChip('🏆 Pépites par époque', _DiscoverMode.era),
               _modeChip('🎯 Pour ma table', _DiscoverMode.table),
               ActionChip(
@@ -802,7 +837,7 @@ class _DiscoverCard extends StatelessWidget {
                             child: const Icon(Icons.casino_outlined),
                           )
                         : CollectionCoverImage(
-                            key: ValueKey(game.imageUrl),
+                            key: ValueKey('discover-${game.bggId}-${game.imageUrl}'),
                             url: game.imageUrl!,
                             boxedCover: true,
                             compact: true,

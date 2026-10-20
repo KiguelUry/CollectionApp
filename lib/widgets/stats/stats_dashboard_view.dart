@@ -548,9 +548,11 @@ class _RankedRow extends StatelessWidget {
       child: Row(
         children: [
           SizedBox(
-            width: 26,
+            width: 44,
             child: Text(
               '#$rank',
+              softWrap: false,
+              maxLines: 1,
               style: TextStyle(
                 fontWeight: FontWeight.w800,
                 color: scheme.onSurfaceVariant,

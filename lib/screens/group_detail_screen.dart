@@ -224,7 +224,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
               PopupMenuItem(
                 value: 'collections',
                 child: ListTile(
-                  leading: const Icon(Icons.grid_view_rounded),
+                  leading: const Icon(Icons.home_rounded),
                   title: const Text('Collections'),
                   contentPadding: EdgeInsets.zero,
                   visualDensity: VisualDensity.compact,

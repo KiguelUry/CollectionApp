@@ -42,7 +42,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       final json = await AccountExportService().exportAsJsonString();
       if (!mounted) return;
-      await Share.share(json, subject: 'Export Collectingo');
+      await Share.share(json, subject: 'Export Paloma');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Export JSON prêt à enregistrer ou partager')),
       );

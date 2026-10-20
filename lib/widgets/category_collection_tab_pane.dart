@@ -27,7 +27,7 @@ import 'collection_item_list_tile.dart';
 import 'collection_item_tile.dart';
 import 'cover_preview_sheet.dart';
 import 'wishlist_suggestions_banner.dart';
-import 'bulk_group_assign_sheet.dart';
+import 'bulk_selection_actions_sheet.dart';
 
 /// Onglet Collection ou Wishlist isolé (filtres locaux → moins de rebuilds).
 class CategoryCollectionTabPane extends StatefulWidget {
@@ -112,12 +112,6 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
   final Map<String, GlobalKey> _tileKeys = {};
   String? _highlightItemId;
   Timer? _highlightTimer;
-  Offset? _marqueePointerDown;
-  Offset? _marqueeCurrent;
-  bool _marqueeDragging = false;
-  Set<String> _marqueeBaseSelection = {};
-  DateTime? _lastMarqueeSetState;
-  static const _marqueeThrottle = Duration(milliseconds: 32);
 
   /// Cache filtre / options dérivées (évite le recalcul à chaque rebuild scroll).
   List<CollectionItem>? _cachedFiltered;
@@ -231,9 +225,6 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
       _selectionMode = false;
       _selectedIds.clear();
       _tileKeys.clear();
-      _marqueePointerDown = null;
-      _marqueeCurrent = null;
-      _marqueeDragging = false;
     });
   }
 
@@ -253,87 +244,23 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
     }
   }
 
-  Rect? get _marqueeRect {
-    if (_marqueePointerDown == null || _marqueeCurrent == null) return null;
-    return Rect.fromPoints(_marqueePointerDown!, _marqueeCurrent!);
-  }
-
-  Set<String> _itemIdsInMarquee(Rect rect) {
-    final ids = <String>{};
-    for (final entry in _tileKeys.entries) {
-      final ctx = entry.value.currentContext;
-      if (ctx == null) continue;
-      final box = ctx.findRenderObject() as RenderBox?;
-      if (box == null || !box.hasSize) continue;
-      final topLeft = box.localToGlobal(Offset.zero);
-      final tileRect = topLeft & box.size;
-      if (rect.overlaps(tileRect)) ids.add(entry.key);
-    }
-    return ids;
-  }
-
-  void _onSelectionPointerDown(PointerDownEvent event) {
-    if (!_selectionMode) return;
-    _marqueePointerDown = event.position;
-    _marqueeCurrent = event.position;
-    _marqueeDragging = false;
-    _marqueeBaseSelection = Set<String>.from(_selectedIds);
-  }
-
-  void _onSelectionPointerMove(PointerMoveEvent event) {
-    if (!_selectionMode || _marqueePointerDown == null) return;
-    if (!_marqueeDragging &&
-        (event.position - _marqueePointerDown!).distance > 10) {
-      _marqueeDragging = true;
-    }
-    if (!_marqueeDragging) return;
-    final now = DateTime.now();
-    final last = _lastMarqueeSetState;
-    if (last != null && now.difference(last) < _marqueeThrottle) {
-      _marqueeCurrent = event.position;
-      return;
-    }
-    _lastMarqueeSetState = now;
-    final rect = Rect.fromPoints(_marqueePointerDown!, event.position);
-    final inRect = _itemIdsInMarquee(rect);
-    setState(() {
-      _marqueeCurrent = event.position;
-      _selectedIds
-        ..clear()
-        ..addAll(_marqueeBaseSelection)
-        ..addAll(inRect);
-    });
-  }
-
-  void _onSelectionPointerUp(PointerEvent event) {
-    _onSelectionPointerEnd();
-  }
-
-  void _onSelectionPointerEnd() {
-    if (!_selectionMode) return;
-    setState(() {
-      _marqueePointerDown = null;
-      _marqueeCurrent = null;
-      _marqueeDragging = false;
-    });
-  }
-
   List<CollectionItem> _selectedItems(List<CollectionItem> filtered) =>
       filtered.where((i) => _selectedIds.contains(i.id)).toList();
 
-  Future<void> _manageSelectedGroups(List<CollectionItem> filtered) async {
+  Future<void> _openBulkActions(List<CollectionItem> filtered) async {
     final selected = _selectedItems(filtered);
     if (selected.isEmpty) return;
-    final ok = await showBulkGroupManageSheet(
+    final action = await showBulkSelectionActionsSheet(
       context,
-      items: selected,
+      selected: selected,
       groups: widget.boardgameGroups,
       groupActivityCounts: widget.groupActivityCounts,
+      onDelete: (_) => _bulkDeleteSelected(filtered),
     );
-    if (ok && mounted) {
-      _exitSelectionMode();
-      await widget.onReload();
-    }
+    if (!mounted || action == null) return;
+    if (action == BulkSelectionAction.delete) return;
+    _exitSelectionMode();
+    await widget.onReload();
   }
 
   Future<void> _bulkDeleteSelected(List<CollectionItem> filtered) async {
@@ -379,20 +306,44 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
 
   Widget? _buildBulkSelectionBar(List<CollectionItem> filtered) {
     if (!widget.enableBulkSelection) return null;
-    final hasGroups = widget.boardgameGroups.isNotEmpty;
     final allSelected =
         filtered.isNotEmpty &&
         filtered.every((i) => _selectedIds.contains(i.id));
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
-      child: Row(
-        children: [
-          if (_selectionMode) ...[
-            TextButton(
-              onPressed: _exitSelectionMode,
-              child: const Text('Annuler'),
+    if (!_selectionMode) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => setState(() => _selectionMode = true),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.primary,
             ),
-            if (filtered.isNotEmpty)
+            icon: const Icon(Icons.checklist_rounded, size: 18),
+            label: const Text('Sélection multiple'),
+          ),
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '${_selectedIds.length} sélectionné${_selectedIds.length > 1 ? 's' : ''}',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.grey.shade800,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.1,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
               TextButton(
                 onPressed: () => setState(() {
                   if (allSelected) {
@@ -403,48 +354,19 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
                 }),
                 child: Text(allSelected ? 'Tout désél.' : 'Tout sélect.'),
               ),
-            Expanded(
-              child: Text(
-                '${_selectedIds.length} sélectionné${_selectedIds.length > 1 ? 's' : ''}',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey.shade700,
-                  fontWeight: FontWeight.w600,
-                ),
-                overflow: TextOverflow.ellipsis,
+              TextButton(
+                onPressed: _exitSelectionMode,
+                child: const Text('✕ Annuler'),
               ),
-            ),
-            if (hasGroups)
-              IconButton(
-                tooltip: 'Groupes',
-                onPressed: _selectedIds.isEmpty
-                    ? null
-                    : () => _manageSelectedGroups(filtered),
-                icon: const Icon(Icons.groups_outlined, size: 22),
-              ),
-            IconButton(
-              tooltip: 'Supprimer',
-              onPressed: _selectedIds.isEmpty
-                  ? null
-                  : () => _bulkDeleteSelected(filtered),
-              icon: Icon(
-                Icons.delete_outline,
-                size: 22,
-                color: Colors.red.shade700,
-              ),
-            ),
-          ] else
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: () => setState(() => _selectionMode = true),
-                style: TextButton.styleFrom(
-                  foregroundColor: Theme.of(context).colorScheme.primary,
-                ),
-                icon: const Icon(Icons.checklist_rounded, size: 18),
-                label: const Text('Sélection multiple'),
-              ),
-            ),
+            ],
+          ),
+          FilledButton.tonalIcon(
+            onPressed: _selectedIds.isEmpty
+                ? null
+                : () => _openBulkActions(filtered),
+            icon: const Icon(Icons.bolt_rounded, size: 18),
+            label: const Text('Actions groupées'),
+          ),
         ],
       ),
     );
@@ -587,41 +509,6 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
     return _wrapSelectable(keyed, item.id);
   }
 
-  Widget _withMarqueeOverlay(Widget child) {
-    if (!_selectionMode) return child;
-    return Stack(
-      children: [
-        Listener(
-          behavior: HitTestBehavior.translucent,
-          onPointerDown: _onSelectionPointerDown,
-          onPointerMove: _onSelectionPointerMove,
-          onPointerUp: _onSelectionPointerUp,
-          onPointerCancel: _onSelectionPointerUp,
-          child: child,
-        ),
-        if (_marqueeRect case final rect?)
-          Positioned.fill(
-            child: Builder(
-              builder: (context) {
-                final box = context.findRenderObject() as RenderBox?;
-                if (box == null) return const SizedBox.shrink();
-                final localRect = Rect.fromPoints(
-                  box.globalToLocal(rect.topLeft),
-                  box.globalToLocal(rect.bottomRight),
-                );
-                return IgnorePointer(
-                  child: CustomPaint(
-                    size: box.size,
-                    painter: _MarqueePainter(rect: localRect),
-                  ),
-                );
-              },
-            ),
-          ),
-      ],
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -732,60 +619,58 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
         Expanded(
           child: RefreshIndicator(
             onRefresh: widget.onReload,
-            child: _withMarqueeOverlay(
-              CustomScrollView(
-                physics: const AlwaysScrollableScrollPhysics(
-                  parent: ClampingScrollPhysics(),
-                ),
-                cacheExtent: 400,
-                slivers: [
-                  SliverAppBar(
-                    floating: false,
-                    snap: false,
-                    pinned: true,
-                    primary: false,
-                    automaticallyImplyLeading: false,
-                    toolbarHeight: 0,
-                    backgroundColor: Theme.of(
-                      context,
-                    ).colorScheme.surfaceContainerLowest,
-                    elevation: 0,
-                    scrolledUnderElevation: 0,
-                    bottom: PreferredSize(
-                      preferredSize: const Size.fromHeight(64),
-                      child: filterBar,
-                    ),
-                  ),
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 2,
-                      ),
-                      child: Text(
-                        countLabel,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey.shade600,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  ),
-                  if (filtered.isEmpty)
-                    SliverFillRemaining(
-                      hasScrollBody: false,
-                      child: _emptyState(),
-                    )
-                  else if (widget.category == CollectionCategory.media &&
-                      widget.mediaGroupByArtist)
-                    ..._mediaArtistSlivers(filtered)
-                  else if (widget.viewMode == CollectionViewMode.grid)
-                    _buildGridSliver(filtered)
-                  else
-                    _buildListSliver(filtered),
-                ],
+            child: CustomScrollView(
+              physics: const AlwaysScrollableScrollPhysics(
+                parent: ClampingScrollPhysics(),
               ),
+              cacheExtent: 400,
+              slivers: [
+                SliverAppBar(
+                  floating: false,
+                  snap: false,
+                  pinned: true,
+                  primary: false,
+                  automaticallyImplyLeading: false,
+                  toolbarHeight: 0,
+                  backgroundColor: Theme.of(
+                    context,
+                  ).colorScheme.surfaceContainerLowest,
+                  elevation: 0,
+                  scrolledUnderElevation: 0,
+                  bottom: PreferredSize(
+                    preferredSize: const Size.fromHeight(64),
+                    child: filterBar,
+                  ),
+                ),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 2,
+                    ),
+                    child: Text(
+                      countLabel,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ),
+                if (filtered.isEmpty)
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: _emptyState(),
+                  )
+                else if (widget.category == CollectionCategory.media &&
+                    widget.mediaGroupByArtist)
+                  ..._mediaArtistSlivers(filtered)
+                else if (widget.viewMode == CollectionViewMode.grid)
+                  _buildGridSliver(filtered)
+                else
+                  _buildListSliver(filtered),
+              ],
             ),
           ),
         ),
@@ -943,27 +828,4 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
       ),
     );
   }
-}
-
-class _MarqueePainter extends CustomPainter {
-  final Rect rect;
-
-  _MarqueePainter({required this.rect});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final fill = Paint()
-      ..color = const Color(0x332196F3)
-      ..style = PaintingStyle.fill;
-    final border = Paint()
-      ..color = const Color(0xFF2196F3)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
-    canvas.drawRect(rect, fill);
-    canvas.drawRect(rect, border);
-  }
-
-  @override
-  bool shouldRepaint(covariant _MarqueePainter oldDelegate) =>
-      oldDelegate.rect != rect;
 }

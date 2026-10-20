@@ -29,6 +29,8 @@ import '../utils/active_categories.dart';
 import '../utils/hub_owned_count.dart';
 import '../utils/hub_category_visibility.dart';
 import '../utils/hub_greeting.dart';
+import '../services/offline_mode.dart';
+import '../widgets/offline_banner.dart';
 import '../widgets/onboarding/onboarding_flow.dart';
 import '../services/profile_cache_service.dart';
 import '../widgets/notifications/notification_bell.dart';
@@ -64,6 +66,12 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
   void initState() {
     super.initState();
     ProfileCacheService.instance.addListener(_onProfileCacheChanged);
+    _grammar = HubGreetingSession.grammar ?? GrammarGender.masculine;
+    _greeting = HubGreetingSession.ensure(
+      username: _username,
+      grammarOverride: _grammar,
+    );
+    unawaited(_seedGrammarFromPrefs());
     final snap = _HubSnapshot.current;
     if (snap != null) {
       _counts = snap.counts;
@@ -77,6 +85,19 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
       _loadingCounts = false;
     }
     _load(silent: snap != null);
+  }
+
+  Future<void> _seedGrammarFromPrefs() async {
+    final g = await loadGrammarGender();
+    if (!mounted) return;
+    _grammar = g;
+    // Ne re-tire pas le surnom : on met juste à jour le pseudo si besoin.
+    setState(() {
+      _greeting = HubGreetingSession.ensure(
+        username: _username,
+        grammarOverride: g,
+      );
+    });
   }
 
   @override
@@ -98,27 +119,27 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
 
   @override
   void didPopNext() {
-    _rollGreeting();
+    if (mounted) {
+      setState(() {
+        _greeting = HubGreetingSession.ensure(
+          username: _username,
+          grammarOverride: _grammar,
+        );
+      });
+    }
     _load(silent: true);
   }
 
   GrammarGender _grammar = GrammarGender.masculine;
 
-  Future<void> _rollGreeting() async {
-    if (!mounted) return;
-    _grammar = await loadGrammarGender();
+  void _onProfileCacheChanged() {
     if (!mounted) return;
     setState(() {
-      _greeting = pickHubGreeting(
+      _greeting = HubGreetingSession.ensure(
         username: _username,
-        previous: _greeting?.name,
-        grammar: _grammar,
+        grammarOverride: _grammar,
       );
     });
-  }
-
-  void _onProfileCacheChanged() {
-    if (mounted) setState(() {});
   }
 
   String get _username =>
@@ -239,6 +260,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
       ).length;
     } catch (e) {
       loadError = e.toString();
+      OfflineMode.instance.markIfNetworkError(e);
     }
 
     if (loadError != null && _orderedTiles.isNotEmpty) {
@@ -253,7 +275,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
           ProfileCacheService.instance.apply(cached, itemCount: ownedTotal),
         );
       }
-      _grammar = await loadGrammarGender();
+      _grammar = HubGreetingSession.grammar ?? await loadGrammarGender();
       if (!mounted) return;
       setState(() {
         _counts = counts;
@@ -265,10 +287,9 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
         _orderedTiles = orderedTiles;
         if (loadError == null) _ownedShown = ownedTotal;
         _loadingCounts = false;
-        _greeting = pickHubGreeting(
+        _greeting = HubGreetingSession.ensure(
           username: _username,
-          previous: _greeting?.name,
-          grammar: _grammar,
+          grammarOverride: _grammar,
         );
       });
       if (loadError == null) {
@@ -490,6 +511,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            const OfflineBanner(),
             Container(
               width: double.infinity,
               padding: const EdgeInsets.fromLTRB(20, 8, 12, 12),

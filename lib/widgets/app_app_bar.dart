@@ -49,8 +49,8 @@ class AppAppBar extends StatelessWidget implements PreferredSizeWidget {
       actions: [
         if (showCollectionsHome && !onCollections)
           IconButton(
-            icon: const Icon(Icons.grid_view_rounded),
-            tooltip: 'Collections',
+            icon: const Icon(Icons.home_rounded),
+            tooltip: 'Accueil',
             onPressed: () => AppNavigation.openCollections(context),
           ),
         ...?actions,

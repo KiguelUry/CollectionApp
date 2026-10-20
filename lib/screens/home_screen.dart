@@ -63,6 +63,8 @@ import '../services/videogame_catalog_service.dart';
 import 'boardgame/boardgame_discover_screen.dart';
 import '../widgets/watch_quick_search_sheet.dart';
 import '../services/collection_local_cache.dart';
+import '../services/offline_mode.dart';
+import '../widgets/offline_banner.dart';
 import '../utils/catalog_hit_metadata.dart';
 import '../widgets/book_subcategory_picker.dart';
 import '../widgets/catalog_search_sheet.dart';
@@ -317,8 +319,11 @@ class _HomeScreenState extends State<HomeScreen>
       _syncedFromDb = true;
       final scoped = _filterAndScopeRows(rows);
       CollectionLocalCache.write(_userId, _cacheScope, scoped);
+      OfflineMode.instance.setOnline();
       _onItemRows(scoped);
-    } catch (_) {
+    } catch (e) {
+      OfflineMode.instance.markIfNetworkError(e);
+      if (!_syncedFromDb) await _restoreFromDiskCache();
       if (mounted) setState(() => _itemsLoading = false);
     }
   }
@@ -1466,44 +1471,52 @@ class _HomeScreenState extends State<HomeScreen>
         child: const Icon(Icons.add_rounded),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-      body: NestedScrollView(
-        floatHeaderSlivers: false,
-        headerSliverBuilder: (context, innerBoxIsScrolled) {
-          return [
-            SliverAppBar(
-              floating: false,
-              snap: false,
-              pinned: true,
-              primary: true,
-              forceElevated: innerBoxIsScrolled,
-              automaticallyImplyLeading: false,
-              backgroundColor: _accentColor,
-              elevation: 0,
-              scrolledUnderElevation: 0,
-              toolbarHeight: 0,
-              bottom: PreferredSize(
-                preferredSize: Size.fromHeight(
-                  _headerPreferredHeight(
-                    context,
-                    compact: innerBoxIsScrolled,
+      body: Column(
+        children: [
+          const OfflineBanner(),
+          Expanded(
+            child: NestedScrollView(
+              floatHeaderSlivers: false,
+              headerSliverBuilder: (context, innerBoxIsScrolled) {
+                return [
+                  SliverAppBar(
+                    floating: false,
+                    snap: false,
+                    pinned: true,
+                    // primary:false — le SafeArea du header gère déjà le notch.
+                    primary: false,
+                    forceElevated: innerBoxIsScrolled,
+                    automaticallyImplyLeading: false,
+                    backgroundColor: _accentColor,
+                    elevation: 0,
+                    scrolledUnderElevation: 0,
+                    toolbarHeight: 0,
+                    bottom: PreferredSize(
+                      preferredSize: Size.fromHeight(
+                        _headerPreferredHeight(
+                          context,
+                          compact: innerBoxIsScrolled,
+                        ),
+                      ),
+                      child: CategoryCollectionHeader(
+                        category: widget.category,
+                        title: title,
+                        tabController: _tabController,
+                        accentOverride: widget.accentOverride,
+                        quickActions: _quickActions(),
+                        extraActions: _headerActions,
+                        compactActions: innerBoxIsScrolled,
+                      ),
+                    ),
                   ),
-                ),
-                child: CategoryCollectionHeader(
-                  category: widget.category,
-                  title: title,
-                  tabController: _tabController,
-                  accentOverride: widget.accentOverride,
-                  quickActions: _quickActions(),
-                  extraActions: _headerActions,
-                  compactActions: innerBoxIsScrolled,
-                ),
-              ),
+                ];
+              },
+              body: _itemsLoading && _enrichedItems == null
+                  ? const Center(child: CircularProgressIndicator())
+                  : _buildCollectionTabs(),
             ),
-          ];
-        },
-        body: _itemsLoading && _enrichedItems == null
-            ? const Center(child: CircularProgressIndicator())
-            : _buildCollectionTabs(),
+          ),
+        ],
       ),
     );
   }

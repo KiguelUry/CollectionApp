@@ -63,7 +63,7 @@ class CollectionShareService {
 
     final buf = StringBuffer();
     buf.writeln('Collection de $name');
-    buf.writeln('Liste du ${_formatDate(now)} — Collectingo');
+    buf.writeln('Liste du ${_formatDate(now)} — Paloma');
     buf.writeln('');
 
     if (owned.isEmpty) {
@@ -104,7 +104,7 @@ class CollectionShareService {
 
     buf.writeln('—');
     buf.writeln(
-      'Partagé depuis Collectingo. '
+      'Partagé depuis Paloma. '
       'Pour voir la collection en direct dans l\'app, ajoute-moi en ami.',
     );
     return buf.toString();
@@ -177,11 +177,11 @@ class CollectionShareService {
 </head>
 <body>
   <h1>Collection de ${_escape(name)}</h1>
-  <p class="date">Liste du $date — Collectingo</p>
+  <p class="date">Liste du $date — Paloma</p>
   $ownedBlock
   $wishBlock
   <footer>
-    Export Collectingo. Pour la version interactive dans l'app, ajoute-moi en ami.
+    Export Paloma. Pour la version interactive dans l'app, ajoute-moi en ami.
   </footer>
 </body>
 </html>''';

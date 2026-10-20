@@ -179,19 +179,46 @@ HubGreeting pickHubGreeting({
   return HubGreeting(name: name, source: HubGreetingSource.title);
 }
 
+/// Salutation du hub stable pour toute la session (ne re-tire pas au rechargement).
+class HubGreetingSession {
+  static HubGreeting? greeting;
+  static GrammarGender? grammar;
+
+  static HubGreeting ensure({
+    required String username,
+    GrammarGender? grammarOverride,
+  }) {
+    final g = grammarOverride ?? grammar ?? GrammarGender.masculine;
+    grammar = g;
+    final current = greeting;
+    if (current != null) {
+      if (current.source == HubGreetingSource.pseudo &&
+          current.name != username) {
+        greeting = HubGreeting(name: username, source: HubGreetingSource.pseudo);
+      }
+      return greeting!;
+    }
+    greeting = pickHubGreeting(username: username, grammar: g);
+    return greeting!;
+  }
+}
+
 const kGrammarPrefsKey = 'greeting_grammar_v1';
 const kIdentityPrefsKey = 'gender_identity_v1';
 
 Future<GrammarGender> loadGrammarGender() async {
   final prefs = await SharedPreferences.getInstance();
-  return switch (prefs.getString(kGrammarPrefsKey)) {
+  final value = switch (prefs.getString(kGrammarPrefsKey)) {
     'feminine' => GrammarGender.feminine,
     'neutral' => GrammarGender.neutral,
     _ => GrammarGender.masculine,
   };
+  HubGreetingSession.grammar = value;
+  return value;
 }
 
 Future<void> saveGrammarGender(GrammarGender gender) async {
+  HubGreetingSession.grammar = gender;
   final prefs = await SharedPreferences.getInstance();
   await prefs.setString(kGrammarPrefsKey, gender.name);
 }

@@ -131,6 +131,14 @@ class _WishlistTileMetaIconsState extends State<WishlistTileMetaIcons> {
     );
   }
 
+  TextStyle _chipTextStyle(Color color) => TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.1,
+        height: 1.15,
+        color: color,
+      );
+
   Widget _chip({
     IconData? icon,
     required String suffix,
@@ -152,12 +160,7 @@ class _WishlistTileMetaIconsState extends State<WishlistTileMetaIcons> {
               child: Text(
                 suffix,
                 maxLines: 1,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: color,
-                  height: 1,
-                ),
+                style: _chipTextStyle(color),
               ),
             )
           : Row(
@@ -172,24 +175,14 @@ class _WishlistTileMetaIconsState extends State<WishlistTileMetaIcons> {
                     child: Text(
                       suffix,
                       maxLines: 1,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: color,
-                        height: 1,
-                      ),
+                      style: _chipTextStyle(color),
                     ),
                   )
                 : Text(
                     suffix,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: color,
-                      height: 1,
-                    ),
+                    style: _chipTextStyle(color),
                   ),
           ),
         ],

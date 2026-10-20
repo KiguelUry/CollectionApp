@@ -332,6 +332,7 @@ class _AllCollectionScreenState extends State<AllCollectionScreen> {
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: ChoiceChip(
+              showCheckmark: false,
               avatar: const Icon(Icons.all_inbox_rounded, size: 18),
               label: Text('Tout · ${items.length}'),
               selected: selected == null,
@@ -342,6 +343,7 @@ class _AllCollectionScreenState extends State<AllCollectionScreen> {
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: ChoiceChip(
+                showCheckmark: false,
                 avatar: Icon(
                   f.icon,
                   size: 18,

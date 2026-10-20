@@ -88,6 +88,6 @@ String formatGameNightShareText({
   if (inviteLink != null && inviteLink.isNotEmpty) {
     buf.writeln('\nRejoins-nous : $inviteLink');
   }
-  buf.writeln('\n— via Collectingo');
+  buf.writeln('\n— via Paloma');
   return buf.toString().trim();
 }

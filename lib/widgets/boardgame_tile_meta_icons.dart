@@ -182,90 +182,125 @@ class BoardgameTileMetaIcons extends StatelessWidget {
         (item.parentGameId != null && item.parentGameId!.isNotEmpty) ||
         item.metadata?['bgg_is_expansion'] == true;
 
+    final narrow = MediaQuery.sizeOf(context).width < 600;
+
+    Widget quantityChip() => GestureDetector(
+          onTap: () => _showQuantitySheet(context),
+          behavior: HitTestBehavior.opaque,
+          child: _metaChip(
+            icon: Icons.layers_outlined,
+            suffix: '$ownedQuantity',
+            color: Colors.lightBlue.shade600,
+          ),
+        );
+
+    Widget valueChip() => GestureDetector(
+          onTap: () => _showValueSheet(context),
+          behavior: HitTestBehavior.opaque,
+          child: _metaChip(
+            suffix: _valueChipLabel,
+            color: Colors.teal.shade500,
+            textOnly: true,
+          ),
+        );
+
+    Widget expansionChip() => GestureDetector(
+          onTap: () => _openExpansionContext(context),
+          behavior: HitTestBehavior.opaque,
+          child: _metaChip(
+            icon: isExpansionTile
+                ? Icons.subdirectory_arrow_right
+                : Icons.extension_outlined,
+            suffix: isExpansionTile ? 'Ext' : '$expansionCount',
+            color: isExpansionTile
+                ? Colors.deepPurple.shade500
+                : Colors.green.shade600,
+          ),
+        );
+
+    Widget locationChip() => GestureDetector(
+          onTap: () => _showLocationSheet(context),
+          behavior: HitTestBehavior.opaque,
+          child: _metaChip(
+            key: item.isOnLoan ? const ValueKey('loan_location_chip') : null,
+            icon: item.isOnLoan
+                ? Icons.handshake_outlined
+                : Icons.place_outlined,
+            suffix: location ?? '—',
+            color: item.isOnLoan
+                ? Colors.blue.shade600
+                : Colors.deepOrange.shade400,
+            groupCount: groupCount,
+          ),
+        );
+
+    Widget ratingChip() => GestureDetector(
+          onTap: () => _showRatingSheet(context),
+          behavior: HitTestBehavior.opaque,
+          child: _metaChip(
+            icon: Icons.star_rounded,
+            suffix: rating ?? '—',
+            color: Colors.amber.shade700,
+            shrinkSuffix: true,
+          ),
+        );
+
+    if (narrow) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(child: quantityChip()),
+              const SizedBox(width: 4),
+              Expanded(child: valueChip()),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Expanded(child: expansionChip()),
+              const SizedBox(width: 4),
+              Expanded(child: ratingChip()),
+            ],
+          ),
+          const SizedBox(height: 4),
+          locationChip(),
+        ],
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           children: [
-            Expanded(
-              child: GestureDetector(
-                onTap: () => _showQuantitySheet(context),
-                behavior: HitTestBehavior.opaque,
-                child: _metaChip(
-                  icon: Icons.layers_outlined,
-                  suffix: '$ownedQuantity',
-                  color: Colors.lightBlue.shade600,
-                ),
-              ),
-            ),
+            Expanded(child: quantityChip()),
             const SizedBox(width: 4),
-            GestureDetector(
-              onTap: () => _showValueSheet(context),
-              behavior: HitTestBehavior.opaque,
-              child: _metaChip(
-                suffix: _valueChipLabel,
-                color: Colors.teal.shade500,
-                textOnly: true,
-              ),
-            ),
+            valueChip(),
             const SizedBox(width: 4),
-            Expanded(
-              child: GestureDetector(
-                onTap: () => _openExpansionContext(context),
-                behavior: HitTestBehavior.opaque,
-                child: _metaChip(
-                  icon: isExpansionTile
-                      ? Icons.subdirectory_arrow_right
-                      : Icons.extension_outlined,
-                  suffix: isExpansionTile ? 'Ext' : '$expansionCount',
-                  color: isExpansionTile
-                      ? Colors.deepPurple.shade500
-                      : Colors.green.shade600,
-                ),
-              ),
-            ),
+            Expanded(child: expansionChip()),
           ],
         ),
         const SizedBox(height: 4),
         Row(
           children: [
-            Expanded(
-              flex: 3,
-              child: GestureDetector(
-                onTap: () => _showLocationSheet(context),
-                behavior: HitTestBehavior.opaque,
-                child: _metaChip(
-                  key: item.isOnLoan ? const ValueKey('loan_location_chip') : null,
-                  icon: item.isOnLoan
-                      ? Icons.handshake_outlined
-                      : Icons.place_outlined,
-                  suffix: location ?? '—',
-                  color: item.isOnLoan
-                      ? Colors.blue.shade600
-                      : Colors.deepOrange.shade400,
-                  groupCount: groupCount,
-                ),
-              ),
-            ),
+            Expanded(flex: 3, child: locationChip()),
             const SizedBox(width: 4),
-            Expanded(
-              flex: 2,
-              child: GestureDetector(
-                onTap: () => _showRatingSheet(context),
-                behavior: HitTestBehavior.opaque,
-                child: _metaChip(
-                  icon: Icons.star_rounded,
-                  suffix: rating ?? '—',
-                  color: Colors.amber.shade700,
-                  shrinkSuffix: true,
-                ),
-              ),
-            ),
+            Expanded(flex: 2, child: ratingChip()),
           ],
         ),
       ],
     );
   }
+
+  TextStyle _chipTextStyle(Color color) => TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.1,
+        height: 1.15,
+        color: color,
+      );
 
   Widget _metaChip({
     Key? key,
@@ -290,12 +325,7 @@ class BoardgameTileMetaIcons extends StatelessWidget {
               child: Text(
                 suffix ?? '',
                 maxLines: 1,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: color,
-                  height: 1,
-                ),
+                style: _chipTextStyle(color),
               ),
             )
           : Row(
@@ -311,24 +341,14 @@ class BoardgameTileMetaIcons extends StatelessWidget {
                       child: Text(
                         suffix,
                         maxLines: 1,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: color,
-                          height: 1,
-                        ),
+                        style: _chipTextStyle(color),
                       ),
                     )
                   : Text(
                       suffix,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: color,
-                        height: 1,
-                      ),
+                      style: _chipTextStyle(color),
                     ),
             ),
           ],
@@ -336,12 +356,7 @@ class BoardgameTileMetaIcons extends StatelessWidget {
             Icon(Icons.group, size: 13, color: Colors.teal.shade600),
             Text(
               '$groupCount',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: Colors.teal.shade600,
-                height: 1,
-              ),
+              style: _chipTextStyle(Colors.teal.shade600),
             ),
           ],
         ],

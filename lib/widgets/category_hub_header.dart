@@ -54,8 +54,8 @@ class CategoryHubHeader extends StatelessWidget {
                   ),
                   if (!AppNavigation.isOnCollectionsHome(context))
                     IconButton(
-                      tooltip: 'Collections',
-                      icon: Icon(Icons.grid_view_rounded, color: onAccent),
+                      tooltip: 'Accueil',
+                      icon: Icon(Icons.home_rounded, color: onAccent),
                       onPressed: () => AppNavigation.openCollections(context),
                     ),
                   ...?trailingActions,

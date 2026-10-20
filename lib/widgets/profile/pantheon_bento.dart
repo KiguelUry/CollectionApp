@@ -13,6 +13,7 @@ class PantheonBento extends StatelessWidget {
   final ValueChanged<int>? onEditSlot;
   final ValueChanged<int>? onRemove;
   final void Function(int oldIndex, int newIndex)? onReorder;
+  final ValueChanged<CollectionItem>? onOpenItem;
 
   const PantheonBento({
     super.key,
@@ -23,6 +24,7 @@ class PantheonBento extends StatelessWidget {
     this.onEditSlot,
     this.onRemove,
     this.onReorder,
+    this.onOpenItem,
   });
 
   @override
@@ -158,9 +160,13 @@ class PantheonBento extends StatelessWidget {
             borderRadius: BorderRadius.circular(12),
             clipBehavior: Clip.antiAlias,
             child: InkWell(
-              onTap: editable && onEditSlot != null
-                  ? () => onEditSlot!(index)
-                  : null,
+              onTap: () {
+                if (item != null && onOpenItem != null) {
+                  onOpenItem!(item);
+                } else if (editable && item == null && onEditSlot != null) {
+                  onEditSlot!(index);
+                }
+              },
               child: Stack(
                 fit: StackFit.expand,
                 children: [
@@ -205,6 +211,25 @@ class PantheonBento extends StatelessWidget {
                             ),
                           ),
                         ),
+                      ),
+                    ),
+                  if (editable && item != null && onEditSlot != null)
+                    Positioned(
+                      right: 36,
+                      top: 4,
+                      child: IconButton(
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 28,
+                          minHeight: 28,
+                        ),
+                        style: IconButton.styleFrom(
+                          backgroundColor: Colors.black54,
+                          foregroundColor: Colors.white,
+                        ),
+                        onPressed: () => onEditSlot!(index),
+                        icon: const Icon(Icons.swap_horiz, size: 16),
                       ),
                     ),
                   if (editable && item != null && onRemove != null)

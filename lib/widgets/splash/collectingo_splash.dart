@@ -5,12 +5,12 @@ import 'package:flutter/material.dart';
 import '../../config/app_brand.dart';
 import '../../models/collection_category.dart';
 import '../../theme/app_theme.dart';
-/// Splash Palomnia : icônes de collection en orbite, titre animé.
+/// Splash Paloma : icônes de collection en orbite, titre animé.
 class CollectingoSplash extends StatefulWidget {
   const CollectingoSplash({
     super.key,
     required this.onFinished,
-    this.duration = const Duration(milliseconds: 6200),
+    this.duration = const Duration(milliseconds: 2800),
   });
 
   final VoidCallback onFinished;
@@ -78,23 +78,19 @@ class _CollectingoSplashState extends State<CollectingoSplash>
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
+                    Color.lerp(PalomaBrand.ink, PalomaBrand.dusk, t)!,
                     Color.lerp(
-                      const Color(0xFF0F2027),
-                      const Color(0xFF203A43),
-                      t,
+                      PalomaBrand.violet,
+                      PalomaBrand.blush,
+                      t * 0.45,
                     )!,
                     Color.lerp(
-                      const Color(0xFF2C5364),
-                      const Color(0xFFFF6B6B),
-                      t * 0.55,
-                    )!,
-                    Color.lerp(
-                      const Color(0xFFFFE66D),
-                      const Color(0xFFFFF8E7),
-                      t * 0.85,
+                      const Color(0xFF7E57C2),
+                      PalomaBrand.cream,
+                      t * 0.75,
                     )!,
                   ],
-                  stops: const [0.0, 0.52, 1.0],
+                  stops: const [0.0, 0.55, 1.0],
                 ),
               ),
               child: SafeArea(
@@ -112,7 +108,7 @@ class _CollectingoSplashState extends State<CollectingoSplash>
                           color: Colors.black.withValues(alpha: 0.22),
                           borderRadius: BorderRadius.circular(28),
                           border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.12),
+                            color: Colors.white.withValues(alpha: 0.14),
                           ),
                         ),
                         child: Column(
@@ -138,7 +134,7 @@ class _CollectingoSplashState extends State<CollectingoSplash>
                               child: LinearProgressIndicator(
                                 value: t,
                                 backgroundColor: Colors.white24,
-                                color: Colors.white,
+                                color: PalomaBrand.cream,
                                 borderRadius: BorderRadius.circular(4),
                                 minHeight: 3,
                               ),
@@ -268,12 +264,13 @@ class _CollectingoSplashState extends State<CollectingoSplash>
         child: Stack(
           alignment: Alignment.center,
           children: [
-            Transform.rotate(
-              angle: t * math.pi * 0.25,
-              child: Icon(
-                Icons.casino_rounded,
-                size: 44,
-                color: const Color(0xFF2C5364).withValues(alpha: 0.9),
+            Text(
+              'P',
+              style: TextStyle(
+                fontSize: 42,
+                fontWeight: FontWeight.w800,
+                color: PalomaBrand.violet.withValues(alpha: 0.95),
+                height: 1,
               ),
             ),
             Positioned(
@@ -282,7 +279,7 @@ class _CollectingoSplashState extends State<CollectingoSplash>
               child: Icon(
                 Icons.favorite_rounded,
                 size: 18,
-                color: Colors.pink.shade300,
+                color: PalomaBrand.blush,
               ),
             ),
           ],
@@ -297,16 +294,16 @@ class _CollectingoSplashState extends State<CollectingoSplash>
       offset: Offset(0, slide),
       child: Opacity(
         opacity: ((t - 0.15) / 0.5).clamp(0.0, 1.0),
-        child: ShaderMask(
+          child: ShaderMask(
           shaderCallback: (bounds) => const LinearGradient(
-            colors: [Colors.white, Color(0xFFE1BEE7)],
+            colors: [Colors.white, PalomaBrand.cream, Color(0xFFFFCDD2)],
           ).createShader(bounds),
-          child: Text(
+          child: const Text(
             kAppDisplayName,
             style: TextStyle(
-              fontSize: 42,
+              fontSize: 44,
               fontWeight: FontWeight.w800,
-              letterSpacing: -0.5,
+              letterSpacing: -0.6,
               color: Colors.white,
               height: 1.05,
             ),
