@@ -57,6 +57,7 @@ function titleRelevanceScore(title: string, query: string): number {
 }
 
 function primaryTitle(inner: string): string {
+  // Uniquement dans le fragment <item> fourni (jamais le document entier).
   // 1) <name type="primary" value="…" /> (ordre d'attributs variable).
   const primary = inner.match(
     /<name\b(?=[^>]*\btype="primary")[^>]*\bvalue="([^"]*)"[^>]*\/?>/i,
@@ -68,6 +69,67 @@ function primaryTitle(inner: string): string {
   );
   if (plain?.[1]) return plain[1];
   return "Sans titre";
+}
+
+/** Direct-child image only (évite les <image> des <item> imbriqués versions). */
+function directImage(inner: string): string | undefined {
+  // Coupe les sous-<item> pour ne lire que le corps du nœud courant.
+  const flat = inner.replace(/<item\b[\s\S]*?<\/item>/gi, "");
+  return (
+    flat.match(/<image>([^<]*)<\/image>/i)?.[1]?.trim() ||
+    flat.match(/<thumbnail>([^<]*)<\/thumbnail>/i)?.[1]?.trim() ||
+    undefined
+  );
+}
+
+/**
+ * Extrait les <item> de premier niveau uniquement (profondeur 1).
+ * BGG peut imbriquer des <item> (versions) : un regex non-greedy
+ * `<item>…</item>` décalage alors titres/images entre jeux du batch.
+ */
+function extractTopLevelItems(
+  xml: string,
+): Array<{ id: string; attrs: string; inner: string }> {
+  const out: Array<{ id: string; attrs: string; inner: string }> = [];
+  const tagRe = /<\/?item\b[^>]*\/?>/gi;
+  let depth = 0;
+  let attrs = "";
+  let innerStart = -1;
+  let m: RegExpExecArray | null;
+  while ((m = tagRe.exec(xml)) !== null) {
+    const tag = m[0];
+    const selfClosing = /\/>\s*$/.test(tag);
+    if (tag.startsWith("</")) {
+      if (depth === 1 && innerStart >= 0) {
+        const id = attrs.match(/\bid="(\d+)"/i)?.[1];
+        if (id) {
+          out.push({
+            id,
+            attrs,
+            inner: xml.slice(innerStart, m.index),
+          });
+        }
+        innerStart = -1;
+        attrs = "";
+      }
+      if (depth > 0) depth--;
+      continue;
+    }
+    if (selfClosing) {
+      if (depth === 0) {
+        const a = tag.match(/^<item\b([^>]*)/i)?.[1] ?? "";
+        const id = a.match(/\bid="(\d+)"/i)?.[1];
+        if (id) out.push({ id, attrs: a, inner: "" });
+      }
+      continue;
+    }
+    if (depth === 0) {
+      attrs = tag.match(/^<item\b([^>]*)/i)?.[1] ?? "";
+      innerStart = m.index + tag.length;
+    }
+    depth++;
+  }
+  return out;
 }
 
 function isSearchableType(attrs: string): boolean {
@@ -88,14 +150,8 @@ function exactQueryVariants(query: string): string[] {
 
 function parseSearchItems(xml: string): GameHit[] {
   const out: GameHit[] = [];
-  const re = /<item\b([^>]*)>([\s\S]*?)<\/item>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(xml)) !== null) {
-    const attrs = m[1];
-    const inner = m[2];
+  for (const { id, attrs, inner } of extractTopLevelItems(xml)) {
     if (!isSearchableType(attrs)) continue;
-    const id = attrs.match(/\bid="(\d+)"/i)?.[1];
-    if (!id) continue;
     const type = attrs.match(/\btype="([^"]*)"/i)?.[1] ?? "";
     const year =
       inner.match(/<yearpublished[^>]*value="([^"]*)"/i)?.[1] ?? "";
@@ -109,18 +165,11 @@ function parseSearchItems(xml: string): GameHit[] {
 
 function parseHotItems(xml: string): GameHit[] {
   const out: GameHit[] = [];
-  const re = /<item\b([^>]*)>([\s\S]*?)<\/item>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(xml)) !== null) {
-    const attrs = m[1];
-    const inner = m[2];
-    const id = attrs.match(/\bid="(\d+)"/i)?.[1];
-    if (!id) continue;
+  for (const { id, attrs, inner } of extractTopLevelItems(xml)) {
     const hotRank = attrs.match(/\brank="(\d+)"/i)?.[1] ?? "";
     const year =
       inner.match(/<yearpublished[^>]*value="([^"]*)"/i)?.[1] ?? "";
-    const thumb =
-      inner.match(/<thumbnail>([^<]*)<\/thumbnail>/i)?.[1]?.trim() ?? "";
+    const thumb = directImage(inner) ?? "";
     const hit: GameHit = {
       id,
       title: primaryTitle(inner),
@@ -154,33 +203,30 @@ async function enrichGameHits(hits: GameHit[]): Promise<GameHit[]> {
     }
   }
 
+  // Re-map strictement par id demandé (ordre BGG / index ignorés).
   return hits.map((g) => {
     const m = meta.get(g.id);
     if (!m) return g;
-    const next: GameHit = { ...g };
-    if (m.rank != null && !next.bgg_rank) next.bgg_rank = String(m.rank);
-    if (m.image && !next.image_url) next.image_url = m.image;
-    else if (m.thumbnail && !next.image_url) next.image_url = m.thumbnail;
+    const next: GameHit = { ...g, id: g.id };
+    if (m.rank != null) next.bgg_rank = String(m.rank);
+    if (m.image) next.image_url = m.image;
+    else if (m.thumbnail) next.image_url = m.thumbnail;
     if (m.thumbnail) next.thumbnail_url = m.thumbnail;
-    if (m.title && !next.title) next.title = m.title;
-    if (m.year && !next.year) next.year = m.year;
+    // Titre + image issus du MÊME nœud <item id="…">.
+    if (m.title) next.title = m.title;
+    if (m.year) next.year = m.year;
     if (m.categories?.length) next.bgg_categories = m.categories.join("|");
-    if (m.avgRating != null && !next.avg_rating) {
-      next.avg_rating = m.avgRating.toFixed(1);
-    }
+    if (m.avgRating != null) next.avg_rating = m.avgRating.toFixed(1);
     return next;
   });
 }
 
 function parseThingMeta(xml: string): Map<string, ThingMeta> {
   const out = new Map<string, ThingMeta>();
-  const re = /<item\b([^>]*)>([\s\S]*?)<\/item>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(xml)) !== null) {
-    const id = m[1].match(/\bid="(\d+)"/i)?.[1];
-    if (!id) continue;
-    const inner = m[2];
-    const rankMatch = inner.match(
+  // Dictionnaire indexé par bgg_id — jamais par ordre de réponse BGG.
+  for (const { id, inner } of extractTopLevelItems(xml)) {
+    const flat = inner.replace(/<item\b[\s\S]*?<\/item>/gi, "");
+    const rankMatch = flat.match(
       /<rank[^>]*name="boardgame"[^>]*value="([^"]*)"/i,
     );
     let rank: number | undefined;
@@ -189,28 +235,26 @@ function parseThingMeta(xml: string): Map<string, ThingMeta> {
       const n = parseInt(rawRank, 10);
       if (!Number.isNaN(n)) rank = n;
     }
-    const fullImage =
-      inner.match(/<image>([^<]*)<\/image>/i)?.[1]?.trim();
-    const thumb =
-      inner.match(/<thumbnail>([^<]*)<\/thumbnail>/i)?.[1]?.trim();
+    const fullImage = flat.match(/<image>([^<]*)<\/image>/i)?.[1]?.trim();
+    const thumb = flat.match(/<thumbnail>([^<]*)<\/thumbnail>/i)?.[1]?.trim();
     const year =
-      inner.match(/<yearpublished[^>]*value="([^"]*)"/i)?.[1] ?? "";
+      flat.match(/<yearpublished[^>]*value="([^"]*)"/i)?.[1] ?? "";
     const categories: string[] = [];
     const linkRe = /<link\b([^>]*)\/?>/gi;
     let lm: RegExpExecArray | null;
-    while ((lm = linkRe.exec(inner)) !== null) {
+    while ((lm = linkRe.exec(flat)) !== null) {
       const attrs = lm[1];
       if (!/type="boardgamecategory"/i.test(attrs)) continue;
       const val = attrs.match(/\bvalue="([^"]*)"/i)?.[1];
       if (val) categories.push(val);
     }
-    const avgRaw = inner.match(/<average[^>]*value="([^"]*)"/i)?.[1];
+    const avgRaw = flat.match(/<average[^>]*value="([^"]*)"/i)?.[1];
     const avgRating = avgRaw ? parseFloat(avgRaw) : undefined;
     out.set(id, {
       rank,
       image: fullImage || undefined,
       thumbnail: thumb || undefined,
-      title: primaryTitle(inner),
+      title: primaryTitle(flat),
       ...(year ? { year } : {}),
       ...(categories.length ? { categories } : {}),
       ...(avgRating != null && !Number.isNaN(avgRating) ? { avgRating } : {}),
@@ -220,21 +264,16 @@ function parseThingMeta(xml: string): Map<string, ThingMeta> {
 }
 
 function parseThingItem(xml: string, id: string): Record<string, unknown> | null {
-  const itemRe = new RegExp(
-    `<item\\b[^>]*\\bid="${id}"[^>]*>([\\s\\S]*?)<\\/item>`,
-    "i",
-  );
-  const m = xml.match(itemRe);
-  if (!m) return null;
-  const inner = m[1];
+  const node = extractTopLevelItems(xml).find((it) => it.id === id);
+  if (!node) return null;
+  const inner = node.inner;
+  const flat = inner.replace(/<item\b[\s\S]*?<\/item>/gi, "");
 
-  const image =
-    inner.match(/<image>([^<]*)<\/image>/i)?.[1]?.trim() ??
-    inner.match(/<thumbnail>([^<]*)<\/thumbnail>/i)?.[1]?.trim();
-  const galleryUrls = imageUrlsFromThingXml(inner, image);
+  const image = directImage(inner);
+  const galleryUrls = imageUrlsFromThingXml(flat, image);
 
   const attr = (tag: string): number | undefined => {
-    const v = inner.match(
+    const v = flat.match(
       new RegExp(`<${tag}[^>]*value="([^"]*)"`, "i"),
     )?.[1];
     if (!v) return undefined;
@@ -242,14 +281,14 @@ function parseThingItem(xml: string, id: string): Record<string, unknown> | null
     return Number.isNaN(n) ? undefined : n;
   };
 
-  const categories = linkValues(inner, "boardgamecategory", 12);
-  const designers = linkValues(inner, "boardgamedesigner", 4);
-  const publishers = linkValues(inner, "boardgamepublisher", 3);
+  const categories = linkValues(flat, "boardgamecategory", 12);
+  const designers = linkValues(flat, "boardgamedesigner", 4);
+  const publishers = linkValues(flat, "boardgamepublisher", 3);
 
   const playingTime =
     attr("playingtime") ?? attr("maxplaytime") ?? attr("minplaytime");
 
-  const itemType = inner.match(/\btype="([^"]*)"/i)?.[1];
+  const itemType = node.attrs.match(/\btype="([^"]*)"/i)?.[1];
   const isExpansion = itemType === "boardgameexpansion";
 
   let baseBggId: string | undefined;
@@ -257,13 +296,13 @@ function parseThingItem(xml: string, id: string): Record<string, unknown> | null
   if (isExpansion) {
     const linkRe2 = /<link\b([^>]*)\/?>/gi;
     let lm2: RegExpExecArray | null;
-    while ((lm2 = linkRe2.exec(inner)) !== null) {
-      const attrs = lm2[1];
-      const type = attrs.match(/\btype="([^"]*)"/i)?.[1];
+    while ((lm2 = linkRe2.exec(flat)) !== null) {
+      const a = lm2[1];
+      const type = a.match(/\btype="([^"]*)"/i)?.[1];
       if (type !== "boardgameexpansion") continue;
-      if (!/inbound="true"/i.test(attrs)) continue;
-      const baseId = attrs.match(/\bid="(\d+)"/i)?.[1];
-      const baseName = attrs.match(/\bvalue="([^"]*)"/i)?.[1];
+      if (!/inbound="true"/i.test(a)) continue;
+      const baseId = a.match(/\bid="(\d+)"/i)?.[1];
+      const baseName = a.match(/\bvalue="([^"]*)"/i)?.[1];
       if (baseId) {
         baseBggId = baseId;
         baseTitle = baseName;
@@ -272,14 +311,17 @@ function parseThingItem(xml: string, id: string): Record<string, unknown> | null
     }
   }
 
-  const desc = inner.match(/<description>([\s\S]*?)<\/description>/i)?.[1];
+  const title = primaryTitle(flat);
+  const desc = flat.match(/<description>([\s\S]*?)<\/description>/i)?.[1];
   const cleanDesc = stripHtml(desc);
-  const bestPlayers = parseBestPlayerCount(inner);
-  const avgRaw = inner.match(/<average[^>]*value="([^"]*)"/i)?.[1];
+  const bestPlayers = parseBestPlayerCount(flat);
+  const avgRaw = flat.match(/<average[^>]*value="([^"]*)"/i)?.[1];
   const avgRating = avgRaw ? parseFloat(avgRaw) : undefined;
 
   return {
     bgg_id: id,
+    id,
+    ...(title && title !== "Sans titre" ? { title } : {}),
     ...(image ? { image_url: image } : {}),
     ...(galleryUrls.length ? { bgg_gallery_urls: galleryUrls } : {}),
     ...(attr("yearpublished") != null
@@ -431,10 +473,10 @@ function parseBestPlayerCount(inner: string): number | undefined {
 }
 
 function parseExpansions(xml: string): Array<Record<string, unknown>> {
-  const baseMatch = xml.match(/<item\b[^>]*>([\s\S]*?)<\/item>/i);
-  if (!baseMatch) return [];
+  const top = extractTopLevelItems(xml);
+  if (top.length === 0) return [];
 
-  const baseInner = baseMatch[1];
+  const baseInner = top[0].inner.replace(/<item\b[\s\S]*?<\/item>/gi, "");
   const expansionIds = new Map<string, string>();
   const linkRe = /<link\b([^>]*)\/?>/gi;
   let lm: RegExpExecArray | null;
@@ -451,21 +493,16 @@ function parseExpansions(xml: string): Array<Record<string, unknown>> {
   }
   if (expansionIds.size === 0) return [];
 
-  const expansions: Array<Record<string, unknown>> = [];
-  const re = /<item\b([^>]*)>([\s\S]*?)<\/item>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(xml)) !== null) {
-    const id = m[1].match(/\bid="(\d+)"/i)?.[1];
-    if (!id || !expansionIds.has(id)) continue;
-    const inner = m[2];
-    const image =
-      inner.match(/<image>([^<]*)<\/image>/i)?.[1]?.trim() ??
-      inner.match(/<thumbnail>([^<]*)<\/thumbnail>/i)?.[1]?.trim();
-    const yearRaw = inner.match(
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const { id, inner } of top) {
+    if (!expansionIds.has(id)) continue;
+    const flat = inner.replace(/<item\b[\s\S]*?<\/item>/gi, "");
+    const image = directImage(inner);
+    const yearRaw = flat.match(
       /<yearpublished[^>]*value="([^"]*)"/i,
     )?.[1];
     const year = yearRaw ? parseInt(yearRaw, 10) : undefined;
-    const rankMatch = inner.match(
+    const rankMatch = flat.match(
       /<rank[^>]*name="boardgame"[^>]*value="([^"]*)"/i,
     );
     let bggRank: number | undefined;
@@ -474,17 +511,15 @@ function parseExpansions(xml: string): Array<Record<string, unknown>> {
       const n = parseInt(rawRank, 10);
       if (!Number.isNaN(n)) bggRank = n;
     }
-    const desc = inner.match(/<description>([\s\S]*?)<\/description>/i)?.[1];
+    const desc = flat.match(/<description>([\s\S]*?)<\/description>/i)?.[1];
     const clean = stripHtml(desc);
     const summary = clean.length > 140 ? `${clean.slice(0, 137)}…` : clean;
-    const avgRaw = inner.match(
-      /<average[^>]*value="([^"]*)"/i,
-    )?.[1];
+    const avgRaw = flat.match(/<average[^>]*value="([^"]*)"/i)?.[1];
     const avgRating = avgRaw ? parseFloat(avgRaw) : undefined;
 
-    expansions.push({
+    byId.set(id, {
       bggId: id,
-      title: primaryTitle(inner),
+      title: primaryTitle(flat),
       ...(image ? { imageUrl: image } : {}),
       ...(year != null && !Number.isNaN(year) ? { year } : {}),
       ...(summary ? { summary } : {}),
@@ -494,6 +529,10 @@ function parseExpansions(xml: string): Array<Record<string, unknown>> {
         : {}),
     });
   }
+
+  const expansions = [...expansionIds.keys()]
+    .map((id) => byId.get(id))
+    .filter((row): row is Record<string, unknown> => row != null);
 
   expansions.sort((a, b) => {
     const ra = a.bggRank as number | undefined;
@@ -928,24 +967,21 @@ async function handleExpansions(id: string): Promise<Response> {
 function parseCollectionItems(xml: string): Array<Record<string, unknown>> {
   const out: Array<Record<string, unknown>> = [];
   const seen = new Set<string>();
-  const re = /<item\b([^>]*)>([\s\S]*?)<\/item>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(xml)) !== null) {
-    const attrs = m[1];
-    const inner = m[2];
+  for (const { id: _ignore, attrs, inner } of extractTopLevelItems(xml)) {
     const id = attrs.match(/\bobjectid="(\d+)"/i)?.[1];
     if (!id || seen.has(id)) continue;
     seen.add(id);
+    const flat = inner.replace(/<item\b[\s\S]*?<\/item>/gi, "");
     const subtype = attrs.match(/\bsubtype="([^"]*)"/i)?.[1] ?? "";
     const title =
-      inner.match(/<name[^>]*>([^<]*)<\/name>/i)?.[1]?.trim() || "Sans titre";
+      flat.match(/<name[^>]*>([^<]*)<\/name>/i)?.[1]?.trim() || "Sans titre";
     const year = parseInt(
-      inner.match(/<yearpublished>([^<]*)<\/yearpublished>/i)?.[1] ?? "",
+      flat.match(/<yearpublished>([^<]*)<\/yearpublished>/i)?.[1] ?? "",
       10,
     );
-    const image = inner.match(/<image>([^<]*)<\/image>/i)?.[1]?.trim();
-    const thumb = inner.match(/<thumbnail>([^<]*)<\/thumbnail>/i)?.[1]?.trim();
-    const statsAttrs = inner.match(/<stats\b([^>]*)>/i)?.[1] ?? "";
+    const image = flat.match(/<image>([^<]*)<\/image>/i)?.[1]?.trim();
+    const thumb = flat.match(/<thumbnail>([^<]*)<\/thumbnail>/i)?.[1]?.trim();
+    const statsAttrs = flat.match(/<stats\b([^>]*)>/i)?.[1] ?? "";
     const stat = (name: string): number | undefined => {
       const v = parseInt(
         statsAttrs.match(new RegExp(`\\b${name}="(\\d+)"`, "i"))?.[1] ?? "",

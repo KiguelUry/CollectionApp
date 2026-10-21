@@ -205,33 +205,43 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
       return (d['image_url']?.toString() ?? '').isEmpty;
     }).toList();
     if (need.isEmpty) return;
-    const width = 6;
+    const width = 8;
     for (var i = 0; i < need.length; i += width) {
       if (!mounted) return;
       final slice = need.skip(i).take(width).toList();
       for (final id in slice) {
         _inflightIds.add(id);
       }
-      await Future.wait(slice.map((id) async {
-        try {
-          final details = await BggService.getGameFullDetails(id);
-          if (details == null || !mounted) return;
-          final returned = details['bgg_id']?.toString().trim();
-          if (returned != null && returned.isNotEmpty && returned != id) {
-            return;
-          }
-          final image = details['image_url']?.toString() ?? '';
-          setState(() {
+      try {
+        // Map<bgg_id, details> — jamais zip par index de réponse.
+        final byId = await BggService.fetchThingDetailsByIds(slice);
+        if (!mounted) return;
+        setState(() {
+          for (final id in slice) {
+            final details = byId[id];
+            if (details == null) continue;
+            final returned = details['bgg_id']?.toString().trim() ??
+                details['id']?.toString().trim();
+            if (returned != null && returned.isNotEmpty && returned != id) {
+              continue;
+            }
+            final image = details['image_url']?.toString() ?? '';
+            final title = details['title']?.toString() ?? '';
             _details[id] = {
+              ...?_details[id],
               ...details,
               'bgg_id': id,
+              'id': id,
+              if (title.isNotEmpty) 'title': title,
               if (image.isNotEmpty) 'image_url': image,
             };
-          });
-        } finally {
+          }
+        });
+      } finally {
+        for (final id in slice) {
           _inflightIds.remove(id);
         }
-      }));
+      }
     }
   }
 
@@ -485,12 +495,13 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
   }
 
   BggCatalogGame _game(_Seed seed) {
-    // Une seule source : _details[seed.id] (jamais un autre index).
+    // Une seule entrée Map[_details][seed.id] : titre + image du même nœud.
     final d = _details[seed.id];
     final avg = d?['bgg_avg_rating'];
     final image = d?['image_url']?.toString().trim();
     final detailTitle = d?['title']?.toString().trim();
-    // Tant que les détails ne sont pas là, titre seed ; image seulement si liée.
+    // Si on a une image hydratée sans titre BGG, on garde le titre seed
+    // (même bgg_id) — jamais un titre tiré d'un autre index.
     final title = (detailTitle != null && detailTitle.isNotEmpty)
         ? detailTitle
         : seed.title;

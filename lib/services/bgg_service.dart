@@ -180,6 +180,10 @@ class BggService {
           final map = g.map(
             (k, v) => MapEntry(k.toString(), v?.toString() ?? ''),
           );
+          // Normalise id : certaines réponses n'ont que bgg_id.
+          if ((map['id'] ?? '').isEmpty && (map['bgg_id'] ?? '').isNotEmpty) {
+            map['id'] = map['bgg_id']!;
+          }
           if ((map['image_url'] ?? '').isEmpty &&
               (map['thumbnail_url'] ?? '').isNotEmpty) {
             map['image_url'] = map['thumbnail_url']!;
@@ -292,7 +296,7 @@ class BggService {
     final document = _parseXmlDocument(body);
     if (document == null) return [];
     final candidates = <Map<String, String>>[];
-    for (final node in document.findAllElements('item')) {
+    for (final node in _topLevelItems(document)) {
       if (candidates.length >= _maxSearchResults) break;
       final itemType = node.getAttribute('type') ?? '';
       if (!_isSearchableBggType(itemType)) continue;
@@ -489,6 +493,7 @@ class BggService {
   }
 
   /// Titre BGG : `type="primary"` d'abord, sinon `<name value="…"/>` (API Hot).
+  /// Uniquement les `<name>` **enfants directs** du nœud (jamais le document).
   /// Ignore les balises `alternate`.
   static String _primaryTitle(XmlElement node) {
     String? fallback;
@@ -506,6 +511,20 @@ class BggService {
     }
     if (fallback != null) return unescapeHtml(fallback);
     return 'Sans titre';
+  }
+
+  /// `<item>` de premier niveau uniquement (ignore les versions imbriquées).
+  static Iterable<XmlElement> _topLevelItems(XmlDocument document) {
+    return document.rootElement.findElements('item');
+  }
+
+  /// Couverture : enfants directs `<image>` / `<thumbnail>` (pas les versions).
+  static String? _directCoverUrl(XmlElement item) {
+    final image = item.findElements('image').firstOrNull?.innerText.trim();
+    if (image != null && image.isNotEmpty) return image;
+    final thumb = item.findElements('thumbnail').firstOrNull?.innerText.trim();
+    if (thumb != null && thumb.isNotEmpty) return thumb;
+    return null;
   }
 
   /// Mémoire (15 min) → cache partagé Supabase (7 j) → BGG.
@@ -746,7 +765,7 @@ class BggService {
       final document = XmlDocument.parse(response.body);
       var items = <Map<String, String>>[];
 
-      for (final node in document.findAllElements('item')) {
+      for (final node in _topLevelItems(document)) {
         final id = node.getAttribute('id') ?? '';
         if (id.isEmpty) continue;
         final title = _primaryTitle(node);
@@ -757,8 +776,7 @@ class BggService {
                 ?.getAttribute('value') ??
             '';
         final hotRank = node.getAttribute('rank') ?? '';
-        final thumb =
-            node.findElements('thumbnail').firstOrNull?.innerText ??
+        final thumb = _directCoverUrl(node) ??
             node.getAttribute('thumbnail') ??
             '';
 
@@ -1016,9 +1034,10 @@ class BggService {
         if (response.statusCode != 200 || response.body.isEmpty) continue;
 
         final document = XmlDocument.parse(response.body);
-        for (final item in document.findAllElements('item')) {
+        // Map par attribut id du nœud — jamais par index de la liste demandée.
+        for (final item in _topLevelItems(document)) {
           final id = item.getAttribute('id');
-          if (id == null) continue;
+          if (id == null || id.isEmpty) continue;
 
           final rankEl = item
               .findAllElements('rank')
@@ -1031,23 +1050,15 @@ class BggService {
             rank = int.tryParse(rawRank);
           }
 
-          final fullImage = item
-              .findAllElements('image')
-              .firstOrNull
-              ?.innerText;
-          final thumb = item
-              .findAllElements('thumbnail')
-              .firstOrNull
-              ?.innerText;
-          final imageUrl = (fullImage != null && fullImage.isNotEmpty)
-              ? fullImage
-              : thumb;
+          final imageUrl = _directCoverUrl(item);
+          final thumb =
+              item.findElements('thumbnail').firstOrNull?.innerText.trim();
           final year = item
               .findElements('yearpublished')
               .firstOrNull
               ?.getAttribute('value');
           final categories = item
-              .findAllElements('link')
+              .findElements('link')
               .where((l) => l.getAttribute('type') == 'boardgamecategory')
               .map((l) => l.getAttribute('value'))
               .whereType<String>()
@@ -1061,8 +1072,8 @@ class BggService {
 
           result[id] = _BggThingMeta(
             rank: rank,
-            image: imageUrl?.isNotEmpty == true ? imageUrl : null,
-            thumbnail: thumb?.isNotEmpty == true ? thumb : null,
+            image: imageUrl,
+            thumbnail: (thumb != null && thumb.isNotEmpty) ? thumb : null,
             title: _primaryTitle(item),
             year: year,
             categories: categories,
@@ -1131,9 +1142,7 @@ class BggService {
   }
 
   static Map<String, dynamic>? _parseThingItem(XmlElement item) {
-    final image =
-        item.findAllElements('image').firstOrNull?.innerText ??
-        item.findAllElements('thumbnail').firstOrNull?.innerText;
+    final image = _directCoverUrl(item);
     final galleryUrls = _galleryUrlsFromThingItem(item, coverUrl: image);
 
     int? parseAttr(String tag) {
@@ -1518,11 +1527,11 @@ class BggService {
       if (response.statusCode != 200 || response.body.isEmpty) return null;
 
       final document = XmlDocument.parse(response.body);
-      final baseItem = document.findAllElements('item').firstOrNull;
+      final baseItem = _topLevelItems(document).firstOrNull;
       if (baseItem == null) return null;
 
       final expansionIds = <String, String>{};
-      for (final link in baseItem.findAllElements('link')) {
+      for (final link in baseItem.findElements('link')) {
         final type = link.getAttribute('type');
         if (type != 'boardgameexpansion' && type != 'boardgameintegration') {
           continue;
@@ -1537,7 +1546,7 @@ class BggService {
       }
       if (expansionIds.isEmpty) return [];
 
-      final expansions = <BggExpansion>[];
+      final byId = <String, BggExpansion>{};
       final ids = expansionIds.keys.toList();
 
       for (var i = 0; i < ids.length; i += _thingChunkSize) {
@@ -1550,13 +1559,11 @@ class BggService {
         if (detailRes.statusCode != 200 || detailRes.body.isEmpty) continue;
 
         final detailDoc = XmlDocument.parse(detailRes.body);
-        for (final item in detailDoc.findAllElements('item')) {
+        for (final item in _topLevelItems(detailDoc)) {
           final id = item.getAttribute('id');
-          if (id == null) continue;
+          if (id == null || !expansionIds.containsKey(id)) continue;
 
-          final image =
-              item.findAllElements('image').firstOrNull?.innerText ??
-              item.findAllElements('thumbnail').firstOrNull?.innerText;
+          final image = _directCoverUrl(item);
           final yearRaw = item
               .findElements('yearpublished')
               .firstOrNull
@@ -1580,19 +1587,21 @@ class BggService {
               ?.getAttribute('value');
           final avgRating = double.tryParse(avgRaw ?? '');
 
-          expansions.add(
-            BggExpansion(
-              bggId: id,
-              title: _primaryTitle(item),
-              imageUrl: image?.isNotEmpty == true ? image : null,
-              year: year,
-              summary: _expansionSummary(item),
-              bggRank: rank,
-              avgRating: avgRating != null && avgRating > 0 ? avgRating : null,
-            ),
+          byId[id] = BggExpansion(
+            bggId: id,
+            title: _primaryTitle(item),
+            imageUrl: image,
+            year: year,
+            summary: _expansionSummary(item),
+            bggRank: rank,
+            avgRating: avgRating != null && avgRating > 0 ? avgRating : null,
           );
         }
       }
+      final expansions = [
+        for (final id in ids)
+          if (byId[id] != null) byId[id]!,
+      ];
 
       expansions.sort(_compareExpansionsByPopularity);
       return expansions;
@@ -1614,7 +1623,8 @@ class BggService {
       );
       if (cached is! Map) return null;
       final map = Map<String, dynamic>.from(cached);
-      final returned = map['bgg_id']?.toString().trim();
+      final returned = map['bgg_id']?.toString().trim() ??
+          map['id']?.toString().trim();
       // Refuse un payload rattaché au mauvais id (évite décalage titre/image).
       if (returned != null && returned.isNotEmpty && returned != id) {
         if (kDebugMode) {
@@ -1623,6 +1633,7 @@ class BggService {
         return null;
       }
       map['bgg_id'] = id;
+      map['id'] = id;
       return map;
     } catch (e) {
       if (kDebugMode) debugPrint('Erreur détails BGG: $e');
@@ -1673,22 +1684,49 @@ class BggService {
 
     if (response.statusCode == 200 && response.body.isNotEmpty) {
       final document = XmlDocument.parse(response.body);
-      // Toujours rattacher au nœud <item id="…"> demandé (jamais firstOrNull).
+      // Dictionnaire : uniquement le nœud top-level dont id == bggId.
+      // Pas de fallback firstOrNull (cause classique de décalage titre/image).
       XmlElement? matched;
-      for (final item in document.findAllElements('item')) {
+      for (final item in _topLevelItems(document)) {
         if (item.getAttribute('id') == bggId) {
           matched = item;
           break;
         }
       }
-      matched ??= document.findAllElements('item').firstOrNull;
       if (matched == null) return null;
       final parsed = _parseThingItem(matched);
       if (parsed == null) return null;
-      // Garantit la clé bgg_id = id demandé.
-      return {...parsed, 'bgg_id': bggId};
+      return {...parsed, 'bgg_id': bggId, 'id': bggId};
     }
     return null;
+  }
+
+  /// Détails BGG pour une liste d'IDs → `Map<bgg_id, details>` (jamais par index).
+  static Future<Map<String, Map<String, dynamic>>> fetchThingDetailsByIds(
+    List<String> ids,
+  ) async {
+    final unique = ids
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toSet()
+        .toList();
+    if (unique.isEmpty) return {};
+
+    final out = <String, Map<String, dynamic>>{};
+    // Parallel per-id via cache (mutualisé) — chaque entrée est clé par bgg_id.
+    await Future.wait(
+      unique.map((id) async {
+        final details = await getGameFullDetails(id);
+        if (details == null) return;
+        final returned = details['bgg_id']?.toString().trim() ??
+            details['id']?.toString().trim();
+        if (returned != null && returned.isNotEmpty && returned != id) {
+          return;
+        }
+        out[id] = {...details, 'bgg_id': id, 'id': id};
+      }),
+    );
+    return out;
   }
 
   /// Jeux possédés (`own=1`) d'un compte BoardGameGeek.

@@ -62,7 +62,8 @@ class CollectionCoverImage extends StatelessWidget {
         height: h,
         fit: imageFit,
         filterQuality: FilterQuality.low,
-        gaplessPlayback: true,
+        // false : évite d'afficher l'image précédente (tuile voisine) pendant le load.
+        gaplessPlayback: false,
         cacheWidth: kThumbnailSize,
         errorBuilder: (_, _, _) => Image.network(
           // Repli : URL directe si le proxy wsrv échoue (Lego, Brickset…).
@@ -71,7 +72,7 @@ class CollectionCoverImage extends StatelessWidget {
           height: h,
           fit: imageFit,
           filterQuality: FilterQuality.low,
-          gaplessPlayback: true,
+          gaplessPlayback: false,
           cacheWidth: kThumbnailSize,
           errorBuilder: (_, _, _) => _fallback(),
         ),
