@@ -7,6 +7,8 @@ import '../services/auth_service.dart';
 import '../services/profile_cache_service.dart';
 import '../services/profile_service.dart';
 import '../services/social_directory_cache.dart';
+import '../utils/hub_greeting.dart';
+import '../widgets/profile/own_profile_panel.dart';
 import '../widgets/splash/collectingo_splash.dart';
 import 'login_screen.dart';
 
@@ -60,9 +62,15 @@ class _SplashScreenState extends State<SplashScreen> {
       );
     } else {
       try {
-        await ProfileService().ensureCurrentUserProfile();
+        final profileService = ProfileService();
+        await profileService.ensureCurrentUserProfile();
         await ProfileCacheService.instance.hydrate();
         await ProfileCacheService.instance.refresh();
+        OwnProfilePanel.memory = ProfileCacheService.instance.profile;
+        // Genre + accord des salutations en mémoire avant le Hub / Profil.
+        await preloadGreetingProfile(
+          remoteFetch: profileService.fetchGreetingProfile,
+        );
         unawaited(SocialDirectoryCache.instance.warm());
       } catch (e) {
         debugPrint('Profil utilisateur : $e');

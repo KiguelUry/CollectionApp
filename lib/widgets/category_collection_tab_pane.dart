@@ -795,6 +795,8 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
           },
           childCount: grouped.length,
           addRepaintBoundaries: false,
+          // Firefox WebGL : garde les tuiles / textures en mémoire au scroll.
+          addAutomaticKeepAlives: true,
         ),
       ),
     );

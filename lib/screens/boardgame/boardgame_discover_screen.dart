@@ -171,6 +171,43 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
     _order = _mix(widget.owned, salt: _shuffleSalt);
     unawaited(_loadMembership());
     unawaited(_hydrateUpTo(_visible + _page));
+    unawaited(_prefetchUpcomingSeeds());
+  }
+
+  Iterable<_Seed> get _upcomingSeedCandidates => _uniquePool().where((s) {
+        final y = s.yearHint;
+        return y != null && y >= 2026 && y <= 2027;
+      });
+
+  Future<void> _prefetchUpcomingSeeds() async {
+    final ids = _upcomingSeedCandidates.map((s) => s.id).toList();
+    if (ids.isEmpty) return;
+    await _hydrateIds(ids);
+  }
+
+  Future<void> _hydrateIds(List<String> ids) async {
+    final gen = ++_hydrateGen;
+    const width = 4;
+    for (var i = 0; i < ids.length; i += width) {
+      if (!mounted || gen != _hydrateGen) return;
+      final slice = ids.skip(i).take(width);
+      await Future.wait(slice.map((id) async {
+        if (_details[id] != null &&
+            (_details[id]!['image_url']?.toString() ?? '').isNotEmpty) {
+          return;
+        }
+        final details = await BggService.getGameFullDetails(id);
+        if (details == null || !mounted || gen != _hydrateGen) return;
+        final image = details['image_url']?.toString() ?? '';
+        setState(() {
+          _details[id] = {
+            ...details,
+            if (image.isNotEmpty) 'image_url': image,
+            'bgg_id': id,
+          };
+        });
+      }));
+    }
   }
 
   List<_Seed> _uniquePool() {
@@ -332,7 +369,7 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
       case _DiscoverMode.upcoming:
         // Année réelle BGG si connue, sinon yearHint du seed.
         if (year == null) return false;
-        return year >= 2025 && year <= 2027;
+        return year >= 2026 && year <= 2027;
       case _DiscoverMode.era:
         if (year == null) return false;
         return year >= _eraFrom && year <= _eraTo;
@@ -439,6 +476,9 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
       _visible = mode == _DiscoverMode.era ? 12 : _page;
     });
     if (mode != _DiscoverMode.forYou) unawaited(_ensureHot());
+    if (mode == _DiscoverMode.upcoming) {
+      unawaited(_prefetchUpcomingSeeds());
+    }
     unawaited(_hydrateUpTo(_visible + _page));
   }
 
@@ -446,9 +486,13 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
     final d = _details[seed.id];
     final avg = d?['bgg_avg_rating'];
     final image = d?['image_url']?.toString();
+    final detailTitle = d?['title']?.toString().trim();
+    final title = (detailTitle != null && detailTitle.isNotEmpty)
+        ? detailTitle
+        : seed.title;
     return BggCatalogGame(
       bggId: seed.id,
-      title: seed.title,
+      title: title,
       imageUrl: (image != null && image.isNotEmpty) ? image : null,
       subtitle: avg == null ? null : _ratingLabel(avg),
     );
@@ -482,22 +526,30 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
                 ),
           ),
           const SizedBox(height: 10),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: [
-              _modeChip('Pour toi', _DiscoverMode.forYou),
-              _modeChip('🔥 Sorties récentes au top', _DiscoverMode.recent),
-              _modeChip('⏳ Prochaines sorties', _DiscoverMode.upcoming),
-              _modeChip('📈 Tendances', _DiscoverMode.hot),
-              _modeChip('🏆 Pépites par époque', _DiscoverMode.era),
-              _modeChip('🎯 Pour ma table', _DiscoverMode.table),
-              ActionChip(
-                avatar: const Icon(Icons.casino, size: 18),
-                label: const Text('Nouvelles idées'),
-                onPressed: _reshuffle,
-              ),
-            ],
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _modeChip('Pour toi', _DiscoverMode.forYou),
+                const SizedBox(width: 6),
+                _modeChip('🔥 Sorties récentes au top', _DiscoverMode.recent),
+                const SizedBox(width: 6),
+                _modeChip('⏳ Prochaines sorties', _DiscoverMode.upcoming),
+                const SizedBox(width: 6),
+                _modeChip('📈 Tendances', _DiscoverMode.hot),
+                const SizedBox(width: 6),
+                _modeChip('🏆 Pépites par époque', _DiscoverMode.era),
+                const SizedBox(width: 6),
+                _modeChip('🎯 Pour ma table', _DiscoverMode.table),
+                const SizedBox(width: 6),
+                ActionChip(
+                  visualDensity: VisualDensity.compact,
+                  avatar: const Icon(Icons.casino, size: 18),
+                  label: const Text('Nouvelles idées'),
+                  onPressed: _reshuffle,
+                ),
+              ],
+            ),
           ),
           if (_mode == _DiscoverMode.era) ...[
             const SizedBox(height: 8),
@@ -575,6 +627,7 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             clipBehavior: Clip.hardEdge,
+            addAutomaticKeepAlives: true,
             itemCount: shown.length,
             gridDelegate: CollectionGridLayout.collectionDelegate(
               context,
@@ -584,15 +637,17 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
               final seed = shown[index];
               final game = _game(seed);
               final key = game.catalogKey;
-              return _DiscoverCard(
-                key: ValueKey(game.bggId),
-                game: game,
-                rating: _cardMeta(seed),
-                inCollection: _ownedKeys.contains(key),
-                inWishlist: _wishlistKeys.contains(key),
-                onOpen: () => _openPreview(game),
-                onCollection: () => _addCollection(game),
-                onWishlist: () => _toggleWish(game),
+              return RepaintBoundary(
+                child: _DiscoverCard(
+                  key: ValueKey(game.bggId),
+                  game: game,
+                  rating: _cardMeta(seed),
+                  inCollection: _ownedKeys.contains(key),
+                  inWishlist: _wishlistKeys.contains(key),
+                  onOpen: () => _openPreview(game),
+                  onCollection: () => _addCollection(game),
+                  onWishlist: () => _toggleWish(game),
+                ),
               );
             },
           ),
@@ -759,10 +814,29 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
   }
 
   Widget _modeChip(String label, _DiscoverMode mode) {
-    return ChoiceChip(
-      label: Text(label),
-      selected: _mode == mode,
-      onSelected: (_) => _selectMode(mode),
+    final selected = _mode == mode;
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(right: 2),
+      child: Material(
+        color: selected ? scheme.primary : scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(20),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: () => _selectMode(mode),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                color: selected ? scheme.onPrimary : scheme.onSurface,
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 

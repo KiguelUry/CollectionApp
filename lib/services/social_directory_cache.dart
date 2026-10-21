@@ -84,13 +84,14 @@ class SocialDirectoryCache extends ChangeNotifier {
       }
 
       try {
+        // Pas de colonne location_label sur collection_items (prod) :
+        // le lieu libre vit dans metadata.holder_label / metadata.location_label.
         final rows = await Supabase.instance.client
             .from('collection_items')
-            .select('location_label, metadata')
+            .select('metadata')
             .or('added_by.eq.$userId,location_user_id.eq.$userId')
             .limit(400);
         for (final row in rows as List) {
-          _addPlace(placeSet, peopleSet, row['location_label']?.toString());
           final meta = row['metadata'];
           if (meta is Map) {
             _addPlace(placeSet, peopleSet, meta['holder_label']?.toString());

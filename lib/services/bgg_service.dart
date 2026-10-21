@@ -488,16 +488,14 @@ class BggService {
         .replaceAll('&gt;', '>');
   }
 
+  /// Exclusivement `<name type="primary">` — jamais une balise `alternate`.
   static String _primaryTitle(XmlElement node) {
     for (final name in node.findElements('name')) {
       if (name.getAttribute('type') == 'primary') {
         return unescapeHtml(name.getAttribute('value') ?? 'Sans titre');
       }
     }
-    return unescapeHtml(
-      node.findElements('name').firstOrNull?.getAttribute('value') ??
-          'Sans titre',
-    );
+    return 'Sans titre';
   }
 
   /// Mémoire (15 min) → cache partagé Supabase (7 j) → BGG.
@@ -1181,8 +1179,11 @@ class BggService {
         ?.getAttribute('value');
     final avgRating = double.tryParse(avgRaw ?? '');
 
+    final title = _primaryTitle(item);
+
     return {
       'bgg_id': ?bggId,
+      if (title.isNotEmpty) 'title': title,
       if (image != null && image.isNotEmpty) 'image_url': image,
       if (galleryUrls.isNotEmpty) 'bgg_gallery_urls': galleryUrls,
       'year_published': ?year,

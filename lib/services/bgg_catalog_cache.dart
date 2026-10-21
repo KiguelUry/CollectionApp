@@ -25,33 +25,109 @@ abstract class BggCacheStore {
   Future<void> write(String bggId, BggCacheKind kind, Object payload);
 }
 
+/// Coupe-circuit : si la table est absente (404) ou invalide (400),
+/// on arrête les appels PostgREST pour [cooldown] (évite 70+ erreurs au scroll).
+class _CatalogCacheBreaker {
+  static bool tripped = false;
+  static DateTime? trippedAt;
+  static const cooldown = Duration(minutes: 15);
+
+  static bool get isOpen {
+    if (!tripped) return false;
+    final at = trippedAt;
+    if (at != null && DateTime.now().difference(at) > cooldown) {
+      tripped = false;
+      trippedAt = null;
+      return false;
+    }
+    return true;
+  }
+
+  static void trip([Object? error]) {
+    if (tripped) return;
+    tripped = true;
+    trippedAt = DateTime.now();
+    if (kDebugMode) {
+      debugPrint(
+        'BGG catalog cache OFF (${cooldown.inMinutes} min) : $error',
+      );
+    }
+  }
+
+  static bool looksLikeSchemaError(Object e) {
+    if (e is PostgrestException) {
+      final code = (e.code ?? '').toUpperCase();
+      // PGRST205 = table introuvable, 42P01 = undefined_table, 42703 = undefined_column
+      if (code == 'PGRST205' ||
+          code == '42P01' ||
+          code == '42703' ||
+          code == 'PGRST204') {
+        return true;
+      }
+      final status = e.message; // souvent contient "404" / "relation … does not exist"
+      final lower = '${e.code} $status ${e.details} ${e.hint}'.toLowerCase();
+      if (lower.contains('404') ||
+          lower.contains('does not exist') ||
+          lower.contains('bgg_catalog_cache') && lower.contains('schema cache')) {
+        return true;
+      }
+    }
+    final text = e.toString().toLowerCase();
+    return text.contains('bgg_catalog_cache') &&
+        (text.contains('404') ||
+            text.contains('400') ||
+            text.contains('does not exist') ||
+            text.contains('pgrst205') ||
+            text.contains('schema cache'));
+  }
+}
+
 class SupabaseBggCacheStore implements BggCacheStore {
   static const _table = 'bgg_catalog_cache';
 
   @override
   Future<BggCacheEntry?> read(String bggId, BggCacheKind kind) async {
-    final row = await Supabase.instance.client
-        .from(_table)
-        .select('payload, fetched_at')
-        .eq('bgg_id', bggId)
-        .eq('kind', kind.dbValue)
-        .maybeSingle();
-    if (row == null) return null;
-    final at = DateTime.tryParse(row['fetched_at']?.toString() ?? '');
-    final payload = row['payload'];
-    if (at == null || payload == null) return null;
-    return BggCacheEntry(payload as Object, at);
+    if (_CatalogCacheBreaker.isOpen) return null;
+    try {
+      final row = await Supabase.instance.client
+          .from(_table)
+          .select('payload, fetched_at')
+          .eq('bgg_id', bggId)
+          .eq('kind', kind.dbValue)
+          .maybeSingle();
+      if (row == null) return null;
+      final at = DateTime.tryParse(row['fetched_at']?.toString() ?? '');
+      final payload = row['payload'];
+      if (at == null || payload == null) return null;
+      return BggCacheEntry(payload as Object, at);
+    } catch (e) {
+      if (_CatalogCacheBreaker.looksLikeSchemaError(e)) {
+        _CatalogCacheBreaker.trip(e);
+      } else if (kDebugMode) {
+        debugPrint('BGG cache read: $e');
+      }
+      return null;
+    }
   }
 
   @override
   Future<void> write(String bggId, BggCacheKind kind, Object payload) async {
+    if (_CatalogCacheBreaker.isOpen) return;
     if (Supabase.instance.client.auth.currentUser == null) return;
-    await Supabase.instance.client.from(_table).upsert({
-      'bgg_id': bggId,
-      'kind': kind.dbValue,
-      'payload': payload,
-      'fetched_at': DateTime.now().toUtc().toIso8601String(),
-    });
+    try {
+      await Supabase.instance.client.from(_table).upsert({
+        'bgg_id': bggId,
+        'kind': kind.dbValue,
+        'payload': payload,
+        'fetched_at': DateTime.now().toUtc().toIso8601String(),
+      });
+    } catch (e) {
+      if (_CatalogCacheBreaker.looksLikeSchemaError(e)) {
+        _CatalogCacheBreaker.trip(e);
+      } else if (kDebugMode) {
+        debugPrint('BGG cache write: $e');
+      }
+    }
   }
 }
 
@@ -60,6 +136,7 @@ class SupabaseBggCacheStore implements BggCacheStore {
 /// - entrée fraîche (< [ttl]) : aucun appel BGG ;
 /// - absente / périmée : un seul appel BGG même si plusieurs écrans
 ///   demandent le même jeu en même temps (requêtes en vol mutualisées) ;
+/// - table absente (404) : coupe-circuit, mémoire + BGG uniquement ;
 /// - échec BGG : on renvoie l'entrée périmée si elle existe.
 class BggCatalogCache {
   BggCatalogCache({
@@ -154,6 +231,12 @@ class BggCatalogCache {
 
   @visibleForTesting
   void clearMemory() => _memory.clear();
+
+  @visibleForTesting
+  static void resetCircuitBreaker() {
+    _CatalogCacheBreaker.tripped = false;
+    _CatalogCacheBreaker.trippedAt = null;
+  }
 }
 
 /// Résultats de recherche BGG partagés entre utilisateurs (`bgg_search_cache`).

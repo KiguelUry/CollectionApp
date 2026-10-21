@@ -45,6 +45,14 @@ jobs:
       - name: Build web
         run: flutter build web --release --base-href "/CollectionApp/"
 
+      - name: Strip missing flutter.js.map sourcemap refs
+        run: |
+          # Évite les 404 console (flutter.js.map absent du build release).
+          find build/web -type f \( -name 'flutter.js' -o -name 'flutter_bootstrap.js' -o -name '*.js' \) \
+            -print0 | xargs -0 sed -i '/sourceMappingURL=flutter\.js\.map/d' || true
+          # Fichier vide optionnel si un cache demande encore le .map
+          : > build/web/flutter.js.map
+
       - name: Add .nojekyll for GitHub Pages
         run: touch build/web/.nojekyll
 

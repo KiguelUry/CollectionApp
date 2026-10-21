@@ -179,10 +179,13 @@ HubGreeting pickHubGreeting({
   return HubGreeting(name: name, source: HubGreetingSource.title);
 }
 
-/// Salutation du hub stable pour toute la session (ne re-tire pas au rechargement).
+/// Salutation du hub : fixe tant qu'on reste sur l'accueil ;
+/// [reroll] tire un nouveau surnom au retour sur le Hub.
 class HubGreetingSession {
   static HubGreeting? greeting;
   static GrammarGender? grammar;
+  static String? identity;
+  static bool profileReady = false;
 
   static HubGreeting ensure({
     required String username,
@@ -199,6 +202,21 @@ class HubGreetingSession {
       return greeting!;
     }
     greeting = pickHubGreeting(username: username, grammar: g);
+    return greeting!;
+  }
+
+  /// Nouveau tirage (retour Hub). Garde [previous] pour éviter le même titre.
+  static HubGreeting reroll({
+    required String username,
+    GrammarGender? grammarOverride,
+  }) {
+    final g = grammarOverride ?? grammar ?? GrammarGender.masculine;
+    grammar = g;
+    greeting = pickHubGreeting(
+      username: username,
+      previous: greeting?.name,
+      grammar: g,
+    );
     return greeting!;
   }
 }
@@ -225,10 +243,42 @@ Future<void> saveGrammarGender(GrammarGender gender) async {
 
 Future<String?> loadGenderIdentity() async {
   final prefs = await SharedPreferences.getInstance();
-  return prefs.getString(kIdentityPrefsKey);
+  final value = prefs.getString(kIdentityPrefsKey);
+  if (value != null) HubGreetingSession.identity = value;
+  return value;
 }
 
 Future<void> saveGenderIdentity(String identity) async {
+  HubGreetingSession.identity = identity;
   final prefs = await SharedPreferences.getInstance();
   await prefs.setString(kIdentityPrefsKey, identity);
+}
+
+/// Précharge genre + accord des salutations en mémoire (0 ms à l'ouverture Profil).
+Future<void> preloadGreetingProfile({
+  Future<({String? identity, String? grammar})> Function()? remoteFetch,
+}) async {
+  final localGrammar = await loadGrammarGender();
+  final localIdentity = await loadGenderIdentity();
+  var identity = localIdentity ?? HubGreetingSession.identity ?? 'Non précisé';
+  var grammar = localGrammar;
+
+  if (remoteFetch != null) {
+    try {
+      final remote = await remoteFetch();
+      if (remote.identity != null && remote.identity!.trim().isNotEmpty) {
+        identity = remote.identity!;
+      }
+      grammar = switch (remote.grammar) {
+        'feminine' => GrammarGender.feminine,
+        'neutral' => GrammarGender.neutral,
+        'masculine' => GrammarGender.masculine,
+        _ => grammar,
+      };
+    } catch (_) {}
+  }
+
+  await saveGenderIdentity(identity);
+  await saveGrammarGender(grammar);
+  HubGreetingSession.profileReady = true;
 }

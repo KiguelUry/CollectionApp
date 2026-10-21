@@ -17,6 +17,7 @@ import '../widgets/empty_state_view.dart';
 import '../utils/collection_pick_dedupe.dart';
 import '../widgets/orphan_attach_sheet.dart';
 import '../widgets/player_alias_linker_sheet.dart';
+import 'item_detail_screen.dart';
 import 'shake_pick_screen.dart';
 
 /// Historique global des parties (tous jeux confondus).
@@ -36,6 +37,7 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
   List<GlobalPlayHistoryEntry> _entries = [];
   List<GlobalPlayHistoryGroup> _groups = [];
   final _expanded = <String>{};
+  bool _mobileActionsCompact = false;
 
   @override
   void initState() {
@@ -44,7 +46,13 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
     PlayerAliasService.instance.ensureLoaded().then((_) {
       if (mounted) setState(() {});
     });
-    _load();
+    final cached = _service.cachedEntries;
+    if (cached != null && cached.isNotEmpty) {
+      _entries = cached;
+      _groups = groupPlayHistoryEntries(cached);
+      _loading = false;
+    }
+    unawaited(_load(silent: cached != null && cached.isNotEmpty));
   }
 
   @override
@@ -61,8 +69,8 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
         .toList();
   }
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
+  Future<void> _load({bool silent = false}) async {
+    if (!silent) setState(() => _loading = true);
     final entries = await _service.loadAllEntries();
     if (!mounted) return;
     setState(() {
@@ -70,6 +78,25 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
       _groups = groupPlayHistoryEntries(entries);
       _loading = false;
     });
+  }
+
+  bool _onScrollCompact(ScrollNotification notification) {
+    if (MediaQuery.sizeOf(context).width >= 600) return false;
+    if (notification.metrics.axis != Axis.vertical) return false;
+    final compact = notification.metrics.pixels > 40;
+    if (compact != _mobileActionsCompact) {
+      setState(() => _mobileActionsCompact = compact);
+    }
+    return false;
+  }
+
+  Future<void> _openGameDetail(GlobalPlayHistoryEntry entry) async {
+    final item = await _itemForEntry(entry);
+    if (!mounted) return;
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(builder: (_) => ItemDetailScreen(item: item)),
+    );
   }
 
   Future<void> _deleteEntry(GlobalPlayHistoryEntry entry) async {
@@ -341,9 +368,28 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
       ..sort((a, b) => b.entries.length.compareTo(a.entries.length));
     final wide = MediaQuery.sizeOf(context).width > 900;
 
+    final narrowMobile = MediaQuery.sizeOf(context).width < 600;
+    final showInlineActions =
+        MediaQuery.sizeOf(context).width <= 1100 &&
+            (!narrowMobile || !_mobileActionsCompact);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Historique des parties'),
+        actions: [
+          if (narrowMobile && _mobileActionsCompact) ...[
+            IconButton(
+              tooltip: 'Tirage au sort',
+              icon: const Icon(Icons.casino_outlined),
+              onPressed: _openDraw,
+            ),
+            IconButton(
+              tooltip: 'Identités joueurs',
+              icon: const Icon(Icons.people_alt_outlined),
+              onPressed: _openAliasLinker,
+            ),
+          ],
+        ],
       ),
       floatingActionButton: _tabIndex == 0
           ? FloatingActionButton.extended(
@@ -372,7 +418,7 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
               onOpenDraw: _openDraw,
               child: Column(
               children: [
-                if (MediaQuery.sizeOf(context).width <= 1100)
+                if (showInlineActions) ...[
                   Padding(
                     padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
                     child: SizedBox(
@@ -384,7 +430,6 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
                       ),
                     ),
                   ),
-                if (MediaQuery.sizeOf(context).width <= 1100)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
                     child: SizedBox(
@@ -396,6 +441,7 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
                       ),
                     ),
                   ),
+                ],
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
                   child: SegmentedButton<int>(
@@ -440,9 +486,12 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
                     ),
                   ),
                 Expanded(
-                  child: _tabIndex == 1
-                      ? _buildAllTimeRanking(allSessions)
-                      : _buildHistoryList(dateFmt),
+                  child: NotificationListener<ScrollNotification>(
+                    onNotification: _onScrollCompact,
+                    child: _tabIndex == 1
+                        ? _buildAllTimeRanking(allSessions)
+                        : _buildHistoryList(dateFmt),
+                  ),
                 ),
               ],
             ),
@@ -522,10 +571,11 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
           final expanded = _expanded.contains(group.streakKey);
 
           if (group.isStreak && !expanded) {
-            return _StreakTile(
-              group: group,
-              onTap: () => setState(() => _expanded.add(group.streakKey)),
-            );
+            return                 _StreakTile(
+                  group: group,
+                  onTap: () => setState(() => _expanded.add(group.streakKey)),
+                  onOpenGame: () => _openGameDetail(group.entries.first),
+                );
           }
 
           if (group.isStreak && expanded) {
@@ -537,6 +587,7 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
                   expanded: true,
                   onTap: () =>
                       setState(() => _expanded.remove(group.streakKey)),
+                  onOpenGame: () => _openGameDetail(group.entries.first),
                 ),
                 for (final entry in group.entries)
                   _EntryTile(
@@ -549,6 +600,7 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
                     onAttach:
                         entry.isOrphan ? () => _attachOrphan(entry) : null,
                     onDelete: () => _deleteEntry(entry),
+                    onOpenGame: () => _openGameDetail(entry),
                   ),
               ],
             );
@@ -564,6 +616,7 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
             onRelaunch: () => _relaunchEntry(entry),
             onAttach: entry.isOrphan ? () => _attachOrphan(entry) : null,
             onDelete: () => _deleteEntry(entry),
+            onOpenGame: () => _openGameDetail(entry),
           );
         },
       ),
@@ -803,17 +856,37 @@ class _GamePick {
       );
 }
 
-Widget _historyThumb(String? url, {Key? key, double size = 40}) {
+Widget _historyThumb(
+  String? url, {
+  Key? key,
+  double size = 40,
+  VoidCallback? onTap,
+}) {
+  Widget thumb;
   if (url == null || url.isEmpty) {
-    return Icon(Icons.extension_outlined, key: key, size: size * 0.7);
+    thumb = Icon(Icons.extension_outlined, size: size * 0.7);
+  } else {
+    thumb = ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: BggNetworkImage(url: url, boxedCover: true, compact: true),
+      ),
+    );
   }
-  return ClipRRect(
+  if (onTap == null) {
+    return KeyedSubtree(key: key, child: thumb);
+  }
+  return KeyedSubtree(
     key: key,
-    borderRadius: BorderRadius.circular(8),
-    child: SizedBox(
-      width: size,
-      height: size,
-      child: BggNetworkImage(url: url, boxedCover: true, compact: true),
+    child: Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: thumb,
+      ),
     ),
   );
 }
@@ -824,11 +897,13 @@ double _thumbSize(BuildContext context) =>
 class _StreakTile extends StatelessWidget {
   final GlobalPlayHistoryGroup group;
   final VoidCallback onTap;
+  final VoidCallback? onOpenGame;
   final bool expanded;
 
   const _StreakTile({
     required this.group,
     required this.onTap,
+    this.onOpenGame,
     this.expanded = false,
   });
 
@@ -837,7 +912,11 @@ class _StreakTile extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
-        leading: _historyThumb(group.imageUrl, size: _thumbSize(context)),
+        leading: _historyThumb(
+          group.imageUrl,
+          size: _thumbSize(context),
+          onTap: onOpenGame,
+        ),
         title: Text(group.title),
         subtitle: Text(
           '${group.entries.length} parties jouées d\'affilée !',
@@ -850,7 +929,7 @@ class _StreakTile extends StatelessWidget {
   }
 }
 
-class _EntryTile extends StatelessWidget {
+class _EntryTile extends StatefulWidget {
   final GlobalPlayHistoryEntry entry;
   final DateFormat dateFmt;
   final String title;
@@ -858,6 +937,7 @@ class _EntryTile extends StatelessWidget {
   final VoidCallback? onRelaunch;
   final VoidCallback? onAttach;
   final VoidCallback? onDelete;
+  final VoidCallback? onOpenGame;
   final String? imageUrl;
   final bool nested;
 
@@ -869,32 +949,45 @@ class _EntryTile extends StatelessWidget {
     this.onRelaunch,
     this.onAttach,
     this.onDelete,
+    this.onOpenGame,
     this.imageUrl,
     this.nested = false,
   });
 
   @override
+  State<_EntryTile> createState() => _EntryTileState();
+}
+
+class _EntryTileState extends State<_EntryTile> {
+  bool _playersExpanded = false;
+
+  @override
   Widget build(BuildContext context) {
-    final session = entry.session;
+    final session = widget.entry.session;
     final scores = session.scoresLine;
     final winner = session.winnerLine;
     final scheme = Theme.of(context).colorScheme;
+    final players = session.players.where((p) => p.trim().isNotEmpty).toList();
 
     return Card(
-      margin: EdgeInsets.only(bottom: 8, left: nested ? 16 : 0),
+      margin: EdgeInsets.only(bottom: 8, left: widget.nested ? 16 : 0),
       child: InkWell(
-        onTap: onTap,
+        onTap: widget.onTap,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (!nested) ...[
+              if (!widget.nested) ...[
                 Stack(
                   clipBehavior: Clip.none,
                   children: [
-                    _historyThumb(imageUrl, size: _thumbSize(context)),
+                    _historyThumb(
+                      widget.imageUrl,
+                      size: _thumbSize(context),
+                      onTap: widget.onOpenGame,
+                    ),
                     if (session.isInProgress)
                       Positioned(
                         right: -2,
@@ -921,7 +1014,9 @@ class _EntryTile extends StatelessWidget {
                       children: [
                         Expanded(
                           child: Text(
-                            nested ? dateFmt.format(session.date) : title,
+                            widget.nested
+                                ? widget.dateFmt.format(session.date)
+                                : widget.title,
                             style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
                         ),
@@ -947,10 +1042,10 @@ class _EntryTile extends StatelessWidget {
                           ),
                       ],
                     ),
-                    if (!nested) ...[
+                    if (!widget.nested) ...[
                       const SizedBox(height: 2),
                       Text(
-                        dateFmt.format(session.date),
+                        widget.dateFmt.format(session.date),
                         style: TextStyle(
                           fontSize: 12,
                           color: scheme.onSurfaceVariant,
@@ -975,29 +1070,61 @@ class _EntryTile extends StatelessWidget {
                         ),
                       ),
                     ],
-                    if (session.players.isNotEmpty) ...[
+                    if (players.isNotEmpty) ...[
                       const SizedBox(height: 6),
-                      Wrap(
-                        spacing: 4,
-                        runSpacing: 4,
-                        children: [
-                          for (final name in session.players)
-                            ActionChip(
-                              visualDensity: VisualDensity.compact,
-                              avatar: const Icon(Icons.person_outline, size: 16),
-                              label: Text(name),
-                              onPressed: () => showPlayerAliasLinkerSheet(
-                                context,
-                                knownNames: [name],
+                      if (_playersExpanded)
+                        Wrap(
+                          spacing: 4,
+                          runSpacing: 4,
+                          children: [
+                            for (final name in players)
+                              ActionChip(
+                                visualDensity: VisualDensity.compact,
+                                materialTapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                                label: Text(
+                                  name,
+                                  style: const TextStyle(fontSize: 11),
+                                ),
+                                onPressed: () => showPlayerAliasLinkerSheet(
+                                  context,
+                                  knownNames: [name],
+                                ),
+                              ),
+                          ],
+                        )
+                      else
+                        InkWell(
+                          onTap: () =>
+                              setState(() => _playersExpanded = true),
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: scheme.surfaceContainerHighest
+                                  .withValues(alpha: 0.6),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              players.length == 1
+                                  ? '1 joueur'
+                                  : '${players.length} joueurs',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: scheme.primary,
                               ),
                             ),
-                        ],
-                      ),
+                          ),
+                        ),
                     ],
                   ],
                 ),
               ),
-              if (onRelaunch != null)
+              if (widget.onRelaunch != null)
                 Padding(
                   padding: const EdgeInsets.only(right: 4),
                   child: FilledButton.tonalIcon(
@@ -1009,23 +1136,23 @@ class _EntryTile extends StatelessWidget {
                       ),
                       shape: const StadiumBorder(),
                     ),
-                    onPressed: onRelaunch,
+                    onPressed: widget.onRelaunch,
                     icon: const Icon(Icons.add, size: 18),
                     label: const Text('Partie'),
                   ),
                 ),
-              if (onAttach != null)
+              if (widget.onAttach != null)
                 IconButton(
                   key: const ValueKey('attach_orphan'),
                   icon: const Icon(Icons.link),
                   tooltip: 'Rattacher à un jeu de ma collection',
-                  onPressed: onAttach,
+                  onPressed: widget.onAttach,
                 ),
-              if (onDelete != null)
+              if (widget.onDelete != null)
                 IconButton(
                   icon: const Icon(Icons.delete_outline),
                   tooltip: 'Supprimer',
-                  onPressed: onDelete,
+                  onPressed: widget.onDelete,
                 ),
             ],
           ),

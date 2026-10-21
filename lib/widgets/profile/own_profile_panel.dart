@@ -29,10 +29,12 @@ class _OwnProfilePanelState extends State<OwnProfilePanel> {
   final _bio = TextEditingController();
   UserProfile? _profile = OwnProfilePanel.memory ?? ProfileCacheService.instance.profile;
   String _accent = profileAccentPresets.first;
-  GrammarGender _grammar = GrammarGender.masculine;
-  String _identity = 'Non précisé';
+  GrammarGender _grammar =
+      HubGreetingSession.grammar ?? GrammarGender.masculine;
+  String _identity = HubGreetingSession.identity ?? 'Non précisé';
   bool _loading = OwnProfilePanel.memory == null &&
-      ProfileCacheService.instance.profile == null;
+      ProfileCacheService.instance.profile == null &&
+      !HubGreetingSession.profileReady;
   bool _saving = false;
   bool _uploading = false;
   String _visitorShow = 'all';
@@ -47,7 +49,13 @@ class _OwnProfilePanelState extends State<OwnProfilePanel> {
       _bio.text = known.bio ?? '';
       _accent = known.accentColor;
     }
-    _load();
+    // Mémoire déjà hydratée au splash → affichage immédiat, sync silencieuse.
+    if (HubGreetingSession.profileReady || known != null) {
+      _loading = false;
+      unawaited(_load(silent: true));
+    } else {
+      _load();
+    }
   }
 
   @override
@@ -58,11 +66,13 @@ class _OwnProfilePanelState extends State<OwnProfilePanel> {
     super.dispose();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool silent = false}) async {
     try {
       final p = await _service.fetchCurrentProfile();
-      final localGrammar = await loadGrammarGender();
-      final localIdentity = await loadGenderIdentity();
+      final localGrammar =
+          HubGreetingSession.grammar ?? await loadGrammarGender();
+      final localIdentity =
+          HubGreetingSession.identity ?? await loadGenderIdentity();
       final remote = await _service.fetchGreetingProfile();
       final identity = remote.identity ?? localIdentity ?? _identity;
       final grammar = switch (remote.grammar) {
@@ -81,10 +91,17 @@ class _OwnProfilePanelState extends State<OwnProfilePanel> {
       }
       await saveGenderIdentity(identity);
       await saveGrammarGender(grammar);
+      HubGreetingSession.profileReady = true;
       final prefs = await SharedPreferences.getInstance();
       final show = prefs.getString('showcase_visitor_show') ?? 'all';
       if (!mounted) return;
       OwnProfilePanel.memory = p;
+      final changed = !silent ||
+          _profile?.id != p.id ||
+          _grammar != grammar ||
+          _identity != identity ||
+          _accent != p.accentColor;
+      if (!changed && silent) return;
       setState(() {
         _profile = p;
         _username.text = p.username;

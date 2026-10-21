@@ -76,7 +76,27 @@ class GlobalPlayHistoryEntry {
 class GlobalPlayHistoryService {
   final _client = Supabase.instance.client;
 
+  static List<GlobalPlayHistoryEntry>? _sessionEntries;
+  static String? _sessionUserId;
+
   String? get _userId => _client.auth.currentUser?.id;
+
+  /// Dernière liste chargée en mémoire (même session / utilisateur).
+  List<GlobalPlayHistoryEntry>? get cachedEntries {
+    final uid = _userId;
+    if (uid == null || _sessionUserId != uid) return null;
+    return _sessionEntries;
+  }
+
+  static void _rememberEntries(String userId, List<GlobalPlayHistoryEntry> entries) {
+    _sessionUserId = userId;
+    _sessionEntries = List<GlobalPlayHistoryEntry>.from(entries);
+  }
+
+  static void invalidateSessionCache() {
+    _sessionEntries = null;
+    _sessionUserId = null;
+  }
 
   String _orphanKey(String userId) => 'orphan_boardgame_plays_$userId';
 
@@ -174,6 +194,8 @@ class GlobalPlayHistoryService {
         b.sessionIndex,
       ),
     );
+    final uid = _userId;
+    if (uid != null) _rememberEntries(uid, entries);
     return entries;
   }
 

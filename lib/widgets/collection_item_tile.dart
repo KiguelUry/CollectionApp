@@ -237,19 +237,8 @@ class CollectionItemTile extends StatelessWidget {
                 readOnly: boardgameQuickEditGroups == null,
               ),
             )
-          else ...[
-            SizedBox(
-              height: _metaRowHeight,
-              width: double.infinity,
-              child: _buildIconRowTop(context),
-            ),
-            const SizedBox(height: 2),
-            SizedBox(
-              height: _metaRowHeight,
-              width: double.infinity,
-              child: _buildIconRowBottom(context),
-            ),
-          ],
+          else
+            _buildBoardgameMetaChips(context),
         ],
       ),
     );
@@ -616,24 +605,24 @@ class CollectionItemTile extends StatelessWidget {
           (item.parentGameId != null && item.parentGameId!.isNotEmpty) ||
           item.metadata?['bgg_is_expansion'] == true);
 
-  Widget _buildIconRowTop(BuildContext context) {
+  /// GSM (`width < 600`) : 2 + 2 + 1. Desktop : 3 + 2.
+  Widget _buildBoardgameMetaChips(BuildContext context) {
+    final narrow = MediaQuery.sizeOf(context).width < 600;
     final expansionCount = ownedExpansionCount(item);
+    final location = _locationChipLabel;
+    final rating = _bggRatingLabel;
 
-    return Row(
-      children: [
-        Expanded(
-          child: GestureDetector(
-            onTap: () => _showQuantitySheet(context),
-            behavior: HitTestBehavior.opaque,
-            child: _metaChip(
-              icon: Icons.layers_outlined,
-              suffix: '$_ownedQty',
-              color: Colors.lightBlue.shade600,
-            ),
+    Widget quantityChip() => GestureDetector(
+          onTap: () => _showQuantitySheet(context),
+          behavior: HitTestBehavior.opaque,
+          child: _metaChip(
+            icon: Icons.layers_outlined,
+            suffix: '$_ownedQty',
+            color: Colors.lightBlue.shade600,
           ),
-        ),
-        const SizedBox(width: 4),
-        GestureDetector(
+        );
+
+    Widget valueChip() => GestureDetector(
           onTap: () => _showValueSheet(context),
           behavior: HitTestBehavior.opaque,
           child: _metaChip(
@@ -641,61 +630,104 @@ class CollectionItemTile extends StatelessWidget {
             color: Colors.teal.shade500,
             textOnly: true,
           ),
-        ),
-        const SizedBox(width: 4),
-        Expanded(
-          child: GestureDetector(
-            onTap: () => _openExpansionContext(context),
-            behavior: HitTestBehavior.opaque,
-            child: _metaChip(
-              icon: _isOwnedExpansionTile
-                  ? Icons.subdirectory_arrow_right
-                  : Icons.extension_outlined,
-              suffix: _isOwnedExpansionTile ? 'Ext' : '$expansionCount',
-              color: _isOwnedExpansionTile
-                  ? Colors.deepPurple.shade500
-                  : Colors.green.shade600,
+        );
+
+    Widget expansionChip() => GestureDetector(
+          onTap: () => _openExpansionContext(context),
+          behavior: HitTestBehavior.opaque,
+          child: _metaChip(
+            icon: _isOwnedExpansionTile
+                ? Icons.subdirectory_arrow_right
+                : Icons.extension_outlined,
+            suffix: _isOwnedExpansionTile ? 'Ext' : '$expansionCount',
+            color: _isOwnedExpansionTile
+                ? Colors.deepPurple.shade500
+                : Colors.green.shade600,
+          ),
+        );
+
+    Widget ratingChip() => GestureDetector(
+          onTap: () => _showRatingSheet(context),
+          behavior: HitTestBehavior.opaque,
+          child: _metaChip(
+            icon: Icons.star_rounded,
+            suffix: rating ?? '—',
+            color: Colors.amber.shade700,
+            shrinkSuffix: true,
+          ),
+        );
+
+    Widget locationChip() => GestureDetector(
+          onTap: () => _showLocationSheet(context),
+          behavior: HitTestBehavior.opaque,
+          child: _metaChip(
+            icon: item.isOnLoan
+                ? Icons.handshake_outlined
+                : Icons.place_outlined,
+            suffix: location ?? '—',
+            color: item.isOnLoan
+                ? Colors.blue.shade600
+                : Colors.deepOrange.shade400,
+          ),
+        );
+
+    if (narrow) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            height: _metaRowHeight,
+            child: Row(
+              children: [
+                Expanded(child: quantityChip()),
+                const SizedBox(width: 4),
+                Expanded(child: valueChip()),
+              ],
             ),
           ),
-        ),
-      ],
-    );
-  }
+          const SizedBox(height: 2),
+          SizedBox(
+            height: _metaRowHeight,
+            child: Row(
+              children: [
+                Expanded(child: expansionChip()),
+                const SizedBox(width: 4),
+                Expanded(child: ratingChip()),
+              ],
+            ),
+          ),
+          const SizedBox(height: 2),
+          SizedBox(height: _metaRowHeight, child: locationChip()),
+        ],
+      );
+    }
 
-  Widget _buildIconRowBottom(BuildContext context) {
-    final location = _locationChipLabel;
-    final rating = _bggRatingLabel;
-
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Expanded(
-          flex: 3,
-          child: GestureDetector(
-            onTap: () => _showLocationSheet(context),
-            behavior: HitTestBehavior.opaque,
-            child: _metaChip(
-              icon: item.isOnLoan
-                  ? Icons.handshake_outlined
-                  : Icons.place_outlined,
-              suffix: location ?? '—',
-              color: item.isOnLoan
-                  ? Colors.blue.shade600
-                  : Colors.deepOrange.shade400,
-            ),
+        SizedBox(
+          height: _metaRowHeight,
+          child: Row(
+            children: [
+              Expanded(child: quantityChip()),
+              const SizedBox(width: 4),
+              Expanded(child: valueChip()),
+              const SizedBox(width: 4),
+              Expanded(child: expansionChip()),
+            ],
           ),
         ),
-        const SizedBox(width: 4),
-        Expanded(
-          flex: 2,
-          child: GestureDetector(
-            onTap: () => _showRatingSheet(context),
-            behavior: HitTestBehavior.opaque,
-            child: _metaChip(
-              icon: Icons.star_rounded,
-              suffix: rating ?? '—',
-              color: Colors.amber.shade700,
-              shrinkSuffix: true,
-            ),
+        const SizedBox(height: 2),
+        SizedBox(
+          height: _metaRowHeight,
+          child: Row(
+            children: [
+              Expanded(flex: 3, child: locationChip()),
+              const SizedBox(width: 4),
+              Expanded(flex: 2, child: ratingChip()),
+            ],
           ),
         ),
       ],
@@ -769,6 +801,26 @@ class CollectionItemTile extends StatelessWidget {
     );
   }
 
+  TextStyle _chipTextStyle(Color color) => TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.1,
+        height: 1.15,
+        color: color,
+      );
+
+  Widget _fittedChipText(String text, Color color) {
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.centerLeft,
+      child: Text(
+        text,
+        maxLines: 1,
+        style: _chipTextStyle(color),
+      ),
+    );
+  }
+
   Widget _metaChip({
     IconData? icon,
     String? suffix,
@@ -776,62 +828,25 @@ class CollectionItemTile extends StatelessWidget {
     bool shrinkSuffix = false,
     bool textOnly = false,
   }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(5),
-        border: Border.all(color: color.withValues(alpha: 0.35)),
-      ),
-      child: textOnly
-          ? Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: Text(
-                suffix ?? '',
-                maxLines: 1,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: color,
-                  height: 1,
-                ),
+    return ClipRect(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(5),
+          border: Border.all(color: color.withValues(alpha: 0.35)),
+        ),
+        child: textOnly
+            ? _fittedChipText(suffix ?? '', color)
+            : Row(
+                children: [
+                  if (icon != null) Icon(icon, size: 13, color: color),
+                  if (suffix != null) ...[
+                    const SizedBox(width: 2),
+                    Expanded(child: _fittedChipText(suffix, color)),
+                  ],
+                ],
               ),
-            )
-          : Row(
-        children: [
-          if (icon != null) Icon(icon, size: 13, color: color),
-          if (suffix != null) ...[
-            const SizedBox(width: 2),
-            Expanded(
-              child: shrinkSuffix
-                  ? FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        suffix,
-                        maxLines: 1,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: color,
-                          height: 1,
-                        ),
-                      ),
-                    )
-                  : Text(
-                      suffix,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: color,
-                        height: 1,
-                      ),
-                    ),
-            ),
-          ],
-        ],
       ),
     );
   }

@@ -277,7 +277,7 @@ class BoardgameTileMetaIcons extends StatelessWidget {
           children: [
             Expanded(child: quantityChip()),
             const SizedBox(width: 4),
-            valueChip(),
+            Expanded(child: valueChip()),
             const SizedBox(width: 4),
             Expanded(child: expansionChip()),
           ],
@@ -302,6 +302,18 @@ class BoardgameTileMetaIcons extends StatelessWidget {
         color: color,
       );
 
+  Widget _fittedChipText(String text, Color color) {
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.centerLeft,
+      child: Text(
+        text,
+        maxLines: 1,
+        style: _chipTextStyle(color),
+      ),
+    );
+  }
+
   Widget _metaChip({
     Key? key,
     IconData? icon,
@@ -311,55 +323,37 @@ class BoardgameTileMetaIcons extends StatelessWidget {
     bool textOnly = false,
     int groupCount = 0,
   }) {
-    return Container(
-      key: key,
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(5),
-        border: Border.all(color: color.withValues(alpha: 0.35)),
-      ),
-      child: textOnly
-          ? Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: Text(
-                suffix ?? '',
-                maxLines: 1,
-                style: _chipTextStyle(color),
-              ),
-            )
-          : Row(
-        children: [
-          if (icon != null) Icon(icon, size: 13, color: color),
-          if (suffix != null) ...[
-            const SizedBox(width: 2),
-            Expanded(
-              child: shrinkSuffix
-                  ? FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        suffix,
-                        maxLines: 1,
-                        style: _chipTextStyle(color),
-                      ),
-                    )
-                  : Text(
-                      suffix,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: _chipTextStyle(color),
+    return ClipRect(
+      child: Container(
+        key: key,
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(5),
+          border: Border.all(color: color.withValues(alpha: 0.35)),
+        ),
+        child: textOnly
+            ? _fittedChipText(suffix ?? '', color)
+            : Row(
+                children: [
+                  if (icon != null) Icon(icon, size: 13, color: color),
+                  if (suffix != null) ...[
+                    const SizedBox(width: 2),
+                    Expanded(
+                      child: _fittedChipText(suffix, color),
                     ),
-            ),
-          ],
-          if (groupCount > 0) ...[
-            Icon(Icons.group, size: 13, color: Colors.teal.shade600),
-            Text(
-              '$groupCount',
-              style: _chipTextStyle(Colors.teal.shade600),
-            ),
-          ],
-        ],
+                  ],
+                  if (groupCount > 0) ...[
+                    Icon(Icons.group, size: 13, color: Colors.teal.shade600),
+                    Flexible(
+                      child: _fittedChipText(
+                        '$groupCount',
+                        Colors.teal.shade600,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
       ),
     );
   }

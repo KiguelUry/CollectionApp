@@ -130,6 +130,9 @@ class HouseholdService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Coupe-circuit si `household_aliases` n'existe pas encore en base (400).
+  static bool _aliasesColumnMissing = false;
+
   Future<void> saveMyAliases(List<String> aliases) async {
     _myAliases = aliases
         .map((e) => e.trim())
@@ -137,16 +140,33 @@ class HouseholdService extends ChangeNotifier {
         .toList();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_aliasesKey, _myAliases);
+    if (_aliasesColumnMissing) {
+      notifyListeners();
+      return;
+    }
     try {
       final client = Supabase.instance.client;
       final uid = client.auth.currentUser?.id;
       if (uid != null) {
+        // Colonne profiles.household_aliases (jsonb) — schema_sync_master.sql
         await client.from('profiles').update({
           'household_aliases': _myAliases,
         }).eq('id', uid);
       }
-    } catch (_) {}
+    } catch (e) {
+      if (_isMissingAliasesColumn(e)) _aliasesColumnMissing = true;
+    }
     notifyListeners();
+  }
+
+  static bool _isMissingAliasesColumn(Object e) {
+    final text = e.toString().toLowerCase();
+    return text.contains('household_aliases') &&
+        (text.contains('400') ||
+            text.contains('42703') ||
+            text.contains('pgrst204') ||
+            text.contains('does not exist') ||
+            text.contains('schema cache'));
   }
 
   Future<void> refreshPeers() async {
@@ -207,21 +227,56 @@ class HouseholdService extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       final local = prefs.getStringList(_aliasesKey) ?? const [];
+      if (_aliasesColumnMissing) {
+        if (local.isNotEmpty) return local;
+        // Username seul, sans requête household_aliases.
+        try {
+          final uid = Supabase.instance.client.auth.currentUser?.id;
+          if (uid == null) return local;
+          final row = await Supabase.instance.client
+              .from('profiles')
+              .select('username')
+              .eq('id', uid)
+              .maybeSingle();
+          final username = row?['username']?.toString();
+          if (username != null && username.isNotEmpty) return [username];
+        } catch (_) {}
+        return local;
+      }
       final client = Supabase.instance.client;
       final uid = client.auth.currentUser?.id;
       if (uid != null) {
-        final row = await client
-            .from('profiles')
-            .select('household_aliases, username')
-            .eq('id', uid)
-            .maybeSingle();
-        final remote = row?['household_aliases'];
-        if (remote is List && remote.isNotEmpty) {
-          return remote.map((e) => e.toString()).toList();
-        }
-        final username = row?['username']?.toString();
-        if (local.isEmpty && username != null && username.isNotEmpty) {
-          return [username];
+        try {
+          final row = await client
+              .from('profiles')
+              .select('household_aliases, username')
+              .eq('id', uid)
+              .maybeSingle();
+          final remote = row?['household_aliases'];
+          if (remote is List && remote.isNotEmpty) {
+            return remote.map((e) => e.toString()).toList();
+          }
+          final username = row?['username']?.toString();
+          if (local.isEmpty && username != null && username.isNotEmpty) {
+            return [username];
+          }
+        } catch (e) {
+          if (_isMissingAliasesColumn(e)) {
+            _aliasesColumnMissing = true;
+            try {
+              final row = await client
+                  .from('profiles')
+                  .select('username')
+                  .eq('id', uid)
+                  .maybeSingle();
+              final username = row?['username']?.toString();
+              if (local.isEmpty &&
+                  username != null &&
+                  username.isNotEmpty) {
+                return [username];
+              }
+            } catch (_) {}
+          }
         }
       }
       return local;

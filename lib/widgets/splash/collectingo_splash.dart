@@ -1,16 +1,13 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 
 import '../../config/app_brand.dart';
-import '../../models/collection_category.dart';
-import '../../theme/app_theme.dart';
-/// Splash Paloma : icônes de collection en orbite, titre animé.
+
+/// Splash Paloma : fond sombre élégant, titre net, sans audio.
 class CollectingoSplash extends StatefulWidget {
   const CollectingoSplash({
     super.key,
     required this.onFinished,
-    this.duration = const Duration(milliseconds: 2800),
+    this.duration = const Duration(milliseconds: 2200),
   });
 
   final VoidCallback onFinished;
@@ -24,15 +21,6 @@ class _CollectingoSplashState extends State<CollectingoSplash>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   bool _done = false;
-
-  static const _orbitCategories = [
-    CollectionCategory.boardgame,
-    CollectionCategory.book,
-    CollectionCategory.card,
-    CollectionCategory.media,
-    CollectionCategory.videogame,
-    CollectionCategory.lego,
-  ];
 
   @override
   void initState() {
@@ -73,51 +61,70 @@ class _CollectingoSplashState extends State<CollectingoSplash>
           builder: (context, _) {
             final t = Curves.easeOutCubic.transform(_controller.value);
             return DecoratedBox(
-              decoration: BoxDecoration(
+              decoration: const BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    Color.lerp(PalomaBrand.ink, PalomaBrand.dusk, t)!,
-                    Color.lerp(
-                      PalomaBrand.violet,
-                      PalomaBrand.blush,
-                      t * 0.45,
-                    )!,
-                    Color.lerp(
-                      const Color(0xFF7E57C2),
-                      PalomaBrand.cream,
-                      t * 0.75,
-                    )!,
+                    Color(0xFF0F1419),
+                    Color(0xFF1B2838),
+                    Color(0xFF243447),
                   ],
-                  stops: const [0.0, 0.55, 1.0],
+                  stops: [0.0, 0.55, 1.0],
                 ),
               ),
               child: SafeArea(
                 child: Stack(
                   children: [
-                    ..._buildParticles(t),
-                    ..._buildOrbitIcons(t),
-                    Center(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 28,
-                          vertical: 22,
-                        ),
+                    // Soft vignette
+                    Positioned.fill(
+                      child: DecoratedBox(
                         decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.22),
-                          borderRadius: BorderRadius.circular(28),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.14),
+                          gradient: RadialGradient(
+                            center: const Alignment(0, -0.15),
+                            radius: 1.1,
+                            colors: [
+                              const Color(0xFFFFB74D).withValues(alpha: 0.08 * t),
+                              Colors.transparent,
+                            ],
                           ),
                         ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            _buildLogoMark(t),
-                            const SizedBox(height: 24),
-                            _buildTitle(t),
-                          ],
+                      ),
+                    ),
+                    Center(
+                      child: Opacity(
+                        opacity: ((t - 0.05) / 0.45).clamp(0.0, 1.0),
+                        child: Transform.translate(
+                          offset: Offset(0, (1 - t) * 16),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _DoveMark(progress: t),
+                              const SizedBox(height: 28),
+                              Text(
+                                kAppDisplayName,
+                                style: TextStyle(
+                                  fontSize: 42,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 1.2,
+                                  color: Colors.white.withValues(
+                                    alpha: 0.96,
+                                  ),
+                                  height: 1.05,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              Text(
+                                'Tes collections, au même endroit',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w400,
+                                  letterSpacing: 0.2,
+                                  color: Colors.white.withValues(alpha: 0.55),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -126,25 +133,25 @@ class _CollectingoSplashState extends State<CollectingoSplash>
                       right: 0,
                       bottom: 28,
                       child: Opacity(
-                        opacity: (t * 4 - 0.5).clamp(0.0, 0.75),
+                        opacity: (t * 3 - 0.4).clamp(0.0, 0.7),
                         child: Column(
                           children: [
                             SizedBox(
-                              width: 120,
+                              width: 100,
                               child: LinearProgressIndicator(
                                 value: t,
-                                backgroundColor: Colors.white24,
-                                color: PalomaBrand.cream,
+                                backgroundColor: Colors.white12,
+                                color: const Color(0xFFFFB74D),
                                 borderRadius: BorderRadius.circular(4),
-                                minHeight: 3,
+                                minHeight: 2.5,
                               ),
                             ),
                             const SizedBox(height: 14),
                             const Text(
                               'Appuyer pour continuer',
                               style: TextStyle(
-                                color: Colors.white70,
-                                fontSize: 13,
+                                color: Colors.white54,
+                                fontSize: 12,
                                 letterSpacing: 0.3,
                               ),
                             ),
@@ -161,155 +168,96 @@ class _CollectingoSplashState extends State<CollectingoSplash>
       ),
     );
   }
+}
 
-  List<Widget> _buildParticles(double t) {
-    final size = MediaQuery.sizeOf(context);
-    return List.generate(18, (i) {
-      final seed = i * 1.618;
-      final x = (math.sin(seed * 3.1 + t * 2) * 0.5 + 0.5) * size.width;
-      final y = (math.cos(seed * 2.7 + t * 1.6) * 0.5 + 0.5) * size.height;
-      final s = 3.0 + (i % 4);
-      return Positioned(
-        left: x,
-        top: y,
-        child: Opacity(
-          opacity: (0.15 + 0.35 * math.sin(t * math.pi + seed)).clamp(0.0, 0.5),
-          child: Container(
-            width: s,
-            height: s,
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              shape: BoxShape.circle,
-            ),
-          ),
-        ),
-      );
-    });
-  }
+/// Marque géométrique plate (colombe origami stylisée).
+class _DoveMark extends StatelessWidget {
+  const _DoveMark({required this.progress});
 
-  List<Widget> _buildOrbitIcons(double t) {
-    final size = MediaQuery.sizeOf(context);
-    final cx = size.width / 2;
-    final cy = size.height * 0.38;
-    final radius = math.min(size.width, size.height) * 0.44;
+  final double progress;
 
-    return List.generate(_orbitCategories.length, (i) {
-      final cat = _orbitCategories[i];
-      final angle =
-          (i / _orbitCategories.length) * math.pi * 2 + t * math.pi * 0.85;
-      final r = radius * (0.88 + 0.08 * math.sin(t * math.pi * 2 + i));
-      final x = cx + math.cos(angle) * r;
-      final y = cy + math.sin(angle) * r * 0.52;
-      final iconT = ((t - i * 0.06) * 2.2).clamp(0.0, 1.0);
-      final scale = 0.52 + iconT * 0.48;
-
-      return Positioned(
-        left: x - 28,
-        top: y - 28,
-        child: Opacity(
-          opacity: iconT,
-          child: Transform.scale(
-            scale: scale,
-            child: Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.18),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: cat.color.withValues(alpha: 0.55),
-                  width: 1.5,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: cat.color.withValues(alpha: 0.45),
-                    blurRadius: 18,
-                    spreadRadius: 1,
-                  ),
-                ],
-              ),
-              child: Icon(cat.icon, color: cat.color, size: 28),
-            ),
-          ),
-        ),
-      );
-    });
-  }
-
-  Widget _buildLogoMark(double t) {
-    final scale = 0.6 + t * 0.4;
+  @override
+  Widget build(BuildContext context) {
+    final scale = 0.82 + progress * 0.18;
     return Transform.scale(
       scale: scale,
       child: Container(
         width: 88,
         height: 88,
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Colors.white.withValues(alpha: 0.95),
-              Colors.white.withValues(alpha: 0.75),
-            ],
+          color: const Color(0xFF2A3A4D),
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.12),
           ),
-          borderRadius: BorderRadius.circular(24),
-          boxShadow: [
-            BoxShadow(
-              color: AppTheme.seed.withValues(alpha: 0.45),
-              blurRadius: 24,
-              offset: const Offset(0, 8),
-            ),
-          ],
         ),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Text(
-              'P',
-              style: TextStyle(
-                fontSize: 42,
-                fontWeight: FontWeight.w800,
-                color: PalomaBrand.violet.withValues(alpha: 0.95),
-                height: 1,
-              ),
-            ),
-            Positioned(
-              right: 14,
-              bottom: 14,
-              child: Icon(
-                Icons.favorite_rounded,
-                size: 18,
-                color: PalomaBrand.blush,
-              ),
-            ),
-          ],
+        child: CustomPaint(
+          painter: _OrigamiDovePainter(
+            color: PalomaBrand.cream,
+            accent: const Color(0xFFFFB74D),
+          ),
         ),
       ),
+    );
+  }
+}
+
+class _OrigamiDovePainter extends CustomPainter {
+  _OrigamiDovePainter({required this.color, required this.accent});
+
+  final Color color;
+  final Color accent;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+    final body = Paint()..color = color;
+    final fold = Paint()..color = color.withValues(alpha: 0.72);
+    final beak = Paint()..color = accent;
+
+    // Wing
+    final wing = Path()
+      ..moveTo(w * 0.32, h * 0.48)
+      ..lineTo(w * 0.58, h * 0.18)
+      ..lineTo(w * 0.62, h * 0.52)
+      ..close();
+    canvas.drawPath(wing, fold);
+
+    // Body
+    final bodyPath = Path()
+      ..moveTo(w * 0.28, h * 0.52)
+      ..lineTo(w * 0.68, h * 0.38)
+      ..lineTo(w * 0.55, h * 0.62)
+      ..lineTo(w * 0.22, h * 0.78)
+      ..close();
+    canvas.drawPath(bodyPath, body);
+
+    // Lower wing
+    final wing2 = Path()
+      ..moveTo(w * 0.36, h * 0.55)
+      ..lineTo(w * 0.78, h * 0.58)
+      ..lineTo(w * 0.48, h * 0.70)
+      ..close();
+    canvas.drawPath(wing2, fold);
+
+    // Beak
+    final beakPath = Path()
+      ..moveTo(w * 0.66, h * 0.38)
+      ..lineTo(w * 0.82, h * 0.34)
+      ..lineTo(w * 0.68, h * 0.46)
+      ..close();
+    canvas.drawPath(beakPath, beak);
+
+    // Eye
+    canvas.drawCircle(
+      Offset(w * 0.58, h * 0.42),
+      w * 0.025,
+      Paint()..color = const Color(0xFF1B2838),
     );
   }
 
-  Widget _buildTitle(double t) {
-    final slide = (1 - t) * 24;
-    return Transform.translate(
-      offset: Offset(0, slide),
-      child: Opacity(
-        opacity: ((t - 0.15) / 0.5).clamp(0.0, 1.0),
-          child: ShaderMask(
-          shaderCallback: (bounds) => const LinearGradient(
-            colors: [Colors.white, PalomaBrand.cream, Color(0xFFFFCDD2)],
-          ).createShader(bounds),
-          child: const Text(
-            kAppDisplayName,
-            style: TextStyle(
-              fontSize: 44,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.6,
-              color: Colors.white,
-              height: 1.05,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  @override
+  bool shouldRepaint(covariant _OrigamiDovePainter oldDelegate) =>
+      oldDelegate.color != color || oldDelegate.accent != accent;
 }

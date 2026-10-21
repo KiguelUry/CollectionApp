@@ -7,7 +7,7 @@ import '../../utils/wishlist_market_metadata.dart';
 import '../boardgame_tile_inventory_sheets.dart';
 import '../boardgame_tile_sheets.dart';
 
-/// Badges wishlist — même échelle / puce € que la collection.
+/// Badges wishlist — même échelle / puce € que la collection (2 + 1 sur GSM).
 class WishlistTileMetaIcons extends StatefulWidget {
   final CollectionItem item;
   final bool readOnly;
@@ -78,6 +78,7 @@ class _WishlistTileMetaIconsState extends State<WishlistTileMetaIcons> {
 
     return Column(
       mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SizedBox(
           height: _rowHeight,
@@ -97,15 +98,17 @@ class _WishlistTileMetaIconsState extends State<WishlistTileMetaIcons> {
                 ),
               ),
               const SizedBox(width: 4),
-              _chip(
-                suffix: _valueChipLabel,
-                color: Colors.teal.shade500,
-                textOnly: true,
-                onTap: () => showBoardgameTileValueSheet(
-                  context,
-                  item: widget.item,
-                  readOnly: widget.readOnly,
-                  showPurchaseBlock: false,
+              Expanded(
+                child: _chip(
+                  suffix: _valueChipLabel,
+                  color: Colors.teal.shade500,
+                  textOnly: true,
+                  onTap: () => showBoardgameTileValueSheet(
+                    context,
+                    item: widget.item,
+                    readOnly: widget.readOnly,
+                    showPurchaseBlock: false,
+                  ),
                 ),
               ),
             ],
@@ -139,6 +142,18 @@ class _WishlistTileMetaIconsState extends State<WishlistTileMetaIcons> {
         color: color,
       );
 
+  Widget _fittedChipText(String text, Color color) {
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.centerLeft,
+      child: Text(
+        text,
+        maxLines: 1,
+        style: _chipTextStyle(color),
+      ),
+    );
+  }
+
   Widget _chip({
     IconData? icon,
     required String suffix,
@@ -147,45 +162,23 @@ class _WishlistTileMetaIconsState extends State<WishlistTileMetaIcons> {
     bool textOnly = false,
     VoidCallback? onTap,
   }) {
-    final child = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(5),
-        border: Border.all(color: color.withValues(alpha: 0.35)),
-      ),
-      child: textOnly
-          ? Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: Text(
-                suffix,
-                maxLines: 1,
-                style: _chipTextStyle(color),
+    final child = ClipRect(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(5),
+          border: Border.all(color: color.withValues(alpha: 0.35)),
+        ),
+        child: textOnly
+            ? _fittedChipText(suffix, color)
+            : Row(
+                children: [
+                  if (icon != null) Icon(icon, size: 13, color: color),
+                  const SizedBox(width: 2),
+                  Expanded(child: _fittedChipText(suffix, color)),
+                ],
               ),
-            )
-          : Row(
-        children: [
-          if (icon != null) Icon(icon, size: 13, color: color),
-          const SizedBox(width: 2),
-          Expanded(
-            child: shrinkSuffix
-                ? FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      suffix,
-                      maxLines: 1,
-                      style: _chipTextStyle(color),
-                    ),
-                  )
-                : Text(
-                    suffix,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: _chipTextStyle(color),
-                  ),
-          ),
-        ],
       ),
     );
     if (onTap == null) return child;

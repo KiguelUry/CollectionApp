@@ -121,13 +121,19 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
   void didPopNext() {
     if (mounted) {
       setState(() {
-        _greeting = HubGreetingSession.ensure(
+        // Nouveau surnom à chaque retour sur le Hub (fixe tant qu'on reste).
+        _greeting = HubGreetingSession.reroll(
           username: _username,
           grammarOverride: _grammar,
         );
       });
     }
     _load(silent: true);
+  }
+
+  void _openOwnProfile() {
+    AppHaptics.selection();
+    Navigator.pushNamed(context, '/profile');
   }
 
   GrammarGender _grammar = GrammarGender.masculine;
@@ -512,14 +518,18 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const OfflineBanner(),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(20, 8, 12, 12),
-              decoration: AppTheme.heroGradient(
-                accent,
-                brightness: Theme.of(context).brightness,
-              ),
-              child: Row(
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: _openOwnProfile,
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(20, 8, 12, 12),
+                  decoration: AppTheme.heroGradient(
+                    accent,
+                    brightness: Theme.of(context).brightness,
+                  ),
+                  child: Row(
                     children: [
                       Expanded(
                         child: Column(
@@ -569,6 +579,8 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
                         ),
                     ],
                   ),
+                ),
+              ),
             ),
             AnimatedSize(
               duration: const Duration(milliseconds: 220),
@@ -583,6 +595,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
                   ? const Center(child: CircularProgressIndicator())
                   : GridView.builder(
                       padding: const EdgeInsets.all(16),
+                      addAutomaticKeepAlives: true,
                       gridDelegate: CollectionGridLayout.gridDelegate(
                         context,
                         mobileColumns: 2,
@@ -590,7 +603,9 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
                         spacing: 14,
                       ),
                       itemCount: _gridItemCount,
-                      itemBuilder: (context, index) => _buildGridItem(index),
+                      itemBuilder: (context, index) => RepaintBoundary(
+                        child: _buildGridItem(index),
+                      ),
                     ),
             ),
           ],
