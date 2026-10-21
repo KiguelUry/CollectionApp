@@ -13,9 +13,11 @@ const corsHeaders: Record<string, string> = {
 };
 
 const MAX_SEARCH = 50;
-const MAX_META = 24;
+const MAX_META = 20;
+/** Taille max d'un batch `/thing?id=` (Découvrir / meta). */
+const MAX_THING_BATCH = 20;
 const MAX_HOT = 50;
-const THING_CHUNK = 8;
+const THING_CHUNK = 20;
 const SEARCH_TYPES = "boardgame,rpgitem,boardgameexpansion";
 const SEARCH_CACHE_TTL_MS = 15 * 60 * 1000;
 const SEARCH_CACHE_MAX = 48;
@@ -266,6 +268,13 @@ function parseThingMeta(xml: string): Map<string, ThingMeta> {
 function parseThingItem(xml: string, id: string): Record<string, unknown> | null {
   const node = extractTopLevelItems(xml).find((it) => it.id === id);
   if (!node) return null;
+  return parseThingItemFromNode(node);
+}
+
+function parseThingItemFromNode(
+  node: { id: string; attrs: string; inner: string },
+): Record<string, unknown> | null {
+  const id = node.id;
   const inner = node.inner;
   const flat = inner.replace(/<item\b[\s\S]*?<\/item>/gi, "");
 
@@ -854,7 +863,41 @@ async function handleMeta(idsParam: string): Promise<Response> {
 
   const hits: GameHit[] = ids.map((id) => ({ id, title: "" }));
   const enriched = await enrichGameHits(hits);
-  return json({ games: enriched });
+  // Ordre = liste demandée, données = Map par id (jamais index XML).
+  const byId = new Map(enriched.map((g) => [g.id, g]));
+  return json({
+    games: ids.map((id) => byId.get(id) ?? { id, title: "" }),
+  });
+}
+
+/**
+ * Batch fiches complètes : 1 appel BGG `thing?id=a,b,…` (≤20) → Map par bgg_id.
+ * Utilisé par Découvrir pour éviter N requêtes unitaires.
+ */
+async function handleThings(idsParam: string): Promise<Response> {
+  const ids = [
+    ...new Set(
+      idsParam
+        .split(",")
+        .map((s) => s.trim())
+        .filter((id) => /^\d+$/.test(id)),
+    ),
+  ].slice(0, MAX_THING_BATCH);
+  if (ids.length === 0) return json({ games: [] });
+
+  const xml = await fetchBgg("/xmlapi2/thing", {
+    id: ids.join(","),
+    stats: "1",
+  });
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const node of extractTopLevelItems(xml)) {
+    const game = parseThingItemFromNode(node);
+    if (game) byId.set(node.id, game);
+  }
+  const games = ids
+    .map((id) => byId.get(id))
+    .filter((g): g is Record<string, unknown> => g != null);
+  return json({ games });
 }
 
 async function handleGame(id: string): Promise<Response> {
@@ -1146,6 +1189,8 @@ Deno.serve(async (req) => {
         return await handleHot();
       case "meta":
         return await handleMeta(url.searchParams.get("ids") ?? "");
+      case "things":
+        return await handleThings(url.searchParams.get("ids") ?? "");
       case "game": {
         const id = url.searchParams.get("id") ?? "";
         return await handleGame(id);

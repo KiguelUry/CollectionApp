@@ -9,7 +9,31 @@ class _MemStore implements BggCacheStore {
 
   @override
   Future<void> write(String bggId, BggCacheKind kind, Object payload) async {
-    rows['${kind.dbValue}:$bggId'] = BggCacheEntry(payload, DateTime.now());
+    await writeMany({bggId: payload}, kind);
+  }
+
+  @override
+  Future<Map<String, BggCacheEntry>> readMany(
+    List<String> bggIds,
+    BggCacheKind kind,
+  ) async {
+    final out = <String, BggCacheEntry>{};
+    for (final id in bggIds) {
+      final e = rows['${kind.dbValue}:$id'];
+      if (e != null) out[id] = e;
+    }
+    return out;
+  }
+
+  @override
+  Future<void> writeMany(
+    Map<String, Object> payloadsById,
+    BggCacheKind kind,
+  ) async {
+    final now = DateTime.now();
+    for (final e in payloadsById.entries) {
+      rows['${kind.dbValue}:${e.key}'] = BggCacheEntry(e.value, now);
+    }
   }
 }
 

@@ -78,9 +78,12 @@ class BggGalleryPhoto {
 class BggService {
   static const _maxSearchResults = 50;
 
+  /// Taille max d'un batch Découvrir / things (1 SQL + 1 BGG).
+  static const discoverThingBatchSize = 20;
+
   /// Moins d'appels /thing (limite BGG ~429 si trop de requêtes).
-  static const _maxMetaLookup = 24;
-  static const _thingChunkSize = 8;
+  static const _maxMetaLookup = discoverThingBatchSize;
+  static const _thingChunkSize = discoverThingBatchSize;
   static const _maxPollAttempts = 10;
   static const _rateLimitBackoff = BackoffPolicy(
     initialDelay: Duration(milliseconds: 900),
@@ -1701,7 +1704,15 @@ class BggService {
     return null;
   }
 
+  static const _thingBatchGap = Duration(milliseconds: 600);
+
   /// Détails BGG pour une liste d'IDs → `Map<bgg_id, details>` (jamais par index).
+  ///
+  /// Preuve scalabilité Découvrir :
+  /// 1. **Une** lecture groupée `bgg_catalog_cache` (`.inFilter`) ;
+  /// 2. IDs manquants → **une** requête `bgg-api?action=things&ids=` (≤20) ;
+  /// 3. **Un** upsert groupé dans `bgg_catalog_cache`.
+  /// Lots suivants espacés de [_thingBatchGap] + retry 429/202.
   static Future<Map<String, Map<String, dynamic>>> fetchThingDetailsByIds(
     List<String> ids,
   ) async {
@@ -1713,20 +1724,129 @@ class BggService {
     if (unique.isEmpty) return {};
 
     final out = <String, Map<String, dynamic>>{};
-    // Parallel per-id via cache (mutualisé) — chaque entrée est clé par bgg_id.
-    await Future.wait(
-      unique.map((id) async {
-        final details = await getGameFullDetails(id);
-        if (details == null) return;
-        final returned = details['bgg_id']?.toString().trim() ??
-            details['id']?.toString().trim();
-        if (returned != null && returned.isNotEmpty && returned != id) {
-          return;
-        }
-        out[id] = {...details, 'bgg_id': id, 'id': id};
-      }),
+
+    // Étape A — 1 SELECT groupé (mémoire + Supabase).
+    final cached = await BggCatalogCache.instance.readManyFresh(
+      unique,
+      BggCacheKind.details,
     );
+    for (final e in cached.entries) {
+      final map = _normalizeDetailsMap(e.key, e.value);
+      if (map != null) out[e.key] = map;
+    }
+
+    final missing = unique.where((id) => !out.containsKey(id)).toList();
+    if (missing.isEmpty) return out;
+
+    // Étape B — paquets ≤20 → 1 appel BGG groupé chacun.
+    for (var i = 0; i < missing.length; i += discoverThingBatchSize) {
+      if (i > 0) await Future.delayed(_thingBatchGap);
+      final chunk = missing.skip(i).take(discoverThingBatchSize).toList();
+      final fetched = await _fetchThingDetailsBatchRemote(chunk);
+      if (fetched.isEmpty) continue;
+
+      // Étape C — upsert groupé.
+      await BggCatalogCache.instance.writeManyFresh(
+        {
+          for (final e in fetched.entries) e.key: e.value,
+        },
+        BggCacheKind.details,
+      );
+      out.addAll(fetched);
+    }
     return out;
+  }
+
+  static Map<String, dynamic>? _normalizeDetailsMap(String id, Object raw) {
+    if (raw is! Map) return null;
+    final map = Map<String, dynamic>.from(raw);
+    final returned =
+        map['bgg_id']?.toString().trim() ?? map['id']?.toString().trim();
+    if (returned != null && returned.isNotEmpty && returned != id) {
+      return null;
+    }
+    final title = map['title']?.toString().trim() ?? '';
+    final image = map['image_url']?.toString().trim() ?? '';
+    if (title.isEmpty || image.isEmpty) return null;
+    map['bgg_id'] = id;
+    map['id'] = id;
+    map['title'] = title;
+    map['image_url'] = image;
+    return map;
+  }
+
+  static Future<Map<String, Map<String, dynamic>>> _fetchThingDetailsBatchRemote(
+    List<String> ids,
+  ) async {
+    if (ids.isEmpty) return {};
+
+    if (_useWebJsonApi) {
+      if (!_webProxyReady) return {};
+      Map<String, dynamic>? data;
+      for (var attempt = 0; attempt < 4; attempt++) {
+        data = await _jsonApiGet('things', {'ids': ids.join(',')});
+        if (data != null) break;
+        final err = lastSearchError ?? '';
+        if (err.contains('429') ||
+            err.contains('202') ||
+            err.contains('surcharg')) {
+          await Future.delayed(_thingBatchGap * (attempt + 1));
+          continue;
+        }
+        break;
+      }
+      final list = data?['games'];
+      if (list is! List) return {};
+      final out = <String, Map<String, dynamic>>{};
+      for (final raw in list) {
+        if (raw is! Map) continue;
+        final map = Map<String, dynamic>.from(raw);
+        final id = map['bgg_id']?.toString().trim() ??
+            map['id']?.toString().trim() ??
+            '';
+        if (id.isEmpty || !ids.contains(id)) continue;
+        final normalized = _normalizeDetailsMap(id, map);
+        if (normalized != null) out[id] = normalized;
+      }
+      return out;
+    }
+
+    // Native : un seul /xmlapi2/thing?id=… pour le chunk.
+    try {
+      final url = Uri.https('boardgamegeek.com', '/xmlapi2/thing', {
+        'id': ids.join(','),
+        'stats': '1',
+      });
+      http.Response? response;
+      for (var attempt = 0; attempt < 4; attempt++) {
+        response = await _getWithRetry(url);
+        if (response.statusCode == 200 && response.body.isNotEmpty) break;
+        if (response.statusCode == 429 || response.statusCode == 202) {
+          await Future.delayed(_thingBatchGap * (attempt + 1));
+          continue;
+        }
+        break;
+      }
+      if (response == null ||
+          response.statusCode != 200 ||
+          response.body.isEmpty) {
+        return {};
+      }
+      final document = XmlDocument.parse(response.body);
+      final out = <String, Map<String, dynamic>>{};
+      for (final item in _topLevelItems(document)) {
+        final id = item.getAttribute('id');
+        if (id == null || !ids.contains(id)) continue;
+        final parsed = _parseThingItem(item);
+        if (parsed == null) continue;
+        final normalized = _normalizeDetailsMap(id, {...parsed, 'bgg_id': id});
+        if (normalized != null) out[id] = normalized;
+      }
+      return out;
+    } catch (e) {
+      if (kDebugMode) debugPrint('BGG things batch: $e');
+      return {};
+    }
   }
 
   /// Jeux possédés (`own=1`) d'un compte BoardGameGeek.

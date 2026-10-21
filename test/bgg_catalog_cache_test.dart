@@ -19,8 +19,33 @@ class _MemoryStore implements BggCacheStore {
 
   @override
   Future<void> write(String bggId, BggCacheKind kind, Object payload) async {
+    await writeMany({bggId: payload}, kind);
+  }
+
+  @override
+  Future<Map<String, BggCacheEntry>> readMany(
+    List<String> bggIds,
+    BggCacheKind kind,
+  ) async {
+    reads++;
+    if (failReads) throw Exception('table absente');
+    final out = <String, BggCacheEntry>{};
+    for (final id in bggIds) {
+      final e = rows['${kind.dbValue}:$id'];
+      if (e != null) out[id] = e;
+    }
+    return out;
+  }
+
+  @override
+  Future<void> writeMany(
+    Map<String, Object> payloadsById,
+    BggCacheKind kind,
+  ) async {
     writes++;
-    rows['${kind.dbValue}:$bggId'] = BggCacheEntry(payload, _now);
+    for (final e in payloadsById.entries) {
+      rows['${kind.dbValue}:${e.key}'] = BggCacheEntry(e.value, _now);
+    }
   }
 }
 
@@ -88,6 +113,28 @@ void main() {
     });
     expect(calls, 0);
     expect((r as Map)['from'], 'cache');
+  });
+
+  test('readManyFresh : 1 lecture store pour N ids, ignore payload sans titre/image',
+      () async {
+    store.rows['details:13'] = BggCacheEntry({
+      'bgg_id': '13',
+      'title': 'Catan',
+      'image_url': 'https://img/catan.jpg',
+    }, _now);
+    store.rows['details:42'] = BggCacheEntry({
+      'bgg_id': '42',
+      'title': 'Broken',
+      // image manquante → ignoré (force refetch)
+    }, _now);
+    final before = store.reads;
+    final got = await cache.readManyFresh(
+      ['13', '42', '99'],
+      BggCacheKind.details,
+    );
+    expect(store.reads, before + 1);
+    expect(got.keys, ['13']);
+    expect((got['13'] as Map)['title'], 'Catan');
   });
 
   test('entrée périmée (> 30 j) : rafraîchie depuis BGG et réécrite', () async {

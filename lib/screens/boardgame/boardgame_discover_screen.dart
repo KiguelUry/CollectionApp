@@ -2,10 +2,13 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../data/boardgame_discover_seeds.dart';
 import '../../models/bgg_catalog_game.dart';
 import '../../models/collection_category.dart';
 import '../../models/collection_item.dart';
+import '../../services/bgg_catalog_cache.dart';
 import '../../services/bgg_service.dart';
 import '../../services/user_boardgame_collection_service.dart';
 import '../../utils/boardgame_genres.dart';
@@ -17,129 +20,7 @@ import '../../widgets/bgg_network_image.dart';
 
 enum _DiscoverMode { forYou, recent, hot, upcoming, era, table }
 
-class _Seed {
-  final String id;
-  final String title;
-  final List<String> genres;
-  final int? yearHint;
-  const _Seed(this.id, this.title, this.genres, {this.yearHint});
-}
-
-/// Vivier élargi (classiques + pépites + sorties) pour éviter toujours les mêmes 10.
-const _popular = <_Seed>[
-  _Seed('224517', 'Brass: Birmingham', ['Strategy', 'Economic'], yearHint: 2018),
-  _Seed('174430', 'Gloomhaven', ['Strategy', 'Adventure', 'Fantasy'], yearHint: 2017),
-  _Seed('167791', 'Terraforming Mars', ['Strategy', 'Economic', 'Science Fiction'], yearHint: 2016),
-  _Seed('342942', 'Ark Nova', ['Strategy'], yearHint: 2021),
-  _Seed('266192', 'Wingspan', ['Strategy', 'Card Game'], yearHint: 2019),
-  _Seed('169786', 'Scythe', ['Strategy', 'Economic'], yearHint: 2016),
-  _Seed('161936', 'Pandemic Legacy: Season 1', ['Cooperative', 'Strategy'], yearHint: 2015),
-  _Seed('13', 'Catan', ['Family', 'Strategy'], yearHint: 1995),
-  _Seed('9209', 'Ticket to Ride', ['Family'], yearHint: 2004),
-  _Seed('68448', '7 Wonders', ['Card Game', 'Strategy'], yearHint: 2010),
-  _Seed('178900', 'Codenames', ['Party', 'Deduction'], yearHint: 2015),
-  _Seed('822', 'Carcassonne', ['Family'], yearHint: 2000),
-  _Seed('39856', 'Dixit', ['Party'], yearHint: 2008),
-  _Seed('188920', 'Azul', ['Abstract', 'Family'], yearHint: 2017),
-  _Seed('266524', 'PARKS', ['Family'], yearHint: 2019),
-  _Seed('31260', 'Agricola', ['Economic', 'Strategy'], yearHint: 2007),
-  _Seed('173346', '7 Wonders Duel', ['Card Game', 'Strategy'], yearHint: 2015),
-  _Seed('148228', 'Splendor', ['Card Game', 'Family'], yearHint: 2014),
-  _Seed('124361', 'Concordia', ['Strategy', 'Economic'], yearHint: 2013),
-  _Seed('205637', 'Arkham Horror: The Card Game', ['Card Game', 'Adventure'], yearHint: 2016),
-  _Seed('162886', 'Spirit Island', ['Strategy', 'Cooperative'], yearHint: 2017),
-  _Seed('120677', 'Terra Mystica', ['Strategy', 'Economic'], yearHint: 2012),
-  _Seed('182028', 'Through the Ages: A New Story of Civilization', ['Strategy', 'Economic'], yearHint: 2015),
-  _Seed('291457', 'Gloomhaven: Jaws of the Lion', ['Strategy', 'Adventure'], yearHint: 2020),
-  _Seed('35677', 'Le Havre', ['Economic', 'Strategy'], yearHint: 2008),
-  _Seed('72125', 'Eclipse', ['Strategy', 'Science Fiction'], yearHint: 2011),
-  _Seed('2651', 'Power Grid', ['Economic', 'Strategy'], yearHint: 2004),
-  _Seed('3076', 'Puerto Rico', ['Economic', 'Strategy'], yearHint: 2002),
-  _Seed('237182', 'Root', ['Strategy'], yearHint: 2018),
-  _Seed('295947', 'Cascadia', ['Family'], yearHint: 2021),
-  _Seed('316554', 'Dune: Imperium', ['Strategy', 'Card Game'], yearHint: 2020),
-  _Seed('286849', 'The Crew: The Quest for Planet Nine', ['Card Game', 'Cooperative'], yearHint: 2019),
-  _Seed('244521', 'The Quacks of Quedlinburg', ['Family'], yearHint: 2018),
-  _Seed('233078', 'Twilight Imperium: Fourth Edition', ['Strategy'], yearHint: 2017),
-  _Seed('199561', 'Sagrada', ['Family', 'Abstract'], yearHint: 2017),
-  _Seed('230802', 'Azul: Stained Glass of Sintra', ['Abstract', 'Family'], yearHint: 2018),
-  _Seed('266810', 'Paladins of the West Kingdom', ['Strategy'], yearHint: 2019),
-  _Seed('193738', 'Great Western Trail', ['Strategy', 'Economic'], yearHint: 2016),
-  _Seed('312484', 'Lost Ruins of Arnak', ['Strategy', 'Adventure'], yearHint: 2020),
-  _Seed('284083', 'The Search for Planet X', ['Deduction'], yearHint: 2020),
-  _Seed('341169', 'Heat: Pedal to the Metal', ['Racing', 'Family'], yearHint: 2022),
-  _Seed('367220', 'Sky Team', ['Cooperative', 'Family'], yearHint: 2023),
-  _Seed('359871', 'Harmonies', ['Family'], yearHint: 2024),
-  _Seed('366013', 'Forest Shuffle', ['Card Game', 'Family'], yearHint: 2023),
-  _Seed('283155', 'London (Second Edition)', ['Economic', 'Strategy'], yearHint: 2017),
-  _Seed('163412', 'Patchwork', ['Abstract', 'Family'], yearHint: 2014),
-  _Seed('170216', 'Blood Rage', ['Strategy', 'Fantasy'], yearHint: 2015),
-  _Seed('187645', 'Star Wars: Rebellion', ['Strategy'], yearHint: 2016),
-  _Seed('164153', 'Star Wars: Imperial Assault', ['Adventure', 'Miniatures'], yearHint: 2014),
-  _Seed('209418', 'Dominion (Second Edition)', ['Card Game'], yearHint: 2016),
-  _Seed('12333', 'Twilight Struggle', ['Strategy', 'Wargame'], yearHint: 2005),
-  _Seed('70323', 'King of Tokyo', ['Family', 'Dice'], yearHint: 2011),
-  _Seed('30549', 'Pandemic', ['Cooperative', 'Family'], yearHint: 2008),
-  _Seed('54043', 'Jaipur', ['Card Game', 'Family'], yearHint: 2009),
-  _Seed('129622', 'Love Letter', ['Card Game', 'Party'], yearHint: 2012),
-  _Seed('172386', 'Mysterium', ['Party', 'Deduction'], yearHint: 2015),
-  _Seed('181304', 'One Night Ultimate Werewolf', ['Party'], yearHint: 2014),
-  _Seed('217372', 'The Mind', ['Party', 'Cooperative'], yearHint: 2017),
-  _Seed('254188', 'Mind MGMT', ['Deduction', 'Strategy'], yearHint: 2021),
-  // Sorties / annonces récentes (ids BGG exacts — image via /thing?id= uniquement).
-  _Seed('420433', 'Final Girl: Frightmare on Maple Lane', ['Cooperative'], yearHint: 2025),
-  _Seed('420546', 'Vantage', ['Adventure', 'Exploration'], yearHint: 2025),
-  _Seed('367521', 'Bomb Busters', ['Deduction', 'Family'], yearHint: 2025),
-  _Seed('416851', 'Finspan', ['Family'], yearHint: 2025),
-  _Seed('436189', 'Fromage', ['Strategy'], yearHint: 2025),
-  _Seed('413245', 'Seti: Search for Extraterrestrial Intelligence', ['Strategy'], yearHint: 2025),
-  _Seed('428097', 'Keep the Heroes Out!', ['Cooperative'], yearHint: 2025),
-  _Seed('428530', 'The Elder Scrolls: Betrayal of the Second Era', ['Adventure'], yearHint: 2025),
-  _Seed('421236', 'Seas of Strife', ['Strategy'], yearHint: 2026),
-  _Seed('439422', 'Captain Flip', ['Family'], yearHint: 2026),
-  // Prochaines sorties (2027+) — exclus des « Sorties récentes ».
-  _Seed('451852', 'Arcs: The Blighted Reach', ['Strategy'], yearHint: 2027),
-  _Seed('444378', 'Windmill Valley', ['Family'], yearHint: 2027),
-  _Seed('436127', 'Nucleum: Australia', ['Strategy'], yearHint: 2027),
-  _Seed('440563', 'Endeavor: Deep Sea', ['Strategy'], yearHint: 2027),
-  _Seed('328871', 'Terraforming Mars: Ares Expedition', ['Card Game', 'Strategy'], yearHint: 2021),
-  _Seed('350184', 'Earth', ['Strategy'], yearHint: 2023),
-  _Seed('342640', 'Marvel Champions: The Card Game', ['Card Game', 'Cooperative'], yearHint: 2019),
-  _Seed('251247', 'Barrage', ['Strategy', 'Economic'], yearHint: 2019),
-  _Seed('256916', 'Concordia Venus', ['Strategy', 'Economic'], yearHint: 2018),
-  _Seed('177736', 'A Feast for Odin', ['Strategy', 'Economic'], yearHint: 2016),
-  _Seed('199792', 'Everdell', ['Strategy', 'Family'], yearHint: 2018),
-  _Seed('285774', 'Marvel United', ['Cooperative', 'Family'], yearHint: 2020),
-  _Seed('299659', 'Wonderland\'s War', ['Strategy'], yearHint: 2022),
-  _Seed('325494', 'Cascadia Junior', ['Family'], yearHint: 2024),
-  _Seed('366906', 'Apiary', ['Strategy'], yearHint: 2023),
-  _Seed('295486', 'My City', ['Family'], yearHint: 2020),
-  _Seed('28143', 'Race for the Galaxy', ['Card Game', 'Strategy'], yearHint: 2007),
-  _Seed('2655', 'Hive', ['Abstract'], yearHint: 2001),
-  _Seed('41', 'Can\'t Stop', ['Family', 'Dice'], yearHint: 1980),
-  _Seed('93', 'El Grande', ['Strategy'], yearHint: 1995),
-  _Seed('215', 'Tigris & Euphrates', ['Strategy'], yearHint: 1997),
-  _Seed('478', 'Ra', ['Strategy'], yearHint: 1999),
-  _Seed('265236', 'Gaia Project', ['Strategy'], yearHint: 2017),
-  _Seed('28720', 'Brass', ['Strategy', 'Economic'], yearHint: 2007),
-  _Seed('110327', 'Lords of Waterdeep', ['Strategy'], yearHint: 2012),
-  _Seed('62219', 'Dominant Species', ['Strategy'], yearHint: 2010),
-  _Seed('123260', 'Village', ['Strategy'], yearHint: 2011),
-  _Seed('150376', 'Dead of Winter', ['Strategy'], yearHint: 2014),
-  _Seed('147020', 'Star Realms', ['Card Game'], yearHint: 2014),
-  _Seed('131357', 'Coup', ['Party', 'Deduction'], yearHint: 2012),
-  _Seed('70919', 'Takenoko', ['Family'], yearHint: 2011),
-  _Seed('126163', 'Hanabi', ['Cooperative'], yearHint: 2010),
-  _Seed('148228', 'Splendor', ['Family', 'Card Game'], yearHint: 2014),
-  _Seed('159675', 'Dead Man\'s Draw', ['Card Game'], yearHint: 2014),
-  _Seed('155821', 'Five Tribes', ['Strategy'], yearHint: 2014),
-  _Seed('147949', 'One Night Ultimate Werewolf', ['Party'], yearHint: 2014),
-  _Seed('128882', 'The Resistance: Avalon', ['Party', 'Deduction'], yearHint: 2012),
-  _Seed('128621', 'Seasons', ['Card Game', 'Strategy'], yearHint: 2012),
-  _Seed('113924', 'Zombicide', ['Adventure'], yearHint: 2012),
-  _Seed('103343', 'A Few Acres of Snow', ['Strategy'], yearHint: 2011),
-  _Seed('91514', '7 Wonders: Leaders', ['Card Game'], yearHint: 2011),
-];
+typedef _Seed = DiscoverSeed;
 
 /// Page Découvrir : cartes visuelles, notes BGG, ajout collection / wishlist.
 class BoardgameDiscoverScreen extends StatefulWidget {
@@ -152,7 +33,8 @@ class BoardgameDiscoverScreen extends StatefulWidget {
 }
 
 class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
-  static const _page = 27;
+  /// Aligné sur le batch BGG (≤20 IDs / requête).
+  static const _page = BggService.discoverThingBatchSize;
 
   late List<_Seed> _order;
   List<_Seed> _hot = [];
@@ -175,9 +57,29 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
   void initState() {
     super.initState();
     _order = _mix(widget.owned, salt: _shuffleSalt);
+    unawaited(_purgeStaleDiscoverCache());
     unawaited(_loadMembership());
     // Premier écran d'abord (sans annuler via un compteur partagé).
     unawaited(_bootstrapFirstPage());
+  }
+
+  /// Purge SharedPreferences + mémoire des paires titre/image corrompues (v4).
+  Future<void> _purgeStaleDiscoverCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      for (final key in const [
+        'discover_cache_v1',
+        'discover_cache_v2',
+        'discover_cache_v3',
+      ]) {
+        await prefs.remove(key);
+      }
+      const epoch = 'v4';
+      if (prefs.getString(kDiscoverLocalCacheEpoch) != epoch) {
+        BggCatalogCache.instance.clearMemory();
+        await prefs.setString(kDiscoverLocalCacheEpoch, epoch);
+      }
+    } catch (_) {}
   }
 
   Future<void> _bootstrapFirstPage() async {
@@ -202,10 +104,14 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
       if (_inflightIds.contains(id)) return false;
       final d = _details[id];
       if (d == null) return true;
-      return (d['image_url']?.toString() ?? '').isEmpty;
+      final hasImage = (d['image_url']?.toString() ?? '').isNotEmpty;
+      final hasTitle = (d['title']?.toString() ?? '').isNotEmpty;
+      return !hasImage || !hasTitle;
     }).toList();
     if (need.isEmpty) return;
-    const width = 8;
+
+    // Un seul batch (≤20) = 1 SQL cache + au plus 1 appel bgg-api groupé.
+    const width = BggService.discoverThingBatchSize;
     for (var i = 0; i < need.length; i += width) {
       if (!mounted) return;
       final slice = need.skip(i).take(width).toList();
@@ -213,27 +119,32 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
         _inflightIds.add(id);
       }
       try {
-        // Map<bgg_id, details> — jamais zip par index de réponse.
         final byId = await BggService.fetchThingDetailsByIds(slice);
         if (!mounted) return;
         setState(() {
           for (final id in slice) {
             final details = byId[id];
             if (details == null) continue;
-            final returned = details['bgg_id']?.toString().trim() ??
-                details['id']?.toString().trim();
-            if (returned != null && returned.isNotEmpty && returned != id) {
-              continue;
-            }
-            final image = details['image_url']?.toString() ?? '';
-            final title = details['title']?.toString() ?? '';
+            // Règle d'or : title / image / year / rating = payload BGG du bgg_id.
             _details[id] = {
-              ...?_details[id],
-              ...details,
               'bgg_id': id,
               'id': id,
-              if (title.isNotEmpty) 'title': title,
-              if (image.isNotEmpty) 'image_url': image,
+              'title': details['title'],
+              'image_url': details['image_url'],
+              if (details['year_published'] != null)
+                'year_published': details['year_published'],
+              if (details['bgg_avg_rating'] != null)
+                'bgg_avg_rating': details['bgg_avg_rating'],
+              if (details['min_players'] != null)
+                'min_players': details['min_players'],
+              if (details['max_players'] != null)
+                'max_players': details['max_players'],
+              if (details['playing_time'] != null)
+                'playing_time': details['playing_time'],
+              if (details['bgg_description'] != null)
+                'bgg_description': details['bgg_description'],
+              if (details['bgg_gallery_urls'] != null)
+                'bgg_gallery_urls': details['bgg_gallery_urls'],
             };
           }
         });
@@ -247,7 +158,7 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
 
   List<_Seed> _uniquePool() {
     final byId = <String, _Seed>{};
-    for (final seed in _popular) {
+    for (final seed in kDiscoverPopularSeeds) {
       byId.putIfAbsent(seed.id, () => seed);
     }
     return byId.values.toList();
@@ -451,11 +362,13 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
         final id = map['id'] ?? map['bgg_id'] ?? '';
         final title = map['title'] ?? '';
         if (id.isEmpty || title.isEmpty) continue;
+        // Titre Hot = titre BGG du même id (déjà mappé côté service).
         seeds.add(_Seed(id, title, const []));
-        // Pas d'image depuis le hot-list : uniquement via getGameFullDetails(bgg_id).
         _details[id] = {
-          ...?_details[id],
           'bgg_id': id,
+          'id': id,
+          'title': title,
+          if ((map['image_url'] ?? '').isNotEmpty) 'image_url': map['image_url'],
           if (map['year'] != null) 'year_published': int.tryParse(map['year']!),
           if (map['avg_rating'] != null)
             'bgg_avg_rating': double.tryParse(map['avg_rating']!),
@@ -495,13 +408,12 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
   }
 
   BggCatalogGame _game(_Seed seed) {
-    // Une seule entrée Map[_details][seed.id] : titre + image du même nœud.
+    // bgg_id = seule source de vérité dès que le cache/BGG a répondu.
     final d = _details[seed.id];
     final avg = d?['bgg_avg_rating'];
     final image = d?['image_url']?.toString().trim();
     final detailTitle = d?['title']?.toString().trim();
-    // Si on a une image hydratée sans titre BGG, on garde le titre seed
-    // (même bgg_id) — jamais un titre tiré d'un autre index.
+    // ÉCRASE toujours le titre seed dès qu'un titre BGG est disponible.
     final title = (detailTitle != null && detailTitle.isNotEmpty)
         ? detailTitle
         : seed.title;

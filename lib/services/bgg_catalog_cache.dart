@@ -23,6 +23,18 @@ class BggCacheEntry {
 abstract class BggCacheStore {
   Future<BggCacheEntry?> read(String bggId, BggCacheKind kind);
   Future<void> write(String bggId, BggCacheKind kind, Object payload);
+
+  /// Une seule requête SQL groupée (`.inFilter`) — obligatoire pour Découvrir.
+  Future<Map<String, BggCacheEntry>> readMany(
+    List<String> bggIds,
+    BggCacheKind kind,
+  );
+
+  /// Upsert groupé des payloads (clé = bgg_id).
+  Future<void> writeMany(
+    Map<String, Object> payloadsById,
+    BggCacheKind kind,
+  );
 }
 
 /// Coupe-circuit : si la table est absente (404) ou invalide (400),
@@ -112,20 +124,71 @@ class SupabaseBggCacheStore implements BggCacheStore {
 
   @override
   Future<void> write(String bggId, BggCacheKind kind, Object payload) async {
-    if (_CatalogCacheBreaker.isOpen) return;
-    if (Supabase.instance.client.auth.currentUser == null) return;
+    await writeMany({bggId: payload}, kind);
+  }
+
+  @override
+  Future<Map<String, BggCacheEntry>> readMany(
+    List<String> bggIds,
+    BggCacheKind kind,
+  ) async {
+    final out = <String, BggCacheEntry>{};
+    final ids = bggIds
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toSet()
+        .toList();
+    if (ids.isEmpty || _CatalogCacheBreaker.isOpen) return out;
     try {
-      await Supabase.instance.client.from(_table).upsert({
-        'bgg_id': bggId,
-        'kind': kind.dbValue,
-        'payload': payload,
-        'fetched_at': DateTime.now().toUtc().toIso8601String(),
-      });
+      final rows = await Supabase.instance.client
+          .from(_table)
+          .select('bgg_id, payload, fetched_at')
+          .inFilter('bgg_id', ids)
+          .eq('kind', kind.dbValue);
+      for (final row in rows as List) {
+        if (row is! Map) continue;
+        final id = row['bgg_id']?.toString();
+        final at = DateTime.tryParse(row['fetched_at']?.toString() ?? '');
+        final payload = row['payload'];
+        if (id == null || id.isEmpty || at == null || payload == null) continue;
+        out[id] = BggCacheEntry(payload as Object, at);
+      }
     } catch (e) {
       if (_CatalogCacheBreaker.looksLikeSchemaError(e)) {
         _CatalogCacheBreaker.trip(e);
       } else if (kDebugMode) {
-        debugPrint('BGG cache write: $e');
+        debugPrint('BGG cache readMany: $e');
+      }
+    }
+    return out;
+  }
+
+  @override
+  Future<void> writeMany(
+    Map<String, Object> payloadsById,
+    BggCacheKind kind,
+  ) async {
+    if (payloadsById.isEmpty || _CatalogCacheBreaker.isOpen) return;
+    if (Supabase.instance.client.auth.currentUser == null) return;
+    final now = DateTime.now().toUtc().toIso8601String();
+    final rows = [
+      for (final e in payloadsById.entries)
+        if (e.key.trim().isNotEmpty)
+          {
+            'bgg_id': e.key.trim(),
+            'kind': kind.dbValue,
+            'payload': e.value,
+            'fetched_at': now,
+          },
+    ];
+    if (rows.isEmpty) return;
+    try {
+      await Supabase.instance.client.from(_table).upsert(rows);
+    } catch (e) {
+      if (_CatalogCacheBreaker.looksLikeSchemaError(e)) {
+        _CatalogCacheBreaker.trip(e);
+      } else if (kDebugMode) {
+        debugPrint('BGG cache writeMany: $e');
       }
     }
   }
@@ -229,13 +292,76 @@ class BggCatalogCache {
     return fresh;
   }
 
-  @visibleForTesting
+  /// Vide le cache mémoire (ex. epoch Découvrir `discover_cache_v4`).
   void clearMemory() => _memory.clear();
 
   @visibleForTesting
   static void resetCircuitBreaker() {
     _CatalogCacheBreaker.tripped = false;
     _CatalogCacheBreaker.trippedAt = null;
+  }
+
+  /// Lecture groupée mémoire → **1** SELECT Supabase `.inFilter` → Map par bgg_id.
+  /// Entrées sans `title` ou sans `image_url` sont traitées comme absentes (v4).
+  Future<Map<String, Object>> readManyFresh(
+    List<String> bggIds,
+    BggCacheKind kind,
+  ) async {
+    final out = <String, Object>{};
+    final missing = <String>[];
+    final now = _clock();
+    for (final raw in bggIds) {
+      final id = raw.trim();
+      if (id.isEmpty) continue;
+      final mem = _memory[_key(id, kind)];
+      if (mem != null && mem.isFresh(now, ttl) && _payloadUsable(mem.payload)) {
+        out[id] = mem.payload;
+      } else {
+        missing.add(id);
+      }
+    }
+    if (missing.isEmpty) return out;
+
+    try {
+      final stored = await _store.readMany(missing, kind);
+      for (final e in stored.entries) {
+        if (!e.value.isFresh(now, ttl) || !_payloadUsable(e.value.payload)) {
+          continue;
+        }
+        _memory[_key(e.key, kind)] = e.value;
+        out[e.key] = e.value.payload;
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('BGG cache readManyFresh: $e');
+    }
+    return out;
+  }
+
+  /// Écriture mémoire + **1** upsert Supabase groupé.
+  Future<void> writeManyFresh(
+    Map<String, Object> payloadsById,
+    BggCacheKind kind,
+  ) async {
+    if (payloadsById.isEmpty) return;
+    final now = _clock();
+    for (final e in payloadsById.entries) {
+      final id = e.key.trim();
+      if (id.isEmpty || !_payloadUsable(e.value)) continue;
+      _memory[_key(id, kind)] = BggCacheEntry(e.value, now);
+    }
+    try {
+      await _store.writeMany(payloadsById, kind);
+    } catch (e) {
+      if (kDebugMode) debugPrint('BGG cache writeManyFresh: $e');
+    }
+  }
+
+  /// Payload Découvrir / fiches : titre + image obligatoires (purge des vieux caches).
+  static bool _payloadUsable(Object payload) {
+    if (payload is! Map) return false;
+    final title = payload['title']?.toString().trim() ?? '';
+    final image = payload['image_url']?.toString().trim() ?? '';
+    return title.isNotEmpty && image.isNotEmpty;
   }
 }
 
