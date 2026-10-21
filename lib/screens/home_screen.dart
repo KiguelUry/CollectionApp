@@ -64,6 +64,7 @@ import 'boardgame/boardgame_discover_screen.dart';
 import '../widgets/watch_quick_search_sheet.dart';
 import '../services/collection_local_cache.dart';
 import '../services/offline_mode.dart';
+import '../services/supabase_capacity.dart';
 import '../widgets/offline_banner.dart';
 import '../utils/catalog_hit_metadata.dart';
 import '../widgets/book_subcategory_picker.dart';
@@ -332,9 +333,12 @@ class _HomeScreenState extends State<HomeScreen>
       OfflineMode.instance.setOnline();
       _onItemRows(scoped);
     } catch (e) {
-      OfflineMode.instance.markIfNetworkError(e);
+      final degraded = SupabaseCapacity.markDegraded(e);
       if (!_syncedFromDb) await _restoreFromDiskCache();
-      if (mounted) setState(() => _itemsLoading = false);
+      if (mounted) {
+        setState(() => _itemsLoading = false);
+        if (degraded) SupabaseCapacity.showOfflineSnackIfNeeded(context);
+      }
     }
   }
 

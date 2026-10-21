@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'supabase_capacity.dart';
+
 /// Ressource BGG mise en cache.
 enum BggCacheKind {
   details('details'),
@@ -92,6 +94,10 @@ class _CatalogCacheBreaker {
             text.contains('pgrst205') ||
             text.contains('schema cache'));
   }
+
+  /// Quota / timeout → coupe les appels PostgREST (mémoire seule).
+  static bool looksLikeCapacityError(Object e) =>
+      SupabaseCapacity.looksLikeCapacityError(e);
 }
 
 class SupabaseBggCacheStore implements BggCacheStore {
@@ -113,8 +119,10 @@ class SupabaseBggCacheStore implements BggCacheStore {
       if (at == null || payload == null) return null;
       return BggCacheEntry(payload as Object, at);
     } catch (e) {
-      if (_CatalogCacheBreaker.looksLikeSchemaError(e)) {
+      if (_CatalogCacheBreaker.looksLikeSchemaError(e) ||
+          _CatalogCacheBreaker.looksLikeCapacityError(e)) {
         _CatalogCacheBreaker.trip(e);
+        SupabaseCapacity.markDegraded(e);
       } else if (kDebugMode) {
         debugPrint('BGG cache read: $e');
       }
@@ -154,8 +162,10 @@ class SupabaseBggCacheStore implements BggCacheStore {
         out[id] = BggCacheEntry(payload as Object, at);
       }
     } catch (e) {
-      if (_CatalogCacheBreaker.looksLikeSchemaError(e)) {
+      if (_CatalogCacheBreaker.looksLikeSchemaError(e) ||
+          _CatalogCacheBreaker.looksLikeCapacityError(e)) {
         _CatalogCacheBreaker.trip(e);
+        SupabaseCapacity.markDegraded(e);
       } else if (kDebugMode) {
         debugPrint('BGG cache readMany: $e');
       }
@@ -185,8 +195,10 @@ class SupabaseBggCacheStore implements BggCacheStore {
     try {
       await Supabase.instance.client.from(_table).upsert(rows);
     } catch (e) {
-      if (_CatalogCacheBreaker.looksLikeSchemaError(e)) {
+      if (_CatalogCacheBreaker.looksLikeSchemaError(e) ||
+          _CatalogCacheBreaker.looksLikeCapacityError(e)) {
         _CatalogCacheBreaker.trip(e);
+        SupabaseCapacity.markDegraded(e);
       } else if (kDebugMode) {
         debugPrint('BGG cache writeMany: $e');
       }

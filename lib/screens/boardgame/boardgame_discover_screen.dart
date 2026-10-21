@@ -83,20 +83,10 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
   }
 
   Future<void> _bootstrapFirstPage() async {
+    // Tendances / sorties : Hot BGG dès l'ouverture (pas d'IDs hardcodés).
+    await _ensureHot(force: false);
     await _hydrateUpTo(_visible + _page);
     if (mounted) setState(() => _firstPageReady = true);
-    unawaited(_prefetchUpcomingSeeds());
-  }
-
-  Iterable<_Seed> get _upcomingSeedCandidates => _uniquePool().where((s) {
-        final y = s.yearHint;
-        return y != null && y >= 2027;
-      });
-
-  Future<void> _prefetchUpcomingSeeds() async {
-    final ids = _upcomingSeedCandidates.map((s) => s.id).toList();
-    if (ids.isEmpty) return;
-    await _hydrateIds(ids);
   }
 
   Future<void> _hydrateIds(List<String> ids) async {
@@ -285,9 +275,10 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
       case _DiscoverMode.hot:
         return _hot.any((s) => s.id == seed.id);
       case _DiscoverMode.recent:
-        // Exclusion mutuelle avec « Prochaines sorties ».
-        if (year == null || (year != 2025 && year != 2026)) return false;
-        if (rating != null && rating < 6.8) return false;
+        // Nouvelles sorties : issus du Hot BGG, années courantes.
+        final nowY = DateTime.now().year;
+        if (year == null || year < nowY - 1 || year > nowY + 1) return false;
+        if (rating != null && rating < 6.5) return false;
         return true;
       case _DiscoverMode.upcoming:
         // Année réelle BGG si connue, sinon yearHint du seed.
@@ -322,7 +313,17 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
     if (_mode == _DiscoverMode.forYou) {
       list = List<_Seed>.from(_order);
     } else if (_mode == _DiscoverMode.hot) {
+      // 100 % dynamique : uniquement /xmlapi2/hot (aucun seed hardcodé).
       list = List<_Seed>.from(_hot);
+    } else if (_mode == _DiscoverMode.recent) {
+      // Nouvelles sorties = Hot BGG (années récentes) — zéro seed hardcodé.
+      final filtered = _hot.where(_matches).toList();
+      list = filtered.isNotEmpty ? filtered : List<_Seed>.from(_hot);
+      list.sort((a, b) {
+        final ay = _asInt(_details[a.id]?['year_published']) ?? a.yearHint ?? 0;
+        final by = _asInt(_details[b.id]?['year_published']) ?? b.yearHint ?? 0;
+        return by.compareTo(ay);
+      });
     } else if (_mode == _DiscoverMode.upcoming) {
       list = _pool.where(_matches).toList();
       list.sort((a, b) {
@@ -351,25 +352,28 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
     return [...fresh, ...owned];
   }
 
-  Future<void> _ensureHot() async {
-    if (_hot.isNotEmpty || _hotLoading) return;
+  Future<void> _ensureHot({bool force = false}) async {
+    if ((!force && _hot.isNotEmpty) || _hotLoading) return;
     setState(() => _hotLoading = true);
     try {
+      // Source unique : /xmlapi2/hot?type=boardgame (via bgg-api / natif).
       final maps = await BggService.fetchHotBoardgames();
       if (!mounted) return;
       final seeds = <_Seed>[];
+      final hotIds = <String>[];
       for (final map in maps) {
         final id = map['id'] ?? map['bgg_id'] ?? '';
         final title = map['title'] ?? '';
         if (id.isEmpty || title.isEmpty) continue;
-        // Titre Hot = titre BGG du même id (déjà mappé côté service).
-        seeds.add(_Seed(id, title, const []));
+        hotIds.add(id);
+        final year = int.tryParse(map['year'] ?? '');
+        seeds.add(_Seed(id, title, const [], yearHint: year));
         _details[id] = {
           'bgg_id': id,
           'id': id,
           'title': title,
           if ((map['image_url'] ?? '').isNotEmpty) 'image_url': map['image_url'],
-          if (map['year'] != null) 'year_published': int.tryParse(map['year']!),
+          if (year != null) 'year_published': year,
           if (map['avg_rating'] != null)
             'bgg_avg_rating': double.tryParse(map['avg_rating']!),
           if (map['min_players'] != null)
@@ -380,16 +384,11 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
             'playing_time': int.tryParse(map['playing_time']!),
         };
       }
-      // Complète avec le vivier pour atteindre 20+ même si l'API renvoie peu.
-      if (seeds.length < 24) {
-        for (final seed in _uniquePool()) {
-          if (seeds.any((s) => s.id == seed.id)) continue;
-          seeds.add(seed);
-          if (seeds.length >= 36) break;
-        }
-      }
       setState(() => _hot = seeds);
-      unawaited(_hydrateUpTo(_visible + _page));
+      // Batch cache/BGG sur les IDs Hot uniquement (pas de seeds).
+      if (hotIds.isNotEmpty) {
+        await _hydrateIds(hotIds.take(_page * 2).toList());
+      }
     } finally {
       if (mounted) setState(() => _hotLoading = false);
     }
@@ -400,9 +399,8 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
       _mode = mode;
       _visible = mode == _DiscoverMode.era ? 12 : _page;
     });
-    if (mode != _DiscoverMode.forYou) unawaited(_ensureHot());
-    if (mode == _DiscoverMode.upcoming) {
-      unawaited(_prefetchUpcomingSeeds());
+    if (mode == _DiscoverMode.hot || mode == _DiscoverMode.recent) {
+      unawaited(_ensureHot());
     }
     unawaited(_hydrateUpTo(_visible + _page));
   }

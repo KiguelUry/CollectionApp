@@ -16,6 +16,7 @@ import '../services/collection_refresh.dart';
 import '../services/global_play_history_service.dart';
 import '../services/group_service.dart';
 import '../services/location_service.dart';
+import '../services/supabase_capacity.dart';
 import '../services/tag_service.dart';
 import '../utils/active_categories.dart';
 import '../utils/boardgame_collection_visibility.dart';
@@ -172,8 +173,24 @@ class _AllCollectionScreenState extends State<AllCollectionScreen> {
         }
       });
       _enrich();
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+    } catch (e) {
+      final degraded = SupabaseCapacity.markDegraded(e);
+      if (!mounted) return;
+      if (degraded) {
+        final local = await CollectionLocalCache.read(_userId, _cacheScope);
+        if (local != null && local.isNotEmpty && mounted) {
+          setState(() {
+            _rows = local;
+            _loading = false;
+          });
+          _enrich();
+        } else if (mounted) {
+          setState(() => _loading = false);
+        }
+        if (mounted) SupabaseCapacity.showOfflineSnackIfNeeded(context);
+      } else if (mounted) {
+        setState(() => _loading = false);
+      }
     }
   }
 
