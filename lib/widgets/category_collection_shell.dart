@@ -7,11 +7,13 @@ class CategoryQuickAction {
   final String label;
   final IconData icon;
   final VoidCallback onTap;
+  final bool showBadge;
 
   const CategoryQuickAction({
     required this.label,
     required this.icon,
     required this.onTap,
+    this.showBadge = false,
   });
 }
 

@@ -1604,14 +1604,26 @@ class BggService {
 
   /// Fiche BGG complète (images, joueurs, durée…) via le cache partagé.
   static Future<Map<String, dynamic>?> getGameFullDetails(String bggId) async {
-    if (bggId.trim().isEmpty) return null;
+    final id = bggId.trim();
+    if (id.isEmpty) return null;
     try {
       final cached = await BggCatalogCache.instance.getOrFetch(
-        bggId,
+        id,
         BggCacheKind.details,
-        () => _fetchGameFullDetailsRemote(bggId),
+        () => _fetchGameFullDetailsRemote(id),
       );
-      return cached is Map ? Map<String, dynamic>.from(cached) : null;
+      if (cached is! Map) return null;
+      final map = Map<String, dynamic>.from(cached);
+      final returned = map['bgg_id']?.toString().trim();
+      // Refuse un payload rattaché au mauvais id (évite décalage titre/image).
+      if (returned != null && returned.isNotEmpty && returned != id) {
+        if (kDebugMode) {
+          debugPrint('BGG details id mismatch: asked=$id got=$returned');
+        }
+        return null;
+      }
+      map['bgg_id'] = id;
+      return map;
     } catch (e) {
       if (kDebugMode) debugPrint('Erreur détails BGG: $e');
       return null;
@@ -1625,7 +1637,14 @@ class BggService {
       if (!_webProxyReady) return null;
       final data = await _jsonApiGet('game', {'id': bggId});
       final game = data?['game'];
-      return game is Map<String, dynamic> ? game : null;
+      if (game is! Map) return null;
+      final map = Map<String, dynamic>.from(game);
+      final returned = map['bgg_id']?.toString() ?? map['id']?.toString();
+      if (returned != null && returned.isNotEmpty && returned != bggId) {
+        return null;
+      }
+      map['bgg_id'] = bggId;
+      return map;
     }
 
     try {
@@ -1636,7 +1655,7 @@ class BggService {
       final thing = results[0] as Map<String, dynamic>?;
       final extras = results[1] as Map<String, dynamic>? ?? {};
       if (thing == null && extras.isEmpty) return null;
-      return {...?thing, ...extras};
+      return {...?thing, ...extras, 'bgg_id': bggId};
     } catch (e) {
       if (kDebugMode) debugPrint('Erreur détails BGG: $e');
     }
@@ -1654,8 +1673,20 @@ class BggService {
 
     if (response.statusCode == 200 && response.body.isNotEmpty) {
       final document = XmlDocument.parse(response.body);
-      final item = document.findAllElements('item').firstOrNull;
-      if (item != null) return _parseThingItem(item);
+      // Toujours rattacher au nœud <item id="…"> demandé (jamais firstOrNull).
+      XmlElement? matched;
+      for (final item in document.findAllElements('item')) {
+        if (item.getAttribute('id') == bggId) {
+          matched = item;
+          break;
+        }
+      }
+      matched ??= document.findAllElements('item').firstOrNull;
+      if (matched == null) return null;
+      final parsed = _parseThingItem(matched);
+      if (parsed == null) return null;
+      // Garantit la clé bgg_id = id demandé.
+      return {...parsed, 'bgg_id': bggId};
     }
     return null;
   }

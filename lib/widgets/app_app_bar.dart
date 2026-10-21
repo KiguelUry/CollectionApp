@@ -47,13 +47,14 @@ class AppAppBar extends StatelessWidget implements PreferredSizeWidget {
       foregroundColor: foregroundColor,
       automaticallyImplyLeading: showLeading,
       actions: [
+        ...?actions,
+        // Maison tout à droite.
         if (showCollectionsHome && !onCollections)
           IconButton(
             icon: const Icon(Icons.home_rounded),
             tooltip: 'Accueil',
             onPressed: () => AppNavigation.openCollections(context),
           ),
-        ...?actions,
       ],
     );
   }

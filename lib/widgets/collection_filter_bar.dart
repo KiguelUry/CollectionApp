@@ -192,11 +192,14 @@ class CollectionFilterBar extends StatelessWidget {
           value: CollectionSort.quantityDesc,
           child: Text('Quantité'),
         ),
-        if (showWishlistSortOptions)
-          const PopupMenuItem(
-            value: CollectionSort.estimatedValueAsc,
-            child: Text('Coût estimé'),
-          ),
+        const PopupMenuItem(
+          value: CollectionSort.estimatedValueDesc,
+          child: Text('Valeur décroissante'),
+        ),
+        const PopupMenuItem(
+          value: CollectionSort.estimatedValueAsc,
+          child: Text('Valeur croissante'),
+        ),
       ],
       child: IgnorePointer(
         child: OutlinedButton.icon(

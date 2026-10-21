@@ -19,6 +19,7 @@ import 'boardgame_expansion_flow.dart';
 Future<void> quickAddBoardgameFromCatalog(
   BuildContext context, {
   required BggCatalogGame game,
+  bool defaultWishlist = false,
 }) async {
   if (!context.mounted) return;
 
@@ -56,12 +57,43 @@ Future<void> quickAddBoardgameFromCatalog(
       ? parseBggAvgRating(details['bgg_avg_rating'])
       : null;
 
+  final detailTitle = details?['title']?.toString().trim();
+  final title = (detailTitle != null && detailTitle.isNotEmpty)
+      ? detailTitle
+      : game.title;
+  final year = details?['year_published'] is int
+      ? details!['year_published'] as int
+      : int.tryParse('${details?['year_published'] ?? ''}');
+  final minP = details?['min_players'] is int
+      ? details!['min_players'] as int
+      : int.tryParse('${details?['min_players'] ?? ''}');
+  final maxP = details?['max_players'] is int
+      ? details!['max_players'] as int
+      : int.tryParse('${details?['max_players'] ?? ''}');
+  final desc = details?['bgg_description']?.toString() ??
+      details?['bgg_short_description']?.toString();
+  int? playingTime;
+  final pt = details?['playing_time'];
+  if (pt is int && pt > 0) {
+    playingTime = pt;
+  } else {
+    playingTime = int.tryParse('$pt');
+    if (playingTime != null && playingTime <= 0) playingTime = null;
+  }
+
   await showDialog(
     context: context,
     builder: (dialogContext) => AddItemOptionsDialog(
-      itemTitle: game.title,
+      itemTitle: title,
       itemImageUrl: coverUrl,
       bggAvgRating: bggAvg,
+      defaultWishlist: defaultWishlist,
+      yearPublished: year,
+      minPlayers: minP,
+      maxPlayers: maxP,
+      playingTime: playingTime,
+      description: desc,
+      bggId: game.bggId,
       onConfirm: (options) async {
         final client = Supabase.instance.client;
         final userId = client.auth.currentUser!.id;
@@ -83,10 +115,7 @@ Future<void> quickAddBoardgameFromCatalog(
           return;
         }
 
-        int? playingTime;
         final detailsMap = details;
-        final pt = detailsMap?['playing_time'];
-        if (pt is int && pt > 0) playingTime = pt;
 
         try {
           String message;
@@ -96,7 +125,7 @@ Future<void> quickAddBoardgameFromCatalog(
             if (!context.mounted) return;
             final expansionMsg = await insertBoardgameWithExpansionRules(
               context: context,
-              title: game.title,
+              title: title,
               bggId: game.bggId,
               bggDetails: detailsMap,
               imageUrl: coverUrl,
@@ -133,7 +162,7 @@ Future<void> quickAddBoardgameFromCatalog(
               if (options.isWishlist) {}
               final item = CollectionItem(
                 id: '',
-                title: game.title.trim(),
+                title: title.trim(),
                 category: CollectionCategory.boardgame,
                 metadata: meta.isEmpty ? null : meta,
                 imageUrl: coverUrl,
@@ -176,8 +205,8 @@ Future<void> quickAddBoardgameFromCatalog(
                 ]);
               }
               message = options.isWishlist
-                  ? '« ${game.title} » ajouté à la wishlist'
-                  : '« ${game.title} » ajouté';
+                  ? '« $title » ajouté à la wishlist'
+                  : '« $title » ajouté';
             }
           } else {
             final meta = <String, dynamic>{
@@ -199,7 +228,7 @@ Future<void> quickAddBoardgameFromCatalog(
             }
             final item = CollectionItem(
               id: '',
-              title: game.title.trim(),
+              title: title.trim(),
               category: CollectionCategory.boardgame,
               metadata: meta.isEmpty ? null : meta,
               imageUrl: coverUrl,
@@ -242,8 +271,8 @@ Future<void> quickAddBoardgameFromCatalog(
               ]);
             }
             message = options.isWishlist
-                ? '« ${game.title} » ajouté à la wishlist'
-                : '« ${game.title} » ajouté';
+                ? '« $title » ajouté à la wishlist'
+                : '« $title » ajouté';
           }
           CollectionRefresh.instance.bump();
           if (dialogContext.mounted) Navigator.pop(dialogContext);

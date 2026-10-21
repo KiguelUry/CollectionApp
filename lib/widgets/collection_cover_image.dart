@@ -64,7 +64,17 @@ class CollectionCoverImage extends StatelessWidget {
         filterQuality: FilterQuality.low,
         gaplessPlayback: true,
         cacheWidth: kThumbnailSize,
-        errorBuilder: (_, _, _) => _fallback(),
+        errorBuilder: (_, _, _) => Image.network(
+          // Repli : URL directe si le proxy wsrv échoue (Lego, Brickset…).
+          resolveCoverSourceUrl(url, large: false),
+          width: w,
+          height: h,
+          fit: imageFit,
+          filterQuality: FilterQuality.low,
+          gaplessPlayback: true,
+          cacheWidth: kThumbnailSize,
+          errorBuilder: (_, _, _) => _fallback(),
+        ),
         loadingBuilder: (context, child, progress) {
           if (progress == null) return child;
           return _fallback(
@@ -136,7 +146,14 @@ class CollectionCoverImage extends StatelessWidget {
         filterQuality: compact ? FilterQuality.low : FilterQuality.medium,
         gaplessPlayback: true,
         cacheWidth: largeSource ? 1000 : 600,
-        errorBuilder: (_, _, _) => _fallback(),
+        errorBuilder: (_, _, _) => Image.network(
+          displayUrl,
+          width: w,
+          height: h,
+          fit: imageFit,
+          gaplessPlayback: true,
+          errorBuilder: (_, _, _) => _fallback(),
+        ),
         loadingBuilder: (context, child, progress) {
           if (progress == null) return child;
           return _fallback(

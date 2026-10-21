@@ -39,7 +39,6 @@ import '../widgets/boardgame_detail_bento.dart';
 import '../widgets/boardgame_rules_bento.dart';
 import '../widgets/collapsible_section.dart';
 import '../widgets/detail_bento_tile.dart';
-import '../widgets/favorite_heart_button.dart';
 import '../widgets/profile/pantheon_bento.dart';
 import '../widgets/compact_whereabouts_dropdown.dart';
 import '../widgets/discogs_market_value_card.dart';
@@ -681,6 +680,12 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
             );
       if (mounted) {
         setState(() => _item = updated);
+        unawaited(
+          CollectionChangeHistoryService.instance.recordLoan(
+            item: updated,
+            borrower: updated.loaneeDisplayName,
+          ),
+        );
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Prêté à ${updated.loaneeDisplayName}')),
         );
@@ -718,6 +723,9 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       final updated = await _loanService.returnItem(_item.id);
       if (mounted) {
         setState(() => _item = updated);
+        unawaited(
+          CollectionChangeHistoryService.instance.recordReturn(item: updated),
+        );
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Prêt clôturé')));
@@ -821,19 +829,93 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                 if (ok == true) _reloadItem();
               },
             ),
-          if (Supabase.instance.client.auth.currentUser != null)
-            RecommendToFriendButton(item: _item),
           if (!ro)
-            FavoriteHeartIconButton(
-              item: _item,
-              onChanged: (updated) {
-                setState(() => _item = updated);
+            PopupMenuButton<_ItemMenuAction>(
+              tooltip: 'Actions',
+              icon: const Icon(Icons.more_vert_rounded),
+              onSelected: (action) async {
+                switch (action) {
+                  case _ItemMenuAction.favorite:
+                    final updated = _item.withFavorite(!_item.isFavorite);
+                    setState(() => _item = updated);
+                    unawaited(
+                      Supabase.instance.client.from('collection_items').update({
+                        'metadata': updated.metadata,
+                      }).eq('id', updated.id),
+                    );
+                  case _ItemMenuAction.pantheon:
+                    await _offerPantheonSlot();
+                  case _ItemMenuAction.recommend:
+                    if (!mounted) return;
+                    await RecommendToFriendButton.openFor(context, _item);
+                  case _ItemMenuAction.location:
+                    if (!mounted) return;
+                    await _lend();
+                  case _ItemMenuAction.delete:
+                    await _delete();
+                }
               },
-            ),
-          if (!ro)
-            IconButton(
-              icon: const Icon(Icons.delete_outline),
-              onPressed: _delete,
+              itemBuilder: (ctx) => [
+                PopupMenuItem(
+                  value: _ItemMenuAction.favorite,
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(
+                      _item.isFavorite
+                          ? Icons.favorite
+                          : Icons.favorite_border,
+                      color: Colors.pinkAccent,
+                    ),
+                    title: Text(
+                      _item.isFavorite
+                          ? 'Retirer des favoris'
+                          : 'Ajouter aux favoris',
+                    ),
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: _ItemMenuAction.pantheon,
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.emoji_events_outlined),
+                    title: Text('Ajouter au Panthéon'),
+                  ),
+                ),
+                if (Supabase.instance.client.auth.currentUser != null)
+                  const PopupMenuItem(
+                    value: _ItemMenuAction.recommend,
+                    child: ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.chat_bubble_outline),
+                      title: Text('Recommander à un ami'),
+                    ),
+                  ),
+                const PopupMenuItem(
+                  value: _ItemMenuAction.location,
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.place_outlined),
+                    title: Text('Localisation / Prêter'),
+                  ),
+                ),
+                const PopupMenuDivider(),
+                PopupMenuItem(
+                  value: _ItemMenuAction.delete,
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.delete_outline, color: Colors.red.shade700),
+                    title: Text(
+                      'Supprimer l\'objet',
+                      style: TextStyle(color: Colors.red.shade700),
+                    ),
+                  ),
+                ),
+              ],
             ),
         ],
       ),
@@ -1798,16 +1880,28 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
               clearHolder = false,
               manualHolder = false,
             }) {
-              setState(() {
-                _item = applyWhereaboutsChange(
-                  _item,
-                  locationUserId: locationUserId,
-                  holderLabel: holderLabel,
-                  clearHolder: clearHolder,
-                  manualHolder: manualHolder,
+              final fromLabel = _item.locationLabel?.trim().isNotEmpty == true
+                  ? _item.locationLabel!
+                  : (_item.locationUserId != null ? 'Chez quelqu\'un' : '—');
+              final next = applyWhereaboutsChange(
+                _item,
+                locationUserId: locationUserId,
+                holderLabel: holderLabel,
+                clearHolder: clearHolder,
+                manualHolder: manualHolder,
+              );
+              final toLabel = next.locationLabel?.trim().isNotEmpty == true
+                  ? next.locationLabel!
+                  : (next.locationUserId != null ? 'Chez quelqu\'un' : '—');
+              setState(() => _item = next);
+              if (manualHolder || locationUserId != null || clearHolder) {
+                unawaited(
+                  CollectionChangeHistoryService.instance.recordLocationChange(
+                    item: next,
+                    fromLabel: fromLabel,
+                    toLabel: toLabel,
+                  ),
                 );
-              });
-              if (manualHolder || locationUserId != null) {
                 _saveNow();
               }
             },
@@ -2741,3 +2835,5 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     );
   }
 }
+
+enum _ItemMenuAction { favorite, pantheon, recommend, location, delete }

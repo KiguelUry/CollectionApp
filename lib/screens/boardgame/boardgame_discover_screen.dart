@@ -12,9 +12,8 @@ import '../../utils/boardgame_genres.dart';
 import '../../utils/collection_grid_layout.dart';
 import '../../utils/boardgame_quick_add.dart';
 import '../../utils/boardgame_bulk_add.dart';
-import '../../utils/bgg_text.dart';
 import '../../widgets/app_app_bar.dart';
-import '../../widgets/collection_cover_image.dart';
+import '../../widgets/bgg_network_image.dart';
 
 enum _DiscoverMode { forYou, recent, hot, upcoming, era, table }
 
@@ -165,17 +164,25 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
   int? _maxMinutes;
   int _visible = _page;
   int _shuffleSalt = 0;
+  /// Métadonnées indexées exclusivement par `bgg_id`.
   final _details = <String, Map<String, dynamic>>{};
   Set<String> _ownedKeys = {};
   Set<String> _wishlistKeys = {};
-  int _hydrateGen = 0;
+  final _inflightIds = <String>{};
+  bool _firstPageReady = false;
 
   @override
   void initState() {
     super.initState();
     _order = _mix(widget.owned, salt: _shuffleSalt);
     unawaited(_loadMembership());
-    unawaited(_hydrateUpTo(_visible + _page));
+    // Premier écran d'abord (sans annuler via un compteur partagé).
+    unawaited(_bootstrapFirstPage());
+  }
+
+  Future<void> _bootstrapFirstPage() async {
+    await _hydrateUpTo(_visible + _page);
+    if (mounted) setState(() => _firstPageReady = true);
     unawaited(_prefetchUpcomingSeeds());
   }
 
@@ -191,26 +198,39 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
   }
 
   Future<void> _hydrateIds(List<String> ids) async {
-    final gen = ++_hydrateGen;
-    const width = 4;
-    for (var i = 0; i < ids.length; i += width) {
-      if (!mounted || gen != _hydrateGen) return;
-      final slice = ids.skip(i).take(width);
+    final need = ids.where((id) {
+      if (_inflightIds.contains(id)) return false;
+      final d = _details[id];
+      if (d == null) return true;
+      return (d['image_url']?.toString() ?? '').isEmpty;
+    }).toList();
+    if (need.isEmpty) return;
+    const width = 6;
+    for (var i = 0; i < need.length; i += width) {
+      if (!mounted) return;
+      final slice = need.skip(i).take(width).toList();
+      for (final id in slice) {
+        _inflightIds.add(id);
+      }
       await Future.wait(slice.map((id) async {
-        if (_details[id] != null &&
-            (_details[id]!['image_url']?.toString() ?? '').isNotEmpty) {
-          return;
+        try {
+          final details = await BggService.getGameFullDetails(id);
+          if (details == null || !mounted) return;
+          final returned = details['bgg_id']?.toString().trim();
+          if (returned != null && returned.isNotEmpty && returned != id) {
+            return;
+          }
+          final image = details['image_url']?.toString() ?? '';
+          setState(() {
+            _details[id] = {
+              ...details,
+              'bgg_id': id,
+              if (image.isNotEmpty) 'image_url': image,
+            };
+          });
+        } finally {
+          _inflightIds.remove(id);
         }
-        final details = await BggService.getGameFullDetails(id);
-        if (details == null || !mounted || gen != _hydrateGen) return;
-        final image = details['image_url']?.toString() ?? '';
-        setState(() {
-          _details[id] = {
-            ...details,
-            if (image.isNotEmpty) 'image_url': image,
-            'bgg_id': id,
-          };
-        });
       }));
     }
   }
@@ -270,32 +290,9 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
   }
 
   Future<void> _hydrateUpTo(int count) async {
-    final gen = ++_hydrateGen;
-    // Image exclusivement via bgg_id exact (/thing?id=) — jamais par titre.
-    final ids = _source.take(count).map((s) => s.id).where((id) {
-      final d = _details[id];
-      if (d == null) return true;
-      final img = d['image_url']?.toString() ?? '';
-      return img.isEmpty;
-    }).toList();
-    const width = 4;
-    for (var i = 0; i < ids.length; i += width) {
-      if (!mounted || gen != _hydrateGen) return;
-      final slice = ids.skip(i).take(width);
-      await Future.wait(slice.map((id) async {
-        final details = await BggService.getGameFullDetails(id);
-        if (details == null || !mounted || gen != _hydrateGen) return;
-        final image = details['image_url']?.toString() ?? '';
-        // Refuse toute image sans bgg_id clairement rattaché.
-        setState(() {
-          _details[id] = {
-            ...details,
-            if (image.isNotEmpty) 'image_url': image,
-            'bgg_id': id,
-          };
-        });
-      }));
-    }
+    // Image exclusivement via bgg_id exact (/thing?id=) — jamais par index.
+    final ids = _source.take(count).map((s) => s.id).toList();
+    await _hydrateIds(ids);
   }
 
   void _showMore() {
@@ -488,10 +485,12 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
   }
 
   BggCatalogGame _game(_Seed seed) {
+    // Une seule source : _details[seed.id] (jamais un autre index).
     final d = _details[seed.id];
     final avg = d?['bgg_avg_rating'];
-    final image = d?['image_url']?.toString();
+    final image = d?['image_url']?.toString().trim();
     final detailTitle = d?['title']?.toString().trim();
+    // Tant que les détails ne sont pas là, titre seed ; image seulement si liée.
     final title = (detailTitle != null && detailTitle.isNotEmpty)
         ? detailTitle
         : seed.title;
@@ -531,6 +530,11 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
                 ),
           ),
           const SizedBox(height: 10),
+          if (!_firstPageReady)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 10),
+              child: LinearProgressIndicator(minHeight: 2),
+            ),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
@@ -670,150 +674,14 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
     );
   }
 
-  Future<void> _showDiscoverGallery(BuildContext ctx, String bggId) async {
-    final urls = await BggService.fetchCommunityImages(bggId);
-    if (!ctx.mounted) return;
-    if (urls.isEmpty) {
-      ScaffoldMessenger.of(ctx).showSnackBar(
-        const SnackBar(content: Text('Aucune photo BGG pour ce jeu')),
-      );
-      return;
-    }
-    await showModalBottomSheet<void>(
-      context: ctx,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (sheet) => SafeArea(
-        child: SizedBox(
-          height: MediaQuery.sizeOf(sheet).height * 0.7,
-          child: GridView.builder(
-            padding: const EdgeInsets.all(12),
-            itemCount: urls.length,
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 180,
-              mainAxisSpacing: 8,
-              crossAxisSpacing: 8,
-            ),
-            itemBuilder: (_, i) => ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: CollectionCoverImage(
-                url: urls[i],
-                boxedCover: true,
-                compact: true,
-              ),
-            ),
-          ),
-        ),
-      ),
+  Future<void> _openPreview(BggCatalogGame game, {bool defaultWishlist = false}) async {
+    // Modale unifiée (même widget que Collection / Wishlist).
+    await quickAddBoardgameFromCatalog(
+      context,
+      game: game,
+      defaultWishlist: defaultWishlist,
     );
-  }
-
-  Future<void> _openPreview(BggCatalogGame game) async {
-    final details = _details[game.bggId];
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (ctx) {
-        final desc = cleanBggText(
-          details?['bgg_description']?.toString() ??
-              details?['bgg_short_description']?.toString(),
-        );
-        final avg = _ratingLabel(details?['bgg_avg_rating']);
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (game.imageUrl != null)
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: CollectionCoverImage(
-                          url: game.imageUrl!,
-                          width: 96,
-                          height: 96,
-                          boxedCover: true,
-                          compact: true,
-                        ),
-                      ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            game.title,
-                            style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
-                                  fontWeight: FontWeight.w800,
-                                ),
-                          ),
-                          Text(
-                            'Note BGG  $avg',
-                            style: const TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                          Text(
-                            [
-                              if (details?['year_published'] != null)
-                                '${details!['year_published']}',
-                              if (details?['min_players'] != null)
-                                '${details!['min_players']}–${details['max_players'] ?? '?'} joueurs',
-                              if (details?['playing_time'] != null)
-                                '${details!['playing_time']} min',
-                            ].join(' · '),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                if (desc.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  Text(desc, maxLines: 8, overflow: TextOverflow.ellipsis),
-                ],
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: () => _showDiscoverGallery(ctx, game.bggId),
-                    icon: const Icon(Icons.photo_library_outlined),
-                    label: const Text('Photos BoardGameGeek'),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          _toggleWish(game);
-                        },
-                        child: const Text('+ Wishlist'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          _addCollection(game);
-                        },
-                        child: const Text('+ Collection'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
+    await _loadMembership();
   }
 
   Widget _modeChip(String label, _DiscoverMode mode) {
@@ -844,26 +712,23 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
   }
 
   Future<void> _addCollection(BggCatalogGame game) async {
-    await quickAddBoardgameFromCatalog(context, game: game);
-    await _loadMembership();
+    await _openPreview(game, defaultWishlist: false);
   }
 
   Future<void> _toggleWish(BggCatalogGame game) async {
     final key = game.catalogKey;
     final inWish = _wishlistKeys.contains(key);
-    final ok = await toggleBoardgameWishlist(
-      context,
-      game: game,
-      currentlyInWishlist: inWish,
-    );
-    if (!mounted || !ok) return;
-    setState(() {
-      if (inWish) {
-        _wishlistKeys.remove(key);
-      } else {
-        _wishlistKeys.add(key);
-      }
-    });
+    if (inWish) {
+      final ok = await toggleBoardgameWishlist(
+        context,
+        game: game,
+        currentlyInWishlist: true,
+      );
+      if (!mounted || !ok) return;
+      setState(() => _wishlistKeys.remove(key));
+      return;
+    }
+    await _openPreview(game, defaultWishlist: true);
   }
 }
 
@@ -908,13 +773,18 @@ class _DiscoverCard extends StatelessWidget {
                 Expanded(
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(12),
-                    child: game.imageUrl == null
+                    child: game.imageUrl == null || game.imageUrl!.isEmpty
                         ? ColoredBox(
-                            color: Colors.orange.withValues(alpha: 0.15),
-                            child: const Icon(Icons.casino_outlined),
+                            color: Colors.grey.shade200,
+                            child: Icon(
+                              Icons.casino_outlined,
+                              color: Colors.grey.shade500,
+                            ),
                           )
-                        : CollectionCoverImage(
-                            key: ValueKey('discover-${game.bggId}-${game.imageUrl}'),
+                        : BggNetworkImage(
+                            key: ValueKey(
+                              'discover-${game.bggId}-${game.imageUrl}',
+                            ),
                             url: game.imageUrl!,
                             boxedCover: true,
                             compact: true,

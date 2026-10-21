@@ -128,17 +128,48 @@ class _AllCollectionScreenState extends State<AllCollectionScreen> {
 
   Future<void> _reload() async {
     try {
-      final data = await Supabase.instance.client
+      final client = Supabase.instance.client;
+      // Groupes + objets perso + objets de groupe en parallèle (0 s d'attente).
+      final groupsFuture = _groups.isEmpty
+          ? GroupService().fetchMyGroups()
+          : Future.value(_groups);
+      final personalFuture = client
           .from('collection_items')
           .select(SupabaseEmbeds.collectionItemList)
-          .eq('is_wishlist', false);
+          .eq('is_wishlist', false)
+          .eq('added_by', _userId);
+
+      final groups = await groupsFuture;
+      final groupIds = groups.map((g) => g.id).toList();
+      final groupFuture = groupIds.isEmpty
+          ? Future.value(<dynamic>[])
+          : client
+              .from('collection_items')
+              .select(SupabaseEmbeds.collectionItemList)
+              .eq('is_wishlist', false)
+              .inFilter('group_id', groupIds);
+
+      final personalRows = await personalFuture;
+      final groupRows = await groupFuture;
       if (!mounted) return;
-      final rows = List<Map<String, dynamic>>.from(data);
+
+      final byId = <String, Map<String, dynamic>>{};
+      for (final raw in [...personalRows, ...groupRows]) {
+        final map = Map<String, dynamic>.from(raw as Map);
+        final id = map['id']?.toString();
+        if (id != null && id.isNotEmpty) byId[id] = map;
+      }
+      final rows = byId.values.toList();
       _synced = true;
       CollectionLocalCache.write(_userId, _cacheScope, rows);
       setState(() {
         _rows = rows;
         _loading = false;
+        if (groups.isNotEmpty) {
+          _groups = groups;
+          _myGroupIds = groups.map((g) => g.id).toSet();
+          _groupNamesById = {for (final g in groups) g.id: g.name};
+        }
       });
       _enrich();
     } catch (_) {

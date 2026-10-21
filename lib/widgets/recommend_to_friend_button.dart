@@ -136,6 +136,10 @@ class RecommendToFriendButton extends StatelessWidget {
 
   const RecommendToFriendButton({super.key, required this.item});
 
+  static Future<void> openFor(BuildContext context, CollectionItem item) async {
+    await RecommendToFriendButton(item: item)._open(context);
+  }
+
   Future<void> _open(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
     final rows = await FriendService().fetchFriends();

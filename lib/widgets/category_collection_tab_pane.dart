@@ -380,15 +380,25 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
       children: [
         child,
         Positioned(
-          top: 6,
-          left: 6,
-          child: Icon(
-            selected ? Icons.circle : Icons.circle_outlined,
-            size: 22,
-            color: selected ? primary : Colors.white,
-            shadows: const [
-              Shadow(color: Colors.black54, blurRadius: 4),
-            ],
+          top: 4,
+          left: 4,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: () => _toggleSelection(itemId),
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(
+                  selected ? Icons.circle : Icons.circle_outlined,
+                  size: 22,
+                  color: selected ? primary : Colors.white,
+                  shadows: const [
+                    Shadow(color: Colors.black54, blurRadius: 4),
+                  ],
+                ),
+              ),
+            ),
           ),
         ),
       ],
@@ -420,6 +430,7 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
             ownedQuantity: ownedQuantityFor(item, ownedIndex),
             showDuplicateBadge: showDuplicateBadge,
             compactCover: true,
+            showFavoriteHeart: !_selectionMode,
             groupNamesById: widget.groupNamesById,
             boardgameQuickEditGroups:
                 widget.category == CollectionCategory.boardgame &&

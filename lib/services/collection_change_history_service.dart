@@ -7,15 +7,17 @@ import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../utils/whereabouts_persistence.dart';
 
-/// Entrée d'historique local (ajouts / suppressions) pour restauration rapide.
+/// Entrée d'historique local (ajouts / suppressions / lieux / prêts).
 class CollectionChangeEvent {
   final String id;
-  final String action; // added | deleted
+  /// added | deleted | location | loaned | returned
+  final String action;
   final DateTime at;
   final CollectionCategory category;
   final String title;
   final String? imageUrl;
   final String? actorUsername;
+  final String? detail;
   final Map<String, dynamic> snapshot;
 
   const CollectionChangeEvent({
@@ -27,6 +29,7 @@ class CollectionChangeEvent {
     required this.imageUrl,
     required this.snapshot,
     this.actorUsername,
+    this.detail,
   });
 
   factory CollectionChangeEvent.fromJson(Map<String, dynamic> json) {
@@ -40,6 +43,7 @@ class CollectionChangeEvent {
       title: json['title']?.toString() ?? 'Sans titre',
       imageUrl: json['image_url']?.toString(),
       actorUsername: json['actor_username']?.toString(),
+      detail: json['detail']?.toString(),
       snapshot: Map<String, dynamic>.from(json['snapshot'] as Map? ?? {}),
     );
   }
@@ -52,6 +56,7 @@ class CollectionChangeEvent {
         'title': title,
         'image_url': imageUrl,
         if (actorUsername != null) 'actor_username': actorUsername,
+        if (detail != null) 'detail': detail,
         'snapshot': snapshot,
       };
 }
@@ -62,11 +67,15 @@ class CollectionChangeHistoryService {
   static final instance = CollectionChangeHistoryService._();
 
   static const _keyPrefix = 'collection_change_history_v1_';
+  static const _seenPrefix = 'collection_modifs_seen_v1_';
   static const _ttl = Duration(days: 14);
   static const _maxEntries = 80;
 
   String _storageKey(String userId, CollectionCategory category) =>
       '$_keyPrefix${userId}_${category.dbValue}';
+
+  String _seenKey(String userId, CollectionCategory category) =>
+      '$_seenPrefix${userId}_${category.dbValue}';
 
   Future<List<CollectionChangeEvent>> load({
     required CollectionCategory category,
@@ -93,6 +102,28 @@ class CollectionChangeHistoryService {
     }
   }
 
+  Future<bool> hasUnseen({required CollectionCategory category}) async {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return false;
+    final events = await load(category: category);
+    if (events.isEmpty) return false;
+    final prefs = await SharedPreferences.getInstance();
+    final seenRaw = prefs.getString(_seenKey(userId, category));
+    final seenAt = DateTime.tryParse(seenRaw ?? '') ??
+        DateTime.fromMillisecondsSinceEpoch(0);
+    return events.any((e) => e.at.isAfter(seenAt));
+  }
+
+  Future<void> markSeen({required CollectionCategory category}) async {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _seenKey(userId, category),
+      DateTime.now().toIso8601String(),
+    );
+  }
+
   Future<void> recordDeleted(CollectionItem item) async {
     await _record(
       action: 'deleted',
@@ -115,10 +146,50 @@ class CollectionChangeHistoryService {
     );
   }
 
+  Future<void> recordLocationChange({
+    required CollectionItem item,
+    required String fromLabel,
+    required String toLabel,
+  }) async {
+    if (fromLabel.trim() == toLabel.trim()) return;
+    await _record(
+      action: 'location',
+      item: item,
+      detail: '$fromLabel → $toLabel',
+      snapshot: {
+        'id': item.id,
+        'from': fromLabel,
+        'to': toLabel,
+      },
+    );
+  }
+
+  Future<void> recordLoan({
+    required CollectionItem item,
+    required String borrower,
+  }) async {
+    await _record(
+      action: 'loaned',
+      item: item,
+      detail: 'Prêté à $borrower',
+      snapshot: {'id': item.id, 'borrower': borrower},
+    );
+  }
+
+  Future<void> recordReturn({required CollectionItem item}) async {
+    await _record(
+      action: 'returned',
+      item: item,
+      detail: 'Objet rendu',
+      snapshot: {'id': item.id},
+    );
+  }
+
   Future<void> _record({
     required String action,
     required CollectionItem item,
     required Map<String, dynamic> snapshot,
+    String? detail,
   }) async {
     final userId = Supabase.instance.client.auth.currentUser?.id;
     if (userId == null) return;
@@ -140,6 +211,7 @@ class CollectionChangeHistoryService {
       title: item.title,
       imageUrl: item.imageUrl,
       actorUsername: actor,
+      detail: detail,
       snapshot: snapshot,
     );
     final next = [entry, ...events].take(_maxEntries).toList();
@@ -166,7 +238,6 @@ class CollectionChangeHistoryService {
       isWishlist: item.isWishlist,
       defaultUserId: userId ?? '',
     );
-    // Conserver aussi l'ancien id pour affichage / debug.
     payload['_previous_id'] = item.id;
     return payload;
   }
@@ -190,7 +261,6 @@ class CollectionChangeHistoryService {
     final restored = CollectionItem.fromJson(inserted);
     await recordAdded(restored);
 
-    // Retirer l'entrée delete restaurée.
     final events = await load(category: event.category);
     final kept = events.where((e) => e.id != event.id).toList();
     await _save(userId, event.category, kept);

@@ -46,6 +46,7 @@ class CategoryCollectionHeader extends StatelessWidget {
           icon: action.icon,
           color: onAccent,
           showLabel: showLabels,
+          showBadge: action.showBadge,
           onTap: action.onTap,
         ),
     ];
@@ -213,6 +214,7 @@ class _ToolbarAction extends StatelessWidget {
   final IconData icon;
   final Color color;
   final bool showLabel;
+  final bool showBadge;
   final VoidCallback onTap;
 
   const _ToolbarAction({
@@ -222,7 +224,31 @@ class _ToolbarAction extends StatelessWidget {
     required this.color,
     required this.showLabel,
     required this.onTap,
+    this.showBadge = false,
   });
+
+  Widget _iconWithBadge() {
+    final iconWidget = Icon(icon, size: showLabel ? 18 : 22, color: color);
+    if (!showBadge) return iconWidget;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        iconWidget,
+        Positioned(
+          right: -2,
+          top: -2,
+          child: Container(
+            width: 8,
+            height: 8,
+            decoration: const BoxDecoration(
+              color: Colors.redAccent,
+              shape: BoxShape.circle,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -234,7 +260,7 @@ class _ToolbarAction extends StatelessWidget {
           borderRadius: BorderRadius.circular(20),
           child: Padding(
             padding: const EdgeInsets.all(8),
-            child: Icon(icon, size: 22, color: color),
+            child: _iconWithBadge(),
           ),
         ),
       );
@@ -256,7 +282,7 @@ class _ToolbarAction extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(icon, size: 18, color: color),
+                  _iconWithBadge(),
                   const SizedBox(width: 5),
                   ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 110),

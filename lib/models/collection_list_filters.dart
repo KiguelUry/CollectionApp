@@ -15,6 +15,7 @@ enum CollectionSort {
   bggRatingDesc,
   quantityDesc,
   estimatedValueAsc,
+  estimatedValueDesc,
   genreAsc,
   locationAsc,
   favoritesFirst,
@@ -378,13 +379,16 @@ class CollectionListFilters {
         final cmp = b.quantity.compareTo(a.quantity);
         return cmp != 0 ? cmp : a.title.compareTo(b.title);
       case CollectionSort.estimatedValueAsc:
+      case CollectionSort.estimatedValueDesc:
         final va = marketSecondhandPriceFromMetadata(a.metadata) ??
             marketNewPriceMinFromMetadata(a.metadata) ??
-            double.infinity;
+            (sort == CollectionSort.estimatedValueDesc ? -1 : double.infinity);
         final vb = marketSecondhandPriceFromMetadata(b.metadata) ??
             marketNewPriceMinFromMetadata(b.metadata) ??
-            double.infinity;
-        final cmp = va.compareTo(vb);
+            (sort == CollectionSort.estimatedValueDesc ? -1 : double.infinity);
+        final cmp = sort == CollectionSort.estimatedValueDesc
+            ? vb.compareTo(va)
+            : va.compareTo(vb);
         return cmp != 0 ? cmp : a.title.compareTo(b.title);
       case CollectionSort.genreAsc:
         final ga = primaryBoardgameGenre(a) ?? 'zzz';

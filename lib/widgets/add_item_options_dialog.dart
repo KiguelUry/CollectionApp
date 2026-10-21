@@ -1,10 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_group.dart';
+import '../services/bgg_service.dart';
 import '../services/group_service.dart';
+import '../utils/bgg_text.dart';
 import '../utils/holder_label_utils.dart';
 import '../utils/boardgame_display.dart';
 import 'bgg_network_image.dart';
+import 'bgg_photo_strip.dart';
 import 'compact_whereabouts_dropdown.dart';
 import 'cover_preview_sheet.dart';
 import 'group_badge.dart';
@@ -27,11 +32,19 @@ class AddItemOptions {
   });
 }
 
+/// Modale unifiée d'aperçu + options d'ajout (Découvrir / Collection / Wishlist).
 class AddItemOptionsDialog extends StatefulWidget {
   final String itemTitle;
   final String? itemImageUrl;
   final bool defaultWishlist;
   final double? bggAvgRating;
+  final int? yearPublished;
+  final int? minPlayers;
+  final int? maxPlayers;
+  final int? playingTime;
+  final String? description;
+  final String? bggId;
+  final List<BggGalleryPhoto>? photos;
   final Future<void> Function(AddItemOptions options) onConfirm;
 
   const AddItemOptionsDialog({
@@ -41,6 +54,13 @@ class AddItemOptionsDialog extends StatefulWidget {
     this.itemImageUrl,
     this.defaultWishlist = false,
     this.bggAvgRating,
+    this.yearPublished,
+    this.minPlayers,
+    this.maxPlayers,
+    this.playingTime,
+    this.description,
+    this.bggId,
+    this.photos,
   });
 
   @override
@@ -58,6 +78,9 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
   List<CollectionGroup> _groups = [];
   Map<String, int> _groupActivityCounts = {};
   bool _loading = true;
+  bool _descExpanded = false;
+  List<BggGalleryPhoto> _photos = const [];
+  bool _photosLoading = false;
 
   @override
   void initState() {
@@ -65,7 +88,27 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
     _isWishlist = widget.defaultWishlist;
     _quantity = widget.defaultWishlist ? 0 : 1;
     _locationUserId = Supabase.instance.client.auth.currentUser?.id;
+    _photos = widget.photos ?? const [];
     _load();
+    if (_photos.isEmpty && (widget.bggId ?? '').isNotEmpty) {
+      unawaited(_loadPhotos());
+    }
+  }
+
+  Future<void> _loadPhotos() async {
+    final id = widget.bggId?.trim();
+    if (id == null || id.isEmpty) return;
+    setState(() => _photosLoading = true);
+    try {
+      final photos = await BggService.fetchCommunityGallery(id);
+      if (!mounted) return;
+      setState(() {
+        _photos = photos;
+        _photosLoading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _photosLoading = false);
+    }
   }
 
   List<CollectionGroup> get _sortedGroups {
@@ -135,8 +178,27 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
     return _locationUserId ?? userId;
   }
 
+  String get _metaLine {
+    final parts = <String>[];
+    if (widget.yearPublished != null) parts.add('${widget.yearPublished}');
+    if (widget.minPlayers != null) {
+      parts.add(
+        '${widget.minPlayers}–${widget.maxPlayers ?? '?'} joueurs',
+      );
+    }
+    if (widget.playingTime != null && widget.playingTime! > 0) {
+      parts.add('${widget.playingTime} min');
+    }
+    return parts.join(' · ');
+  }
+
+  String get _cleanDescription => cleanBggText(widget.description);
+
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final desc = _cleanDescription;
+
     return AlertDialog(
       title: const Text('Ajouter à la collection'),
       content: SizedBox(
@@ -149,72 +211,127 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
             : SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    if (widget.itemImageUrl != null &&
-                        widget.itemImageUrl!.trim().isNotEmpty) ...[
-                      Center(
-                        child: GestureDetector(
-                          onTap: () => showCoverPreview(
-                            context,
-                            imageUrl: widget.itemImageUrl,
-                            title: widget.itemTitle,
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: SizedBox(
-                              width: 160,
-                              height: 160,
-                              child: BggNetworkImage(
-                                url: widget.itemImageUrl!,
-                                boxedCover: true,
-                                largeSource: true,
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (widget.itemImageUrl != null &&
+                            widget.itemImageUrl!.trim().isNotEmpty)
+                          GestureDetector(
+                            onTap: () => showCoverPreview(
+                              context,
+                              imageUrl: widget.itemImageUrl,
+                              title: widget.itemTitle,
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: SizedBox(
+                                width: 96,
+                                height: 96,
+                                child: BggNetworkImage(
+                                  url: widget.itemImageUrl!,
+                                  boxedCover: true,
+                                  compact: true,
+                                ),
                               ),
                             ),
                           ),
+                        if (widget.itemImageUrl != null &&
+                            widget.itemImageUrl!.trim().isNotEmpty)
+                          const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                widget.itemTitle,
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleMedium
+                                    ?.copyWith(fontWeight: FontWeight.w800),
+                              ),
+                              if (widget.bggAvgRating != null) ...[
+                                const SizedBox(height: 4),
+                                _BggRatingPreview(
+                                  avgRating: widget.bggAvgRating!,
+                                ),
+                              ],
+                              if (_metaLine.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  _metaLine,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: scheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (desc.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      InkWell(
+                        onTap: () =>
+                            setState(() => _descExpanded = !_descExpanded),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Text(
+                            desc,
+                            maxLines: _descExpanded ? 40 : 4,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 13, height: 1.35),
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 12),
-                    ],
-                    Text(
-                      widget.itemTitle,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton(
+                          onPressed: () =>
+                              setState(() => _descExpanded = !_descExpanded),
+                          child: Text(
+                            _descExpanded ? 'Réduire' : 'Lire la suite',
                           ),
-                    ),
-                    if (widget.bggAvgRating != null) ...[
-                      const SizedBox(height: 6),
-                      _BggRatingPreview(avgRating: widget.bggAvgRating!),
+                        ),
+                      ),
+                    ],
+                    if (_photosLoading) ...[
+                      const SizedBox(height: 8),
+                      const LinearProgressIndicator(minHeight: 2),
+                    ] else if (_photos.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Aperçus & matériel du jeu',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      const SizedBox(height: 8),
+                      BggPhotoStrip(photos: _photos),
                     ],
                     const SizedBox(height: 8),
-                    if (!widget.defaultWishlist)
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Wishlist'),
-                        value: _isWishlist,
-                        onChanged: (v) => setState(() {
-                          _isWishlist = v;
-                          if (v) {
-                            _quantity = 0;
-                          } else if (_quantity == 0) {
-                            _quantity = 1;
-                          }
-                        }),
-                      )
-                    else
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.favorite_border),
-                        title: const Text('Ajout à la wishlist'),
-                        subtitle: Text(
-                          _quantity == 0
-                              ? 'Non possédé pour l\'instant'
-                              : 'Quantité : $_quantity',
-                        ),
-                      ),
-                    if (_isWishlist) ...[
-                      const SizedBox(height: 4),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Wishlist'),
+                      value: _isWishlist,
+                      onChanged: (v) => setState(() {
+                        _isWishlist = v;
+                        if (v) {
+                          _quantity = 0;
+                          _shareWithGroup = false;
+                          _selectedGroupId = null;
+                        } else if (_quantity == 0) {
+                          _quantity = 1;
+                        }
+                      }),
+                    ),
+                    if (_isWishlist)
                       Text(
                         'Tu pourras comparer les prix depuis la wishlist.',
                         style: TextStyle(
@@ -222,7 +339,6 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                           color: Colors.grey.shade600,
                         ),
                       ),
-                    ],
                     if (!_isWishlist) ...[
                       const Divider(),
                       SwitchListTile(
@@ -255,7 +371,8 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                                 ),
                               )
                               .toList(),
-                          onChanged: (v) => setState(() => _selectedGroupId = v),
+                          onChanged: (v) =>
+                              setState(() => _selectedGroupId = v),
                         )
                       else if (_shareWithGroup && _groups.isEmpty)
                         const Text(
@@ -374,7 +491,8 @@ class _BggRatingPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final onFive = bggRatingOnFive(avgRating);
     if (onFive == null) return const SizedBox.shrink();
-    final chipLabel = formatBggRatingChipLabel(avgRating) ?? onFive.toStringAsFixed(1);
+    final chipLabel =
+        formatBggRatingChipLabel(avgRating) ?? onFive.toStringAsFixed(1);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -389,7 +507,7 @@ class _BggRatingPreview extends StatelessWidget {
           Icon(Icons.star_rounded, size: 18, color: Colors.amber.shade700),
           const SizedBox(width: 6),
           Text(
-            'Note communautaire : $chipLabel',
+            'Note BGG : $chipLabel',
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
