@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../config/app_brand.dart';
 
-/// Splash Paloma : fond sombre élégant, titre net, sans audio.
+/// Splash Paloma : fond sombre, animation légère (60 FPS), sans audio.
 class CollectingoSplash extends StatefulWidget {
   const CollectingoSplash({
     super.key,
     required this.onFinished,
-    this.duration = const Duration(milliseconds: 2200),
+    this.duration = const Duration(milliseconds: 1800),
   });
 
   final VoidCallback onFinished;
@@ -20,6 +20,8 @@ class CollectingoSplash extends StatefulWidget {
 class _CollectingoSplashState extends State<CollectingoSplash>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
+  late final Animation<double> _fade;
+  late final Animation<double> _rise;
   bool _done = false;
 
   @override
@@ -28,8 +30,12 @@ class _CollectingoSplashState extends State<CollectingoSplash>
     _controller = AnimationController(vsync: this, duration: widget.duration)
       ..addStatusListener((s) {
         if (s == AnimationStatus.completed) _finish();
-      })
-      ..forward();
+      });
+    _fade = CurvedAnimation(parent: _controller, curve: Curves.easeOut);
+    _rise = Tween<double>(begin: 12, end: 0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
+    );
+    _controller.forward();
   }
 
   @override
@@ -56,200 +62,151 @@ class _CollectingoSplashState extends State<CollectingoSplash>
       behavior: HitTestBehavior.opaque,
       onTap: _skip,
       child: Scaffold(
-        body: AnimatedBuilder(
-          animation: _controller,
-          builder: (context, _) {
-            final t = Curves.easeOutCubic.transform(_controller.value);
-            return DecoratedBox(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Color(0xFF0F1419),
-                    Color(0xFF1B2838),
-                    Color(0xFF243447),
-                  ],
-                  stops: [0.0, 0.55, 1.0],
-                ),
-              ),
-              child: SafeArea(
-                child: Stack(
+        backgroundColor: const Color(0xFF1B2838),
+        body: DecoratedBox(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Color(0xFF0F1419),
+                Color(0xFF1B2838),
+                Color(0xFF243447),
+              ],
+            ),
+          ),
+          child: SafeArea(
+            child: AnimatedBuilder(
+              animation: _controller,
+              builder: (context, child) {
+                return Opacity(
+                  opacity: _fade.value.clamp(0.0, 1.0),
+                  child: Transform.translate(
+                    offset: Offset(0, _rise.value),
+                    child: child,
+                  ),
+                );
+              },
+              child: const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Soft vignette
-                    Positioned.fill(
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: RadialGradient(
-                            center: const Alignment(0, -0.15),
-                            radius: 1.1,
-                            colors: [
-                              const Color(0xFFFFB74D).withValues(alpha: 0.08 * t),
-                              Colors.transparent,
-                            ],
-                          ),
-                        ),
+                    _DoveMark(),
+                    SizedBox(height: 28),
+                    Text(
+                      kAppDisplayName,
+                      style: TextStyle(
+                        fontSize: 42,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.2,
+                        color: Colors.white,
+                        height: 1.05,
                       ),
                     ),
-                    Center(
-                      child: Opacity(
-                        opacity: ((t - 0.05) / 0.45).clamp(0.0, 1.0),
-                        child: Transform.translate(
-                          offset: Offset(0, (1 - t) * 16),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              _DoveMark(progress: t),
-                              const SizedBox(height: 28),
-                              Text(
-                                kAppDisplayName,
-                                style: TextStyle(
-                                  fontSize: 42,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 1.2,
-                                  color: Colors.white.withValues(
-                                    alpha: 0.96,
-                                  ),
-                                  height: 1.05,
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              Text(
-                                'Tes collections, au même endroit',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w400,
-                                  letterSpacing: 0.2,
-                                  color: Colors.white.withValues(alpha: 0.55),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                    SizedBox(height: 10),
+                    Text(
+                      'Tes collections, au même endroit',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w400,
+                        letterSpacing: 0.2,
+                        color: Color(0x8CFFFFFF),
                       ),
                     ),
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 28,
-                      child: Opacity(
-                        opacity: (t * 3 - 0.4).clamp(0.0, 0.7),
-                        child: Column(
-                          children: [
-                            SizedBox(
-                              width: 100,
-                              child: LinearProgressIndicator(
-                                value: t,
-                                backgroundColor: Colors.white12,
-                                color: const Color(0xFFFFB74D),
-                                borderRadius: BorderRadius.circular(4),
-                                minHeight: 2.5,
-                              ),
-                            ),
-                            const SizedBox(height: 14),
-                            const Text(
-                              'Appuyer pour continuer',
-                              style: TextStyle(
-                                color: Colors.white54,
-                                fontSize: 12,
-                                letterSpacing: 0.3,
-                              ),
-                            ),
-                          ],
-                        ),
+                    SizedBox(height: 48),
+                    SizedBox(
+                      width: 100,
+                      child: LinearProgressIndicator(
+                        backgroundColor: Colors.white12,
+                        color: Color(0xFFFFB74D),
+                        borderRadius: BorderRadius.all(Radius.circular(4)),
+                        minHeight: 2.5,
+                      ),
+                    ),
+                    SizedBox(height: 14),
+                    Text(
+                      'Appuyer pour continuer',
+                      style: TextStyle(
+                        color: Colors.white54,
+                        fontSize: 12,
+                        letterSpacing: 0.3,
                       ),
                     ),
                   ],
                 ),
               ),
-            );
-          },
+            ),
+          ),
         ),
       ),
     );
   }
 }
 
-/// Marque géométrique plate (colombe origami stylisée).
 class _DoveMark extends StatelessWidget {
-  const _DoveMark({required this.progress});
-
-  final double progress;
+  const _DoveMark();
 
   @override
   Widget build(BuildContext context) {
-    final scale = 0.82 + progress * 0.18;
-    return Transform.scale(
-      scale: scale,
-      child: Container(
-        width: 88,
-        height: 88,
-        decoration: BoxDecoration(
-          color: const Color(0xFF2A3A4D),
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(
-            color: Colors.white.withValues(alpha: 0.12),
-          ),
-        ),
-        child: CustomPaint(
-          painter: _OrigamiDovePainter(
-            color: PalomaBrand.cream,
-            accent: const Color(0xFFFFB74D),
-          ),
-        ),
+    return Container(
+      width: 88,
+      height: 88,
+      decoration: BoxDecoration(
+        color: const Color(0xFF2A3A4D),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: const CustomPaint(
+        painter: _OrigamiDovePainter(),
       ),
     );
   }
 }
 
 class _OrigamiDovePainter extends CustomPainter {
-  _OrigamiDovePainter({required this.color, required this.accent});
-
-  final Color color;
-  final Color accent;
+  const _OrigamiDovePainter();
 
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width;
     final h = size.height;
-    final body = Paint()..color = color;
-    final fold = Paint()..color = color.withValues(alpha: 0.72);
-    final beak = Paint()..color = accent;
+    final body = Paint()..color = PalomaBrand.cream;
+    final fold = Paint()..color = PalomaBrand.cream.withValues(alpha: 0.72);
+    final beak = Paint()..color = const Color(0xFFFFB74D);
 
-    // Wing
-    final wing = Path()
-      ..moveTo(w * 0.32, h * 0.48)
-      ..lineTo(w * 0.58, h * 0.18)
-      ..lineTo(w * 0.62, h * 0.52)
-      ..close();
-    canvas.drawPath(wing, fold);
-
-    // Body
-    final bodyPath = Path()
-      ..moveTo(w * 0.28, h * 0.52)
-      ..lineTo(w * 0.68, h * 0.38)
-      ..lineTo(w * 0.55, h * 0.62)
-      ..lineTo(w * 0.22, h * 0.78)
-      ..close();
-    canvas.drawPath(bodyPath, body);
-
-    // Lower wing
-    final wing2 = Path()
-      ..moveTo(w * 0.36, h * 0.55)
-      ..lineTo(w * 0.78, h * 0.58)
-      ..lineTo(w * 0.48, h * 0.70)
-      ..close();
-    canvas.drawPath(wing2, fold);
-
-    // Beak
-    final beakPath = Path()
-      ..moveTo(w * 0.66, h * 0.38)
-      ..lineTo(w * 0.82, h * 0.34)
-      ..lineTo(w * 0.68, h * 0.46)
-      ..close();
-    canvas.drawPath(beakPath, beak);
-
-    // Eye
+    canvas.drawPath(
+      Path()
+        ..moveTo(w * 0.32, h * 0.48)
+        ..lineTo(w * 0.58, h * 0.18)
+        ..lineTo(w * 0.62, h * 0.52)
+        ..close(),
+      fold,
+    );
+    canvas.drawPath(
+      Path()
+        ..moveTo(w * 0.28, h * 0.52)
+        ..lineTo(w * 0.68, h * 0.38)
+        ..lineTo(w * 0.55, h * 0.62)
+        ..lineTo(w * 0.22, h * 0.78)
+        ..close(),
+      body,
+    );
+    canvas.drawPath(
+      Path()
+        ..moveTo(w * 0.36, h * 0.55)
+        ..lineTo(w * 0.78, h * 0.58)
+        ..lineTo(w * 0.48, h * 0.70)
+        ..close(),
+      fold,
+    );
+    canvas.drawPath(
+      Path()
+        ..moveTo(w * 0.66, h * 0.38)
+        ..lineTo(w * 0.82, h * 0.34)
+        ..lineTo(w * 0.68, h * 0.46)
+        ..close(),
+      beak,
+    );
     canvas.drawCircle(
       Offset(w * 0.58, h * 0.42),
       w * 0.025,
@@ -258,6 +215,5 @@ class _OrigamiDovePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _OrigamiDovePainter oldDelegate) =>
-      oldDelegate.color != color || oldDelegate.accent != accent;
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

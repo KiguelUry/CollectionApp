@@ -21,24 +21,22 @@ class SplashScreen extends StatefulWidget {
 
 class _SplashScreenState extends State<SplashScreen> {
   bool _navigating = false;
+  Future<void>? _bootstrap;
 
   @override
   void initState() {
     super.initState();
+    // Précharge pendant l'animation — ne bloque pas le 1er frame.
+    _bootstrap = Future.microtask(_preloadSessionData);
     if (DevAuthConfig.skipSplash) {
-      _navigateToNext();
+      unawaited(_navigateToNext());
     }
   }
 
-  Future<void> _navigateToNext() async {
-    if (_navigating) return;
-    _navigating = true;
-
-    if (!mounted) return;
-
+  /// Hydrate profil / genre en parallèle du splash (hors UI thread critique).
+  Future<void> _preloadSessionData() async {
     var session = Supabase.instance.client.auth.currentSession;
 
-    // Connexion auto uniquement en mode dev rapide (pas après le splash normal).
     if (session == null &&
         DevAuthConfig.fastStart &&
         DevAuthConfig.hasAutoLogin) {
@@ -53,29 +51,41 @@ class _SplashScreenState extends State<SplashScreen> {
       }
     }
 
+    if (session == null) return;
+
+    try {
+      final profileService = ProfileService();
+      await profileService.ensureCurrentUserProfile();
+      await ProfileCacheService.instance.hydrate();
+      await ProfileCacheService.instance.refresh();
+      OwnProfilePanel.memory = ProfileCacheService.instance.profile;
+      await preloadGreetingProfile(
+        remoteFetch: profileService.fetchGreetingProfile,
+      );
+      unawaited(SocialDirectoryCache.instance.warm());
+    } catch (e) {
+      debugPrint('Profil utilisateur : $e');
+    }
+  }
+
+  Future<void> _navigateToNext() async {
+    if (_navigating) return;
+    _navigating = true;
+
+    // Laisse finir le preload lancé au démarrage (sans re-bloquer le splash).
+    try {
+      await (_bootstrap ?? Future<void>.value());
+    } catch (_) {}
+
     if (!mounted) return;
 
+    final session = Supabase.instance.client.auth.currentSession;
     if (session == null) {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (context) => const LoginScreen()),
       );
     } else {
-      try {
-        final profileService = ProfileService();
-        await profileService.ensureCurrentUserProfile();
-        await ProfileCacheService.instance.hydrate();
-        await ProfileCacheService.instance.refresh();
-        OwnProfilePanel.memory = ProfileCacheService.instance.profile;
-        // Genre + accord des salutations en mémoire avant le Hub / Profil.
-        await preloadGreetingProfile(
-          remoteFetch: profileService.fetchGreetingProfile,
-        );
-        unawaited(SocialDirectoryCache.instance.warm());
-      } catch (e) {
-        debugPrint('Profil utilisateur : $e');
-      }
-      if (!mounted) return;
       Navigator.pushReplacementNamed(context, '/categories');
     }
   }
@@ -103,6 +113,8 @@ class _SplashScreenState extends State<SplashScreen> {
       );
     }
 
-    return CollectingoSplash(onFinished: _navigateToNext);
+    return CollectingoSplash(onFinished: () {
+      unawaited(_navigateToNext());
+    });
   }
 }

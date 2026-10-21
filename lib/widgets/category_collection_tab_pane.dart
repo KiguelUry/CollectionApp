@@ -375,25 +375,20 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
   Widget _wrapSelectable(Widget child, String itemId) {
     if (!_selectionMode) return child;
     final selected = _selectedIds.contains(itemId);
+    final primary = Theme.of(context).colorScheme.primary;
     return Stack(
       children: [
         child,
         Positioned(
-          top: 4,
-          left: 4,
-          child: Material(
-            color: selected
-                ? Theme.of(context).colorScheme.primary
-                : Colors.black54,
-            shape: const CircleBorder(),
-            child: Padding(
-              padding: const EdgeInsets.all(4),
-              child: Icon(
-                selected ? Icons.check_rounded : Icons.circle_outlined,
-                size: 18,
-                color: Colors.white,
-              ),
-            ),
+          top: 6,
+          left: 6,
+          child: Icon(
+            selected ? Icons.circle : Icons.circle_outlined,
+            size: 22,
+            color: selected ? primary : Colors.white,
+            shadows: const [
+              Shadow(color: Colors.black54, blurRadius: 4),
+            ],
           ),
         ),
       ],
@@ -782,21 +777,18 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
         delegate: SliverChildBuilderDelegate(
           (context, index) {
             final entry = grouped[index];
-            return RepaintBoundary(
-              child: _buildTile(
-                item: entry.item,
-                totalQuantity: entry.totalQuantity,
-                showDuplicateBadge: entry.hasDuplicates,
-                ownedIndex: ownedIndex,
-                groupActivity: groupActivity,
-                isGrid: true,
-              ),
+            return _buildTile(
+              item: entry.item,
+              totalQuantity: entry.totalQuantity,
+              showDuplicateBadge: entry.hasDuplicates,
+              ownedIndex: ownedIndex,
+              groupActivity: groupActivity,
+              isGrid: true,
             );
           },
           childCount: grouped.length,
-          addRepaintBoundaries: false,
-          // Firefox WebGL : garde les tuiles / textures en mémoire au scroll.
-          addAutomaticKeepAlives: true,
+          // Ne pas geler le chargement initial des images (Web).
+          addAutomaticKeepAlives: false,
         ),
       ),
     );
@@ -813,19 +805,17 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
         delegate: SliverChildBuilderDelegate(
           (context, index) {
             final entry = grouped[index];
-            return RepaintBoundary(
-              child: _buildTile(
-                item: entry.item,
-                totalQuantity: entry.totalQuantity,
-                showDuplicateBadge: entry.hasDuplicates,
-                ownedIndex: ownedIndex,
-                groupActivity: groupActivity,
-                isGrid: false,
-              ),
+            return _buildTile(
+              item: entry.item,
+              totalQuantity: entry.totalQuantity,
+              showDuplicateBadge: entry.hasDuplicates,
+              ownedIndex: ownedIndex,
+              groupActivity: groupActivity,
+              isGrid: false,
             );
           },
           childCount: grouped.length,
-          addRepaintBoundaries: false,
+          addAutomaticKeepAlives: false,
         ),
       ),
     );

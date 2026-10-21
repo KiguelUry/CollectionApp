@@ -595,7 +595,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
                   ? const Center(child: CircularProgressIndicator())
                   : GridView.builder(
                       padding: const EdgeInsets.all(16),
-                      addAutomaticKeepAlives: true,
+                      addAutomaticKeepAlives: false,
                       gridDelegate: CollectionGridLayout.gridDelegate(
                         context,
                         mobileColumns: 2,
@@ -603,9 +603,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
                         spacing: 14,
                       ),
                       itemCount: _gridItemCount,
-                      itemBuilder: (context, index) => RepaintBoundary(
-                        child: _buildGridItem(index),
-                      ),
+                      itemBuilder: (context, index) => _buildGridItem(index),
                     ),
             ),
           ],

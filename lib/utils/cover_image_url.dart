@@ -37,24 +37,30 @@ String gridThumbnailUrl(
   bool crop = false,
   int size = kThumbnailSize,
 }) {
-  final src = resolveCoverSourceUrl(url, large: size > 320);
+  var src = resolveCoverSourceUrl(url, large: size > 320).trim();
+  if (src.startsWith('//')) src = 'https:$src';
+  if (src.isEmpty) return url;
+
   final uri = Uri.tryParse(src);
-  if (uri == null || (uri.scheme != 'https' && uri.scheme != 'http')) {
+  if (uri == null ||
+      (uri.scheme != 'https' && uri.scheme != 'http') ||
+      uri.host.isEmpty) {
     return url;
   }
   final host = uri.host.toLowerCase();
-  if (host.isEmpty ||
-      host == kThumbnailCdnHost ||
+  if (host == kThumbnailCdnHost ||
       host == 'localhost' ||
       host.startsWith('127.')) {
-    return url;
+    return src;
   }
   // Stockage Supabase : seules les URLs publiques sont stables.
   if (uri.path.contains('/storage/v1/object/') &&
       !uri.path.contains('/storage/v1/object/public/')) {
-    return url;
+    return src;
   }
-  return 'https://$kThumbnailCdnHost/?url=${Uri.encodeComponent(src)}'
+  // URL absolue https canonique avant encode (évite ERR_NAME_NOT_RESOLVED).
+  final absolute = uri.replace(scheme: 'https').toString();
+  return 'https://$kThumbnailCdnHost/?url=${Uri.encodeComponent(absolute)}'
       '&w=$size&h=$size'
       '&fit=${crop ? 'cover' : 'inside'}&we&output=webp&q=80';
 }

@@ -54,7 +54,7 @@ class CollectionCoverImage extends StatelessWidget {
 
     Widget image;
     if (kIsWeb && compact) {
-      // Firefox WebGL : Image.network + gaplessPlayback garde la texture.
+      // Image.network charge dès le build (pas de keepAlive / RepaintBoundary).
       image = Image.network(
         thumb,
         key: ValueKey(thumb),
@@ -63,12 +63,22 @@ class CollectionCoverImage extends StatelessWidget {
         fit: imageFit,
         filterQuality: FilterQuality.low,
         gaplessPlayback: true,
-        // Décodage plafonné pour limiter la VRAM WebGL.
         cacheWidth: kThumbnailSize,
         errorBuilder: (_, _, _) => _fallback(),
         loadingBuilder: (context, child, progress) {
           if (progress == null) return child;
-          return _fallback(child: const SizedBox.shrink());
+          return _fallback(
+            child: Center(
+              child: SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.grey.shade500,
+                ),
+              ),
+            ),
+          );
         },
       );
     } else if (thumb != url) {

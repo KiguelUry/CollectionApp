@@ -98,6 +98,11 @@ const _popular = <_Seed>[
   _Seed('428530', 'The Elder Scrolls: Betrayal of the Second Era', ['Adventure'], yearHint: 2025),
   _Seed('421236', 'Seas of Strife', ['Strategy'], yearHint: 2026),
   _Seed('439422', 'Captain Flip', ['Family'], yearHint: 2026),
+  // Prochaines sorties (2027+) — exclus des « Sorties récentes ».
+  _Seed('451852', 'Arcs: The Blighted Reach', ['Strategy'], yearHint: 2027),
+  _Seed('444378', 'Windmill Valley', ['Family'], yearHint: 2027),
+  _Seed('436127', 'Nucleum: Australia', ['Strategy'], yearHint: 2027),
+  _Seed('440563', 'Endeavor: Deep Sea', ['Strategy'], yearHint: 2027),
   _Seed('328871', 'Terraforming Mars: Ares Expedition', ['Card Game', 'Strategy'], yearHint: 2021),
   _Seed('350184', 'Earth', ['Strategy'], yearHint: 2023),
   _Seed('342640', 'Marvel Champions: The Card Game', ['Card Game', 'Cooperative'], yearHint: 2019),
@@ -176,7 +181,7 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
 
   Iterable<_Seed> get _upcomingSeedCandidates => _uniquePool().where((s) {
         final y = s.yearHint;
-        return y != null && y >= 2026 && y <= 2027;
+        return y != null && y >= 2027;
       });
 
   Future<void> _prefetchUpcomingSeeds() async {
@@ -362,14 +367,14 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
       case _DiscoverMode.hot:
         return _hot.any((s) => s.id == seed.id);
       case _DiscoverMode.recent:
-        final newest = DateTime.now().year - 2;
-        if (year == null || year < newest) return false;
+        // Exclusion mutuelle avec « Prochaines sorties ».
+        if (year == null || (year != 2025 && year != 2026)) return false;
         if (rating != null && rating < 6.8) return false;
         return true;
       case _DiscoverMode.upcoming:
         // Année réelle BGG si connue, sinon yearHint du seed.
         if (year == null) return false;
-        return year >= 2026 && year <= 2027;
+        return year >= 2027;
       case _DiscoverMode.era:
         if (year == null) return false;
         return year >= _eraFrom && year <= _eraTo;
@@ -627,7 +632,7 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             clipBehavior: Clip.hardEdge,
-            addAutomaticKeepAlives: true,
+            addAutomaticKeepAlives: false,
             itemCount: shown.length,
             gridDelegate: CollectionGridLayout.collectionDelegate(
               context,
@@ -637,17 +642,15 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
               final seed = shown[index];
               final game = _game(seed);
               final key = game.catalogKey;
-              return RepaintBoundary(
-                child: _DiscoverCard(
-                  key: ValueKey(game.bggId),
-                  game: game,
-                  rating: _cardMeta(seed),
-                  inCollection: _ownedKeys.contains(key),
-                  inWishlist: _wishlistKeys.contains(key),
-                  onOpen: () => _openPreview(game),
-                  onCollection: () => _addCollection(game),
-                  onWishlist: () => _toggleWish(game),
-                ),
+              return _DiscoverCard(
+                key: ValueKey(game.bggId),
+                game: game,
+                rating: _cardMeta(seed),
+                inCollection: _ownedKeys.contains(key),
+                inWishlist: _wishlistKeys.contains(key),
+                onOpen: () => _openPreview(game),
+                onCollection: () => _addCollection(game),
+                onWishlist: () => _toggleWish(game),
               );
             },
           ),

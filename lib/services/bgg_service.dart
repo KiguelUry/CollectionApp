@@ -488,13 +488,23 @@ class BggService {
         .replaceAll('&gt;', '>');
   }
 
-  /// Exclusivement `<name type="primary">` — jamais une balise `alternate`.
+  /// Titre BGG : `type="primary"` d'abord, sinon `<name value="…"/>` (API Hot).
+  /// Ignore les balises `alternate`.
   static String _primaryTitle(XmlElement node) {
+    String? fallback;
     for (final name in node.findElements('name')) {
-      if (name.getAttribute('type') == 'primary') {
-        return unescapeHtml(name.getAttribute('value') ?? 'Sans titre');
+      final value = name.getAttribute('value');
+      if (value == null || value.trim().isEmpty) continue;
+      final type = name.getAttribute('type');
+      if (type == 'primary') {
+        return unescapeHtml(value);
+      }
+      // Hot : <name value="…"/> sans type. Jamais alternate.
+      if (type == null || type.isEmpty) {
+        fallback ??= value;
       }
     }
+    if (fallback != null) return unescapeHtml(fallback);
     return 'Sans titre';
   }
 

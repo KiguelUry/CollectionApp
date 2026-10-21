@@ -41,10 +41,9 @@ class CollectionItemListTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return RepaintBoundary(
-      child: Card(
-        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        child: InkWell(
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
@@ -163,7 +162,6 @@ class CollectionItemListTile extends StatelessWidget {
           ),
         ),
       ),
-    ),
     );
   }
 

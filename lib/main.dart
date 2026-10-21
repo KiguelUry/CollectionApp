@@ -25,8 +25,6 @@ import 'theme/app_theme.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (kIsWeb) {
-    // Firefox vide les textures WebGL au scroll. Un cache plus grand évite
-    // de jeter les jaquettes encore à l'écran ou juste au-dessus.
     final cache = PaintingBinding.instance.imageCache;
     cache.maximumSize = 2500;
     cache.maximumSizeBytes = 256 << 20;
@@ -35,22 +33,26 @@ Future<void> main() async {
   try {
     await dotenv.load(fileName: '.env');
   } catch (_) {
-    // Web/Vercel : assets/.env parfois absent ; repli AppEnv.
+    // Web : assets/.env parfois absent ; repli AppEnv.
   }
-  await initializeDateFormatting('fr_FR');
 
+  // Seul await bloquant avant le 1er frame : Supabase (auth session).
   await Supabase.initialize(
     url: AppEnv.supabaseUrl,
     anonKey: AppEnv.supabaseAnonKey,
   );
 
-  // Après Supabase : SettingsService peut synchroniser le profil (ProfileService).
-  await SettingsService.instance.load();
-  if (Supabase.instance.client.auth.currentUser != null) {
-    unawaited(SocialDirectoryCache.instance.warm());
-  }
-
+  // UI immédiate (splash) — le reste en arrière-plan.
   runApp(const MyApp());
+
+  // Locale + prefs + cache profil hors du chemin critique du 1er rendu.
+  unawaited(Future(() async {
+    await initializeDateFormatting('fr_FR');
+    await SettingsService.instance.load();
+    if (Supabase.instance.client.auth.currentUser != null) {
+      unawaited(SocialDirectoryCache.instance.warm());
+    }
+  }));
 }
 
 class MyApp extends StatefulWidget {

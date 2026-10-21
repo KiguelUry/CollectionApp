@@ -57,12 +57,16 @@ function titleRelevanceScore(title: string, query: string): number {
 }
 
 function primaryTitle(inner: string): string {
-  // Exclusivement <name type="primary" … /> (ordre d'attributs variable).
+  // 1) <name type="primary" value="…" /> (ordre d'attributs variable).
   const primary = inner.match(
     /<name\b(?=[^>]*\btype="primary")[^>]*\bvalue="([^"]*)"[^>]*\/?>/i,
   );
   if (primary?.[1]) return primary[1];
-  // Jamais une balise alternate au hasard : uniquement primary, sinon « Sans titre ».
+  // 2) API Hot : <name value="…" /> sans type (ignorer alternate).
+  const plain = inner.match(
+    /<name\b(?![^>]*\btype\s*=)[^>]*\bvalue="([^"]*)"[^>]*\/?>/i,
+  );
+  if (plain?.[1]) return plain[1];
   return "Sans titre";
 }
 
