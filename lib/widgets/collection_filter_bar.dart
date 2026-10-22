@@ -165,7 +165,7 @@ class CollectionFilterBar extends StatelessWidget {
       itemBuilder: (context) => [
         const PopupMenuItem(
           value: CollectionSort.favoritesFirst,
-          child: Text('Favoris en premier'),
+          child: Text('❤️ Prioritaires / favoris en premier'),
         ),
         const PopupMenuItem(
           value: CollectionSort.titleAsc,

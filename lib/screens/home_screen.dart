@@ -1244,13 +1244,14 @@ class _HomeScreenState extends State<HomeScreen>
         isWishlist: options.isWishlist,
         subcategory: resolvedSub,
         groupId: options.groupId,
+        bggId: bggId,
       );
       if (!mounted) return;
       var message = '« $title » ajouté';
-      if (existing != null) {
-        final baseQty = options.isWishlist
-            ? ((existing['quantity'] as int?) ?? 0)
-            : ((existing['quantity'] as int?) ?? 1);
+      if (existing != null && options.isWishlist) {
+        message = 'Déjà dans ta wishlist';
+      } else if (existing != null) {
+        final baseQty = (existing['quantity'] as int?) ?? 1;
         final newQty = baseQty + options.quantity;
         await client
             .from('collection_items')

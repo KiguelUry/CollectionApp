@@ -70,7 +70,10 @@ import '../widgets/item_copy_units_panel.dart';
 import '../widgets/item_market_value_panel.dart';
 import '../utils/navigate_to_card_set.dart';
 import '../utils/wishlist_promote.dart';
+import '../utils/item_favorite.dart';
 import '../utils/app_page_route.dart';
+import '../utils/display_text.dart';
+import '../widgets/add_item_options_dialog.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class ItemDetailScreen extends StatefulWidget {
@@ -638,24 +641,166 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
   }
 
   Future<void> _promoteFromWishlist() async {
+    if (!_item.isWishlist) return;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AddItemOptionsDialog(
+        itemTitle: cleanDisplayText(_item.title),
+        itemImageUrl: _item.imageUrl,
+        defaultWishlist: false,
+        onConfirm: (options) async {
+          try {
+            await promoteWishlistToCollection(
+              _item,
+              locationUserId: options.locationUserId,
+              holderLabel: options.holderLabel,
+              groupId: options.groupId,
+              quantity: options.quantity,
+            );
+            if (dialogContext.mounted) Navigator.pop(dialogContext);
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  '« ${cleanDisplayText(_item.title)} » est dans ta collection',
+                ),
+              ),
+            );
+            await _reloadItem();
+            if (mounted && !_item.isWishlist && _ownedDisplayQty < 1) {
+              setState(() => _ownedDisplayQty = 1);
+            }
+          } catch (e) {
+            if (mounted) {
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(SnackBar(content: Text('Erreur : $e')));
+            }
+          }
+        },
+      ),
+    );
+  }
+
+  Future<void> _toggleFavoriteFromMenu() async {
     try {
-      await promoteWishlistToCollection(_item);
+      final updated = await toggleItemFavorite(_item);
+      if (mounted) setState(() => _item = updated);
+    } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('« ${_item.title} » est dans ta collection')),
+          const SnackBar(content: Text('Impossible de mettre à jour le favori')),
         );
-        await _reloadItem();
-        if (mounted && !_item.isWishlist && _ownedDisplayQty < 1) {
-          setState(() => _ownedDisplayQty = 1);
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Erreur : $e')));
       }
     }
+  }
+
+  Future<void> _openShopSearch() async {
+    final q = Uri.encodeComponent(cleanDisplayText(_item.title));
+    final uri = Uri.parse(
+      'https://www.google.com/search?q=$q+jeu+société+acheter',
+    );
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  Widget _buildWishlistPurchaseBlock(bool ro) {
+    final avg = marketPriceAvgFromMetadata(_item.metadata);
+    final second = marketSecondhandPriceFromMetadata(_item.metadata);
+    final neu = marketNewPriceMinFromMetadata(_item.metadata);
+    final estimate = avg ?? neu ?? second;
+    final estimateLabel = estimate != null && estimate > 0
+        ? '~${formatEuroChip(estimate, compact: false)}'
+        : null;
+    final priority = _item.isFavorite;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        OutlinedButton.icon(
+          onPressed: ro ? null : _toggleFavoriteFromMenu,
+          icon: Icon(
+            priority ? Icons.favorite : Icons.favorite_border,
+            color: Colors.redAccent,
+          ),
+          label: Text(
+            priority
+                ? '❤️ Priorité haute (Coup de cœur)'
+                : 'Marquer en priorité / Coup de cœur',
+          ),
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            side: BorderSide(
+              color: priority ? Colors.redAccent : Colors.grey.shade400,
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Card(
+          margin: EdgeInsets.zero,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Budget / Prix cible',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  estimateLabel != null
+                      ? 'Estimation marché : $estimateLabel'
+                      : 'Pas encore d’estimation — cherche en boutique.',
+                  style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _priceController,
+                  readOnly: ro,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'Prix cible (€)',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onChanged: (_) => _scheduleSave(),
+                ),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: _openShopSearch,
+                    icon: const Icon(Icons.storefront_outlined, size: 18),
+                    label: const Text('Chercher en boutique'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: _promoteFromWishlist,
+            icon: const Icon(Icons.check_circle),
+            label: const Text(
+              '✅ Je l\'ai reçu / acheté — Passer dans ma collection',
+            ),
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.green.shade700,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   Future<void> _lend() async {
@@ -802,7 +947,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
 
     return Scaffold(
       appBar: AppAppBar(
-        title: _item.title,
+        title: cleanDisplayText(_item.title),
         showBackButton: true,
         actions: [
           if (ro && widget.friendUsername != null)
@@ -836,13 +981,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
               onSelected: (action) async {
                 switch (action) {
                   case _ItemMenuAction.favorite:
-                    final updated = _item.withFavorite(!_item.isFavorite);
-                    setState(() => _item = updated);
-                    unawaited(
-                      Supabase.instance.client.from('collection_items').update({
-                        'metadata': updated.metadata,
-                      }).eq('id', updated.id),
-                    );
+                    await _toggleFavoriteFromMenu();
                   case _ItemMenuAction.pantheon:
                     await _offerPantheonSlot();
                   case _ItemMenuAction.recommend:
@@ -868,21 +1007,26 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       color: Colors.pinkAccent,
                     ),
                     title: Text(
-                      _item.isFavorite
-                          ? 'Retirer des favoris'
-                          : 'Ajouter aux favoris',
+                      isWishlist
+                          ? (_item.isFavorite
+                              ? 'Retirer la priorité'
+                              : 'Priorité / Coup de cœur')
+                          : (_item.isFavorite
+                              ? 'Retirer des favoris'
+                              : 'Ajouter aux favoris'),
                     ),
                   ),
                 ),
-                const PopupMenuItem(
-                  value: _ItemMenuAction.pantheon,
-                  child: ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.emoji_events_outlined),
-                    title: Text('Ajouter au Panthéon'),
+                if (!isWishlist)
+                  const PopupMenuItem(
+                    value: _ItemMenuAction.pantheon,
+                    child: ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.emoji_events_outlined),
+                      title: Text('Ajouter au Panthéon'),
+                    ),
                   ),
-                ),
                 if (Supabase.instance.client.auth.currentUser != null)
                   const PopupMenuItem(
                     value: _ItemMenuAction.recommend,
@@ -893,15 +1037,16 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       title: Text('Recommander à un ami'),
                     ),
                   ),
-                const PopupMenuItem(
-                  value: _ItemMenuAction.location,
-                  child: ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.place_outlined),
-                    title: Text('Localisation / Prêter'),
+                if (!isWishlist)
+                  const PopupMenuItem(
+                    value: _ItemMenuAction.location,
+                    child: ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.place_outlined),
+                      title: Text('Localisation / Prêter'),
+                    ),
                   ),
-                ),
                 const PopupMenuDivider(),
                 PopupMenuItem(
                   value: _ItemMenuAction.delete,
@@ -1112,20 +1257,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         widget.friendOverlap != FriendOverlapKind.none)
                       const SizedBox(height: 12),
                     if (!ro && isWishlist) ...[
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: _promoteFromWishlist,
-                          icon: const Icon(Icons.check_circle),
-                          label: const Text(
-                            'Je l\'ai — ajouter à ma collection',
-                          ),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: Colors.green.shade700,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                          ),
-                        ),
-                      ),
+                      _buildWishlistPurchaseBlock(ro),
                       const SizedBox(height: 16),
                     ],
                     if (!isBoardgame)
@@ -1142,68 +1274,53 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                             Chip(label: Text(_item.cardSubcategory!.label)),
                         ],
                       ),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          if (_item.createdAtLabel != null ||
-                              _item.addedByUsername != null)
-                            Expanded(
-                              child: Text(
-                                [
-                                  if (_item.createdAtLabel != null)
-                                    _item.createdAtLabel!,
-                                  if (_item.addedByUsername != null)
-                                    'Ajouté par ${_item.addedByUsername}',
-                                ].join(' · '),
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: Colors.grey.shade600,
+                    if (!isWishlist)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            if (_item.createdAtLabel != null ||
+                                _item.addedByUsername != null)
+                              Expanded(
+                                child: Text(
+                                  [
+                                    if (_item.createdAtLabel != null)
+                                      _item.createdAtLabel!,
+                                    if (_item.addedByUsername != null)
+                                      'Ajouté par ${_item.addedByUsername}',
+                                  ].join(' · '),
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.grey.shade600,
+                                  ),
                                 ),
                               ),
+                            Text(
+                              'Possédé : $ownedQty',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
-                          Text(
-                            'Possédé : $ownedQty',
-                            style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          if (!isWishlist && !ro) ...[
-                            IconButton(
-                              visualDensity: VisualDensity.compact,
-                              onPressed: _item.quantity > 0
-                                  ? () => _adjustQuantity(-1)
-                                  : null,
-                              icon: const Icon(Icons.remove, size: 20),
-                            ),
-                            IconButton(
-                              visualDensity: VisualDensity.compact,
-                              onPressed: () => _adjustQuantity(1),
-                              icon: const Icon(Icons.add, size: 20),
-                            ),
+                            if (!ro) ...[
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                onPressed: _item.quantity > 0
+                                    ? () => _adjustQuantity(-1)
+                                    : null,
+                                icon: const Icon(Icons.remove, size: 20),
+                              ),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                onPressed: () => _adjustQuantity(1),
+                                icon: const Icon(Icons.add, size: 20),
+                              ),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
-                    ),
-                    if (isWishlist && ownedQty == 0)
-                      Text(
-                        'Tu peux enregistrer des parties même sans posséder le jeu.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey.shade600,
-                        ),
-                      )
-                    else if (isWishlist && ownedQty > 0)
-                      Text(
-                        'Tu possèdes déjà $ownedQty exemplaire${ownedQty > 1 ? 's' : ''} en collection.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey.shade600,
-                        ),
-                      )
-                    else if (_groupOwnershipSubtitle().isNotEmpty)
+                    if (!isWishlist && _groupOwnershipSubtitle().isNotEmpty)
                       Text(
                         _groupOwnershipSubtitle(),
                         style: TextStyle(
@@ -1443,7 +1560,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       const Divider(height: 28),
                       RestaurantVisitsPanel(item: _item),
                     ],
-                    if (!ro && !_item.isGroupOwned) ...[
+                    if (!ro && !isWishlist && !_item.isGroupOwned) ...[
                       const Divider(height: 28),
                       _buildSectionTitle('Prêt'),
                       if (_item.isOnLoan) ...[
@@ -1477,7 +1594,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                         Text(
                           ownedQty == 0
                               ? 'Tu ne peux pas prêter un objet que tu ne possèdes pas.'
-                              : 'Les objets en wishlist ou vendus ne peuvent pas être prêtés.',
+                              : 'Les objets vendus ne peuvent pas être prêtés.',
                           style: TextStyle(
                             fontSize: 13,
                             color: Colors.grey.shade600,
@@ -1497,17 +1614,6 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                               _expandedBento == 'sale' ? null : 'sale',
                         ),
                         child: _buildDoublesSalePanel(ro, isBoardgame),
-                      ),
-                    ],
-                    if (isWishlist && isBoardgame) ...[
-                      const Divider(height: 28),
-                      _buildSectionTitle('Prix marché (indicatif)'),
-                      Text(
-                        'Consulte BoardGameGeek pour une fourchette de prix neuf / occasion.',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.grey.shade600,
-                        ),
                       ),
                     ],
                     if ((!isWishlist || isTech) && !isBoardgame) ...[

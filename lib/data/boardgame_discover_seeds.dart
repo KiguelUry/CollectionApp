@@ -8,8 +8,16 @@ class DiscoverSeed {
   final String title;
   final List<String> genres;
   final int? yearHint;
+  /// Kickstarter / Gamefound / précommande signalé sur BGG.
+  final bool crowdfunding;
 
-  const DiscoverSeed(this.id, this.title, this.genres, {this.yearHint});
+  const DiscoverSeed(
+    this.id,
+    this.title,
+    this.genres, {
+    this.yearHint,
+    this.crowdfunding = false,
+  });
 }
 
 /// Clé SharedPreferences — bump = purge des paires titre/image corrompues.
@@ -130,4 +138,13 @@ const kDiscoverPopularSeeds = <DiscoverSeed>[
   DiscoverSeed('188920', 'This War of Mine: The Board Game', ['Strategy'], yearHint: 2017),
   DiscoverSeed('283155', 'Calico', ['Family'], yearHint: 2020),
   DiscoverSeed('367220', 'Sea Salt & Paper', ['Card Game', 'Family'], yearHint: 2022),
+];
+
+/// Vivier « Prochaines sorties » — titres de secours ; IDs résolus via BGG.
+/// Les IDs absents du Hot sont hydratés par `/thing` (pas de titre hardcodé final).
+const kDiscoverUpcomingSeeds = <DiscoverSeed>[
+  DiscoverSeed('420033', 'Vantage', ['Adventure'], yearHint: 2025),
+  DiscoverSeed('413246', 'Bomb Busters', ['Deduction'], yearHint: 2025),
+  DiscoverSeed('436126', 'Finspan', ['Family'], yearHint: 2025),
+  DiscoverSeed('408223', 'Nucleum: Australia', ['Strategy'], yearHint: 2025),
 ];

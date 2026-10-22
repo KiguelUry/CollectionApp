@@ -15,6 +15,7 @@ import '../../utils/boardgame_genres.dart';
 import '../../utils/collection_grid_layout.dart';
 import '../../utils/boardgame_quick_add.dart';
 import '../../utils/boardgame_bulk_add.dart';
+import '../../utils/display_text.dart';
 import '../../widgets/app_app_bar.dart';
 import '../../widgets/bgg_network_image.dart';
 
@@ -38,7 +39,9 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
 
   late List<_Seed> _order;
   List<_Seed> _hot = [];
+  List<_Seed> _upcoming = [];
   bool _hotLoading = false;
+  bool _upcomingLoading = false;
   _DiscoverMode _mode = _DiscoverMode.forYou;
   int _eraFrom = 2015;
   int _eraTo = 2020;
@@ -52,6 +55,11 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
   Set<String> _wishlistKeys = {};
   final _inflightIds = <String>{};
   bool _firstPageReady = false;
+
+  bool get _canShuffle =>
+      _mode == _DiscoverMode.forYou ||
+      _mode == _DiscoverMode.era ||
+      _mode == _DiscoverMode.table;
 
   @override
   void initState() {
@@ -212,15 +220,22 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
   }
 
   void _reshuffle() {
-    final hidden = _source.take(9).map((s) => s.id).toSet();
+    if (!_canShuffle) return;
     setState(() {
       _shuffleSalt++;
-      _mode = _DiscoverMode.forYou;
-      final mixed = _mix(widget.owned, salt: _shuffleSalt);
-      final fresh = mixed.where((s) => !hidden.contains(s.id)).toList();
-      final rest = mixed.where((s) => hidden.contains(s.id)).toList();
-      _order = [...fresh, ...rest];
       _visible = _page;
+      if (_mode == _DiscoverMode.forYou) {
+        final hidden = _source.take(9).map((s) => s.id).toSet();
+        final mixed = _mix(widget.owned, salt: _shuffleSalt);
+        final fresh = mixed.where((s) => !hidden.contains(s.id)).toList();
+        final rest = mixed.where((s) => hidden.contains(s.id)).toList();
+        _order = [...fresh, ...rest];
+      } else {
+        // Era / table : nouveau tirage sur le vivier filtré.
+        final rnd = Random(DateTime.now().millisecondsSinceEpoch ^ _shuffleSalt);
+        final pool = List<_Seed>.from(_uniquePool())..shuffle(rnd);
+        _order = pool;
+      }
     });
     unawaited(_hydrateUpTo(_visible + _page));
   }
@@ -252,7 +267,13 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
 
   List<_Seed> get _pool {
     final byId = <String, _Seed>{};
-    for (final seed in [..._order, ..._hot, ..._uniquePool()]) {
+    for (final seed in [
+      ..._order,
+      ..._hot,
+      ..._upcoming,
+      ...kDiscoverUpcomingSeeds,
+      ..._uniquePool(),
+    ]) {
       byId[seed.id] = seed;
     }
     return byId.values.toList();
@@ -275,9 +296,8 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
       case _DiscoverMode.hot:
         return _hot.any((s) => s.id == seed.id);
       case _DiscoverMode.recent:
-        // Nouvelles sorties : issus du Hot BGG, années courantes.
-        final nowY = DateTime.now().year;
-        if (year == null || year < nowY - 1 || year > nowY + 1) return false;
+        // Strict : uniquement 2025 et 2026 (jamais 2027+).
+        if (year == null || (year != 2025 && year != 2026)) return false;
         if (rating != null && rating < 6.5) return false;
         return true;
       case _DiscoverMode.upcoming:
@@ -316,16 +336,20 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
       // 100 % dynamique : uniquement /xmlapi2/hot (aucun seed hardcodé).
       list = List<_Seed>.from(_hot);
     } else if (_mode == _DiscoverMode.recent) {
-      // Nouvelles sorties = Hot BGG (années récentes) — zéro seed hardcodé.
-      final filtered = _hot.where(_matches).toList();
-      list = filtered.isNotEmpty ? filtered : List<_Seed>.from(_hot);
+      // Nouvelles sorties = Hot BGG années 2025|2026 uniquement.
+      list = _hot.where(_matches).toList();
       list.sort((a, b) {
         final ay = _asInt(_details[a.id]?['year_published']) ?? a.yearHint ?? 0;
         final by = _asInt(_details[b.id]?['year_published']) ?? b.yearHint ?? 0;
         return by.compareTo(ay);
       });
     } else if (_mode == _DiscoverMode.upcoming) {
-      list = _pool.where(_matches).toList();
+      // Dynamique (API upcoming) + Hot/pool filtrés year >= 2027.
+      final byId = <String, _Seed>{};
+      for (final s in [..._upcoming, ..._pool.where(_matches)]) {
+        byId.putIfAbsent(s.id, () => s);
+      }
+      list = byId.values.where(_matches).toList();
       list.sort((a, b) {
         final ay = _asInt(_details[a.id]?['year_published']) ?? a.yearHint ?? 0;
         final by = _asInt(_details[b.id]?['year_published']) ?? b.yearHint ?? 0;
@@ -352,55 +376,99 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
     return [...fresh, ...owned];
   }
 
+  void _ingestGameMaps(
+    List<Map<String, String>> maps, {
+    required void Function(List<_Seed> seeds) assign,
+    bool markCrowdfunding = false,
+  }) {
+    final seeds = <_Seed>[];
+    final ids = <String>[];
+    for (final map in maps) {
+      final id = map['id'] ?? map['bgg_id'] ?? '';
+      final title = cleanDisplayText(map['title'] ?? '');
+      if (id.isEmpty || title.isEmpty) continue;
+      ids.add(id);
+      final year = int.tryParse(map['year'] ?? '');
+      final cf = markCrowdfunding ||
+          map['crowdfunding'] == '1' ||
+          map['crowdfunding'] == 'true' ||
+          (year != null && year > DateTime.now().year);
+      seeds.add(
+        _Seed(id, title, const [], yearHint: year, crowdfunding: cf),
+      );
+      _details[id] = {
+        'bgg_id': id,
+        'id': id,
+        'title': title,
+        if ((map['image_url'] ?? '').isNotEmpty) 'image_url': map['image_url'],
+        if (year != null) 'year_published': year,
+        if (cf) 'crowdfunding': true,
+        if (map['avg_rating'] != null)
+          'bgg_avg_rating': double.tryParse(map['avg_rating']!),
+        if (map['min_players'] != null)
+          'min_players': int.tryParse(map['min_players']!),
+        if (map['max_players'] != null)
+          'max_players': int.tryParse(map['max_players']!),
+        if (map['playing_time'] != null)
+          'playing_time': int.tryParse(map['playing_time']!),
+      };
+    }
+    assign(seeds);
+    if (ids.isNotEmpty) {
+      unawaited(_hydrateIds(ids.take(_page * 2).toList()));
+    }
+  }
+
   Future<void> _ensureHot({bool force = false}) async {
     if ((!force && _hot.isNotEmpty) || _hotLoading) return;
     setState(() => _hotLoading = true);
     try {
-      // Source unique : /xmlapi2/hot?type=boardgame (via bgg-api / natif).
       final maps = await BggService.fetchHotBoardgames();
       if (!mounted) return;
-      final seeds = <_Seed>[];
-      final hotIds = <String>[];
-      for (final map in maps) {
-        final id = map['id'] ?? map['bgg_id'] ?? '';
-        final title = map['title'] ?? '';
-        if (id.isEmpty || title.isEmpty) continue;
-        hotIds.add(id);
-        final year = int.tryParse(map['year'] ?? '');
-        seeds.add(_Seed(id, title, const [], yearHint: year));
-        _details[id] = {
-          'bgg_id': id,
-          'id': id,
-          'title': title,
-          if ((map['image_url'] ?? '').isNotEmpty) 'image_url': map['image_url'],
-          if (year != null) 'year_published': year,
-          if (map['avg_rating'] != null)
-            'bgg_avg_rating': double.tryParse(map['avg_rating']!),
-          if (map['min_players'] != null)
-            'min_players': int.tryParse(map['min_players']!),
-          if (map['max_players'] != null)
-            'max_players': int.tryParse(map['max_players']!),
-          if (map['playing_time'] != null)
-            'playing_time': int.tryParse(map['playing_time']!),
-        };
-      }
-      setState(() => _hot = seeds);
-      // Batch cache/BGG sur les IDs Hot uniquement (pas de seeds).
-      if (hotIds.isNotEmpty) {
-        await _hydrateIds(hotIds.take(_page * 2).toList());
-      }
+      _ingestGameMaps(maps, assign: (seeds) => setState(() => _hot = seeds));
     } finally {
       if (mounted) setState(() => _hotLoading = false);
+    }
+  }
+
+  Future<void> _ensureUpcoming({bool force = false}) async {
+    if ((!force && _upcoming.isNotEmpty) || _upcomingLoading) return;
+    setState(() => _upcomingLoading = true);
+    try {
+      final maps = await BggService.fetchUpcomingBoardgames();
+      if (!mounted) return;
+      _ingestGameMaps(
+        maps,
+        markCrowdfunding: true,
+        assign: (seeds) => setState(() => _upcoming = seeds),
+      );
+      // Si l'API renvoie peu, hydrater aussi le vivier yearHint >= 2027.
+      if (_upcoming.length < 20) {
+        final extras = <String>[
+          for (final s in [...kDiscoverUpcomingSeeds, ..._uniquePool()])
+            if ((s.yearHint ?? 0) >= 2027) s.id,
+        ];
+        if (extras.isNotEmpty) await _hydrateIds(extras.take(30).toList());
+      }
+    } finally {
+      if (mounted) setState(() => _upcomingLoading = false);
     }
   }
 
   void _selectMode(_DiscoverMode mode) {
     setState(() {
       _mode = mode;
-      _visible = mode == _DiscoverMode.era ? 12 : _page;
+      _visible = mode == _DiscoverMode.era
+          ? 12
+          : mode == _DiscoverMode.upcoming
+              ? 24
+              : _page;
     });
     if (mode == _DiscoverMode.hot || mode == _DiscoverMode.recent) {
       unawaited(_ensureHot());
+    }
+    if (mode == _DiscoverMode.upcoming) {
+      unawaited(_ensureUpcoming());
     }
     unawaited(_hydrateUpTo(_visible + _page));
   }
@@ -417,10 +485,18 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
         : seed.title;
     return BggCatalogGame(
       bggId: seed.id,
-      title: title,
+      title: cleanDisplayText(title),
       imageUrl: (image != null && image.isNotEmpty) ? image : null,
       subtitle: avg == null ? null : _ratingLabel(avg),
     );
+  }
+
+  bool _isCrowdfunding(_Seed seed) {
+    if (seed.crowdfunding) return true;
+    final d = _details[seed.id];
+    if (d?['crowdfunding'] == true) return true;
+    final year = _asInt(d?['year_published']) ?? seed.yearHint;
+    return year != null && year > DateTime.now().year;
   }
 
   @override
@@ -434,11 +510,12 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
         title: 'Découvrir',
         showBackButton: true,
         actions: [
-          IconButton(
-            tooltip: 'Nouvelles idées',
-            onPressed: _reshuffle,
-            icon: const Icon(Icons.casino_outlined),
-          ),
+          if (_canShuffle)
+            IconButton(
+              tooltip: 'Nouvelles idées',
+              onPressed: _reshuffle,
+              icon: const Icon(Icons.casino_outlined),
+            ),
         ],
       ),
       body: ListView(
@@ -471,13 +548,6 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
                 _modeChip('🏆 Pépites par époque', _DiscoverMode.era),
                 const SizedBox(width: 6),
                 _modeChip('🎯 Pour ma table', _DiscoverMode.table),
-                const SizedBox(width: 6),
-                ActionChip(
-                  visualDensity: VisualDensity.compact,
-                  avatar: const Icon(Icons.casino, size: 18),
-                  label: const Text('Nouvelles idées'),
-                  onPressed: _reshuffle,
-                ),
               ],
             ),
           ),
@@ -544,8 +614,12 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
               ],
             ),
           ],
-          if (_hotLoading) const LinearProgressIndicator(minHeight: 2),
-          if (!_hotLoading && shown.isEmpty && _mode != _DiscoverMode.forYou)
+          if (_hotLoading || _upcomingLoading)
+            const LinearProgressIndicator(minHeight: 2),
+          if (!_hotLoading &&
+              !_upcomingLoading &&
+              shown.isEmpty &&
+              _mode != _DiscoverMode.forYou)
             const Padding(
               padding: EdgeInsets.only(top: 12),
               child: Text(
@@ -571,6 +645,8 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
                 key: ValueKey(game.bggId),
                 game: game,
                 rating: _cardMeta(seed),
+                crowdfunding: _mode == _DiscoverMode.upcoming &&
+                    _isCrowdfunding(seed),
                 inCollection: _ownedKeys.contains(key),
                 inWishlist: _wishlistKeys.contains(key),
                 onOpen: () => _openPreview(game),
@@ -656,6 +732,7 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
 class _DiscoverCard extends StatelessWidget {
   final BggCatalogGame game;
   final Object? rating;
+  final bool crowdfunding;
   final bool inCollection;
   final bool inWishlist;
   final VoidCallback onOpen;
@@ -666,6 +743,7 @@ class _DiscoverCard extends StatelessWidget {
     super.key,
     required this.game,
     required this.rating,
+    this.crowdfunding = false,
     required this.inCollection,
     required this.inWishlist,
     required this.onOpen,
@@ -692,30 +770,65 @@ class _DiscoverCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Expanded(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: game.imageUrl == null || game.imageUrl!.isEmpty
-                        ? ColoredBox(
-                            color: Colors.grey.shade200,
-                            child: Icon(
-                              Icons.casino_outlined,
-                              color: Colors.grey.shade500,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: game.imageUrl == null || game.imageUrl!.isEmpty
+                            ? ColoredBox(
+                                color: Colors.grey.shade200,
+                                child: Icon(
+                                  Icons.casino_outlined,
+                                  color: Colors.grey.shade500,
+                                ),
+                              )
+                            : BggNetworkImage(
+                                key: ValueKey(
+                                  'discover-${game.bggId}-${game.imageUrl}',
+                                ),
+                                url: game.imageUrl!,
+                                boxedCover: true,
+                                compact: true,
+                                fit: BoxFit.contain,
+                              ),
+                      ),
+                      if (crowdfunding)
+                        Positioned(
+                          top: 4,
+                          left: 4,
+                          right: 4,
+                          child: Align(
+                            alignment: Alignment.topLeft,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 5,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.deepOrange.shade700
+                                    .withValues(alpha: 0.92),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Text(
+                                '🚀 À paraître',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
                             ),
-                          )
-                        : BggNetworkImage(
-                            key: ValueKey(
-                              'discover-${game.bggId}-${game.imageUrl}',
-                            ),
-                            url: game.imageUrl!,
-                            boxedCover: true,
-                            compact: true,
-                            fit: BoxFit.contain,
                           ),
+                        ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  game.title,
+                  cleanDisplayText(game.title),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(

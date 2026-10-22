@@ -58,18 +58,44 @@ function titleRelevanceScore(title: string, query: string): number {
   return 0;
 }
 
+function decodeHtmlEntities(raw: string): string {
+  let s = raw;
+  s = s.replace(/&#(\d+);/g, (_, n: string) => {
+    const code = parseInt(n, 10);
+    return Number.isFinite(code) ? String.fromCharCode(code) : _;
+  });
+  s = s.replace(/&#x([0-9a-fA-F]+);/gi, (_, h: string) => {
+    const code = parseInt(h, 16);
+    return Number.isFinite(code) ? String.fromCharCode(code) : _;
+  });
+  s = s
+    .replace(/&nbsp;/g, " ")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#039;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&ndash;/g, "–")
+    .replace(/&mdash;/g, "—")
+    .replace(/&hellip;/g, "…")
+    .replace(/&rsquo;/g, "’")
+    .replace(/&lsquo;/g, "‘")
+    .replace(/&amp;/g, "&");
+  return s.trim();
+}
+
 function primaryTitle(inner: string): string {
   // Uniquement dans le fragment <item> fourni (jamais le document entier).
   // 1) <name type="primary" value="…" /> (ordre d'attributs variable).
   const primary = inner.match(
     /<name\b(?=[^>]*\btype="primary")[^>]*\bvalue="([^"]*)"[^>]*\/?>/i,
   );
-  if (primary?.[1]) return primary[1];
+  if (primary?.[1]) return decodeHtmlEntities(primary[1]);
   // 2) API Hot : <name value="…" /> sans type (ignorer alternate).
   const plain = inner.match(
     /<name\b(?![^>]*\btype\s*=)[^>]*\bvalue="([^"]*)"[^>]*\/?>/i,
   );
-  if (plain?.[1]) return plain[1];
+  if (plain?.[1]) return decodeHtmlEntities(plain[1]);
   return "Sans titre";
 }
 
@@ -853,6 +879,74 @@ async function handleHot(): Promise<Response> {
   return json({ games: enriched });
 }
 
+/**
+ * Prochaines sorties : Hot + recherches « recent », années >= 2027
+ * (et fin 2026), avec badge crowdfunding / à paraître.
+ */
+async function handleUpcoming(): Promise<Response> {
+  const nowY = new Date().getFullYear();
+  const minYear = Math.max(2027, nowY); // strictement futures / 2027+
+  const byId = new Map<string, GameHit>();
+
+  const absorb = (games: GameHit[]) => {
+    for (const g of games) {
+      if (!g.id || byId.has(g.id)) continue;
+      const year = parseInt(g.year ?? "", 10);
+      if (!Number.isFinite(year) || year < minYear) continue;
+      const next: GameHit = { ...g };
+      if (year > nowY) next.crowdfunding = "1";
+      byId.set(g.id, next);
+    }
+  };
+
+  try {
+    const hotXml = await fetchBgg("/xmlapi2/hot", { type: "boardgame" });
+    absorb(await enrichGameHits(parseHotItems(hotXml)));
+  } catch {
+    // hot optionnel
+  }
+
+  // Recherches à tri « recent » pour étoffer 20–30 sorties attendues.
+  const queries = [
+    "legacy",
+    "edition",
+    "quest",
+    "war",
+    "realm",
+    "saga",
+    "empire",
+    "dungeon",
+    "kickstarter",
+    "campaign",
+  ];
+  for (const q of queries) {
+    if (byId.size >= 30) break;
+    try {
+      const xml = await fetchBgg("/xmlapi2/search", {
+        query: q,
+        type: SEARCH_TYPES,
+      });
+      const hits = parseSearchItems(xml);
+      hits.sort((a, b) => {
+        const ya = parseInt(a.year ?? "", 10) || 0;
+        const yb = parseInt(b.year ?? "", 10) || 0;
+        return yb - ya;
+      });
+      absorb(await enrichGameHits(hits.slice(0, 20)));
+    } catch {
+      // ignore une requête en échec
+    }
+  }
+
+  const games = [...byId.values()].sort((a, b) => {
+    const ya = parseInt(a.year ?? "", 10) || 9999;
+    const yb = parseInt(b.year ?? "", 10) || 9999;
+    if (ya !== yb) return ya - yb;
+    return (a.title ?? "").localeCompare(b.title ?? "");
+  });
+  return json({ games: games.slice(0, 40) });
+}
+
 async function handleMeta(idsParam: string): Promise<Response> {
   const ids = idsParam
     .split(",")
@@ -1187,6 +1281,8 @@ Deno.serve(async (req) => {
         );
       case "hot":
         return await handleHot();
+      case "upcoming":
+        return await handleUpcoming();
       case "meta":
         return await handleMeta(url.searchParams.get("ids") ?? "");
       case "things":

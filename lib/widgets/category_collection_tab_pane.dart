@@ -127,6 +127,8 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
         ? CollectionListFilters(
             wishlistMineOnly: true,
             wishlistMineUserId: widget.currentUserId,
+            // Coups de cœur / prioritaires en haut de la wishlist.
+            sort: CollectionSort.favoritesFirst,
           )
         : CollectionListFilters();
   }

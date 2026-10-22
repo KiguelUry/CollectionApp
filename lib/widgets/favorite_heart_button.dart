@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/collection_item.dart';
-import '../services/collection_refresh.dart';
+import '../utils/item_favorite.dart';
 
 /// Cœur favori synchronisé (grille, fiche, sheet notes).
 class FavoriteHeartButton extends StatefulWidget {
@@ -55,13 +54,8 @@ class _FavoriteHeartButtonState extends State<FavoriteHeartButton> {
       _fav = next;
       _saving = true;
     });
-    final updated = widget.item.withFavorite(next);
     try {
-      await Supabase.instance.client
-          .from('collection_items')
-          .update({'metadata': updated.metadata})
-          .eq('id', widget.item.id);
-      CollectionRefresh.instance.bump();
+      final updated = await toggleItemFavorite(widget.item);
       widget.onChanged?.call(updated);
     } catch (_) {
       if (mounted) {
@@ -79,18 +73,24 @@ class _FavoriteHeartButtonState extends State<FavoriteHeartButton> {
   Widget build(BuildContext context) {
     final active = widget.activeColor ?? Colors.redAccent;
     final inactive = widget.inactiveColor ?? Colors.white;
+    final tooltip = widget.item.isWishlist
+        ? (_fav ? 'Retirer la priorité' : 'Priorité / Coup de cœur')
+        : (_fav ? 'Retirer des favoris' : 'Ajouter aux favoris');
     return Material(
       color: Colors.black.withValues(alpha: 0.45),
       borderRadius: BorderRadius.circular(8),
       child: InkWell(
         onTap: widget.readOnly ? null : _toggle,
         borderRadius: BorderRadius.circular(8),
-        child: Padding(
-          padding: widget.padding,
-          child: Icon(
-            _fav ? Icons.favorite : Icons.favorite_border,
-            size: widget.size,
-            color: _fav ? active : inactive,
+        child: Tooltip(
+          message: tooltip,
+          child: Padding(
+            padding: widget.padding,
+            child: Icon(
+              _fav ? Icons.favorite : Icons.favorite_border,
+              size: widget.size,
+              color: _fav ? active : inactive,
+            ),
           ),
         ),
       ),
@@ -142,13 +142,8 @@ class _FavoriteHeartIconButtonState extends State<FavoriteHeartIconButton> {
       _fav = next;
       _saving = true;
     });
-    final updated = widget.item.withFavorite(next);
     try {
-      await Supabase.instance.client
-          .from('collection_items')
-          .update({'metadata': updated.metadata})
-          .eq('id', widget.item.id);
-      CollectionRefresh.instance.bump();
+      final updated = await toggleItemFavorite(widget.item);
       widget.onChanged?.call(updated);
     } catch (_) {
       if (mounted) {
@@ -164,8 +159,11 @@ class _FavoriteHeartIconButtonState extends State<FavoriteHeartIconButton> {
 
   @override
   Widget build(BuildContext context) {
+    final wishlist = widget.item.isWishlist;
     return IconButton(
-      tooltip: _fav ? 'Retirer des favoris' : 'Ajouter aux favoris',
+      tooltip: wishlist
+          ? (_fav ? 'Retirer la priorité' : 'Priorité / Coup de cœur')
+          : (_fav ? 'Retirer des favoris' : 'Ajouter aux favoris'),
       onPressed: widget.readOnly ? null : _toggle,
       icon: Icon(
         _fav ? Icons.favorite : Icons.favorite_border,

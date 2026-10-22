@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../utils/display_text.dart';
+
 /// Titre tronqué avec infobulle au survol / appui long.
 class ItemTitleText extends StatelessWidget {
   final String title;
@@ -17,11 +19,12 @@ class ItemTitleText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cleaned = cleanDisplayText(title);
     return Tooltip(
-      message: title,
+      message: cleaned,
       waitDuration: const Duration(milliseconds: 400),
       child: Text(
-        title,
+        cleaned,
         maxLines: maxLines,
         overflow: TextOverflow.ellipsis,
         textAlign: textAlign,

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/collection_category.dart';
 import '../models/collection_group.dart';
 import '../models/collection_item.dart';
+import '../utils/display_text.dart';
 import '../screens/item_detail_screen.dart';
 import '../services/boardgame_expansion_service.dart';
 import '../utils/boardgame_display.dart';
@@ -207,7 +208,7 @@ class CollectionItemTile extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            item.title,
+            cleanDisplayText(item.title),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
@@ -293,7 +294,7 @@ class CollectionItemTile extends StatelessWidget {
               child: _buildImage(),
             ),
           ),
-        if (showFavoriteHeart && !item.isWishlist)
+        if (showFavoriteHeart)
           Positioned(
             top: 4,
             left: 4,
@@ -312,16 +313,16 @@ class CollectionItemTile extends StatelessWidget {
         ?_overlapBadge,
         if (item.isOnLoan && !item.isSold)
           Positioned(
-            top: showFavoriteHeart && !item.isWishlist ? 34 : 4,
+            top: showFavoriteHeart ? 34 : 4,
             left: 4,
             child: _badge('Prêté', Colors.blue.shade700),
           ),
         if (item.isForSale && !item.isSold)
           Positioned(
-            top: showFavoriteHeart && !item.isWishlist ? 34 : 4,
+            top: showFavoriteHeart ? 34 : 4,
             left: item.isOnLoan
                 ? 52
-                : (showFavoriteHeart && !item.isWishlist ? 4 : 4),
+                : (showFavoriteHeart ? 4 : 4),
             child: _badge('Vente', Colors.orange.shade800),
           ),
         if (item.isSold)
@@ -373,7 +374,7 @@ class CollectionItemTile extends StatelessWidget {
                     right: onDelete != null ? 32 : 4,
                     child: _badge('×$_ownedQty', Colors.deepPurple),
                   ),
-                if (showFavoriteHeart && !item.isWishlist)
+                if (showFavoriteHeart)
                   Positioned(
                     top: 4,
                     left: 4,

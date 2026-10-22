@@ -4,6 +4,7 @@ import 'card_subcategory.dart';
 import 'category_metadata.dart';
 import 'item_condition.dart';
 import 'item_tag.dart';
+import '../utils/display_text.dart';
 import '../utils/holder_label_utils.dart';
 
 class CollectionItem {
@@ -162,9 +163,27 @@ class CollectionItem {
       metadata['_added_by_username'] = addedByProfile['username'].toString();
     }
 
+    final rawDesc = metadata?['bgg_description']?.toString() ??
+        metadata?['description']?.toString();
+    if (rawDesc != null && rawDesc.contains('&')) {
+      metadata = Map<String, dynamic>.from(metadata ?? {});
+      if (metadata['bgg_description'] != null) {
+        metadata['bgg_description'] =
+            cleanDisplayText(metadata['bgg_description']?.toString());
+      }
+      if (metadata['description'] != null) {
+        metadata['description'] =
+            cleanDisplayText(metadata['description']?.toString());
+      }
+      if (metadata['bgg_short_description'] != null) {
+        metadata['bgg_short_description'] =
+            cleanDisplayText(metadata['bgg_short_description']?.toString());
+      }
+    }
+
     return CollectionItem(
       id: json['id'],
-      title: json['title'],
+      title: cleanDisplayText(json['title']?.toString()),
       category: category,
       subcategory: category == CollectionCategory.book
           ? (rawSub ?? (json['category'] == 'manga' ? 'manga' : null))

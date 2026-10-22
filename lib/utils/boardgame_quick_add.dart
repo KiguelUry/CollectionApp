@@ -11,6 +11,7 @@ import '../services/profile_service.dart';
 import '../services/collection_refresh.dart';
 import '../widgets/add_item_options_dialog.dart';
 import '../utils/whereabouts_persistence.dart';
+import '../utils/wishlist_promote.dart';
 import 'boardgame_cover.dart';
 import 'boardgame_display.dart';
 import 'boardgame_expansion_flow.dart';
@@ -113,6 +114,24 @@ Future<void> quickAddBoardgameFromCatalog(
             );
           }
           return;
+        }
+
+        if (options.isWishlist) {
+          final dup = await findWishlistDuplicate(
+            title: title,
+            categoryDb: CollectionCategory.boardgame.dbValue,
+            bggId: game.bggId.isNotEmpty ? game.bggId : null,
+            groupId: options.groupId,
+          );
+          if (dup != null) {
+            if (dialogContext.mounted) Navigator.pop(dialogContext);
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Déjà dans ta wishlist')),
+              );
+            }
+            return;
+          }
         }
 
         final detailsMap = details;

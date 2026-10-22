@@ -11,6 +11,7 @@ import '../config/supabase_public_config.dart';
 import '../models/bgg_expansion.dart';
 import '../utils/bgg_collection_parse.dart';
 import '../utils/bgg_text.dart';
+import '../utils/display_text.dart';
 import '../utils/retry_backoff.dart';
 import 'bgg_catalog_cache.dart';
 import '../utils/search_relevance.dart';
@@ -485,15 +486,7 @@ class BggService {
     return candidates;
   }
 
-  static String unescapeHtml(String raw) {
-    return raw
-        .replaceAll('&amp;', '&')
-        .replaceAll('&quot;', '"')
-        .replaceAll('&#039;', "'")
-        .replaceAll('&apos;', "'")
-        .replaceAll('&lt;', '<')
-        .replaceAll('&gt;', '>');
-  }
+  static String unescapeHtml(String raw) => cleanDisplayText(raw);
 
   /// Titre BGG : `type="primary"` d'abord, sinon `<name value="…"/>` (API Hot).
   /// Uniquement les `<name>` **enfants directs** du nœud (jamais le document).
@@ -810,6 +803,80 @@ class BggService {
       if (kDebugMode) debugPrint('Erreur hot BGG: $e');
       return [];
     }
+  }
+
+  static List<Map<String, String>>? _upcomingCache;
+  static DateTime? _upcomingCacheAt;
+
+  /// Sorties à venir (2027+) + projets crowdfunding / précommande BGG.
+  static Future<List<Map<String, String>>> fetchUpcomingBoardgames() async {
+    if (!supportsWebSearch) return [];
+
+    if (_upcomingCache != null &&
+        _upcomingCacheAt != null &&
+        DateTime.now().difference(_upcomingCacheAt!) <
+            const Duration(minutes: 30)) {
+      return _upcomingCache!;
+    }
+
+    if (_useWebJsonApi) {
+      final data = await _jsonApiGet('upcoming', {});
+      final games = _gamesFromJsonList(data?['games']);
+      if (games.isEmpty) return [];
+      final enriched = await enrichGameMaps(games);
+      if (enriched.isNotEmpty) {
+        _upcomingCache = enriched;
+        _upcomingCacheAt = DateTime.now();
+      }
+      return enriched;
+    }
+
+    // Fallback natif : Hot filtré + recherches recent.
+    final byId = <String, Map<String, String>>{};
+    final nowY = DateTime.now().year;
+    final minYear = nowY < 2027 ? 2027 : nowY;
+
+    void absorb(List<Map<String, String>> games) {
+      for (final g in games) {
+        final id = g['id'] ?? '';
+        if (id.isEmpty || byId.containsKey(id)) continue;
+        final year = int.tryParse(g['year'] ?? '') ?? 0;
+        if (year < minYear) continue;
+        final next = Map<String, String>.from(g);
+        if (year > nowY) next['crowdfunding'] = '1';
+        byId[id] = next;
+      }
+    }
+
+    absorb(await fetchHotBoardgames());
+    for (final q in const [
+      'legacy',
+      'edition',
+      'quest',
+      'war',
+      'kickstarter',
+      'campaign',
+    ]) {
+      if (byId.length >= 30) break;
+      try {
+        final hits = await _searchGamesLive(
+          q,
+          BggSearchSort.recent,
+          lightweight: true,
+        );
+        absorb(hits);
+      } catch (_) {}
+    }
+
+    final list = byId.values.toList()
+      ..sort((a, b) {
+        final ya = int.tryParse(a['year'] ?? '') ?? 9999;
+        final yb = int.tryParse(b['year'] ?? '') ?? 9999;
+        return ya.compareTo(yb);
+      });
+    _upcomingCache = list.take(40).toList();
+    _upcomingCacheAt = DateTime.now();
+    return _upcomingCache!;
   }
 
   /// Fiche BGG par IDs (catalogue curé, genres).

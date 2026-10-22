@@ -6,6 +6,7 @@ import '../models/collection_group.dart';
 import '../services/bgg_service.dart';
 import '../services/group_service.dart';
 import '../utils/bgg_text.dart';
+import '../utils/display_text.dart';
 import '../utils/holder_label_utils.dart';
 import '../utils/boardgame_display.dart';
 import 'bgg_network_image.dart';
@@ -245,7 +246,7 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                widget.itemTitle,
+                                cleanDisplayText(widget.itemTitle),
                                 maxLines: 3,
                                 overflow: TextOverflow.ellipsis,
                                 style: Theme.of(context)

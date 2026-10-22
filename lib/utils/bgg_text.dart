@@ -15,6 +15,9 @@ String cleanBggText(String? html) {
   return s;
 }
 
+/// Décode les entités HTML (titres, descriptions) sans retirer les balises.
+String decodeHtmlEntities(String input) => _decodeEntities(input);
+
 String _decodeEntities(String input) {
   return input.replaceAllMapped(RegExp(r'&(#x?[0-9a-fA-F]+|[a-zA-Z]+);'), (m) {
     final token = m.group(1)!;
