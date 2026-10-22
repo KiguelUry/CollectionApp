@@ -4,6 +4,8 @@ import '../../constants/book_accent.dart';
 import '../../models/book_subcategory.dart';
 import '../../services/book_catalog_service.dart';
 import '../../services/book_intelligence_service.dart';
+import '../../services/mangadex_service.dart';
+import '../../utils/book_series_normalizer.dart';
 import '../../utils/collection_grid_layout.dart';
 import '../../widgets/app_app_bar.dart';
 import '../../widgets/catalog/catalog_item_tile.dart';
@@ -15,12 +17,14 @@ class BookCatalogGridScreen extends StatefulWidget {
   final String? initialQuery;
   final void Function(Map<String, String> book, BookSubcategory sub)?
       onBookSelected;
+  final void Function(String seriesName, BookSubcategory sub)? onAddSeries;
 
   const BookCatalogGridScreen({
     super.key,
     this.initialSub = BookSubcategory.manga,
     this.initialQuery,
     this.onBookSelected,
+    this.onAddSeries,
   });
 
   @override
@@ -38,6 +42,8 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
   List<EnrichedBookHit> _hits = [];
   bool _loading = false;
   bool _searched = false;
+  String? _seriesBannerName;
+  int? _seriesBannerVolumes;
 
   @override
   void initState() {
@@ -91,11 +97,58 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       filters: filters,
     );
 
+    final q = filters.titleQuery.trim();
+    String? seriesName = q;
+    int? seriesVols = BookSeriesNormalizer.expectedCount(q, _sub);
+    if (_sub == BookSubcategory.manga && seriesVols == null) {
+      final dex = await MangaDexService.lookupManga(q);
+      if (dex != null) {
+        seriesName = dex.title;
+        seriesVols = dex.volumesPublished;
+      }
+    }
+    // Infère le nom de série depuis le meilleur hit.
+    if (enriched.isNotEmpty && enriched.first.parsed.hasSeries) {
+      seriesName = enriched.first.parsed.seriesName;
+      seriesVols ??= enriched.first.estimatedTotalVolumes ??
+          BookSeriesNormalizer.expectedCount(seriesName!, _sub);
+    }
+
     if (!mounted) return;
     setState(() {
       _hits = enriched;
+      _seriesBannerName =
+          (seriesName != null && seriesName.trim().length >= 2)
+              ? seriesName.trim()
+              : null;
+      _seriesBannerVolumes = seriesVols;
       _loading = false;
     });
+  }
+
+  void _addSeries() {
+    final name = _seriesBannerName;
+    if (name == null) return;
+    final cb = widget.onAddSeries;
+    if (cb != null) {
+      cb(name, _sub);
+      return;
+    }
+    // Fallback : sélectionne un hit synthétique série.
+    _select(
+      EnrichedBookHit(
+        raw: {
+          'title': name,
+          'series_title': name,
+          if (_seriesBannerVolumes != null)
+            'estimated_volumes': '$_seriesBannerVolumes',
+        },
+        parsed: BookSeriesNormalizer.parse(name),
+        displayTitle: name,
+        score: 999,
+        estimatedTotalVolumes: _seriesBannerVolumes,
+      ),
+    );
   }
 
   void _select(EnrichedBookHit hit) {
@@ -118,18 +171,20 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
             child: ListView(
               scrollDirection: Axis.horizontal,
               children: [
-                for (final s in BookSubcategory.values)
+                for (final s in BookSubcategory.filterChips)
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: FilterChip(
-                      label: Text(s.label, style: const TextStyle(fontSize: 12)),
+                      label: Text(
+                        s.filterLabel,
+                        style: const TextStyle(fontSize: 12),
+                      ),
                       selected: _sub == s,
                       selectedColor: BookAccent.surface,
                       onSelected: (_) {
                         setState(() => _sub = s);
                         if (_searched) _search();
                       },
-                      avatar: Icon(s.icon, size: 16, color: s.color),
                       showCheckmark: false,
                     ),
                   ),
@@ -248,7 +303,57 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
                 iconColor: _sub.color,
               ),
             )
-          else
+          else ...[
+            if (_seriesBannerName != null)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                  child: Material(
+                    color: _accent.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(14),
+                    child: InkWell(
+                      onTap: _addSeries,
+                      borderRadius: BorderRadius.circular(14),
+                      child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Row(
+                          children: [
+                            const Text('📚', style: TextStyle(fontSize: 28)),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Série : $_seriesBannerName',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 15,
+                                    ),
+                                  ),
+                                  Text(
+                                    _seriesBannerVolumes != null
+                                        ? '$_seriesBannerVolumes tomes parus — Ajouter la série'
+                                        : 'Ajouter la série complète',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey.shade400,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            FilledButton(
+                              onPressed: _addSeries,
+                              child: const Text('Ajouter'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 24),
               sliver: SliverGrid(
@@ -277,6 +382,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
                 ),
               ),
             ),
+          ],
         ],
       ),
     );

@@ -9,6 +9,7 @@ import '../utils/book_series_normalizer.dart';
 import '../utils/book_title_parser.dart';
 import 'anilist_manga_service.dart';
 import 'book_intelligence_service.dart';
+import 'mangadex_service.dart';
 import 'open_library_service.dart';
 import 'profile_service.dart';
 
@@ -347,20 +348,41 @@ class BookSeriesService {
   }) {
     final active = items.where((i) => !i.isSold).toList();
     final owned = active.where((i) => !i.isWishlist).toList();
-    final wishlistItems =
-        active.where((i) => i.isWishlist).length;
-    final readFromOwned = owned.where((i) => i.isRead).length;
-    final ownedVolumeIds = owned.map((i) => i.volumeId).whereType<String>().toSet();
-    final readFromVolumes = volumes
-        .where((v) => v.isRead && !ownedVolumeIds.contains(v.id))
-        .length;
-    final read = readFromOwned + readFromVolumes;
+    final wishlistItems = active.where((i) => i.isWishlist).toList();
 
+    final volById = {for (final v in volumes) v.id: v};
     var totalSlots = series.expectedVolumeCount ?? 0;
-    if (totalSlots < volumes.length) totalSlots = volumes.length;
-    if (totalSlots == 0 && volumes.isNotEmpty) {
-      totalSlots = volumes.length;
+    final regularVols = volumes.where((v) => !v.isHorsSerie).toList();
+    if (totalSlots < regularVols.length) totalSlots = regularVols.length;
+    if (totalSlots == 0 && regularVols.isNotEmpty) {
+      totalSlots = regularVols.length;
     }
+
+    // Possédés = numéros de tome distincts (jamais de 73/42).
+    final ownedNumbers = <int>{};
+    for (final i in owned) {
+      final vol = i.volumeId != null ? volById[i.volumeId!] : null;
+      if (vol == null || vol.isHorsSerie) continue;
+      final n = vol.volumeNumber.round();
+      if (totalSlots > 0 && n > totalSlots) continue;
+      if (n >= 1) ownedNumbers.add(n);
+    }
+    final ownedCount = ownedNumbers.length;
+
+    final readNumbers = <int>{};
+    for (final i in owned) {
+      if (!i.isRead) continue;
+      final vol = i.volumeId != null ? volById[i.volumeId!] : null;
+      if (vol == null || vol.isHorsSerie) continue;
+      final n = vol.volumeNumber.round();
+      if (n >= 1) readNumbers.add(n);
+    }
+    for (final v in volumes) {
+      if (!v.isRead || v.isHorsSerie) continue;
+      final n = v.volumeNumber.round();
+      if (ownedNumbers.contains(n)) readNumbers.add(n);
+    }
+    final readCount = readNumbers.length;
 
     double? rating = series.userRating;
     if (rating == null) {
@@ -382,13 +404,18 @@ class BookSeriesService {
       }
     }
 
-    final wishlistCount = series.wishlistEntireSeries
-        ? totalSlots
-        : wishlistItems;
+    final wishNumbers = <int>{};
+    for (final i in wishlistItems) {
+      final vol = i.volumeId != null ? volById[i.volumeId!] : null;
+      if (vol == null || vol.isHorsSerie) continue;
+      wishNumbers.add(vol.volumeNumber.round());
+    }
+    final wishlistCount =
+        series.wishlistEntireSeries ? totalSlots : wishNumbers.length;
 
     return BookSeriesStats(
-      ownedCount: owned.length,
-      readCount: read,
+      ownedCount: ownedCount,
+      readCount: readCount,
       wishlistVolumeCount: wishlistCount,
       totalSlots: totalSlots,
       displayRating: rating,
@@ -465,7 +492,7 @@ class BookSeriesService {
         .eq('id', volumeId);
   }
 
-  /// Récupère les couvertures manquantes (Google / AniList / OL).
+  /// Récupère les couvertures manquantes (MangaDex / Google / AniList / OL).
   Future<int> enrichMissingVolumeCovers({
     required BookSeries series,
     required List<BookVolume> volumes,
@@ -473,6 +500,23 @@ class BookSeriesService {
   }) async {
     var updated = 0;
     var lookups = 0;
+
+    Map<int, String> dexCovers = const {};
+    if (series.subcategory == BookSubcategory.manga) {
+      final dex = await MangaDexService.lookupManga(series.name);
+      if (dex != null) {
+        dexCovers = dex.coverByVolume;
+        final published = dex.volumesPublished;
+        if (published != null &&
+            published > (series.expectedVolumeCount ?? 0)) {
+          await ensureVolumeSlots(series.id, published);
+          await updateSeries(
+            series.copyWith(expectedVolumeCount: published),
+          );
+        }
+      }
+    }
+
     for (final vol in volumes) {
       if (lookups >= maxLookups) break;
       if (vol.isHorsSerie && vol.coverUrl != null && vol.coverUrl!.isNotEmpty) {
@@ -480,7 +524,9 @@ class BookSeriesService {
       }
       if (vol.coverUrl != null && vol.coverUrl!.isNotEmpty) continue;
       lookups++;
-      final url = await BookIntelligenceService.lookupVolumeCover(
+      final n = vol.volumeNumber.round();
+      var url = dexCovers[n];
+      url ??= await BookIntelligenceService.lookupVolumeCover(
         seriesName: series.name,
         volumeNumber: vol.volumeNumber,
         subcategory: series.subcategory,
@@ -564,6 +610,23 @@ class BookSeriesService {
     bool markAsRead = false,
   }) async {
     await ProfileService().ensureCurrentUserProfile();
+
+    // Anti-doublon : une seule entrée possédée par volume_id.
+    final existing = await fetchSeriesItems(series.id);
+    final dupes = existing
+        .where((i) => i.volumeId == volume.id && !i.isWishlist && !i.isSold)
+        .toList();
+    if (dupes.isNotEmpty) {
+      final keep = dupes.first;
+      for (final d in dupes.skip(1)) {
+        await removeVolumeItem(d.id);
+      }
+      if (markAsRead && !keep.isRead) {
+        await setItemRead(keep.id, true);
+      }
+      return keep;
+    }
+
     final n = volume.volumeNumber.ceil();
     final customTitle = volume.volumeTitle;
     final title = customTitle != null && customTitle.isNotEmpty
@@ -593,16 +656,10 @@ class BookSeriesService {
     if (read) {
       await setVolumeReadFlag(volume.id, false);
     }
-    final coverUrl = volume.coverUrl ??
-        await OpenLibraryService.lookupVolumeCover(
-          series.name,
-          volume.volumeNumber,
-          series.subcategory,
-        );
+    final coverUrl = volume.coverUrl;
     if (coverUrl != null && coverUrl.isNotEmpty) {
-      await setVolumeCoverUrl(volume.id, coverUrl);
+      await ensureSeriesCoverFromItem(seriesId: series.id, imageUrl: coverUrl);
     }
-    await ensureSeriesCoverFromItem(seriesId: series.id, imageUrl: coverUrl);
     return CollectionItem.fromJson(row);
   }
 
@@ -612,24 +669,197 @@ class BookSeriesService {
     required bool owned,
   }) async {
     if (owned) {
-      if (slot.item == null) {
-        await addVolumeQuick(series: series, volume: slot.volume);
-      }
+      await addVolumeQuick(series: series, volume: slot.volume);
       return;
     }
-    final item = slot.item;
-    if (item != null && !item.isWishlist) {
-      if (item.isRead) {
-        await setVolumeReadFlag(slot.volume.id, true);
-      }
+    // Supprime TOUTES les lignes pour ce volume (anti 73/42).
+    final items = await fetchSeriesItems(series.id);
+    final toRemove = items
+        .where((i) =>
+            i.volumeId == slot.volume.id && !i.isWishlist && !i.isSold)
+        .toList();
+    var keepReadFlag = false;
+    for (final item in toRemove) {
+      if (item.isRead) keepReadFlag = true;
       await removeVolumeItem(item.id);
     }
+    if (keepReadFlag) {
+      await setVolumeReadFlag(slot.volume.id, true);
+    }
+  }
+
+  /// Déduplique les `collection_items` d'une série (1 ligne / volume_id).
+  Future<int> dedupeVolumeItems(String seriesId) async {
+    final items = await fetchSeriesItems(seriesId);
+    final byVol = <String, List<CollectionItem>>{};
+    for (final i in items) {
+      if (i.volumeId == null || i.isWishlist || i.isSold) continue;
+      byVol.putIfAbsent(i.volumeId!, () => []).add(i);
+    }
+    var removed = 0;
+    for (final list in byVol.values) {
+      if (list.length < 2) continue;
+      list.sort((a, b) {
+        final ar = a.isRead ? 1 : 0;
+        final br = b.isRead ? 1 : 0;
+        if (ar != br) return br.compareTo(ar);
+        return a.id.compareTo(b.id);
+      });
+      for (final extra in list.skip(1)) {
+        await removeVolumeItem(extra.id);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
+  /// Fusionne toutes les séries au même nom normalisé → 1 seule ligne.
+  Future<int> dedupeDuplicateSeriesFolders() async {
+    final all = await fetchAllRootSeries();
+    final groups = <String, List<BookSeries>>{};
+    for (final s in all) {
+      final key = BookSeriesNormalizer.mergeKey(s.name);
+      if (key.isEmpty) continue;
+      groups.putIfAbsent(key, () => []).add(s);
+    }
+
+    var merged = 0;
+    for (final entry in groups.entries) {
+      final list = entry.value;
+      // Aussi fusionner un seul dossier mal nommé « Thorgal - Tome ».
+      final needsRename = list.length == 1 &&
+          BookSeriesNormalizer.parse(list.first.name).hasVolume;
+      if (list.length < 2 && !needsRename) continue;
+
+      list.sort((a, b) {
+        final aScore = _seriesCanonicalScore(a);
+        final bScore = _seriesCanonicalScore(b);
+        return bScore.compareTo(aScore);
+      });
+      final canonical = list.first;
+      final preferredSub =
+          BookSeriesNormalizer.preferredSubcategory(canonical.name) ??
+              canonical.subcategory;
+      final known = BookSeriesNormalizer.expectedCount(canonical.name);
+      var expected = known ?? canonical.expectedVolumeCount ?? 0;
+      for (final s in list) {
+        final e = s.expectedVolumeCount ?? 0;
+        if (e > expected) expected = e;
+      }
+      if (expected < 1) expected = 1;
+
+      final canonName = BookSeriesNormalizer.displaySeriesName(canonical.name);
+      await updateSeries(
+        canonical.copyWith(
+          name: canonName,
+          subcategory: preferredSub,
+          expectedVolumeCount: expected,
+          metadata: {
+            ...canonical.metadata,
+            'is_standalone': expected <= 1,
+          },
+        ),
+      );
+      if (expected > 0) await ensureVolumeSlots(canonical.id, expected);
+
+      for (final dup in list.skip(1)) {
+        final items = await fetchSeriesItems(dup.id);
+        for (final item in items) {
+          final parsed = BookSeriesNormalizer.parse(item.title);
+          double? fromOldVol;
+          if (item.volumeId != null) {
+            final oldVols = await fetchVolumes(dup.id);
+            for (final v in oldVols) {
+              if (v.id == item.volumeId) {
+                fromOldVol = v.volumeNumber;
+                break;
+              }
+            }
+          }
+          final volNum = parsed.volumeNumber ?? fromOldVol ?? 1.0;
+          final vol = await getOrCreateVolume(canonical.id, volNum);
+          await linkItemToVolume(
+            itemId: item.id,
+            seriesId: canonical.id,
+            volumeId: vol.id,
+          );
+        }
+        final oldVols = await fetchVolumes(dup.id);
+        for (final ov in oldVols) {
+          final target =
+              await getOrCreateVolume(canonical.id, ov.volumeNumber);
+          if (ov.coverUrl != null &&
+              ov.coverUrl!.isNotEmpty &&
+              (target.coverUrl == null || target.coverUrl!.isEmpty)) {
+            await setVolumeCoverUrl(target.id, ov.coverUrl!);
+          }
+        }
+        try {
+          await deleteSeries(dup.id);
+        } catch (_) {}
+        merged++;
+      }
+
+      await dedupeVolumeItems(canonical.id);
+      // Corrige sous-catégorie BD connue même sans doublon.
+      if (list.length == 1 && preferredSub != list.first.subcategory) {
+        await updateSeries(
+          (await fetchSeriesById(canonical.id))!.copyWith(
+            subcategory: preferredSub,
+            name: canonName,
+            expectedVolumeCount: expected,
+          ),
+        );
+      }
+    }
+    return merged;
+  }
+
+  int _seriesCanonicalScore(BookSeries s) {
+    var score = 0;
+    if (!s.isStandalone) score += 100;
+    score += (s.expectedVolumeCount ?? 0);
+    if (s.coverUrl != null && s.coverUrl!.isNotEmpty) score += 20;
+    final pref = BookSeriesNormalizer.preferredSubcategory(s.name);
+    if (pref != null && s.subcategory == pref) score += 50;
+    if (s.subcategory == BookSubcategory.novel) score -= 30;
+    return score;
+  }
+
+  /// Nettoie les doublons de tomes d'une série (menu « Réinitialiser »).
+  Future<({int removedDupes, int ownedLeft})> cleanupSeriesVolumes(
+    String seriesId,
+  ) async {
+    final removed = await dedupeVolumeItems(seriesId);
+    final items = await fetchSeriesItems(seriesId);
+    final owned =
+        items.where((i) => !i.isWishlist && !i.isSold).length;
+    return (removedDupes: removed, ownedLeft: owned);
+  }
+
+  /// Supprime tous les tomes possédés (remet la série à 0 possédé).
+  Future<int> resetOwnedVolumes(String seriesId) async {
+    final items = await fetchSeriesItems(seriesId);
+    var n = 0;
+    for (final i in items) {
+      if (i.isWishlist || i.isSold) continue;
+      await removeVolumeItem(i.id);
+      n++;
+    }
+    return n;
   }
 
   Future<void> setItemRead(String itemId, bool isRead) async {
     await _client
         .from('collection_items')
         .update({'is_read': isRead})
+        .eq('id', itemId);
+  }
+
+  Future<void> setItemRating(String itemId, double rating) async {
+    await _client
+        .from('collection_items')
+        .update({'rating': rating})
         .eq('id', itemId);
   }
 
@@ -654,7 +884,20 @@ class BookSeriesService {
   ) async {
     final all = await fetchSeries(subcategory: subcategory, rootsOnly: true);
     for (final s in all) {
-      if (BookTitleParser.seriesNamesMatch(s.name, name)) return s;
+      if (BookSeriesNormalizer.namesMatch(s.name, name)) return s;
+    }
+    return null;
+  }
+
+  /// Cherche une série par nom dans toutes les sous-catégories.
+  Future<BookSeries?> findSeriesByNameAnySub(String name) async {
+    final all = await fetchAllRootSeries();
+    for (final s in all) {
+      if (BookSeriesNormalizer.namesMatch(s.name, name) ||
+          BookSeriesNormalizer.mergeKey(s.name) ==
+              BookSeriesNormalizer.mergeKey(name)) {
+        return s;
+      }
     }
     return null;
   }
@@ -665,7 +908,11 @@ class BookSeriesService {
     int? expectedVolumeCount,
     String? coverUrl,
   }) async {
-    final existing = await findSeriesByName(name, subcategory);
+    final preferred =
+        BookSeriesNormalizer.preferredSubcategory(name) ?? subcategory;
+    // Évite Thorgal BD + Thorgal Roman en doublon.
+    var existing = await findSeriesByName(name, preferred);
+    existing ??= await findSeriesByNameAnySub(name);
     if (existing != null) {
       var updated = existing;
       if (expectedVolumeCount != null &&
@@ -678,13 +925,24 @@ class BookSeriesService {
           (existing.coverUrl == null || existing.coverUrl!.isEmpty)) {
         updated = updated.copyWith(coverUrl: coverUrl);
       }
+      if (preferred != existing.subcategory) {
+        updated = updated.copyWith(subcategory: preferred);
+      }
+      // Retire le flag standalone si multi-tomes.
+      final exp = updated.expectedVolumeCount ?? expectedVolumeCount ?? 0;
+      if (exp > 1 && existing.metadata['is_standalone'] == true) {
+        final meta = Map<String, dynamic>.from(updated.metadata);
+        meta['is_standalone'] = false;
+        updated = updated.copyWith(metadata: meta);
+      }
       if (updated != existing) await updateSeries(updated);
-      return updated;
+      return (await fetchSeriesById(updated.id)) ?? updated;
     }
     return createSeries(
-      name: name,
-      subcategory: subcategory,
-      expectedVolumeCount: expectedVolumeCount,
+      name: BookSeriesNormalizer.displaySeriesName(name),
+      subcategory: preferred,
+      expectedVolumeCount: expectedVolumeCount ??
+          BookSeriesNormalizer.expectedCount(name, preferred),
       coverUrl: coverUrl,
     );
   }
@@ -745,10 +1003,16 @@ class BookSeriesService {
     }
     if (total == null || total < volCeil) {
       if (subcategory == BookSubcategory.manga) {
-        final fromAni = await AnilistMangaService.estimateVolumeCount(
-          parsed.seriesName!,
-        );
-        if (fromAni != null) total = fromAni;
+        final fromDex =
+            await MangaDexService.lookupManga(parsed.seriesName!);
+        final dexVols = fromDex?.volumesPublished;
+        if (dexVols != null && dexVols > 1) total = dexVols;
+        if (total == null || total < volCeil) {
+          final fromAni = await AnilistMangaService.estimateVolumeCount(
+            parsed.seriesName!,
+          );
+          if (fromAni != null && fromAni > 1) total = fromAni;
+        }
       }
       if (total == null || total < volCeil) {
         final fromOl = await OpenLibraryService.estimateSeriesVolumeCount(
@@ -877,14 +1141,6 @@ class BookSeriesService {
         'location_user_id': _userId,
         'metadata': {},
       });
-      final coverUrl = await OpenLibraryService.lookupVolumeCover(
-        series.name,
-        n.toDouble(),
-        series.subcategory,
-      );
-      if (coverUrl != null && coverUrl.isNotEmpty) {
-        await setVolumeCoverUrl(vol.id, coverUrl);
-      }
       created++;
     }
     return created;

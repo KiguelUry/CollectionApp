@@ -9,6 +9,8 @@ import '../../models/collection_category.dart';
 import '../../models/collection_item.dart';
 import '../../models/collection_list_filters.dart';
 import '../../services/book_series_service.dart';
+import '../../services/books_collection_cache.dart';
+import '../../services/books_migration_service.dart';
 import '../../services/group_service.dart';
 import '../../utils/book_series_focus.dart';
 import '../../utils/collection_grid_layout.dart';
@@ -37,6 +39,7 @@ class BookCollectionScreen extends StatefulWidget {
 
 class _BookCollectionScreenState extends State<BookCollectionScreen> {
   final _service = BookSeriesService();
+  final _cache = BooksCollectionCache.instance;
   final _search = TextEditingController();
   bool _loading = true;
   BookSubcategory? _filterSub;
@@ -49,7 +52,24 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
   void initState() {
     super.initState();
     _loadGroups();
-    _load();
+    // Affiche le cache immédiatement si dispo, puis refresh silencieux.
+    final cached = _cache.entries;
+    if (cached != null && cached.isNotEmpty) {
+      _entries = cached
+          .map(
+            (e) => _SeriesEntry(
+              series: e.series,
+              volumes: e.volumes,
+              stats: e.stats,
+              items: e.items,
+            ),
+          )
+          .toList();
+      _loading = false;
+      _load(silent: true);
+    } else {
+      _load();
+    }
   }
 
   @override
@@ -69,10 +89,12 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
     } catch (_) {}
   }
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
+  Future<void> _load({bool silent = false}) async {
+    if (!silent) setState(() => _loading = true);
     try {
-      await _service.ensureStandaloneSeriesForUnassigned();
+      // Migration lourde UNE SEULE fois (flag SharedPreferences).
+      await BooksMigrationService.runIfNeeded();
+
       final seriesList = await _service.fetchAllRootSeries();
       final entries = <_SeriesEntry>[];
       for (final series in seriesList) {
@@ -97,17 +119,26 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
               b.series.name.toLowerCase(),
             ),
       );
+      _cache.put([
+        for (final e in entries)
+          CachedSeriesEntry(
+            series: e.series,
+            volumes: e.volumes,
+            items: e.items,
+            stats: e.stats,
+          ),
+      ]);
       if (mounted) {
         setState(() {
           _entries = entries;
           _loading = false;
         });
       }
-      // Réparation couvertures manquantes en arrière-plan (séries grises).
+      // Couvertures manquantes en arrière-plan (sans relancer migration).
       final needCover = entries
           .where((e) =>
               e.series.coverUrl == null || e.series.coverUrl!.isEmpty)
-          .take(5)
+          .take(3)
           .toList();
       if (needCover.isNotEmpty) {
         Future(() async {
@@ -116,11 +147,11 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
             final n = await _service.enrichMissingVolumeCovers(
               series: e.series,
               volumes: e.volumes,
-              maxLookups: 3,
+              maxLookups: 2,
             );
             if (n > 0) any = true;
           }
-          if (any && mounted) _load();
+          if (any && mounted) _load(silent: true);
         });
       }
     } catch (e) {
@@ -341,17 +372,17 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
                 child: Row(
                   children: [
                     FilterChip(
-                      label: const Text('Tout'),
+                      label: const Text('Tous'),
                       selected: _filterSub == null,
                       selectedColor: BookAccent.surface,
                       onSelected: (_) => setState(() => _filterSub = null),
                     ),
                     const SizedBox(width: 8),
-                    for (final sub in BookSubcategory.values)
+                    for (final sub in BookSubcategory.filterChips)
                       Padding(
                         padding: const EdgeInsets.only(right: 8),
                         child: FilterChip(
-                          label: Text(sub.label),
+                          label: Text(sub.filterLabel),
                           selected: _filterSub == sub,
                           selectedColor: BookAccent.surface,
                           onSelected: (_) =>

@@ -50,6 +50,28 @@ void main() {
       );
     });
 
+    test('Thorgal / Astérix → catégorie BD', () {
+      expect(
+        BookSeriesNormalizer.preferredSubcategory('Thorgal'),
+        BookSubcategory.comic,
+      );
+      expect(
+        BookSeriesNormalizer.preferredSubcategory('Astérix'),
+        BookSubcategory.comic,
+      );
+      expect(
+        BookSeriesNormalizer.preferredSubcategory('Naruto'),
+        BookSubcategory.manga,
+      );
+    });
+
+    test('mergeKey ignore le tome', () {
+      expect(
+        BookSeriesNormalizer.mergeKey('Thorgal - Tome 16'),
+        BookSeriesNormalizer.mergeKey('Thorgal'),
+      );
+    });
+
     test('displaySeriesName retire le tome', () {
       expect(
         BookSeriesNormalizer.displaySeriesName('Thorgal - Tome 17'),

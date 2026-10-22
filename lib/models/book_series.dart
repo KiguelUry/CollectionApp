@@ -35,7 +35,12 @@ class BookSeries {
 
   bool get isSubArc => parentSeriesId != null;
 
-  bool get isStandalone => metadata['is_standalone'] == true;
+  /// One-shot uniquement si flag ET pas de multi-tomes attendus.
+  bool get isStandalone {
+    if (metadata['is_standalone'] != true) return false;
+    final n = expectedVolumeCount;
+    return n == null || n <= 1;
+  }
 
   double? get totalNewValue =>
       _parseDouble(metadata['total_value_new']);
@@ -86,6 +91,7 @@ class BookSeries {
 
   Map<String, dynamic> toUpdateJson() => {
         'name': name,
+        'subcategory': subcategory.dbValue,
         'cover_url': coverUrl,
         'description': description,
         'user_rating': userRating,
@@ -97,6 +103,7 @@ class BookSeries {
 
   BookSeries copyWith({
     String? name,
+    BookSubcategory? subcategory,
     String? coverUrl,
     String? description,
     double? userRating,
@@ -110,7 +117,7 @@ class BookSeries {
       id: id,
       ownerId: ownerId,
       name: name ?? this.name,
-      subcategory: subcategory,
+      subcategory: subcategory ?? this.subcategory,
       coverUrl: coverUrl ?? this.coverUrl,
       parentSeriesId: parentSeriesId,
       description: description ?? this.description,

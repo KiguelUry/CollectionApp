@@ -8,6 +8,7 @@ Future<void> showBookSearch(
   BuildContext context, {
   required void Function(Map<String, String> book, BookSubcategory subcategory)
       onBookSelected,
+  void Function(String seriesName, BookSubcategory subcategory)? onAddSeries,
   BookSubcategory initialSub = BookSubcategory.manga,
   String? initialQuery,
   VoidCallback? onManualEntry,
@@ -22,6 +23,12 @@ Future<void> showBookSearch(
           Navigator.pop(ctx);
           onBookSelected(book, sub);
         },
+        onAddSeries: onAddSeries == null
+            ? null
+            : (name, sub) {
+                Navigator.pop(ctx);
+                onAddSeries(name, sub);
+              },
       ),
     ),
   );

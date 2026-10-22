@@ -29,9 +29,10 @@ class BookSeriesTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final subLabel = series.isStandalone
+    final isOneShot = series.isStandalone || stats.totalSlots <= 1;
+    final subLabel = isOneShot
         ? '${series.subcategory.label} · Œuvre unique'
-        : '${series.subcategory.label} · ${stats.totalSlots > 0 ? '${stats.totalSlots} tomes' : 'Série'}';
+        : '${series.subcategory.label} · ${stats.totalSlots} tomes';
     final ownedColor = stats.isComplete ? Colors.green.shade700 : accent;
 
     return Material(
@@ -135,7 +136,7 @@ class BookSeriesTile extends StatelessWidget {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              if (!series.isStandalone && stats.totalSlots > 0) ...[
+              if (!isOneShot && stats.totalSlots > 0) ...[
                 const SizedBox(height: 4),
                 ClipRRect(
                   borderRadius: BorderRadius.circular(4),
@@ -150,37 +151,58 @@ class BookSeriesTile extends StatelessWidget {
                 ),
               ],
               const SizedBox(height: 4),
-              _MetaRow(
-                children: [
-                  _MetaChip(
-                    icon: Icons.menu_book_outlined,
-                    label: stats.ownedLabel,
-                    color: ownedColor,
-                  ),
-                  _MetaChip(
-                    icon: Icons.visibility_outlined,
-                    label: stats.readLabel,
-                    color: Colors.amber.shade800,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 3),
-              _MetaRow(
-                children: [
-                  _MetaChip(
-                    icon: Icons.star_rounded,
-                    label: stats.ratingLabel ?? '—',
-                    color: Colors.amber.shade700,
-                  ),
-                  _MetaChip(
-                    icon: stats.valueLabel != null
-                        ? Icons.payments_outlined
-                        : Icons.place_outlined,
-                    label: stats.valueLabel ?? '—',
-                    color: Colors.teal.shade600,
-                  ),
-                ],
-              ),
+              if (isOneShot)
+                _MetaRow(
+                  children: [
+                    _MetaChip(
+                      icon: Icons.menu_book_outlined,
+                      label: stats.ownedCount > 0 ? 'Possédé' : 'Manquant',
+                      color: stats.ownedCount > 0
+                          ? Colors.green.shade700
+                          : Colors.grey,
+                    ),
+                    _MetaChip(
+                      icon: Icons.visibility_outlined,
+                      label: stats.readCount > 0 ? 'Lu' : 'À lire',
+                      color: stats.readCount > 0
+                          ? Colors.amber.shade800
+                          : Colors.blueGrey,
+                    ),
+                  ],
+                )
+              else ...[
+                _MetaRow(
+                  children: [
+                    _MetaChip(
+                      icon: Icons.menu_book_outlined,
+                      label: stats.ownedLabel,
+                      color: ownedColor,
+                    ),
+                    _MetaChip(
+                      icon: Icons.visibility_outlined,
+                      label: stats.readLabel,
+                      color: Colors.amber.shade800,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                _MetaRow(
+                  children: [
+                    _MetaChip(
+                      icon: Icons.star_rounded,
+                      label: stats.ratingLabel ?? '—',
+                      color: Colors.amber.shade700,
+                    ),
+                    _MetaChip(
+                      icon: stats.valueLabel != null
+                          ? Icons.payments_outlined
+                          : Icons.place_outlined,
+                      label: stats.valueLabel ?? '—',
+                      color: Colors.teal.shade600,
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),

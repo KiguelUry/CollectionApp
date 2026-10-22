@@ -103,7 +103,7 @@ class BookVolumeCell extends StatelessWidget {
                       color: _owned ? accent : Colors.grey.shade600,
                     ),
                   ),
-                  if (!_owned && onOwnedTap != null) ...[
+                  if (onOwnedTap != null) ...[
                     const SizedBox(height: 4),
                     SizedBox(
                       height: 26,
@@ -111,13 +111,14 @@ class BookVolumeCell extends StatelessWidget {
                         onPressed: () async => onOwnedTap!(),
                         style: TextButton.styleFrom(
                           padding: EdgeInsets.zero,
-                          foregroundColor: accent,
+                          foregroundColor:
+                              _owned ? Colors.green.shade700 : accent,
                           textStyle: const TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.w800,
                           ),
                         ),
-                        child: const Text('+ Possédé'),
+                        child: Text(_owned ? '✓ Possédé' : '+ Possédé'),
                       ),
                     ),
                   ],

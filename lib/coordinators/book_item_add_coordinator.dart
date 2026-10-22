@@ -45,6 +45,13 @@ class BookItemAddCoordinator {
           metadata: BookCatalogService.metadataFromLookup(book),
         );
       },
+      onAddSeries: (name, sub) {
+        _prepareAdd(
+          title: name,
+          subcategory: subcategory ?? sub,
+          metadata: {'series_title': name},
+        );
+      },
     );
   }
 

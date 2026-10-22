@@ -15,6 +15,9 @@ abstract final class BookSeriesNormalizer {
     'gannibal': 13,
     'dungeon crawler carl': 7,
     'kagurabachi': 8,
+    'boruto': 20,
+    'boruto - two blue vortex': 5,
+    'boruto: two blue vortex': 5,
     'blake et mortimer': 30,
     'lucky luke': 80,
     'spirou': 55,
@@ -22,6 +25,8 @@ abstract final class BookSeriesNormalizer {
     'XIII': 28,
     'xiii': 28,
     'lanfeust de troy': 8,
+    'largo winch': 22,
+    'gaston': 19,
     'berserk': 42,
     'attack on titan': 34,
     'l\'attaque des titans': 34,
@@ -34,6 +39,60 @@ abstract final class BookSeriesNormalizer {
     'vinland saga': 28,
     'vagabond': 37,
   };
+
+  /// Séries franco-belges → toujours BD (jamais Roman / Manga).
+  static const knownBdSeries = <String>{
+    'thorgal',
+    'asterix',
+    'astérix',
+    'tintin',
+    'blake et mortimer',
+    'lucky luke',
+    'spirou',
+    'boule et bill',
+    'xiii',
+    'lanfeust de troy',
+    'largo winch',
+    'gaston',
+  };
+
+  /// Catégorie préférée pour une série connue (fusion multi-dossiers).
+  static BookSubcategory? preferredSubcategory(String seriesName) {
+    final key = normalizeKey(seriesName);
+    if (knownBdSeries.contains(key) ||
+        knownBdSeries.any((k) => key.startsWith(k) || k.startsWith(key))) {
+      return BookSubcategory.comic;
+    }
+    const manga = {
+      'naruto',
+      'one piece',
+      'dragon ball',
+      'gannibal',
+      'kagurabachi',
+      'boruto',
+      'berserk',
+      'bleach',
+      'demon slayer',
+      'jujutsu kaisen',
+      'death note',
+      'vinland saga',
+      'vagabond',
+      'fullmetal alchemist',
+      'hunter x hunter',
+      'attack on titan',
+      'l\'attaque des titans',
+    };
+    if (manga.any((k) => key == k || key.startsWith(k) || k.startsWith(key))) {
+      return BookSubcategory.manga;
+    }
+    return null;
+  }
+
+  /// Clé de fusion (ignore « - Tome N »).
+  static String mergeKey(String rawName) {
+    final display = displaySeriesName(rawName);
+    return normalizeKey(display);
+  }
 
   static ParsedBookTitle parse(String title) => BookTitleParser.parse(title);
 

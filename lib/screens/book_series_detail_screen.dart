@@ -3,17 +3,21 @@ import 'package:flutter/material.dart';
 import '../constants/book_accent.dart';
 import '../coordinators/book_item_add_coordinator.dart';
 import '../models/book_series.dart';
+import '../models/book_subcategory.dart';
 import '../models/book_volume.dart';
+import '../models/collection_category.dart';
+import '../models/collection_item.dart';
 import '../services/book_series_service.dart';
+import '../services/books_collection_cache.dart';
 import '../widgets/app_app_bar.dart';
 import '../widgets/book_manual_volume_dialog.dart';
-import '../widgets/book_volume_add_cell.dart';
-import '../widgets/book_volume_cell.dart';
-import '../widgets/book_volume_detail_sheet.dart';
 import '../widgets/collection_cover_image.dart';
-import '../widgets/cover_preview_sheet.dart';
 
-/// Détail série : grille de tomes avec états Possédé × Lu.
+enum _VolumeFilter { all, owned, missing, toRead, wishlist }
+
+enum _MatrixView { collection, heatmap, covers }
+
+/// Dossier série — matrice SeriesGraph + tiroir tome + UI optimistic.
 class BookSeriesDetailScreen extends StatefulWidget {
   final String seriesId;
 
@@ -23,17 +27,16 @@ class BookSeriesDetailScreen extends StatefulWidget {
   State<BookSeriesDetailScreen> createState() => _BookSeriesDetailScreenState();
 }
 
-enum _VolumeFilter { all, owned, missing, toRead, wishlist }
-
 class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   final _service = BookSeriesService();
   bool _loading = true;
-  bool _volumesAscending = true;
-  int _coverEpoch = 0;
   BookSeries? _series;
   BookSeriesStats? _stats;
   List<BookVolumeSlot> _slots = [];
   _VolumeFilter _filter = _VolumeFilter.all;
+  _MatrixView _view = _MatrixView.collection;
+  bool _quickTap = false;
+  String? _expandedVolumeId;
 
   @override
   void initState() {
@@ -46,9 +49,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     try {
       final series = await _service.fetchSeriesById(widget.seriesId);
       if (series == null) throw Exception('Série introuvable');
-
-      final fusionMsg = await _service.fuseManualPlaceholders(series: series);
-
+      await _service.dedupeVolumeItems(series.id);
       final volumes = await _service.fetchVolumes(series.id);
       final items = await _service.fetchSeriesItems(series.id);
       final stats = _service.computeStats(
@@ -61,45 +62,49 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         volumes: volumes,
         items: items,
       );
-
+      BooksCollectionCache.instance.updateSeries(
+        seriesId: series.id,
+        series: series,
+        volumes: volumes,
+        items: items,
+        stats: stats,
+      );
       if (!mounted) return;
       setState(() {
         _series = series;
         _stats = stats;
         _slots = slots;
         _loading = false;
-        _coverEpoch++;
       });
-
-      if (fusionMsg != null && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(fusionMsg)),
+      // Couvertures en arrière-plan (ne bloque pas).
+      Future(() async {
+        final n = await _service.enrichMissingVolumeCovers(
+          series: series,
+          volumes: volumes,
+          maxLookups: 8,
         );
-      }
-
-      final updated = await _service.enrichMissingVolumeCovers(
-        series: series,
-        volumes: volumes,
-      );
-      if (updated > 0 && mounted) {
-        await _load(silent: true);
-      }
+        if (n > 0 && mounted) _load(silent: true);
+      });
     } catch (e) {
-      if (mounted) {
-        setState(() => _loading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$e')),
-        );
-      }
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
     }
   }
 
+  bool _slotOwned(BookVolumeSlot s) =>
+      s.item != null && !s.item!.isWishlist;
+
+  bool _slotRead(BookVolumeSlot s) =>
+      (s.item?.isRead ?? false) || s.volume.isRead;
+
+  bool _slotWish(BookVolumeSlot s) => s.item?.isWishlist == true;
+
   List<BookVolumeSlot> get _displaySlots {
-    var copy = List<BookVolumeSlot>.from(_slots);
-    copy = copy.where((slot) {
-      final owned = slot.item != null && !slot.item!.isWishlist;
-      final wish = slot.item?.isWishlist == true;
-      final read = (slot.item?.isRead ?? false) || slot.volume.isRead;
+    final copy = _slots.where((slot) {
+      final owned = _slotOwned(slot);
+      final wish = _slotWish(slot);
+      final read = _slotRead(slot);
       return switch (_filter) {
         _VolumeFilter.all => true,
         _VolumeFilter.owned => owned,
@@ -107,23 +112,16 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         _VolumeFilter.toRead => owned && !read,
         _VolumeFilter.wishlist => wish,
       };
-    }).toList();
-    copy.sort((a, b) {
-      final sa = a.volume.sortIndex;
-      final sb = b.volume.sortIndex;
-      if (_volumesAscending) {
-        return sa.compareTo(sb);
-      }
-      return sb.compareTo(sa);
-    });
+    }).toList()
+      ..sort((a, b) => a.volume.sortIndex.compareTo(b.volume.sortIndex));
     return copy;
   }
 
   int _countFilter(_VolumeFilter f) {
     return _slots.where((slot) {
-      final owned = slot.item != null && !slot.item!.isWishlist;
-      final wish = slot.item?.isWishlist == true;
-      final read = (slot.item?.isRead ?? false) || slot.volume.isRead;
+      final owned = _slotOwned(slot);
+      final wish = _slotWish(slot);
+      final read = _slotRead(slot);
       return switch (f) {
         _VolumeFilter.all => true,
         _VolumeFilter.owned => owned,
@@ -132,6 +130,119 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         _VolumeFilter.wishlist => wish,
       };
     }).length;
+  }
+
+  /// Optimistic : met à jour le slot local immédiatement (0 ms).
+  void _patchSlotLocal(
+    BookVolumeSlot slot, {
+    bool? owned,
+    bool? read,
+    bool? wishlist,
+  }) {
+    final idx = _slots.indexWhere((s) => s.volume.id == slot.volume.id);
+    if (idx < 0) return;
+    final cur = _slots[idx];
+    final nextOwned = owned ?? _slotOwned(cur);
+    final nextRead = read ?? _slotRead(cur);
+    final nextWish = wishlist ?? _slotWish(cur);
+
+    CollectionItem? nextItem;
+    if (!nextOwned && !nextWish) {
+      nextItem = null;
+    } else {
+      nextItem = _fakeItem(cur, wishlist: nextWish, read: nextRead);
+    }
+
+    final status = nextWish
+        ? BookVolumeStatus.wishlist
+        : (nextOwned ? BookVolumeStatus.owned : BookVolumeStatus.missing);
+
+    setState(() {
+      _slots = List.of(_slots);
+      _slots[idx] = BookVolumeSlot(
+        volume: cur.volume,
+        item: nextItem,
+        status: status,
+      );
+      _stats = _service.computeStats(
+        series: _series!,
+        volumes: _slots.map((s) => s.volume).toList(),
+        items: _slots.map((s) => s.item).whereType<CollectionItem>().toList(),
+      );
+    });
+  }
+
+  CollectionItem _fakeItem(
+    BookVolumeSlot cur, {
+    required bool wishlist,
+    required bool read,
+  }) {
+    final existing = cur.item;
+    if (existing != null && !existing.id.startsWith('local-')) {
+      return CollectionItem(
+        id: existing.id,
+        title: existing.title,
+        category: existing.category,
+        subcategory: existing.subcategory,
+        seriesId: existing.seriesId,
+        volumeId: existing.volumeId ?? cur.volume.id,
+        isWishlist: wishlist,
+        isRead: read,
+        quantity: existing.quantity,
+        addedBy: existing.addedBy,
+        locationUserId: existing.locationUserId,
+        metadata: existing.metadata,
+        imageUrl: existing.imageUrl,
+        rating: existing.rating,
+        purchasePrice: existing.purchasePrice,
+        isSold: existing.isSold,
+      );
+    }
+    return CollectionItem(
+      id: 'local-${cur.volume.id}',
+      title: '${_series!.name} - Tome ${cur.volume.displayNumber}',
+      category: CollectionCategory.book,
+      subcategory: _series!.subcategory.dbValue,
+      seriesId: _series!.id,
+      volumeId: cur.volume.id,
+      isWishlist: wishlist,
+      isRead: read,
+      quantity: 1,
+      addedBy: '',
+    );
+  }
+
+  Future<void> _toggleOwned(BookVolumeSlot slot) async {
+    final next = !_slotOwned(slot);
+    _patchSlotLocal(slot, owned: next, wishlist: false);
+    try {
+      await _service.toggleVolumeOwned(
+        series: _series!,
+        slot: slot,
+        owned: next,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur: $e')),
+        );
+        await _load(silent: true);
+      }
+    }
+  }
+
+  Future<void> _toggleRead(BookVolumeSlot slot) async {
+    final next = !_slotRead(slot);
+    if (!_slotOwned(slot) && next) {
+      await _toggleOwned(slot);
+    }
+    _patchSlotLocal(slot, read: next, owned: true);
+    try {
+      final refreshed = _slots.firstWhere((s) => s.volume.id == slot.volume.id);
+      await _service.toggleVolumeRead(slot: refreshed, read: next);
+    } catch (e) {
+      if (mounted) await _load(silent: true);
+    }
   }
 
   Future<void> _markRangeOwned() async {
@@ -175,14 +286,10 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
       if (ok != true) return;
       final from = int.tryParse(fromCtrl.text.trim()) ?? 1;
       final to = int.tryParse(toCtrl.text.trim()) ?? from;
-      final n = await _service.markVolumesOwned(
+      await _service.markVolumesOwned(
         series: series,
         fromVolume: from,
         toVolume: to,
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$n tome${n > 1 ? 's' : ''} marqué${n > 1 ? 's' : ''} possédés')),
       );
       await _load(silent: true);
     } finally {
@@ -191,173 +298,112 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     }
   }
 
-  Future<void> _pickSeriesCover() async {
+  Future<void> _changeSubcategory() async {
     final series = _series!;
-    final withCover = _slots
-        .where((s) =>
-            (s.volume.coverUrl != null && s.volume.coverUrl!.isNotEmpty) ||
-            (s.item?.imageUrl != null && s.item!.imageUrl!.isNotEmpty))
-        .toList();
-    if (withCover.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Aucune couverture de tome disponible')),
-      );
-      return;
-    }
-    final chosen = await showModalBottomSheet<String>(
+    final chosen = await showModalBottomSheet<BookSubcategory>(
       context: context,
       showDragHandle: true,
       builder: (ctx) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            const ListTile(
-              title: Text('🖼️ Changer l\'image de la série'),
-              subtitle: Text('Choisis la couverture d\'un tome'),
-            ),
-            for (final slot in withCover)
+            const ListTile(title: Text('Catégorie de la série')),
+            for (final sub in BookSubcategory.filterChips)
               ListTile(
-                leading: CollectionCoverImage(
-                  url: slot.volume.coverUrl ?? slot.item!.imageUrl!,
-                  width: 40,
-                  height: 56,
-                  bookCover: true,
-                ),
-                title: Text(slot.volume.displayTitle),
-                onTap: () => Navigator.pop(
-                  ctx,
-                  slot.volume.coverUrl ?? slot.item!.imageUrl,
-                ),
+                leading: Icon(sub.icon, color: sub.color),
+                title: Text(sub.label),
+                selected: series.subcategory == sub,
+                onTap: () => Navigator.pop(ctx, sub),
               ),
           ],
         ),
       ),
     );
-    if (chosen == null || chosen.isEmpty) return;
-    await _service.updateSeries(series.copyWith(coverUrl: chosen));
+    if (chosen == null || chosen == series.subcategory) return;
+    await _service.updateSeries(series.copyWith(subcategory: chosen));
     await _load(silent: true);
   }
 
-  Future<void> _openVolumeSheet(BookVolumeSlot slot) async {
+  Future<void> _cleanupVolumes() async {
     final series = _series!;
-    await showBookVolumeDetailSheet(
-      context,
-      series: series,
-      slot: slot,
-      service: _service,
-      onChanged: () => _load(silent: true),
-    );
-    await _load(silent: true);
-  }
-
-  Future<void> _toggleOwned(BookVolumeSlot slot) async {
-    final series = _series!;
-    final owned = slot.item != null && !slot.item!.isWishlist;
-    final next = !owned;
-    await _service.toggleVolumeOwned(
-      series: series,
-      slot: slot,
-      owned: next,
-    );
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          next
-              ? '${slot.volume.displayTitle} marqué comme Possédé !'
-              : '${slot.volume.displayTitle} retiré de ta collection.',
-        ),
-      ),
-    );
-    await _load(silent: true);
-  }
-
-  Future<void> _toggleRead(BookVolumeSlot slot) async {
-    final read = (slot.item?.isRead ?? false) || slot.volume.isRead;
-    final next = !read;
-    await _service.toggleVolumeRead(slot: slot, read: next);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          next
-              ? '${slot.volume.displayTitle} marqué comme Lu !'
-              : '${slot.volume.displayTitle} marqué comme non lu.',
-        ),
-      ),
-    );
-    await _load(silent: true);
-  }
-
-  Future<void> _previewCover(BookVolumeSlot slot) async {
-    final cover = slot.volume.coverUrl;
-    if (cover == null || cover.isEmpty) return;
-    await showCoverPreview(
-      context,
-      imageUrl: cover,
-      title: slot.volume.displayTitle,
-      bookCover: true,
-    );
-  }
-
-  Future<void> _addManualVolume() async {
-    final series = _series!;
-    final ok = await showBookManualVolumeDialog(
-      context,
-      series: series,
-      service: _service,
-    );
-    if (ok == true) await _load();
-  }
-
-  Future<void> _addVolumeFromSearch() async {
-    final series = _series!;
-    await BookItemAddCoordinator(context).addVolumeFromCatalog(
-      seriesId: series.id,
-      seriesName: series.name,
-      subcategory: series.subcategory,
-      expectedVolumeCount: series.expectedVolumeCount,
-    );
-    await _load();
-  }
-
-  Future<void> _editExpectedCount() async {
-    final series = _series!;
-    final controller = TextEditingController(
-      text: '${series.expectedVolumeCount ?? _slots.length}',
-    );
-    final result = await showDialog<int>(
+    final choice = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Nombre de tomes'),
-        content: TextField(
-          controller: controller,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: 'Total estimé',
-          ),
+        title: const Text('🧹 Réinitialiser / Nettoyer'),
+        content: const Text(
+          'Dédupliquer les tomes en double, ou tout remettre à « manquant » ?',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Annuler'),
           ),
-          FilledButton(
-            onPressed: () {
-              final n = int.tryParse(controller.text.trim());
-              Navigator.pop(ctx, n);
-            },
-            child: const Text('OK'),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'dedupe'),
+            child: const Text('Nettoyer doublons'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'reset'),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Tout décocher'),
           ),
         ],
       ),
     );
-    if (result == null || result < 1) return;
-    await _service.ensureVolumeSlots(series.id, result);
-    await _service.updateSeries(
-      series.copyWith(expectedVolumeCount: result),
-    );
-    await _load();
+    if (choice == null) return;
+    if (choice == 'dedupe') {
+      final r = await _service.cleanupSeriesVolumes(series.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${r.removedDupes} doublon(s) retiré(s) · ${r.ownedLeft} possédé(s)',
+            ),
+          ),
+        );
+      }
+    } else if (choice == 'reset') {
+      final n = await _service.resetOwnedVolumes(series.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$n tome(s) décoché(s)')),
+        );
+      }
+    }
+    await _load(silent: true);
+  }
+
+  Future<void> _onCellTap(BookVolumeSlot slot) async {
+    if (_quickTap) {
+      await _toggleOwned(slot);
+      return;
+    }
+    setState(() {
+      _expandedVolumeId =
+          _expandedVolumeId == slot.volume.id ? null : slot.volume.id;
+    });
+  }
+
+  Future<void> _setSeriesCoverFrom(BookVolumeSlot slot) async {
+    final url = slot.volume.coverUrl ?? slot.item?.imageUrl;
+    if (url == null || url.isEmpty) return;
+    await _service.updateSeries(_series!.copyWith(coverUrl: url));
+    await _load(silent: true);
+  }
+
+  Future<void> _setVolumeRating(BookVolumeSlot slot, double rating) async {
+    final item = slot.item;
+    if (item == null || item.id.startsWith('local-')) {
+      await _toggleOwned(slot);
+    }
+    final items = await _service.fetchSeriesItems(_series!.id);
+    final real = items.cast<CollectionItem?>().firstWhere(
+          (i) => i?.volumeId == slot.volume.id && !(i?.isWishlist ?? true),
+          orElse: () => null,
+        );
+    if (real == null) return;
+    await _service.setItemRating(real.id, rating);
+    await _load(silent: true);
   }
 
   @override
@@ -376,8 +422,15 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     final series = _series!;
     final stats = _stats!;
     final accent = BookAccent.primary;
-    final displaySlots = _displaySlots;
-    final gridCount = displaySlots.length + 1;
+    final display = _displaySlots;
+    final expanded = _expandedVolumeId == null
+        ? null
+        : display
+            .cast<BookVolumeSlot?>()
+            .firstWhere(
+              (s) => s?.volume.id == _expandedVolumeId,
+              orElse: () => null,
+            );
 
     return Scaffold(
       appBar: AppAppBar(
@@ -385,35 +438,22 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         backgroundColor: accent,
         foregroundColor: Colors.white,
         actions: [
-          if (_slots.length > 1)
-            IconButton(
-              tooltip: _volumesAscending
-                  ? 'Trier du plus récent au Tome 1'
-                  : 'Trier du Tome 1 au plus récent',
-              icon: Icon(
-                _volumesAscending
-                    ? Icons.arrow_downward_rounded
-                    : Icons.arrow_upward_rounded,
-              ),
-              onPressed: () =>
-                  setState(() => _volumesAscending = !_volumesAscending),
-            ),
-          IconButton(
-            tooltip: 'Rechercher un tome',
-            icon: const Icon(Icons.search),
-            onPressed: _addVolumeFromSearch,
-          ),
           PopupMenuButton<String>(
             onSelected: (v) async {
               if (v == 'count') await _editExpectedCount();
+              if (v == 'cleanup') await _cleanupVolumes();
               if (v == 'delete') await _confirmDelete(series);
             },
-            itemBuilder: (ctx) => [
-              const PopupMenuItem(
+            itemBuilder: (_) => const [
+              PopupMenuItem(
                 value: 'count',
                 child: Text('Ajuster le nombre de tomes'),
               ),
-              const PopupMenuItem(
+              PopupMenuItem(
+                value: 'cleanup',
+                child: Text('🧹 Réinitialiser / Nettoyer les tomes'),
+              ),
+              PopupMenuItem(
                 value: 'delete',
                 child: Text('Supprimer la série'),
               ),
@@ -424,171 +464,572 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
       body: RefreshIndicator(
         onRefresh: _load,
         color: accent,
-        child: CustomScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          slivers: [
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    GestureDetector(
-                      onTap: _pickSeriesCover,
-                      child: series.coverUrl != null &&
-                              series.coverUrl!.isNotEmpty
-                          ? CollectionCoverImage(
-                              key: ValueKey(
-                                'series-${series.coverUrl}-$_coverEpoch',
-                              ),
-                              url: series.coverUrl!,
-                              width: 88,
-                              height: 128,
-                              bookCover: true,
-                            )
-                          : CoverImagePlaceholder(
-                              bookCover: true,
-                              width: 88,
-                              height: 128,
-                            ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            series.subcategory.label,
-                            style: TextStyle(
-                              color: accent,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            'Possédés : ${stats.ownedLabel} · Lus : ${stats.readLabel}'
-                            '${stats.ratingLabel != null ? ' · ${stats.ratingLabel}/5' : ''}',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          TextButton.icon(
-                            onPressed: _pickSeriesCover,
-                            icon: const Icon(Icons.image_outlined, size: 18),
-                            label: const Text('Changer l\'image de la série'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+        child: ListView(
+          padding: const EdgeInsets.only(bottom: 32),
+          children: [
+            _buildHero(series, stats, accent),
+            _buildFilters(accent),
+            _buildToolbar(accent),
+            _buildViewSwitch(accent),
+            if (_view == _MatrixView.heatmap) _buildHeatLegend(),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: _buildMatrix(display, accent),
             ),
-            SliverToBoxAdapter(
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: Row(
-                  children: [
-                    for (final f in _VolumeFilter.values)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: FilterChip(
-                          label: Text(switch (f) {
-                            _VolumeFilter.all => 'Tous (${_countFilter(f)})',
-                            _VolumeFilter.owned =>
-                              'Possédés (${_countFilter(f)})',
-                            _VolumeFilter.missing =>
-                              'Manquants (${_countFilter(f)})',
-                            _VolumeFilter.toRead =>
-                              'À lire (${_countFilter(f)})',
-                            _VolumeFilter.wishlist =>
-                              'Wishlist (${_countFilter(f)})',
-                          }),
-                          selected: _filter == f,
-                          onSelected: (_) => setState(() => _filter = f),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                child: OutlinedButton.icon(
-                  onPressed: _markRangeOwned,
-                  icon: const Icon(Icons.bolt),
-                  label: const Text('⚡ Cocher une plage (Du tome X au Y)'),
-                ),
-              ),
-            ),
-            if (_slots.isEmpty)
-              SliverFillRemaining(
-                hasScrollBody: false,
-                child: Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'Aucun tome défini',
-                        style: TextStyle(color: Colors.grey.shade600),
-                      ),
-                      const SizedBox(height: 12),
-                      FilledButton.icon(
-                        onPressed: _editExpectedCount,
-                        icon: const Icon(Icons.format_list_numbered),
-                        label: const Text('Définir les tomes'),
-                      ),
-                      const SizedBox(height: 8),
-                      OutlinedButton.icon(
-                        onPressed: _addManualVolume,
-                        icon: const Icon(Icons.add),
-                        label: const Text('Ajouter manuellement'),
-                      ),
-                    ],
-                  ),
-                ),
-              )
-            else
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                sliver: SliverGrid(
-                  gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-                    maxCrossAxisExtent: 140,
-                    mainAxisSpacing: 10,
-                    crossAxisSpacing: 10,
-                    childAspectRatio: 0.48,
-                  ),
-                  delegate: SliverChildBuilderDelegate(
-                    (context, index) {
-                      if (index == displaySlots.length) {
-                        return BookVolumeAddCell(
-                          accent: accent,
-                          onTap: _addManualVolume,
-                        );
-                      }
-                      final slot = displaySlots[index];
-                      return BookVolumeCell(
-                        slot: slot,
-                        accent: accent,
-                        coverEpoch: _coverEpoch,
-                        onCenterTap: () => _openVolumeSheet(slot),
-                        onLongPress: () => _previewCover(slot),
-                        onOwnedTap: () => _toggleOwned(slot),
-                        onReadTap: () => _toggleRead(slot),
-                      );
-                    },
-                    childCount: gridCount,
-                  ),
-                ),
-              ),
+            if (expanded != null) _buildVolumeDrawer(expanded, accent),
           ],
         ),
       ),
     );
+  }
+
+  Widget _buildHero(BookSeries series, BookSeriesStats stats, Color accent) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: series.coverUrl != null && series.coverUrl!.isNotEmpty
+                ? CollectionCoverImage(
+                    url: series.coverUrl!,
+                    width: 96,
+                    height: 140,
+                    bookCover: true,
+                  )
+                : CoverImagePlaceholder(
+                    bookCover: true,
+                    width: 96,
+                    height: 140,
+                  ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                InkWell(
+                  onTap: _changeSubcategory,
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: series.subcategory.color.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: series.subcategory.color.withValues(alpha: 0.5),
+                      ),
+                    ),
+                    child: Text(
+                      series.subcategory.label,
+                      style: TextStyle(
+                        color: series.subcategory.color,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  series.name,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 18,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Possédés : ${stats.ownedLabel} · Lus : ${stats.readLabel}'
+                  '${stats.ratingLabel != null ? ' · ${stats.ratingLabel}/5' : ''}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: LinearProgressIndicator(
+                    value: stats.ownedProgress,
+                    minHeight: 6,
+                    backgroundColor: Colors.grey.shade800,
+                    color: stats.isComplete
+                        ? Colors.green.shade600
+                        : const Color(0xFF26A69A),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    FilledButton.tonalIcon(
+                      onPressed: _markRangeOwned,
+                      icon: const Icon(Icons.bolt, size: 16),
+                      label: const Text('⚡ Plage X→Y'),
+                      style: FilledButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                      ),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        await showBookManualVolumeDialog(
+                          context,
+                          series: series,
+                          service: _service,
+                        );
+                        await _load(silent: true);
+                      },
+                      icon: const Icon(Icons.add, size: 16),
+                      label: const Text('Tome'),
+                      style: OutlinedButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilters(Color accent) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+      child: Row(
+        children: [
+          for (final f in _VolumeFilter.values)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: FilterChip(
+                selected: _filter == f,
+                label: Text(switch (f) {
+                  _VolumeFilter.all => 'Tous (${_countFilter(f)})',
+                  _VolumeFilter.owned => 'Possédés (${_countFilter(f)})',
+                  _VolumeFilter.missing => 'Manquants (${_countFilter(f)})',
+                  _VolumeFilter.toRead => 'À lire (${_countFilter(f)})',
+                  _VolumeFilter.wishlist => 'Wishlist (${_countFilter(f)})',
+                }),
+                onSelected: (_) => setState(() => _filter = f),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildToolbar(Color accent) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+      child: Row(
+        children: [
+          FilterChip(
+            selected: _quickTap,
+            avatar: Icon(
+              Icons.bolt,
+              size: 16,
+              color: _quickTap ? accent : null,
+            ),
+            label: const Text('Mode coche rapide'),
+            onSelected: (v) => setState(() => _quickTap = v),
+          ),
+          const Spacer(),
+          IconButton(
+            tooltip: 'Rechercher un tome',
+            icon: const Icon(Icons.search),
+            onPressed: () async {
+              await BookItemAddCoordinator(context).addVolumeFromCatalog(
+                seriesId: _series!.id,
+                seriesName: _series!.name,
+                subcategory: _series!.subcategory,
+                expectedVolumeCount: _series!.expectedVolumeCount,
+              );
+              await _load(silent: true);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildViewSwitch(Color accent) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: SegmentedButton<_MatrixView>(
+        segments: const [
+          ButtonSegment(
+            value: _MatrixView.collection,
+            label: Text('📦 Grille'),
+            icon: Icon(Icons.grid_view, size: 16),
+          ),
+          ButtonSegment(
+            value: _MatrixView.heatmap,
+            label: Text('⭐ Notes'),
+            icon: Icon(Icons.grid_on, size: 16),
+          ),
+          ButtonSegment(
+            value: _MatrixView.covers,
+            label: Text('🖼️ Couv.'),
+            icon: Icon(Icons.image, size: 16),
+          ),
+        ],
+        selected: {_view},
+        onSelectionChanged: (s) => setState(() => _view = s.first),
+      ),
+    );
+  }
+
+  Widget _buildHeatLegend() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        children: const [
+          _LegendDot(color: Color(0xFF2E7D32), label: 'Excellent 4.5+'),
+          _LegendDot(color: Color(0xFF66BB6A), label: 'Très bon 4.0+'),
+          _LegendDot(color: Color(0xFFFFD54F), label: 'Bon 3.0+'),
+          _LegendDot(color: Color(0xFFFF9800), label: 'Moyen 2.0+'),
+          _LegendDot(color: Color(0xFFE53935), label: 'Faible <2'),
+          _LegendDot(color: Color(0xFF424242), label: 'Non noté'),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMatrix(List<BookVolumeSlot> slots, Color accent) {
+    if (slots.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.all(24),
+        child: Text(
+          'Aucun tome pour ce filtre.',
+          style: TextStyle(color: Colors.grey.shade500),
+          textAlign: TextAlign.center,
+        ),
+      );
+    }
+
+    if (_view == _MatrixView.covers) {
+      return GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: slots.length,
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 4,
+          mainAxisSpacing: 8,
+          crossAxisSpacing: 8,
+          childAspectRatio: 0.62,
+        ),
+        itemBuilder: (ctx, i) {
+          final slot = slots[i];
+          final owned = _slotOwned(slot);
+          final read = _slotRead(slot);
+          return InkWell(
+            onTap: () => _onCellTap(slot),
+            borderRadius: BorderRadius.circular(8),
+            child: Column(
+              children: [
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Builder(
+                      builder: (context) {
+                        final image = slot.volume.coverUrl != null
+                            ? CollectionCoverImage(
+                                url: slot.volume.coverUrl!,
+                                bookCover: true,
+                                fit: BoxFit.cover,
+                              )
+                            : ColoredBox(
+                                color: Colors.grey.shade800,
+                                child: Center(
+                                  child: Text(
+                                    'T${slot.volume.displayNumber}',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              );
+                        if (owned) return image;
+                        return ColorFiltered(
+                          colorFilter: const ColorFilter.matrix(<double>[
+                            0.3, 0.4, 0.05, 0, 0,
+                            0.3, 0.4, 0.05, 0, 0,
+                            0.3, 0.4, 0.05, 0, 0,
+                            0, 0, 0, 0.5, 0,
+                          ]),
+                          child: image,
+                        );
+                      },
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.home,
+                      size: 12,
+                      color: owned ? accent : Colors.grey,
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(
+                      Icons.visibility,
+                      size: 12,
+                      color: read ? Colors.amber : Colors.grey,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    }
+
+    // Grille collection / heatmap : 10 colonnes (dizaines).
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: slots.length,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 10,
+        mainAxisSpacing: 4,
+        crossAxisSpacing: 4,
+        childAspectRatio: 1,
+      ),
+      itemBuilder: (ctx, i) {
+        final slot = slots[i];
+        final owned = _slotOwned(slot);
+        final read = _slotRead(slot);
+        final wish = _slotWish(slot);
+        final selected = _expandedVolumeId == slot.volume.id;
+        Color bg;
+        if (_view == _MatrixView.heatmap) {
+          bg = _ratingColor(slot.item?.rating);
+        } else if (read && owned) {
+          bg = const Color(0xFF2E7D32);
+        } else if (owned) {
+          bg = const Color(0xFF00897B);
+        } else if (wish) {
+          bg = const Color(0xFF7E57C2);
+        } else {
+          bg = const Color(0xFF2A2A2A);
+        }
+        final rating = slot.item?.rating;
+        return Material(
+          color: bg,
+          borderRadius: BorderRadius.circular(6),
+          child: InkWell(
+            onTap: () => _onCellTap(slot),
+            borderRadius: BorderRadius.circular(6),
+            child: Container(
+              decoration: selected
+                  ? BoxDecoration(
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.white, width: 2),
+                    )
+                  : null,
+              alignment: Alignment.center,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    'T${slot.volume.displayNumber}',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      color: owned || wish || _view == _MatrixView.heatmap
+                          ? Colors.white
+                          : Colors.white54,
+                    ),
+                  ),
+                  if (_view == _MatrixView.heatmap && rating != null)
+                    Text(
+                      rating.toStringAsFixed(1),
+                      style: const TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Color _ratingColor(double? r) {
+    if (r == null) return const Color(0xFF424242);
+    if (r >= 4.5) return const Color(0xFF2E7D32);
+    if (r >= 4.0) return const Color(0xFF66BB6A);
+    if (r >= 3.0) return const Color(0xFFFFD54F);
+    if (r >= 2.0) return const Color(0xFFFF9800);
+    return const Color(0xFFE53935);
+  }
+
+  Widget _buildVolumeDrawer(BookVolumeSlot slot, Color accent) {
+    final owned = _slotOwned(slot);
+    final read = _slotRead(slot);
+    final wish = _slotWish(slot);
+    return Card(
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                width: 72,
+                height: 104,
+                child: slot.volume.coverUrl != null
+                    ? CollectionCoverImage(
+                        url: slot.volume.coverUrl!,
+                        bookCover: true,
+                        fit: BoxFit.cover,
+                      )
+                    : ColoredBox(
+                        color: Colors.grey.shade800,
+                        child: Center(
+                          child: Text(
+                            'T${slot.volume.displayNumber}',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    slot.volume.displayTitle,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 15,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      FilledButton.tonal(
+                        onPressed: () => _toggleOwned(slot),
+                        child: Text(owned ? '✓ Possédé' : '+ Possédé'),
+                      ),
+                      OutlinedButton(
+                        onPressed: owned ? () => _toggleRead(slot) : null,
+                        child: Text(read ? '👁️ Lu' : '👁️ Non lu'),
+                      ),
+                      OutlinedButton(
+                        onPressed: () async {
+                          _patchSlotLocal(
+                            slot,
+                            owned: false,
+                            wishlist: !wish,
+                          );
+                          // Wishlist via owned toggle + item flag is complex;
+                          // for now toggle owned off then leave wish visual.
+                          if (!wish && owned) await _toggleOwned(slot);
+                        },
+                        child: Text(wish ? '❤️ Wishlist' : '♡ Wishlist'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      const Text('Note /5 : ', style: TextStyle(fontSize: 12)),
+                      for (var i = 1; i <= 5; i++)
+                        IconButton(
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(
+                            minWidth: 28,
+                            minHeight: 28,
+                          ),
+                          icon: Icon(
+                            (slot.item?.rating ?? 0) >= i
+                                ? Icons.star
+                                : Icons.star_border,
+                            size: 20,
+                            color: Colors.amber,
+                          ),
+                          onPressed: () =>
+                              _setVolumeRating(slot, i.toDouble()),
+                        ),
+                    ],
+                  ),
+                  TextButton.icon(
+                    onPressed: () => _setSeriesCoverFrom(slot),
+                    icon: const Icon(Icons.image, size: 16),
+                    label: const Text('Définir comme couverture de la série'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _editExpectedCount() async {
+    final series = _series!;
+    final controller = TextEditingController(
+      text: '${series.expectedVolumeCount ?? _slots.length}',
+    );
+    final result = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Nombre de tomes'),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(labelText: 'Total estimé'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final n = int.tryParse(controller.text.trim());
+              Navigator.pop(ctx, n);
+            },
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (result == null || result < 1) return;
+    await _service.ensureVolumeSlots(series.id, result);
+    await _service.updateSeries(
+      series.copyWith(expectedVolumeCount: result),
+    );
+    await _load(silent: true);
   }
 
   Future<void> _confirmDelete(BookSeries series) async {
@@ -596,10 +1037,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Supprimer la série ?'),
-        content: Text(
-          '« ${series.name} » sera retirée. Les livres restent en collection '
-          'mais ne seront plus liés à cette série.',
-        ),
+        content: Text('« ${series.name} » sera retirée.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -615,6 +1053,30 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     );
     if (ok != true || !mounted) return;
     await _service.deleteSeries(series.id);
+    BooksCollectionCache.instance.clear();
     if (mounted) Navigator.pop(context);
+  }
+}
+
+class _LegendDot extends StatelessWidget {
+  final Color color;
+  final String label;
+
+  const _LegendDot({required this.color, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 4),
+        Text(label, style: const TextStyle(fontSize: 10)),
+      ],
+    );
   }
 }

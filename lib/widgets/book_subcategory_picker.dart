@@ -18,12 +18,7 @@ Future<BookSubcategory?> showBookSubcategoryPicker(
             ListTile(
               title: Text(s.label),
               leading: Icon(
-                switch (s) {
-                  BookSubcategory.manga => Icons.auto_stories_outlined,
-                  BookSubcategory.comic => Icons.menu_book_outlined,
-                  BookSubcategory.novel => Icons.import_contacts_outlined,
-                  BookSubcategory.other => Icons.book_outlined,
-                },
+                s.icon,
               ),
               selected: s == suggested,
               onTap: () => Navigator.pop(ctx, s),
