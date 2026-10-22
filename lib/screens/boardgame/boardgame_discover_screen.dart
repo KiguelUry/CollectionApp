@@ -12,12 +12,14 @@ import '../../services/bgg_catalog_cache.dart';
 import '../../services/bgg_service.dart';
 import '../../services/user_boardgame_collection_service.dart';
 import '../../utils/boardgame_genres.dart';
+import '../../utils/boardgame_display.dart';
 import '../../utils/collection_grid_layout.dart';
-import '../../utils/boardgame_quick_add.dart';
 import '../../utils/boardgame_bulk_add.dart';
+import '../../utils/boardgame_quick_add.dart';
 import '../../utils/display_text.dart';
 import '../../widgets/app_app_bar.dart';
 import '../../widgets/bgg_network_image.dart';
+import '../../widgets/collection_cover_image.dart';
 
 enum _DiscoverMode { forYou, recent, hot, upcoming, era, table }
 
@@ -241,17 +243,11 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
   }
 
   String _cardMeta(_Seed seed) {
-    final rating = _ratingLabel(_details[seed.id]?['bgg_avg_rating']);
+    final rating =
+        formatBggRatingStarLabel(_details[seed.id]?['bgg_avg_rating']);
     final year = _asInt(_details[seed.id]?['year_published']) ?? seed.yearHint;
     if (year == null) return rating;
     return '$rating · $year';
-  }
-
-  String _ratingLabel(Object? raw) {
-    if (raw == null) return '…';
-    final n = raw is num ? raw.toDouble() : double.tryParse('$raw');
-    if (n == null) return '…';
-    return '★ ${n.toStringAsFixed(1)}';
   }
 
   int? _asInt(Object? raw) {
@@ -396,21 +392,22 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
       seeds.add(
         _Seed(id, title, const [], yearHint: year, crowdfunding: cf),
       );
+      final imageUrl = map['image_url'];
+      final avgRaw = map['avg_rating'];
+      final minP = map['min_players'];
+      final maxP = map['max_players'];
+      final playT = map['playing_time'];
       _details[id] = {
         'bgg_id': id,
         'id': id,
         'title': title,
-        if ((map['image_url'] ?? '').isNotEmpty) 'image_url': map['image_url'],
-        if (year != null) 'year_published': year,
+        if (imageUrl != null && imageUrl.isNotEmpty) 'image_url': imageUrl,
+        'year_published': ?year,
         if (cf) 'crowdfunding': true,
-        if (map['avg_rating'] != null)
-          'bgg_avg_rating': double.tryParse(map['avg_rating']!),
-        if (map['min_players'] != null)
-          'min_players': int.tryParse(map['min_players']!),
-        if (map['max_players'] != null)
-          'max_players': int.tryParse(map['max_players']!),
-        if (map['playing_time'] != null)
-          'playing_time': int.tryParse(map['playing_time']!),
+        'bgg_avg_rating': ?double.tryParse(avgRaw ?? ''),
+        'min_players': ?int.tryParse(minP ?? ''),
+        'max_players': ?int.tryParse(maxP ?? ''),
+        'playing_time': ?int.tryParse(playT ?? ''),
       };
     }
     assign(seeds);
@@ -487,7 +484,7 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
       bggId: seed.id,
       title: cleanDisplayText(title),
       imageUrl: (image != null && image.isNotEmpty) ? image : null,
-      subtitle: avg == null ? null : _ratingLabel(avg),
+      subtitle: avg == null ? null : formatBggRatingStarLabel(avg),
     );
   }
 
@@ -641,17 +638,19 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
               final seed = shown[index];
               final game = _game(seed);
               final key = game.catalogKey;
+              final isCf = _mode == _DiscoverMode.upcoming &&
+                  _isCrowdfunding(seed);
               return _DiscoverCard(
                 key: ValueKey(game.bggId),
                 game: game,
                 rating: _cardMeta(seed),
-                crowdfunding: _mode == _DiscoverMode.upcoming &&
-                    _isCrowdfunding(seed),
+                crowdfunding: isCf,
                 inCollection: _ownedKeys.contains(key),
                 inWishlist: _wishlistKeys.contains(key),
-                onOpen: () => _openPreview(game),
-                onCollection: () => _addCollection(game),
-                onWishlist: () => _toggleWish(game),
+                onOpen: () => _openPreview(game, crowdfunding: isCf),
+                onCollection: () =>
+                    _openPreview(game, crowdfunding: isCf),
+                onWishlist: () => _toggleWish(game, crowdfunding: isCf),
               );
             },
           ),
@@ -671,12 +670,17 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
     );
   }
 
-  Future<void> _openPreview(BggCatalogGame game, {bool defaultWishlist = false}) async {
+  Future<void> _openPreview(
+    BggCatalogGame game, {
+    bool defaultWishlist = false,
+    bool crowdfunding = false,
+  }) async {
     // Modale unifiée (même widget que Collection / Wishlist).
     await quickAddBoardgameFromCatalog(
       context,
       game: game,
       defaultWishlist: defaultWishlist,
+      showCrowdfundingSearch: crowdfunding,
     );
     await _loadMembership();
   }
@@ -708,11 +712,10 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
     );
   }
 
-  Future<void> _addCollection(BggCatalogGame game) async {
-    await _openPreview(game, defaultWishlist: false);
-  }
-
-  Future<void> _toggleWish(BggCatalogGame game) async {
+  Future<void> _toggleWish(
+    BggCatalogGame game, {
+    bool crowdfunding = false,
+  }) async {
     final key = game.catalogKey;
     final inWish = _wishlistKeys.contains(key);
     if (inWish) {
@@ -725,7 +728,11 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
       setState(() => _wishlistKeys.remove(key));
       return;
     }
-    await _openPreview(game, defaultWishlist: true);
+    await _openPreview(
+      game,
+      defaultWishlist: true,
+      crowdfunding: crowdfunding,
+    );
   }
 }
 
@@ -775,14 +782,9 @@ class _DiscoverCard extends StatelessWidget {
                     children: [
                       ClipRRect(
                         borderRadius: BorderRadius.circular(12),
-                        child: game.imageUrl == null || game.imageUrl!.isEmpty
-                            ? ColoredBox(
-                                color: Colors.grey.shade200,
-                                child: Icon(
-                                  Icons.casino_outlined,
-                                  color: Colors.grey.shade500,
-                                ),
-                              )
+                        child: game.imageUrl == null ||
+                                game.imageUrl!.trim().isEmpty
+                            ? const CoverImagePlaceholder()
                             : BggNetworkImage(
                                 key: ValueKey(
                                   'discover-${game.bggId}-${game.imageUrl}',

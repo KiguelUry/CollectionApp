@@ -252,10 +252,11 @@ class StatsDashboard {
       }
 
       final personalRating = _num(row['rating']);
-      final community = parseBggAvgRating(meta?['bgg_avg_rating']);
+      // Notes perso et BGG unifiées sur /5 pour le classement « mieux notés ».
+      final communityOnFive = bggRatingOnFive(meta?['bgg_avg_rating']);
       final ratingScore = (personalRating != null && personalRating > 0)
           ? personalRating
-          : (community != null && community > 0 ? community : null);
+          : communityOnFive;
       if (ratingScore != null) {
         ratedItems.add(
           StatsDashboardItem(

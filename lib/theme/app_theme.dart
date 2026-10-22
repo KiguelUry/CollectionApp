@@ -7,6 +7,13 @@ abstract final class AppTheme {
   static const Color seed = Color(0xFF5E35B1);
   static const Color surfaceTint = Color(0xFFF5F3FF);
 
+  /// Fond / icône des placeholders d'image manquante (tuiles, modales).
+  static const Color coverPlaceholderBg = Color(0xFFEEEEEE);
+  static const Color coverPlaceholderIcon = Color(0xFF9E9E9E);
+
+  /// Accent note BGG (étoiles /5).
+  static const Color bggRatingAmber = Color(0xFFFFA000);
+
   static TextTheme _textTheme(TextTheme base, Color onSurface) {
     return GoogleFonts.plusJakartaSansTextTheme(base).apply(
       bodyColor: onSurface,

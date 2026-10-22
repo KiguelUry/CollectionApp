@@ -14,14 +14,21 @@ String? formatBggBestPlayersLabel(int? count) {
   return 'Conseillé : $count';
 }
 
-/// Libellé compact pour la tuile collection (note /5).
+/// Libellé compact pour la tuile collection (note /5, 1 décimale).
 String? formatBggRatingChipLabel(dynamic raw) {
   final onFive = bggRatingOnFive(raw);
   if (onFive == null) return null;
   return onFive.toStringAsFixed(1);
 }
 
-/// Note moyenne BGG (échelle 0–10).
+/// Affichage Découvrir / listes : `★ 4.3` (toujours /5).
+String formatBggRatingStarLabel(dynamic raw, {String placeholder = '…'}) {
+  final label = formatBggRatingChipLabel(raw);
+  if (label == null) return placeholder;
+  return '★ $label';
+}
+
+/// Note moyenne BGG brute (échelle 0–10, telle que renvoyée par l'API).
 double? parseBggAvgRating(dynamic raw) {
   if (raw is num) return raw > 0 ? raw.toDouble() : null;
   if (raw is String) {
@@ -31,11 +38,11 @@ double? parseBggAvgRating(dynamic raw) {
   return null;
 }
 
-/// Convertit la note BGG (/10) en étoiles sur 5.
+/// Convertit la note BGG (/10) en étoiles sur 5 (arrondi 1 décimale).
 double? bggRatingOnFive(dynamic raw) {
   final avg = parseBggAvgRating(raw);
   if (avg == null) return null;
-  return avg / 2.0;
+  return double.parse((avg / 2.0).toStringAsFixed(1));
 }
 
 String? formatPlayerCount(int? min, int? max) {

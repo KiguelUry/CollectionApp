@@ -21,6 +21,7 @@ Future<void> quickAddBoardgameFromCatalog(
   BuildContext context, {
   required BggCatalogGame game,
   bool defaultWishlist = false,
+  bool showCrowdfundingSearch = false,
 }) async {
   if (!context.mounted) return;
 
@@ -95,6 +96,8 @@ Future<void> quickAddBoardgameFromCatalog(
       playingTime: playingTime,
       description: desc,
       bggId: game.bggId,
+      showCrowdfundingSearch: showCrowdfundingSearch ||
+          (year != null && year > DateTime.now().year),
       onConfirm: (options) async {
         final client = Supabase.instance.client;
         final userId = client.auth.currentUser!.id;

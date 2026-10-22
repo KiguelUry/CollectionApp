@@ -696,10 +696,10 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
   }
 
   Future<void> _openShopSearch() async {
-    final q = Uri.encodeComponent(cleanDisplayText(_item.title));
-    final uri = Uri.parse(
-      'https://www.google.com/search?q=$q+jeu+société+acheter',
+    final q = Uri.encodeComponent(
+      '${cleanDisplayText(_item.title)} jeu société acheter',
     );
+    final uri = Uri.parse('https://www.google.com/search?q=$q');
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }

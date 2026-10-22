@@ -3,6 +3,7 @@ import 'package:cached_network_image_platform_interface/cached_network_image_pla
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../theme/app_theme.dart';
 import '../utils/cover_image_url.dart';
 
 /// Couverture nette (cache disque + mémoire, ratio livre, URLs adaptées).
@@ -206,20 +207,14 @@ class CollectionCoverImage extends StatelessWidget {
     return SizedBox(
       width: width,
       height: height,
-      child: ColoredBox(
-        color: Colors.grey.shade200,
-        child: child ??
-            placeholder ??
-            Center(
-              child: Icon(
-                bookCover ? Icons.menu_book_outlined : Icons.image_outlined,
-                color: Colors.grey.shade500,
-                size: (width != null && width!.isFinite && width! < 48)
-                    ? 22
-                    : 36,
-              ),
-            ),
-      ),
+      child: child != null
+          ? ColoredBox(color: AppTheme.coverPlaceholderBg, child: child)
+          : (placeholder ??
+              CoverImagePlaceholder(
+                bookCover: bookCover,
+                width: width,
+                height: height,
+              )),
     );
   }
 
@@ -228,5 +223,38 @@ class CollectionCoverImage extends StatelessWidget {
       return null;
     }
     return (logicalPx * dpr).round().clamp(1, 4096);
+  }
+}
+
+/// Placeholder esthétique quand `image_url` est absente ou en échec.
+class CoverImagePlaceholder extends StatelessWidget {
+  final bool bookCover;
+  final double? width;
+  final double? height;
+
+  const CoverImagePlaceholder({
+    super.key,
+    this.bookCover = false,
+    this.width,
+    this.height,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final compact = width != null && width!.isFinite && width! < 48;
+    return SizedBox(
+      width: width,
+      height: height,
+      child: ColoredBox(
+        color: AppTheme.coverPlaceholderBg,
+        child: Center(
+          child: Icon(
+            bookCover ? Icons.menu_book_outlined : Icons.image_not_supported,
+            color: AppTheme.coverPlaceholderIcon,
+            size: compact ? 22 : 36,
+          ),
+        ),
+      ),
+    );
   }
 }

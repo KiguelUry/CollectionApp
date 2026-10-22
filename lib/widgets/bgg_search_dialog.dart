@@ -3,9 +3,11 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../services/bgg_service.dart';
+import '../utils/boardgame_display.dart';
 import '../utils/debounced_runner.dart';
 import '../utils/dialog_layout.dart';
 import 'bgg_network_image.dart';
+import 'collection_cover_image.dart';
 
 class BggSearchDialog extends StatefulWidget {
   final Function(Map<String, String>) onGameSelected;
@@ -358,9 +360,8 @@ class _BggSearchDialogState extends State<BggSearchDialog> {
         if (hotRank != null) 'Tendance #$hotRank',
         if (year != null && year.isNotEmpty) year,
       ].join(' · ');
-      final line2 = (avgRating != null && avgRating.isNotEmpty)
-          ? '★ $avgRating'
-          : null;
+      final star = formatBggRatingStarLabel(avgRating, placeholder: '');
+      final line2 = star.isNotEmpty ? star : null;
       subtitle = line1.isEmpty && line2 == null
           ? null
           : Column(
@@ -381,7 +382,7 @@ class _BggSearchDialogState extends State<BggSearchDialog> {
     } else {
       final text = [
         if (game['bgg_type'] == 'rpgitem') 'Jeu de rôle narratif',
-        if (avgRating != null && avgRating.isNotEmpty) '★ $avgRating',
+        formatBggRatingStarLabel(avgRating, placeholder: ''),
         if (bggRank != null) '#$bggRank sur BGG',
         if (year != null && year.isNotEmpty) year,
       ].where((s) => s.isNotEmpty).join(' · ');
@@ -415,6 +416,13 @@ class _BggSearchDialogState extends State<BggSearchDialog> {
           height: 48,
           child: BggNetworkImage(url: imageUrl),
         ),
+      );
+    }
+
+    if (!isHot && bggRank == null) {
+      return const ClipRRect(
+        borderRadius: BorderRadius.all(Radius.circular(8)),
+        child: CoverImagePlaceholder(width: 48, height: 48),
       );
     }
 

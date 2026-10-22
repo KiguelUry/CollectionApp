@@ -1,5 +1,4 @@
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart';
 
 /// Tag Hero stable pour les jaquettes grille ↔ détail.
 String collectionCoverHeroTag(String itemId) => 'collection-cover-$itemId';

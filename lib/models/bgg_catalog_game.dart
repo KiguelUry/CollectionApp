@@ -2,6 +2,7 @@
 library;
 import '../catalog/models/catalog_entry.dart';
 import '../services/user_boardgame_collection_service.dart';
+import '../utils/boardgame_display.dart';
 
 class BggCatalogGame implements CatalogEntry {
   final String bggId;
@@ -51,10 +52,11 @@ class BggCatalogGame implements CatalogEntry {
       map['min_players'],
       map['max_players'],
     );
+    final star = formatBggRatingStarLabel(avg, placeholder: '');
     final parts = <String>[
-      if (avg.isNotEmpty) '★ $avg',
+      if (star.isNotEmpty) star,
       if (year.isNotEmpty) year,
-      if (players != null) players,
+      ?players,
       if (rank.isNotEmpty && rank != '999999') 'BGG #$rank',
       if (hot.isNotEmpty) 'Hot #$hot',
     ];

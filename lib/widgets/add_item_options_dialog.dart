@@ -6,11 +6,13 @@ import '../models/collection_group.dart';
 import '../services/bgg_service.dart';
 import '../services/group_service.dart';
 import '../utils/bgg_text.dart';
+import '../utils/crowdfunding_search.dart';
 import '../utils/display_text.dart';
 import '../utils/holder_label_utils.dart';
 import '../utils/boardgame_display.dart';
 import 'bgg_network_image.dart';
 import 'bgg_photo_strip.dart';
+import 'collection_cover_image.dart';
 import 'compact_whereabouts_dropdown.dart';
 import 'cover_preview_sheet.dart';
 import 'group_badge.dart';
@@ -46,6 +48,8 @@ class AddItemOptionsDialog extends StatefulWidget {
   final String? description;
   final String? bggId;
   final List<BggGalleryPhoto>? photos;
+  /// Affiche « Chercher le projet » (Kickstarter / Gamefound) pour les sorties.
+  final bool showCrowdfundingSearch;
   final Future<void> Function(AddItemOptions options) onConfirm;
 
   const AddItemOptionsDialog({
@@ -62,6 +66,7 @@ class AddItemOptionsDialog extends StatefulWidget {
     this.description,
     this.bggId,
     this.photos,
+    this.showCrowdfundingSearch = false,
   });
 
   @override
@@ -94,6 +99,10 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
     if (_photos.isEmpty && (widget.bggId ?? '').isNotEmpty) {
       unawaited(_loadPhotos());
     }
+  }
+
+  Future<void> _openCrowdfundingSearch() async {
+    await launchCrowdfundingSearch(widget.itemTitle);
   }
 
   Future<void> _loadPhotos() async {
@@ -217,30 +226,35 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (widget.itemImageUrl != null &&
-                            widget.itemImageUrl!.trim().isNotEmpty)
-                          GestureDetector(
-                            onTap: () => showCoverPreview(
-                              context,
-                              imageUrl: widget.itemImageUrl,
-                              title: widget.itemTitle,
-                            ),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(12),
-                              child: SizedBox(
-                                width: 96,
-                                height: 96,
-                                child: BggNetworkImage(
-                                  url: widget.itemImageUrl!,
-                                  boxedCover: true,
-                                  compact: true,
-                                ),
-                              ),
+                        GestureDetector(
+                          onTap: (widget.itemImageUrl != null &&
+                                  widget.itemImageUrl!.trim().isNotEmpty)
+                              ? () => showCoverPreview(
+                                    context,
+                                    imageUrl: widget.itemImageUrl,
+                                    title: widget.itemTitle,
+                                  )
+                              : null,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: SizedBox(
+                              width: 96,
+                              height: 96,
+                              child: (widget.itemImageUrl != null &&
+                                      widget.itemImageUrl!.trim().isNotEmpty)
+                                  ? BggNetworkImage(
+                                      url: widget.itemImageUrl!,
+                                      boxedCover: true,
+                                      compact: true,
+                                    )
+                                  : const CoverImagePlaceholder(
+                                      width: 96,
+                                      height: 96,
+                                    ),
                             ),
                           ),
-                        if (widget.itemImageUrl != null &&
-                            widget.itemImageUrl!.trim().isNotEmpty)
-                          const SizedBox(width: 12),
+                        ),
+                        const SizedBox(width: 12),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -275,6 +289,14 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                         ),
                       ],
                     ),
+                    if (widget.showCrowdfundingSearch) ...[
+                      const SizedBox(height: 10),
+                      OutlinedButton.icon(
+                        onPressed: _openCrowdfundingSearch,
+                        icon: const Icon(Icons.search, size: 18),
+                        label: const Text('🔍 Chercher le projet'),
+                      ),
+                    ],
                     if (desc.isNotEmpty) ...[
                       const SizedBox(height: 10),
                       InkWell(
@@ -508,7 +530,7 @@ class _BggRatingPreview extends StatelessWidget {
           Icon(Icons.star_rounded, size: 18, color: Colors.amber.shade700),
           const SizedBox(width: 6),
           Text(
-            'Note BGG : $chipLabel',
+            'Note BGG : $chipLabel / 5',
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
