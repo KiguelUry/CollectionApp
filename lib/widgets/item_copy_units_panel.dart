@@ -145,11 +145,11 @@ class _CopyUnitTileState extends State<_CopyUnitTile> {
   }
 
   Future<void> _rename() async {
-    final name = await showDialog<String>(
-      context: context,
-      builder: (ctx) {
-        final c = TextEditingController(text: _labelController.text);
-        return AlertDialog(
+    final c = TextEditingController(text: _labelController.text);
+    try {
+      final name = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
           title: const Text('Nom de l\'exemplaire'),
           content: TextField(
             controller: c,
@@ -168,12 +168,14 @@ class _CopyUnitTileState extends State<_CopyUnitTile> {
               child: const Text('OK'),
             ),
           ],
-        );
-      },
-    );
-    if (name == null || !mounted) return;
-    _labelController.text = name;
-    widget.onChanged(widget.unit.copyWith(label: name));
+        ),
+      );
+      if (name == null || !mounted) return;
+      _labelController.text = name;
+      widget.onChanged(widget.unit.copyWith(label: name));
+    } finally {
+      c.dispose();
+    }
   }
 
   @override

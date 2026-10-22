@@ -91,127 +91,134 @@ class _WishlistPriceSheetState extends State<_WishlistPriceSheet> {
     final urlCtrl = TextEditingController();
     String? photoUrl;
 
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setLocal) => AlertDialog(
-          title: const Text('Vu a...'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: priceCtrl,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(
-                    labelText: 'Prix (EUR)',
-                    hintText: '24.90',
-                  ),
-                ),
-                TextField(
-                  controller: placeCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Magasin / contact',
-                    hintText: 'Philibert, ami, brocante...',
-                  ),
-                ),
-                TextField(
-                  controller: urlCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'URL annonce (optionnel)',
-                  ),
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: () async {
-                    try {
-                      final picked = await ImagePicker().pickImage(
-                        source: ImageSource.gallery,
-                        maxWidth: 1600,
-                      );
-                      if (picked == null) return;
-                      final bytes = await readPickedImageBytes(picked);
-                      final userId =
-                          Supabase.instance.client.auth.currentUser?.id;
-                      if (userId == null) return;
-                      final path =
-                          '$userId/price_sightings/${_item.id}_${DateTime.now().millisecondsSinceEpoch}.jpg';
-                      await Supabase.instance.client.storage
-                          .from('avatars')
-                          .uploadBinary(
-                            path,
-                            bytes,
-                            fileOptions:
-                                const FileOptions(contentType: 'image/jpeg'),
-                          );
-                      photoUrl = Supabase.instance.client.storage
-                          .from('avatars')
-                          .getPublicUrl(path);
-                      setLocal(() {});
-                    } catch (_) {}
-                  },
-                  icon: Icon(
-                    photoUrl == null
-                        ? Icons.add_photo_alternate_outlined
-                        : Icons.check_circle,
-                  ),
-                  label: Text(
-                    photoUrl == null
-                        ? 'Photo / capture d annonce'
-                        : 'Photo ajoutee',
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Annuler'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Enregistrer'),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (saved != true || !mounted) return;
-    final price = double.tryParse(
-      priceCtrl.text.replaceAll(',', '.').replaceAll('EUR', '').trim(),
-    );
-    final place = placeCtrl.text.trim();
-    if (price == null || price <= 0 || place.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Prix et lieu sont obligatoires')),
-      );
-      return;
-    }
-
-    final sightings = [
-      PriceSighting(
-        id: '${DateTime.now().millisecondsSinceEpoch}',
-        priceEur: price,
-        place: place,
-        url: urlCtrl.text.trim().isEmpty ? null : urlCtrl.text.trim(),
-        photoUrl: photoUrl,
-        seenAt: DateTime.now(),
-      ),
-      ...priceSightingsFromMetadata(_item.metadata),
-    ];
-    final meta = metadataWithPriceSightings(_item.metadata, sightings);
-    setState(() => _item = _item.copyWith(metadata: meta));
     try {
-      await _persistMetadata(meta);
-    } catch (e) {
-      if (mounted) {
+      final saved = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setLocal) => AlertDialog(
+            title: const Text('Vu a...'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: priceCtrl,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Prix (EUR)',
+                      hintText: '24.90',
+                    ),
+                  ),
+                  TextField(
+                    controller: placeCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Magasin / contact',
+                      hintText: 'Philibert, ami, brocante...',
+                    ),
+                  ),
+                  TextField(
+                    controller: urlCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'URL annonce (optionnel)',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      try {
+                        final picked = await ImagePicker().pickImage(
+                          source: ImageSource.gallery,
+                          maxWidth: 1600,
+                        );
+                        if (picked == null) return;
+                        final bytes = await readPickedImageBytes(picked);
+                        final userId =
+                            Supabase.instance.client.auth.currentUser?.id;
+                        if (userId == null) return;
+                        final path =
+                            '$userId/price_sightings/${_item.id}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+                        await Supabase.instance.client.storage
+                            .from('avatars')
+                            .uploadBinary(
+                              path,
+                              bytes,
+                              fileOptions:
+                                  const FileOptions(contentType: 'image/jpeg'),
+                            );
+                        photoUrl = Supabase.instance.client.storage
+                            .from('avatars')
+                            .getPublicUrl(path);
+                        setLocal(() {});
+                      } catch (_) {}
+                    },
+                    icon: Icon(
+                      photoUrl == null
+                          ? Icons.add_photo_alternate_outlined
+                          : Icons.check_circle,
+                    ),
+                    label: Text(
+                      photoUrl == null
+                          ? 'Photo / capture d annonce'
+                          : 'Photo ajoutee',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Annuler'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Enregistrer'),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      if (saved != true || !mounted) return;
+      final price = double.tryParse(
+        priceCtrl.text.replaceAll(',', '.').replaceAll('EUR', '').trim(),
+      );
+      final place = placeCtrl.text.trim();
+      final url = urlCtrl.text.trim();
+      if (price == null || price <= 0 || place.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erreur : $e')),
+          const SnackBar(content: Text('Prix et lieu sont obligatoires')),
         );
+        return;
       }
+
+      final sightings = [
+        PriceSighting(
+          id: '${DateTime.now().millisecondsSinceEpoch}',
+          priceEur: price,
+          place: place,
+          url: url.isEmpty ? null : url,
+          photoUrl: photoUrl,
+          seenAt: DateTime.now(),
+        ),
+        ...priceSightingsFromMetadata(_item.metadata),
+      ];
+      final meta = metadataWithPriceSightings(_item.metadata, sightings);
+      setState(() => _item = _item.copyWith(metadata: meta));
+      try {
+        await _persistMetadata(meta);
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Erreur : $e')),
+          );
+        }
+      }
+    } finally {
+      priceCtrl.dispose();
+      placeCtrl.dispose();
+      urlCtrl.dispose();
     }
   }
 

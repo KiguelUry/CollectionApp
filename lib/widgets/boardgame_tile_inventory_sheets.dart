@@ -259,61 +259,67 @@ class _BoardgameTileQuantitySheetState
       return;
     }
     final priceCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Enregistrer une vente'),
-        content: TextField(
-          controller: priceCtrl,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(
-            labelText: 'Prix de vente (€)',
-            hintText: 'Optionnel',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Annuler'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Valider'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
-
-    setState(() => _saving = true);
     try {
-      final nextQty = await recordSale(
-        item: widget.item,
-        salePrice: double.tryParse(priceCtrl.text.replaceAll(',', '.')),
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Enregistrer une vente'),
+          content: TextField(
+            controller: priceCtrl,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              labelText: 'Prix de vente (€)',
+              hintText: 'Optionnel',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Annuler'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Valider'),
+            ),
+          ],
+        ),
       );
-      if (!mounted) return;
-      final row = await Supabase.instance.client
-          .from('collection_items')
-          .select('metadata')
-          .eq('id', widget.item.id)
-          .maybeSingle();
-      if (!mounted) return;
-      setState(() {
-        _ownedQuantity = nextQty;
-        if (row?['metadata'] is Map) {
-          _history = parseTransactionHistory(
-            Map<String, dynamic>.from(row!['metadata'] as Map),
+      if (ok != true) return;
+
+      final salePrice =
+          double.tryParse(priceCtrl.text.replaceAll(',', '.'));
+      setState(() => _saving = true);
+      try {
+        final nextQty = await recordSale(
+          item: widget.item,
+          salePrice: salePrice,
+        );
+        if (!mounted) return;
+        final row = await Supabase.instance.client
+            .from('collection_items')
+            .select('metadata')
+            .eq('id', widget.item.id)
+            .maybeSingle();
+        if (!mounted) return;
+        setState(() {
+          _ownedQuantity = nextQty;
+          if (row?['metadata'] is Map) {
+            _history = parseTransactionHistory(
+              Map<String, dynamic>.from(row!['metadata'] as Map),
+            );
+          }
+        });
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Erreur lors de la vente')),
           );
         }
-      });
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Erreur lors de la vente')),
-        );
+      } finally {
+        if (mounted) setState(() => _saving = false);
       }
     } finally {
-      if (mounted) setState(() => _saving = false);
+      priceCtrl.dispose();
     }
   }
 
@@ -322,32 +328,37 @@ class _BoardgameTileQuantitySheetState
       return;
     }
     final labelCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Enregistrer un échange'),
-        content: TextField(
-          controller: labelCtrl,
-          decoration: const InputDecoration(
-            labelText: 'Reçu en échange',
-            hintText: 'Ex. Jeu X',
+    late final String label;
+    try {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Enregistrer un échange'),
+          content: TextField(
+            controller: labelCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Reçu en échange',
+              hintText: 'Ex. Jeu X',
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Annuler'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Valider'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Annuler'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Valider'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    final label = labelCtrl.text.trim();
-    if (label.isEmpty) return;
+      );
+      if (ok != true) return;
+      label = labelCtrl.text.trim();
+      if (label.isEmpty) return;
+    } finally {
+      labelCtrl.dispose();
+    }
 
     setState(() => _saving = true);
     try {
