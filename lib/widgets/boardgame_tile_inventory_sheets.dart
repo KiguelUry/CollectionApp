@@ -983,7 +983,7 @@ class _BoardgameTileExpansionSheetState
       subtitle: exp.avgRating == null
           ? null
           : Text(
-              '★ ${formatBggRatingChipLabel(exp.avgRating)} / 5 BGG',
+              '★ ${formatBggRatingChipLabel(exp.avgRating)} / 10 BGG',
               style: TextStyle(fontSize: 11, color: Colors.amber.shade800),
             ),
       trailing: widget.readOnly

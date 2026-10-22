@@ -545,7 +545,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                 const SizedBox(height: 6),
                 Text(
                   'Possédés : ${stats.ownedLabel} · Lus : ${stats.readLabel}'
-                  '${stats.ratingLabel != null ? ' · ${stats.ratingLabel}/5' : ''}',
+                  '${stats.ratingLabel != null ? ' · ${stats.ratingLabel}/10' : ''}',
                   style: const TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: 13,
@@ -696,11 +696,11 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         spacing: 8,
         runSpacing: 4,
         children: const [
-          _LegendDot(color: Color(0xFF2E7D32), label: 'Excellent 4.5+'),
-          _LegendDot(color: Color(0xFF66BB6A), label: 'Très bon 4.0+'),
-          _LegendDot(color: Color(0xFFFFD54F), label: 'Bon 3.0+'),
-          _LegendDot(color: Color(0xFFFF9800), label: 'Moyen 2.0+'),
-          _LegendDot(color: Color(0xFFE53935), label: 'Faible <2'),
+          _LegendDot(color: Color(0xFF2E7D32), label: 'Excellent 9.0+'),
+          _LegendDot(color: Color(0xFF66BB6A), label: 'Très bon 8.0+'),
+          _LegendDot(color: Color(0xFFFFD54F), label: 'Bon 6.0+'),
+          _LegendDot(color: Color(0xFFFF9800), label: 'Moyen 4.0+'),
+          _LegendDot(color: Color(0xFFE53935), label: 'Faible <4'),
           _LegendDot(color: Color(0xFF424242), label: 'Non noté'),
         ],
       ),
@@ -858,7 +858,8 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                   ),
                   if (_view == _MatrixView.heatmap && rating != null)
                     Text(
-                      rating.toStringAsFixed(1),
+                      (rating <= 5.0 ? rating * 2 : rating)
+                          .toStringAsFixed(1),
                       style: const TextStyle(
                         fontSize: 9,
                         fontWeight: FontWeight.w600,
@@ -876,10 +877,11 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
 
   Color _ratingColor(double? r) {
     if (r == null) return const Color(0xFF424242);
-    if (r >= 4.5) return const Color(0xFF2E7D32);
-    if (r >= 4.0) return const Color(0xFF66BB6A);
-    if (r >= 3.0) return const Color(0xFFFFD54F);
-    if (r >= 2.0) return const Color(0xFFFF9800);
+    final onTen = r <= 5.0 ? r * 2 : r;
+    if (onTen >= 9.0) return const Color(0xFF2E7D32);
+    if (onTen >= 8.0) return const Color(0xFF66BB6A);
+    if (onTen >= 6.0) return const Color(0xFFFFD54F);
+    if (onTen >= 4.0) return const Color(0xFFFF9800);
     return const Color(0xFFE53935);
   }
 
@@ -959,7 +961,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      const Text('Note /5 : ', style: TextStyle(fontSize: 12)),
+                      const Text('Note /10 : ', style: TextStyle(fontSize: 12)),
                       for (var i = 1; i <= 5; i++)
                         IconButton(
                           visualDensity: VisualDensity.compact,
@@ -969,14 +971,17 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                             minHeight: 28,
                           ),
                           icon: Icon(
-                            (slot.item?.rating ?? 0) >= i
+                            ((slot.item?.rating ?? 0) > 5
+                                        ? (slot.item!.rating! / 2)
+                                        : (slot.item?.rating ?? 0)) >=
+                                    i
                                 ? Icons.star
                                 : Icons.star_border,
                             size: 20,
                             color: Colors.amber,
                           ),
                           onPressed: () =>
-                              _setVolumeRating(slot, i.toDouble()),
+                              _setVolumeRating(slot, (i * 2).toDouble()),
                         ),
                     ],
                   ),

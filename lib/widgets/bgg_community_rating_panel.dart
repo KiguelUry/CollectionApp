@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../utils/boardgame_display.dart';
 
-/// Note moyenne BGG (communauté), affichée comme sur 5 étoiles.
+/// Note moyenne BGG (communauté), affichée sur /10.
 class BggCommunityRatingPanel extends StatelessWidget {
   final double? avgRating;
   final bool loading;
@@ -15,7 +15,9 @@ class BggCommunityRatingPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final onFive = bggRatingOnFive(avgRating);
+    final onTen = bggRatingOnTen(avgRating);
+    // Remplissage étoiles : 10 pts → 5 étoiles.
+    final stars = onTen == null ? 0.0 : onTen / 2.0;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -38,7 +40,7 @@ class BggCommunityRatingPanel extends StatelessWidget {
               ),
             ),
           )
-        else if (onFive == null)
+        else if (onTen == null)
           Text(
             'Note communautaire indisponible.',
             style: TextStyle(
@@ -50,32 +52,24 @@ class BggCommunityRatingPanel extends StatelessWidget {
           Row(
             children: [
               ...List.generate(5, (i) {
-                final filled = onFive >= i + 1;
-                final half = !filled && onFive >= i + 0.5;
+                final filled = stars >= i + 1;
+                final half = !filled && stars >= i + 0.5;
                 return Icon(
-                  half ? Icons.star_half : (filled ? Icons.star : Icons.star_border),
+                  half
+                      ? Icons.star_half
+                      : (filled ? Icons.star : Icons.star_border),
                   size: 22,
                   color: Colors.amber.shade700,
                 );
               }),
               const SizedBox(width: 10),
               Text(
-                '${onFive.toStringAsFixed(1)} / 5',
+                '${onTen.toStringAsFixed(1)} / 10',
                 style: const TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              if (avgRating != null) ...[
-                const SizedBox(width: 6),
-                Text(
-                  '(${avgRating!.toStringAsFixed(1)} BGG)',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
             ],
           ),
       ],

@@ -28,7 +28,8 @@ import '../widgets/loan_item_dialog.dart';
 import '../widgets/collection_cover_image.dart';
 import '../widgets/cover_preview_sheet.dart';
 import '../widgets/group_badge.dart';
-import '../widgets/star_rating_bar.dart';
+import '../widgets/precision_star_rating_bar.dart';
+import '../services/owned_catalog_index.dart';
 import '../widgets/assign_book_series_sheet.dart';
 import '../widgets/item_tags_editor.dart';
 import '../widgets/boardgame_expansions_section.dart';
@@ -453,7 +454,11 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
         } else {
           _item = reloaded;
         }
-        _ownedDisplayQty = _item.isWishlist ? 0 : _item.quantity.clamp(0, 9999);
+        if (_item.isWishlist) {
+          unawaited(_resolveOwnedQuantity());
+        } else {
+          _ownedDisplayQty = _item.quantity.clamp(0, 9999);
+        }
         _syncGroupSelectionFromItem();
       });
     }
@@ -1296,11 +1301,14 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                                   ),
                                 ),
                               ),
-                            Text(
-                              'Possédé : $ownedQty',
-                              style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
+                            Flexible(
+                              child: Text(
+                                _ownedQtyLabel(ownedQty),
+                                textAlign: TextAlign.end,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                             ),
                             if (!ro) ...[
@@ -2062,19 +2070,25 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
               ),
         ),
         const SizedBox(height: 6),
-        StarRatingBar(
-          rating: _item.rating ?? 0,
-          onChanged: ro
-              ? (_) {}
-              : (value) {
-                  setState(() {
-                    _item = _item.copyWith(
-                      rating: value <= 0 ? null : value,
-                      clearRating: value <= 0,
-                    );
-                  });
-                  _saveNow();
-                },
+        PrecisionStarRatingBar(
+          rating: personalRatingOnTen(
+                _item.rating,
+                metadata: _item.metadata,
+              ) ??
+              0,
+          readOnly: ro,
+          onChanged: (value) {
+            final meta = Map<String, dynamic>.from(_item.metadata ?? {});
+            meta['rating_scale'] = '10';
+            setState(() {
+              _item = _item.copyWith(
+                rating: value <= 0 ? null : value,
+                clearRating: value <= 0,
+                metadata: meta,
+              );
+            });
+            _saveNow();
+          },
         ),
         const SizedBox(height: 16),
         TextField(
@@ -2294,17 +2308,30 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     return '$owned possédée${owned > 1 ? 's' : ''}';
   }
 
+  String _ownedQtyLabel(int ownedQty) {
+    if (_item.isWishlist) {
+      final info = OwnedCatalogIndex.lookup(_item);
+      if (info != null && info.count > 0) return info.detailLabel;
+      if (ownedQty > 0) return 'Possédé : $ownedQty';
+      return 'Possédé : 0';
+    }
+    return 'Possédé : $ownedQty';
+  }
+
   String _boardgameNotesBentoSubtitle() {
     final parts = <String>[];
-    final perso = _item.rating;
+    final perso = personalRatingOnTen(
+      _item.rating,
+      metadata: _item.metadata,
+    );
     if (perso != null && perso > 0) {
-      parts.add('Perso ${perso.toStringAsFixed(1)}/5');
+      parts.add('Perso ${perso.toStringAsFixed(1)}/10');
     }
-    final onFive = bggRatingOnFive(
+    final onTen = bggRatingOnTen(
       _bggAvgRating ?? _item.metadata?['bgg_avg_rating'],
     );
-    if (onFive != null) {
-      parts.add('Commu ${onFive.toStringAsFixed(1)}/5');
+    if (onTen != null) {
+      parts.add('Commu ${onTen.toStringAsFixed(1)}/10');
     }
     if (parts.isEmpty) return 'Perso — · Commu —';
     return parts.join(' · ');
@@ -2814,17 +2841,20 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
 
   String _ratingBentoSubtitle() {
     final parts = <String>[];
-    final perso = _item.rating;
+    final perso = personalRatingOnTen(
+      _item.rating,
+      metadata: _item.metadata,
+    );
     if (perso != null && perso > 0) {
-      parts.add('Perso ${perso.toStringAsFixed(1)}/5');
+      parts.add('Perso ${perso.toStringAsFixed(1)}/10');
     } else {
       parts.add('Perso —');
     }
-    final onFive = bggRatingOnFive(
+    final onTen = bggRatingOnTen(
       _bggAvgRating ?? _item.metadata?['bgg_avg_rating'],
     );
-    if (onFive != null) {
-      parts.add('Commu ${onFive.toStringAsFixed(1)}/5');
+    if (onTen != null) {
+      parts.add('Commu ${onTen.toStringAsFixed(1)}/10');
     } else {
       parts.add('Commu —');
     }

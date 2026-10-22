@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../../models/collection_item.dart';
 import '../../services/boardgame_market_service.dart';
+import '../../services/owned_catalog_index.dart';
 import '../../utils/boardgame_display.dart';
 import '../../utils/wishlist_market_metadata.dart';
 import '../boardgame_tile_inventory_sheets.dart';
 import '../boardgame_tile_sheets.dart';
 
-/// Badges wishlist — même échelle / puce € que la collection (2 + 1 sur GSM).
+/// Badges wishlist — grille 2×2 (Extensions, Prix, Note, Possédé/Année).
 class WishlistTileMetaIcons extends StatefulWidget {
   final CollectionItem item;
   final bool readOnly;
@@ -70,6 +71,27 @@ class _WishlistTileMetaIconsState extends State<WishlistTileMetaIcons> {
     return '—';
   }
 
+  String get _fourthChipLabel {
+    final owned = OwnedCatalogIndex.lookup(widget.item);
+    if (owned != null && owned.count > 0) return owned.chipLabel;
+    final year = widget.item.metadata?['year_published'] ??
+        widget.item.metadata?['year'] ??
+        widget.item.metadata?['bgg_year'];
+    final y = int.tryParse('$year');
+    if (y != null && y > 1900) return '📅 $y';
+    final mins = widget.item.playingTime ??
+        int.tryParse('${widget.item.metadata?['playing_time'] ?? ''}');
+    final time = formatPlayingTime(mins);
+    if (time != null) return '⏱️ $time';
+    return '—';
+  }
+
+  Color get _fourthChipColor {
+    final owned = OwnedCatalogIndex.lookup(widget.item);
+    if (owned != null && owned.count > 0) return Colors.deepPurple.shade400;
+    return Colors.blueGrey.shade500;
+  }
+
   @override
   Widget build(BuildContext context) {
     final extCount = bggExpansionCountFromMetadata(widget.item.metadata) ?? 0;
@@ -118,16 +140,30 @@ class _WishlistTileMetaIconsState extends State<WishlistTileMetaIcons> {
         SizedBox(
           height: _rowHeight,
           width: double.infinity,
-          child: _chip(
-            icon: Icons.star_rounded,
-            suffix: rating ?? '—',
-            color: Colors.amber.shade700,
-            shrinkSuffix: true,
-            onTap: () => showBoardgameTileRatingSheet(
-              context,
-              item: widget.item,
-              readOnly: widget.readOnly,
-            ),
+          child: Row(
+            children: [
+              Expanded(
+                child: _chip(
+                  icon: Icons.star_rounded,
+                  suffix: rating ?? '—',
+                  color: Colors.amber.shade700,
+                  shrinkSuffix: true,
+                  onTap: () => showBoardgameTileRatingSheet(
+                    context,
+                    item: widget.item,
+                    readOnly: widget.readOnly,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: _chip(
+                  suffix: _fourthChipLabel,
+                  color: _fourthChipColor,
+                  textOnly: true,
+                ),
+              ),
+            ],
           ),
         ),
       ],

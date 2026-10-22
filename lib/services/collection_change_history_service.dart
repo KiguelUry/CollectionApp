@@ -155,11 +155,14 @@ class CollectionChangeHistoryService {
     await _record(
       action: 'location',
       item: item,
-      detail: '$fromLabel → $toLabel',
+      detail: '📍 Lieu modifié : $fromLabel → $toLabel',
       snapshot: {
         'id': item.id,
         'from': fromLabel,
         'to': toLabel,
+        'is_wishlist': item.isWishlist,
+        'from_location': fromLabel,
+        'to_location': toLabel,
       },
     );
   }

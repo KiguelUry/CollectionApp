@@ -159,7 +159,7 @@ class VideogameDetailSection extends StatelessWidget {
                 Icon(Icons.public, size: 16, color: scheme.onSurfaceVariant),
                 const SizedBox(width: 6),
                 Text(
-                  'Note communauté : ${community.toStringAsFixed(1)} / 5',
+                  'Note communauté : ${community.toStringAsFixed(1)} / 10',
                   style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
                 ),
               ],

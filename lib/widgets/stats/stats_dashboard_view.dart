@@ -110,7 +110,7 @@ class _StatsDashboardViewState extends State<StatsDashboardView> {
                       rank: i + 1,
                       item: data.topRated[i],
                       trailing:
-                          '${data.topRated[i].ratingScore?.toStringAsFixed(1) ?? '—'} / 5',
+                          '${data.topRated[i].ratingScore?.toStringAsFixed(1) ?? '—'} / 10',
                     ),
                 ],
                 ...widget.footer,

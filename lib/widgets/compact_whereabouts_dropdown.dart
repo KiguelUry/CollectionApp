@@ -82,14 +82,46 @@ class _CompactWhereaboutsDropdownState
   @override
   void initState() {
     super.initState();
-    _manualController = TextEditingController(
-      text: widget.holderLabel == null
-          ? ''
-          : holderLabelStorageValue(widget.holderLabel!),
-    );
+    // Champ « Nouveau lieu » toujours vide (pas de pré-remplissage).
+    _manualController = TextEditingController();
     _meUserId = _personalUserId;
     _seedFromCache();
     unawaited(_loadRemote());
+  }
+
+  static bool _isJunkPlace(String raw) {
+    final n = raw.trim().toLowerCase();
+    return n.isEmpty ||
+        n == 'inconnu' ||
+        n == 'unknown' ||
+        n == 'non renseigné' ||
+        n == 'non renseignée' ||
+        n == '—' ||
+        n == '-';
+  }
+
+  static String _normPlace(String raw) =>
+      holderLabelStorageValue(raw).trim().toLowerCase();
+
+  /// Puces lieu uniques (foyers + suggestions), sans doublon ni « Inconnu ».
+  List<({String label, Household? home, bool isHome})> _dedupedPlaceChips() {
+    final out = <({String label, Household? home, bool isHome})>[];
+    final seen = <String>{};
+    for (final home in _homes) {
+      final key = _normPlace(home.place);
+      if (_isJunkPlace(key) || !seen.add(key)) continue;
+      out.add((label: home.place, home: home, isHome: true));
+    }
+    for (final place in {..._placeSuggestions, ...SocialDirectoryCache.instance.places}) {
+      final key = _normPlace(place);
+      if (_isJunkPlace(key) || !seen.add(key)) continue;
+      out.add((
+        label: holderLabelStorageValue(place),
+        home: null,
+        isHome: false,
+      ));
+    }
+    return out;
   }
 
   void _seedFromCache() {
@@ -258,7 +290,10 @@ class _CompactWhereaboutsDropdownState
     }
 
     _manualFocusNode.unfocus();
-    setState(() => _manualMode = true);
+    setState(() {
+      _manualMode = true;
+      _manualController.clear();
+    });
     await HolderPlaceHistoryService.saveForGroups(
       widget.selectedGroupIds,
       preview,
@@ -386,27 +421,32 @@ class _CompactWhereaboutsDropdownState
             spacing: 6,
             runSpacing: 6,
             children: [
-              for (final home in _homes)
-                FilterChip(
-                  avatar: const Icon(Icons.place_outlined, size: 16),
-                  label: Text(home.place),
-                  selected: _isHomeSelected(home),
-                  onSelected: widget.readOnly ? null : (_) => _selectHome(home),
-                ),
-              for (final place in {
-                ..._placeSuggestions,
-                ...SocialDirectoryCache.instance.places,
-              })
-                InputChip(
-                  avatar: const Icon(Icons.place_outlined, size: 16),
-                  label: Text(
-                    holderLabelStorageValue(place),
-                    style: const TextStyle(fontSize: 12),
+              for (final chip in _dedupedPlaceChips())
+                if (chip.isHome && chip.home != null)
+                  FilterChip(
+                    avatar: const Icon(Icons.shield_outlined, size: 16),
+                    label: Text(chip.label),
+                    selected: _isHomeSelected(chip.home!),
+                    onSelected:
+                        widget.readOnly ? null : (_) => _selectHome(chip.home!),
+                  )
+                else
+                  InputChip(
+                    avatar: const Icon(Icons.place_outlined, size: 16),
+                    label: Text(
+                      chip.label,
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    visualDensity: VisualDensity.compact,
+                    selected: _normPlace(widget.holderLabel ?? '') ==
+                        _normPlace(chip.label),
+                    onPressed: widget.readOnly
+                        ? null
+                        : () => _applySuggestion(chip.label),
+                    onDeleted: widget.readOnly
+                        ? null
+                        : () => _removeSuggestion(chip.label),
                   ),
-                  visualDensity: VisualDensity.compact,
-                  onPressed: () => _applySuggestion(place),
-                  onDeleted: () => _removeSuggestion(place),
-                ),
             ],
           ),
           if (!widget.readOnly) ...[

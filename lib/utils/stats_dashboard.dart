@@ -251,12 +251,16 @@ class StatsDashboard {
         }
       }
 
-      final personalRating = _num(row['rating']);
-      // Notes perso et BGG unifiées sur /5 pour le classement « mieux notés ».
-      final communityOnFive = bggRatingOnFive(meta?['bgg_avg_rating']);
+      final personalRaw = _num(row['rating']);
+      // Notes perso et BGG unifiées sur /10 pour le classement « mieux notés ».
+      final personalRating = personalRatingOnTen(
+        personalRaw,
+        metadata: meta is Map<String, dynamic> ? meta : null,
+      );
+      final communityOnTen = bggRatingOnTen(meta?['bgg_avg_rating']);
       final ratingScore = (personalRating != null && personalRating > 0)
           ? personalRating
-          : communityOnFive;
+          : communityOnTen;
       if (ratingScore != null) {
         ratedItems.add(
           StatsDashboardItem(

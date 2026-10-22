@@ -10,6 +10,8 @@ import '../utils/app_page_route.dart';
 import '../widgets/bgg_network_image.dart';
 import 'item_detail_screen.dart';
 
+enum _ModifsFilter { all, collection, wishlist, places }
+
 /// Timeline moderne des modifications de collection.
 class CollectionChangeHistoryScreen extends StatefulWidget {
   final CollectionCategory category;
@@ -27,6 +29,7 @@ class CollectionChangeHistoryScreen extends StatefulWidget {
 class _CollectionChangeHistoryScreenState
     extends State<CollectionChangeHistoryScreen> {
   late Future<List<CollectionChangeEvent>> _future;
+  _ModifsFilter _filter = _ModifsFilter.all;
 
   @override
   void initState() {
@@ -84,6 +87,29 @@ class _CollectionChangeHistoryScreenState
     }
   }
 
+  List<CollectionChangeEvent> _applyFilter(List<CollectionChangeEvent> all) {
+    return all.where((e) {
+      final wish = e.snapshot['is_wishlist'] == true;
+      return switch (_filter) {
+        _ModifsFilter.all => true,
+        _ModifsFilter.collection =>
+          !wish &&
+              (e.action == 'added' ||
+                  e.action == 'deleted' ||
+                  e.action == 'wishlist_to_collection'),
+        _ModifsFilter.wishlist =>
+          wish ||
+              e.action == 'wishlist_to_collection' ||
+              (e.action == 'added' && wish) ||
+              (e.action == 'deleted' && wish),
+        _ModifsFilter.places =>
+          e.action == 'location' ||
+              e.action == 'loaned' ||
+              e.action == 'returned',
+      };
+    }).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -97,36 +123,84 @@ class _CollectionChangeHistoryScreenState
           if (snap.connectionState != ConnectionState.done) {
             return const Center(child: CircularProgressIndicator());
           }
-          final events = snap.data ?? const [];
-          if (events.isEmpty) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text(
-                  'Aucune modification récente.\n'
-                  'Ajouts, suppressions et changements de lieu apparaissent ici.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: scheme.onSurfaceVariant),
+          final all = snap.data ?? const [];
+          final events = _applyFilter(all);
+          return Column(
+            children: [
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                child: Row(
+                  children: [
+                    for (final f in _ModifsFilter.values)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: FilterChip(
+                          selected: _filter == f,
+                          label: Text(switch (f) {
+                            _ModifsFilter.all => 'Tout',
+                            _ModifsFilter.collection => 'Collection',
+                            _ModifsFilter.wishlist => 'Wishlist',
+                            _ModifsFilter.places => 'Lieux & Prêts',
+                          }),
+                          onSelected: (_) => setState(() => _filter = f),
+                        ),
+                      ),
+                  ],
                 ),
               ),
-            );
-          }
-          return RefreshIndicator(
-            onRefresh: _reload,
-            child: ListView.builder(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-              itemCount: events.length,
-              itemBuilder: (context, index) {
-                final e = events[index];
-                return _TimelineTile(
-                  event: e,
-                  category: widget.category,
-                  isFirst: index == 0,
-                  isLast: index == events.length - 1,
-                  onRestore: e.action == 'deleted' ? () => _restore(e) : null,
-                );
-              },
-            ),
+              Expanded(
+                child: all.isEmpty
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Text(
+                            'Aucune modification récente.\n'
+                            'Ajouts, suppressions et changements de lieu apparaissent ici.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: scheme.onSurfaceVariant),
+                          ),
+                        ),
+                      )
+                    : events.isEmpty
+                        ? Center(
+                            child: Text(
+                              'Aucun événement pour ce filtre.',
+                              style: TextStyle(color: scheme.onSurfaceVariant),
+                            ),
+                          )
+                        : RefreshIndicator(
+                            onRefresh: _reload,
+                            child: Center(
+                              child: ConstrainedBox(
+                                constraints:
+                                    const BoxConstraints(maxWidth: 780),
+                                child: ListView.builder(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    16,
+                                    8,
+                                    16,
+                                    28,
+                                  ),
+                                  itemCount: events.length,
+                                  itemBuilder: (context, index) {
+                                    final e = events[index];
+                                    return _TimelineTile(
+                                      event: e,
+                                      category: widget.category,
+                                      isFirst: index == 0,
+                                      isLast: index == events.length - 1,
+                                      onRestore: e.action == 'deleted'
+                                          ? () => _restore(e)
+                                          : null,
+                                    );
+                                  },
+                                ),
+                              ),
+                            ),
+                          ),
+              ),
+            ],
           );
         },
       ),
@@ -149,32 +223,52 @@ class _TimelineTile extends StatelessWidget {
     this.onRestore,
   });
 
+  bool get _isWishlist => event.snapshot['is_wishlist'] == true;
+
   ({IconData icon, Color color, String label}) get _badge {
+    final wish = _isWishlist;
     return switch (event.action) {
-      'added' => (
-          icon: Icons.add_rounded,
-          color: Colors.green.shade700,
-          label: '+ Ajout',
-        ),
-      'deleted' => (
-          icon: Icons.delete_outline,
-          color: Colors.red.shade700,
-          label: 'Supprimé',
+      'added' => wish
+          ? (
+              icon: Icons.favorite_border,
+              color: Colors.purple.shade600,
+              label: '💜 Wishlist · + Ajout',
+            )
+          : (
+              icon: Icons.add_rounded,
+              color: Colors.green.shade700,
+              label: '📦 Collection · + Ajout',
+            ),
+      'deleted' => wish
+          ? (
+              icon: Icons.heart_broken_outlined,
+              color: Colors.purple.shade700,
+              label: '💜 Wishlist · Retiré',
+            )
+          : (
+              icon: Icons.delete_outline,
+              color: Colors.red.shade700,
+              label: '📦 Collection · Supprimé',
+            ),
+      'wishlist_to_collection' => (
+          icon: Icons.celebration_outlined,
+          color: Colors.teal.shade700,
+          label: '🎉 Wishlist → Collection',
         ),
       'location' => (
           icon: Icons.place_outlined,
           color: Colors.deepOrange.shade600,
-          label: 'Lieu modifié',
+          label: '📍 Lieu modifié',
         ),
       'loaned' => (
           icon: Icons.handshake_outlined,
           color: Colors.blue.shade700,
-          label: 'Prêté',
+          label: '🤝 Prêté',
         ),
       'returned' => (
           icon: Icons.undo_rounded,
           color: Colors.teal.shade700,
-          label: 'Rendu',
+          label: '↩ Rendu',
         ),
       _ => (
           icon: Icons.history,
@@ -193,10 +287,20 @@ class _TimelineTile extends StatelessWidget {
     return DateFormat('d MMM yyyy', 'fr_FR').format(at);
   }
 
+  String? get _sideDetail {
+    if (event.action == 'location') {
+      final from = event.snapshot['from']?.toString();
+      final to = event.snapshot['to']?.toString();
+      if (from != null && to != null) return '$from → $to';
+    }
+    return event.detail;
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final badge = _badge;
+    final side = _sideDetail;
     return IntrinsicHeight(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -296,11 +400,10 @@ class _TimelineTile extends StatelessWidget {
                               fontSize: 14,
                             ),
                           ),
-                          if (event.detail != null &&
-                              event.detail!.isNotEmpty) ...[
+                          if (side != null && side.isNotEmpty) ...[
                             const SizedBox(height: 2),
                             Text(
-                              event.detail!,
+                              side,
                               style: TextStyle(
                                 fontSize: 12,
                                 color: scheme.onSurfaceVariant,
@@ -327,13 +430,26 @@ class _TimelineTile extends StatelessWidget {
                               label: const Text('Restaurer'),
                               style: TextButton.styleFrom(
                                 visualDensity: VisualDensity.compact,
-                                padding: EdgeInsets.zero,
                               ),
                             ),
                           ],
                         ],
                       ),
                     ),
+                    if (side != null &&
+                        side.isNotEmpty &&
+                        event.action == 'location')
+                      Padding(
+                        padding: const EdgeInsets.only(left: 8),
+                        child: Chip(
+                          visualDensity: VisualDensity.compact,
+                          avatar: const Icon(Icons.place, size: 14),
+                          label: Text(
+                            event.snapshot['to']?.toString() ?? side,
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),

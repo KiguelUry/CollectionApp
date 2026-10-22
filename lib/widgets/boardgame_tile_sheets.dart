@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_group.dart';
 import '../models/collection_item.dart';
 import '../models/item_condition.dart';
+import '../services/collection_change_history_service.dart';
 import '../services/collection_refresh.dart';
 import '../services/item_group_service.dart';
 import '../utils/boardgame_display.dart';
@@ -20,7 +21,7 @@ import 'item_copy_units_panel.dart';
 import 'households_sheet.dart';
 import 'item_market_value_panel.dart';
 import 'favorite_heart_button.dart';
-import 'star_rating_bar.dart';
+import 'precision_star_rating_bar.dart';
 import 'temporary_loan_toggle.dart';
 
 Future<void> showBoardgameTileRatingSheet(
@@ -91,7 +92,11 @@ class _BoardgameTileRatingSheetState extends State<_BoardgameTileRatingSheet> {
   @override
   void initState() {
     super.initState();
-    _rating = widget.item.rating ?? 0;
+    _rating = personalRatingOnTen(
+          widget.item.rating,
+          metadata: widget.item.metadata,
+        ) ??
+        0;
   }
 
   Future<void> _saveRating(double value) async {
@@ -101,10 +106,12 @@ class _BoardgameTileRatingSheetState extends State<_BoardgameTileRatingSheet> {
       _saving = true;
     });
     try {
-      await Supabase.instance.client
-          .from('collection_items')
-          .update({'rating': value <= 0 ? null : value})
-          .eq('id', widget.item.id);
+      final meta = Map<String, dynamic>.from(widget.item.metadata ?? {});
+      meta['rating_scale'] = '10';
+      await Supabase.instance.client.from('collection_items').update({
+        'rating': value <= 0 ? null : value,
+        'metadata': meta,
+      }).eq('id', widget.item.id);
       CollectionRefresh.instance.bump();
     } catch (_) {
       if (mounted) {
@@ -163,13 +170,11 @@ class _BoardgameTileRatingSheetState extends State<_BoardgameTileRatingSheet> {
                   ),
             ),
             const SizedBox(height: 8),
-            if (widget.readOnly)
-              _readOnlyStars(_rating)
-            else
-              StarRatingBar(
-                rating: _rating,
-                onChanged: _saveRating,
-              ),
+            PrecisionStarRatingBar(
+              rating: _rating,
+              onChanged: _saveRating,
+              readOnly: widget.readOnly,
+            ),
             if (review != null && review.isNotEmpty) ...[
               const SizedBox(height: 20),
               Text(
@@ -210,20 +215,6 @@ class _BoardgameTileRatingSheetState extends State<_BoardgameTileRatingSheet> {
     );
   }
 
-  Widget _readOnlyStars(double rating) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: List.generate(5, (i) {
-        final filled = rating >= i + 1;
-        final half = !filled && rating >= i + 0.5;
-        return Icon(
-          half ? Icons.star_half : (filled ? Icons.star : Icons.star_border),
-          size: 22,
-          color: Colors.amber.shade700,
-        );
-      }),
-    );
-  }
 }
 
 class _BoardgameTileLocationSheet extends StatefulWidget {
@@ -401,36 +392,22 @@ class _BoardgameTileLocationSheetState
     if (_closing) return;
     _closing = true;
     _saveDebounce?.cancel();
-    if (!widget.readOnly) await _persist();
-    final before = _whereLabel(widget.item);
-    final after = _whereLabel(_item);
-    if (!widget.readOnly && before != after && mounted) {
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Changement de lieu'),
-          content: Text(
-            'Est-ce que ton jeu est passé de « $before » à « $after » ?',
+    // Persiste sans 2e confirmation : le choix via ✓ / puce suffit.
+    if (!widget.readOnly) {
+      final before = _whereLabel(widget.item);
+      await _persist();
+      final after = _whereLabel(_item);
+      if (before != after) {
+        unawaited(
+          CollectionChangeHistoryService.instance.recordLocationChange(
+            item: _item,
+            fromLabel: before,
+            toLabel: after,
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Non, annuler'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Oui'),
-            ),
-          ],
-        ),
-      );
-      if (ok != true && mounted) {
-        setState(() => _item = widget.item);
-        await _persist();
+        );
       }
     }
     if (!mounted) return;
-    _closing = true;
     Navigator.pop(context);
   }
 

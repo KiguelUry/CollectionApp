@@ -25,6 +25,7 @@ import '../utils/boardgame_collection_visibility.dart';
 import '../utils/boardgame_display.dart';
 import '../utils/collection_item_filters.dart';
 import '../utils/owned_quantity_index.dart';
+import '../services/owned_catalog_index.dart';
 import '../utils/debounced_runner.dart';
 import '../utils/holder_filter.dart';
 import '../utils/supabase_embeds.dart';
@@ -350,6 +351,7 @@ class _HomeScreenState extends State<HomeScreen>
     }
     _tagService.enrichItems(parsed).then((items) {
       if (!mounted || gen != _enrichGeneration) return;
+      OwnedCatalogIndex.rebuild(items);
       setState(() => _enrichedItems = items);
     });
   }
@@ -621,7 +623,9 @@ class _HomeScreenState extends State<HomeScreen>
         content: Text(
           isGroup
               ? '« ${item.title} » sera retiré de « ${item.groupName ?? 'ce groupe'} ».'
-              : '« ${item.title} » sera retiré de ta collection.',
+              : item.isWishlist
+                  ? '« ${item.title} » sera retiré de ta wishlist.'
+                  : '« ${item.title} » sera retiré de ta collection.',
         ),
         actions: [
           TextButton(
