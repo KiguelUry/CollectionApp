@@ -23,6 +23,8 @@ class BookSeriesDetailScreen extends StatefulWidget {
   State<BookSeriesDetailScreen> createState() => _BookSeriesDetailScreenState();
 }
 
+enum _VolumeFilter { all, owned, missing, toRead, wishlist }
+
 class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   final _service = BookSeriesService();
   bool _loading = true;
@@ -31,6 +33,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   BookSeries? _series;
   BookSeriesStats? _stats;
   List<BookVolumeSlot> _slots = [];
+  _VolumeFilter _filter = _VolumeFilter.all;
 
   @override
   void initState() {
@@ -92,7 +95,19 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   }
 
   List<BookVolumeSlot> get _displaySlots {
-    final copy = List<BookVolumeSlot>.from(_slots);
+    var copy = List<BookVolumeSlot>.from(_slots);
+    copy = copy.where((slot) {
+      final owned = slot.item != null && !slot.item!.isWishlist;
+      final wish = slot.item?.isWishlist == true;
+      final read = (slot.item?.isRead ?? false) || slot.volume.isRead;
+      return switch (_filter) {
+        _VolumeFilter.all => true,
+        _VolumeFilter.owned => owned,
+        _VolumeFilter.missing => !owned && !wish,
+        _VolumeFilter.toRead => owned && !read,
+        _VolumeFilter.wishlist => wish,
+      };
+    }).toList();
     copy.sort((a, b) {
       final sa = a.volume.sortIndex;
       final sb = b.volume.sortIndex;
@@ -102,6 +117,125 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
       return sb.compareTo(sa);
     });
     return copy;
+  }
+
+  int _countFilter(_VolumeFilter f) {
+    return _slots.where((slot) {
+      final owned = slot.item != null && !slot.item!.isWishlist;
+      final wish = slot.item?.isWishlist == true;
+      final read = (slot.item?.isRead ?? false) || slot.volume.isRead;
+      return switch (f) {
+        _VolumeFilter.all => true,
+        _VolumeFilter.owned => owned,
+        _VolumeFilter.missing => !owned && !wish,
+        _VolumeFilter.toRead => owned && !read,
+        _VolumeFilter.wishlist => wish,
+      };
+    }).length;
+  }
+
+  Future<void> _markRangeOwned() async {
+    final series = _series!;
+    final fromCtrl = TextEditingController(text: '1');
+    final toCtrl = TextEditingController(
+      text: '${series.expectedVolumeCount ?? _slots.length}',
+    );
+    try {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Cocher une plage'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: fromCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Du tome'),
+              ),
+              TextField(
+                controller: toCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Au tome'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Annuler'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Posséder'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true) return;
+      final from = int.tryParse(fromCtrl.text.trim()) ?? 1;
+      final to = int.tryParse(toCtrl.text.trim()) ?? from;
+      final n = await _service.markVolumesOwned(
+        series: series,
+        fromVolume: from,
+        toVolume: to,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$n tome${n > 1 ? 's' : ''} marqué${n > 1 ? 's' : ''} possédés')),
+      );
+      await _load(silent: true);
+    } finally {
+      fromCtrl.dispose();
+      toCtrl.dispose();
+    }
+  }
+
+  Future<void> _pickSeriesCover() async {
+    final series = _series!;
+    final withCover = _slots
+        .where((s) =>
+            (s.volume.coverUrl != null && s.volume.coverUrl!.isNotEmpty) ||
+            (s.item?.imageUrl != null && s.item!.imageUrl!.isNotEmpty))
+        .toList();
+    if (withCover.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Aucune couverture de tome disponible')),
+      );
+      return;
+    }
+    final chosen = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const ListTile(
+              title: Text('🖼️ Changer l\'image de la série'),
+              subtitle: Text('Choisis la couverture d\'un tome'),
+            ),
+            for (final slot in withCover)
+              ListTile(
+                leading: CollectionCoverImage(
+                  url: slot.volume.coverUrl ?? slot.item!.imageUrl!,
+                  width: 40,
+                  height: 56,
+                  bookCover: true,
+                ),
+                title: Text(slot.volume.displayTitle),
+                onTap: () => Navigator.pop(
+                  ctx,
+                  slot.volume.coverUrl ?? slot.item!.imageUrl,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (chosen == null || chosen.isEmpty) return;
+    await _service.updateSeries(series.copyWith(coverUrl: chosen));
+    await _load(silent: true);
   }
 
   Future<void> _openVolumeSheet(BookVolumeSlot slot) async {
@@ -299,28 +433,25 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (series.coverUrl != null && series.coverUrl!.isNotEmpty)
-                      CollectionCoverImage(
-                        key: ValueKey('series-${series.coverUrl}-$_coverEpoch'),
-                        url: series.coverUrl!,
-                        width: 72,
-                        height: 104,
-                        bookCover: true,
-                      )
-                    else
-                      Container(
-                        width: 72,
-                        height: 104,
-                        decoration: BoxDecoration(
-                          color: BookAccent.surface,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Icon(
-                          series.subcategory.icon,
-                          color: accent,
-                          size: 32,
-                        ),
-                      ),
+                    GestureDetector(
+                      onTap: _pickSeriesCover,
+                      child: series.coverUrl != null &&
+                              series.coverUrl!.isNotEmpty
+                          ? CollectionCoverImage(
+                              key: ValueKey(
+                                'series-${series.coverUrl}-$_coverEpoch',
+                              ),
+                              url: series.coverUrl!,
+                              width: 88,
+                              height: 128,
+                              bookCover: true,
+                            )
+                          : CoverImagePlaceholder(
+                              bookCover: true,
+                              width: 88,
+                              height: 128,
+                            ),
+                    ),
                     const SizedBox(width: 16),
                     Expanded(
                       child: Column(
@@ -333,35 +464,64 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                               fontWeight: FontWeight.w600,
                             ),
                           ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 6,
-                            children: [
-                              _StatChip(
-                                icon: Icons.home_rounded,
-                                label: 'Possédé ${stats.ownedLabel}',
-                                color: accent,
-                              ),
-                              _StatChip(
-                                icon: Icons.visibility_rounded,
-                                label: 'Lu ${stats.readLabel}',
-                                color: Colors.amber.shade800,
-                              ),
-                            ],
+                          const SizedBox(height: 6),
+                          Text(
+                            'Possédés : ${stats.ownedLabel} · Lus : ${stats.readLabel}'
+                            '${stats.ratingLabel != null ? ' · ${stats.ratingLabel}/5' : ''}',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
                           ),
                           const SizedBox(height: 8),
-                          Text(
-                            'Icônes : bascule rapide · Carte : détail · Appui long : couverture HD.',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey.shade600,
-                            ),
+                          TextButton.icon(
+                            onPressed: _pickSeriesCover,
+                            icon: const Icon(Icons.image_outlined, size: 18),
+                            label: const Text('Changer l\'image de la série'),
                           ),
                         ],
                       ),
                     ),
                   ],
+                ),
+              ),
+            ),
+            SliverToBoxAdapter(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Row(
+                  children: [
+                    for (final f in _VolumeFilter.values)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: FilterChip(
+                          label: Text(switch (f) {
+                            _VolumeFilter.all => 'Tous (${_countFilter(f)})',
+                            _VolumeFilter.owned =>
+                              'Possédés (${_countFilter(f)})',
+                            _VolumeFilter.missing =>
+                              'Manquants (${_countFilter(f)})',
+                            _VolumeFilter.toRead =>
+                              'À lire (${_countFilter(f)})',
+                            _VolumeFilter.wishlist =>
+                              'Wishlist (${_countFilter(f)})',
+                          }),
+                          selected: _filter == f,
+                          onSelected: (_) => setState(() => _filter = f),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: OutlinedButton.icon(
+                  onPressed: _markRangeOwned,
+                  icon: const Icon(Icons.bolt),
+                  label: const Text('⚡ Cocher une plage (Du tome X au Y)'),
                 ),
               ),
             ),
@@ -400,7 +560,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                     maxCrossAxisExtent: 140,
                     mainAxisSpacing: 10,
                     crossAxisSpacing: 10,
-                    childAspectRatio: 0.52,
+                    childAspectRatio: 0.48,
                   ),
                   delegate: SliverChildBuilderDelegate(
                     (context, index) {
@@ -456,43 +616,5 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     if (ok != true || !mounted) return;
     await _service.deleteSeries(series.id);
     if (mounted) Navigator.pop(context);
-  }
-}
-
-class _StatChip extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Color color;
-
-  const _StatChip({
-    required this.icon,
-    required this.label,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: color),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: color,
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }

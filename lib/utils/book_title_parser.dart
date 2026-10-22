@@ -29,7 +29,7 @@ class ParsedBookTitle {
 
 abstract final class BookTitleParser {
   static final _volumePrefix = RegExp(
-    r'^(.*?)[,\s:-]+(?:vol\.?|volume|tome|#|n°|no\.?)\s*(\d+(?:[.,]\d+)?)\s*$',
+    r'^(.*?)[,\s:-]+(?:vol\.?|volume|tome|t\.?|#|n°|no\.?)\s*(\d+(?:[.,]\d+)?)\s*$',
     caseSensitive: false,
   );
 
@@ -52,6 +52,8 @@ abstract final class BookTitleParser {
     if (t.isEmpty) {
       return ParsedBookTitle(rawTitle: title);
     }
+    // Normalise tirets typographiques (– — −) → ASCII pour le parseur.
+    t = t.replaceAll(RegExp(r'[–—−]'), '-');
     t = t.replaceAll(_stripSuffix, '').trim();
 
     for (final pattern in [_volumePrefix, _hashVolume]) {
@@ -91,7 +93,10 @@ abstract final class BookTitleParser {
 
   static String? _cleanSeriesName(String raw) {
     var s = raw.trim();
+    s = s.replaceAll(RegExp(r'[–—−]'), '-');
     s = s.replaceAll(RegExp(r'\s+'), ' ');
+    // Enlève tirets / ponctuation orphelins en fin (« Thorgal - »).
+    s = s.replaceAll(RegExp(r'[\s,;:\-]+$'), '').trim();
     if (s.endsWith(',')) s = s.substring(0, s.length - 1).trim();
     if (s.length < 2) return null;
     return s;
@@ -104,9 +109,18 @@ abstract final class BookTitleParser {
   }
 
   static bool seriesNamesMatch(String a, String b) {
-    final na = a.toLowerCase().trim();
-    final nb = b.toLowerCase().trim();
+    final na = _normName(a);
+    final nb = _normName(b);
+    if (na.isEmpty || nb.isEmpty) return false;
     if (na == nb) return true;
     return na.startsWith(nb) || nb.startsWith(na);
+  }
+
+  static String _normName(String s) {
+    var n = s.toLowerCase().trim();
+    n = n.replaceAll(RegExp(r'[–—−]'), '-');
+    n = n.replaceAll(RegExp(r'\s+'), ' ');
+    n = n.replaceAll(RegExp(r'[\s\-]+$'), '');
+    return n;
   }
 }

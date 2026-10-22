@@ -9,10 +9,12 @@ import '../services/book_series_service.dart';
 import '../services/profile_service.dart';
 import '../services/book_catalog_service.dart';
 import '../services/open_library_service.dart';
+import '../utils/book_series_normalizer.dart';
 import '../utils/book_title_parser.dart';
 import '../utils/wishlist_promote.dart';
 import '../widgets/add_item_manual_dialog.dart';
 import '../widgets/add_item_options_dialog.dart';
+import '../widgets/book_owned_range_dialog.dart';
 import '../widgets/book_search_dialog.dart' show showBookSearch;
 import '../widgets/book_subcategory_picker.dart';
 import '../widgets/add_volume_to_series_sheet.dart';
@@ -384,7 +386,28 @@ class BookItemAddCoordinator {
     required BookSubcategory subcategory,
     Map<String, dynamic>? metadata,
   }) async {
-    final parsed = _resolveParsed(title, metadata);
+    var parsed = _resolveParsed(title, metadata);
+    // Titre nu d'une série connue (ex. « Thorgal », « Naruto ») → dossier série.
+    if (!parsed.hasSeries) {
+      final known = BookSeriesNormalizer.expectedCount(title.trim(), subcategory);
+      final metaSeries = metadata?['series_title']?.toString().trim();
+      if (known != null && known > 1) {
+        parsed = ParsedBookTitle(
+          rawTitle: title,
+          seriesName: title.trim(),
+        );
+      } else if (metaSeries != null && metaSeries.length >= 2) {
+        final metaKnown =
+            BookSeriesNormalizer.expectedCount(metaSeries, subcategory);
+        if (metaKnown != null && metaKnown > 1) {
+          parsed = ParsedBookTitle(
+            rawTitle: title,
+            seriesName: metaSeries,
+          );
+        }
+      }
+    }
+
     String? seriesId;
     String? volumeId;
     var finalTitle = title;
@@ -418,29 +441,68 @@ class BookItemAddCoordinator {
         },
         subcategory,
       );
-      final estimated = enriched.estimatedTotalVolumes ??
-          await OpenLibraryService.estimateSeriesVolumeCount(
-            parsed.seriesName!,
-            subcategory,
-          );
+      var estimated = enriched.estimatedTotalVolumes ??
+          BookSeriesNormalizer.expectedCount(parsed.seriesName!, subcategory);
+      estimated ??= await OpenLibraryService.estimateSeriesVolumeCount(
+        parsed.seriesName!,
+        subcategory,
+      );
 
       if (!context.mounted) return;
       Navigator.pop(context);
 
       final resolved = await _seriesService.resolveSeriesFromTitle(
-        title: title,
+        title: parsed.hasVolume ? title : parsed.seriesName!,
         subcategory: subcategory,
         estimatedTotalVolumes: estimated,
+        coverUrl: imageUrl,
       );
       if (resolved != null) {
         seriesId = resolved.seriesId;
-        volumeId = resolved.volumeId;
-        finalTitle = resolved.itemTitle;
+        volumeId = parsed.hasVolume ? resolved.volumeId : null;
+        finalTitle = parsed.hasVolume ? resolved.itemTitle : parsed.seriesName!;
         if (imageUrl != null && imageUrl.isNotEmpty) {
           await _seriesService.ensureSeriesCoverFromItem(
             seriesId: resolved.seriesId,
             imageUrl: imageUrl,
           );
+        }
+
+        // Ajout série entière (sans tome précis) → plage possédée + ouverture dossier.
+        if (!parsed.hasVolume && context.mounted) {
+          final series = await _seriesService.fetchSeriesById(resolved.seriesId);
+          final total = series?.expectedVolumeCount ?? estimated ?? 1;
+          final range = await showBookOwnedRangeDialog(
+            context,
+            seriesName: parsed.seriesName!,
+            totalVolumes: total,
+          );
+          if (range == null || !context.mounted) return;
+          if (series != null) {
+            if (range.choice == BookOwnedRangeChoice.all) {
+              await _seriesService.markVolumesOwned(
+                series: series,
+                fromVolume: 1,
+                toVolume: total,
+              );
+            } else if (range.choice == BookOwnedRangeChoice.range &&
+                range.from != null &&
+                range.to != null) {
+              await _seriesService.markVolumesOwned(
+                series: series,
+                fromVolume: range.from!,
+                toVolume: range.to!,
+              );
+            }
+          }
+          if (!context.mounted) return;
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => BookSeriesDetailScreen(seriesId: resolved.seriesId),
+            ),
+          );
+          return;
         }
       }
     } else if (context.mounted) {

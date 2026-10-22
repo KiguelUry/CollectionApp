@@ -26,7 +26,10 @@ enum _BookCollectionViewMode { bySeries, allBooks, byAuthor }
 
 /// Collection Livres regroupée par série / œuvre.
 class BookCollectionScreen extends StatefulWidget {
-  const BookCollectionScreen({super.key});
+  /// `true` quand embarqué dans [BooksCollectionScreen] (sans AppBar propre).
+  final bool embedded;
+
+  const BookCollectionScreen({super.key, this.embedded = false});
 
   @override
   State<BookCollectionScreen> createState() => _BookCollectionScreenState();
@@ -100,6 +103,26 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
           _loading = false;
         });
       }
+      // Réparation couvertures manquantes en arrière-plan (séries grises).
+      final needCover = entries
+          .where((e) =>
+              e.series.coverUrl == null || e.series.coverUrl!.isEmpty)
+          .take(5)
+          .toList();
+      if (needCover.isNotEmpty) {
+        Future(() async {
+          var any = false;
+          for (final e in needCover) {
+            final n = await _service.enrichMissingVolumeCovers(
+              series: e.series,
+              volumes: e.volumes,
+              maxLookups: 3,
+            );
+            if (n > 0) any = true;
+          }
+          if (any && mounted) _load();
+        });
+      }
     } catch (e) {
       if (mounted) {
         setState(() => _loading = false);
@@ -169,12 +192,6 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
         .toList();
   }
 
-  String get _searchHint => switch (_viewMode) {
-        _BookCollectionViewMode.bySeries => 'Filtrer une série…',
-        _BookCollectionViewMode.allBooks => 'Filtrer un livre…',
-        _BookCollectionViewMode.byAuthor => 'Filtrer un auteur…',
-      };
-
   IconData get _viewModeIcon => switch (_viewMode) {
         _BookCollectionViewMode.bySeries => Icons.view_module_outlined,
         _BookCollectionViewMode.allBooks => Icons.menu_book_outlined,
@@ -218,55 +235,50 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
     }
   }
 
+  Widget _viewModeMenu() {
+    return PopupMenuButton<_BookCollectionViewMode>(
+      icon: Icon(_viewModeIcon),
+      tooltip: 'Mode d\'affichage',
+      initialValue: _viewMode,
+      onSelected: (mode) => setState(() => _viewMode = mode),
+      itemBuilder: (ctx) => const [
+        PopupMenuItem(
+          value: _BookCollectionViewMode.bySeries,
+          child: ListTile(
+            leading: Icon(Icons.view_module_outlined),
+            title: Text('Vue par séries'),
+            contentPadding: EdgeInsets.zero,
+            visualDensity: VisualDensity.compact,
+          ),
+        ),
+        PopupMenuItem(
+          value: _BookCollectionViewMode.allBooks,
+          child: ListTile(
+            leading: Icon(Icons.menu_book_outlined),
+            title: Text('Tous les livres'),
+            contentPadding: EdgeInsets.zero,
+            visualDensity: VisualDensity.compact,
+          ),
+        ),
+        PopupMenuItem(
+          value: _BookCollectionViewMode.byAuthor,
+          child: ListTile(
+            leading: Icon(Icons.person_outline),
+            title: Text('Par auteur'),
+            contentPadding: EdgeInsets.zero,
+            visualDensity: VisualDensity.compact,
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final visible = _visible;
     final focusActive = BookSeriesFocus.scopeIsActive(_focusFilters);
 
-    return Scaffold(
-      appBar: AppAppBar(
-        title: 'Ma collection',
-        backgroundColor: BookAccent.primary,
-        foregroundColor: Colors.white,
-        actions: [
-          PopupMenuButton<_BookCollectionViewMode>(
-            icon: Icon(_viewModeIcon),
-            tooltip: 'Mode d\'affichage',
-            initialValue: _viewMode,
-            onSelected: (mode) => setState(() => _viewMode = mode),
-            itemBuilder: (ctx) => const [
-              PopupMenuItem(
-                value: _BookCollectionViewMode.bySeries,
-                child: ListTile(
-                  leading: Icon(Icons.view_module_outlined),
-                  title: Text('Vue par séries'),
-                  contentPadding: EdgeInsets.zero,
-                  visualDensity: VisualDensity.compact,
-                ),
-              ),
-              PopupMenuItem(
-                value: _BookCollectionViewMode.allBooks,
-                child: ListTile(
-                  leading: Icon(Icons.menu_book_outlined),
-                  title: Text('Tous les livres'),
-                  contentPadding: EdgeInsets.zero,
-                  visualDensity: VisualDensity.compact,
-                ),
-              ),
-              PopupMenuItem(
-                value: _BookCollectionViewMode.byAuthor,
-                child: ListTile(
-                  leading: Icon(Icons.person_outline),
-                  title: Text('Par auteur'),
-                  contentPadding: EdgeInsets.zero,
-                  visualDensity: VisualDensity.compact,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-      body: RefreshIndicator(
+    final body = RefreshIndicator(
         onRefresh: _load,
         color: BookAccent.primary,
         child: CustomScrollView(
@@ -282,7 +294,8 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
                         controller: _search,
                         onChanged: (_) => setState(() {}),
                         decoration: InputDecoration(
-                          hintText: _searchHint,
+                          hintText:
+                              'Rechercher une série, un livre, un auteur…',
                           isDense: true,
                           prefixIcon: const Icon(Icons.search, size: 20),
                           suffixIcon: _search.text.isNotEmpty
@@ -303,6 +316,7 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
                       activeColor: BookAccent.primary,
                       onChanged: (f) => setState(() => _focusFilters = f),
                     ),
+                    if (widget.embedded) _viewModeMenu(),
                   ],
                 ),
               ),
@@ -360,7 +374,18 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
               _buildAuthorsSliver(focusActive),
           ],
         ),
+    );
+
+    if (widget.embedded) return body;
+
+    return Scaffold(
+      appBar: AppAppBar(
+        title: 'Ma collection',
+        backgroundColor: BookAccent.primary,
+        foregroundColor: Colors.white,
+        actions: [_viewModeMenu()],
       ),
+      body: body,
     );
   }
 
@@ -388,10 +413,10 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
       sliver: SliverGrid(
         gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-          maxCrossAxisExtent: 320,
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
-          childAspectRatio: 1.35,
+          maxCrossAxisExtent: 200,
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 10,
+          childAspectRatio: 0.58,
         ),
         delegate: SliverChildBuilderDelegate(
           (context, index) {

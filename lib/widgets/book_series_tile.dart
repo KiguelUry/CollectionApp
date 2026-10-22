@@ -3,13 +3,17 @@ import 'package:flutter/material.dart';
 import '../constants/book_accent.dart';
 import '../models/book_series.dart';
 import 'collection_cover_image.dart';
+import 'item_title_text.dart';
 
+/// Tuile série livres — même langage vertical que les jeux de société.
 class BookSeriesTile extends StatelessWidget {
   final BookSeries series;
   final BookSeriesStats stats;
   final VoidCallback onTap;
   final Color accent;
   final VoidCallback? onDelete;
+  final bool isFavorite;
+  final VoidCallback? onToggleFavorite;
 
   const BookSeriesTile({
     super.key,
@@ -18,93 +22,163 @@ class BookSeriesTile extends StatelessWidget {
     required this.onTap,
     this.accent = BookAccent.primary,
     this.onDelete,
+    this.isFavorite = false,
+    this.onToggleFavorite,
   });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Card(
+    final subLabel = series.isStandalone
+        ? '${series.subcategory.label} · Œuvre unique'
+        : '${series.subcategory.label} · ${stats.totalSlots > 0 ? '${stats.totalSlots} tomes' : 'Série'}';
+    final ownedColor = stats.isComplete ? Colors.green.shade700 : accent;
+
+    return Material(
+      color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+      borderRadius: BorderRadius.circular(16),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.fromLTRB(6, 6, 6, 6),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Expanded(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                flex: 5,
+                child: Stack(
+                  fit: StackFit.expand,
                   children: [
-                    _Cover(url: series.coverUrl),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            series.name,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 15,
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: series.coverUrl != null &&
+                              series.coverUrl!.trim().isNotEmpty
+                          ? CollectionCoverImage(
+                              url: series.coverUrl!,
+                              bookCover: true,
+                              boxedCover: true,
+                              compact: true,
+                              fit: BoxFit.contain,
+                            )
+                          : CoverImagePlaceholder(
+                              bookCover: true,
                             ),
-                          ),
-                          if (series.wishlistEntireSeries)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: Text(
-                                'Wishlist série',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: scheme.tertiary,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                    ),
+                    if (onToggleFavorite != null)
+                      Positioned(
+                        top: 4,
+                        left: 4,
+                        child: Material(
+                          color: Colors.black.withValues(alpha: 0.45),
+                          borderRadius: BorderRadius.circular(8),
+                          child: InkWell(
+                            onTap: onToggleFavorite,
+                            borderRadius: BorderRadius.circular(8),
+                            child: Padding(
+                              padding: const EdgeInsets.all(4),
+                              child: Icon(
+                                isFavorite
+                                    ? Icons.favorite
+                                    : Icons.favorite_border,
+                                size: 15,
+                                color: isFavorite
+                                    ? Colors.redAccent
+                                    : Colors.white,
                               ),
                             ),
-                        ],
-                      ),
-                    ),
-                    if (onDelete != null)
-                      IconButton(
-                        icon: Icon(Icons.delete_outline, color: Colors.red.shade400),
-                        tooltip: 'Supprimer la série',
-                        visualDensity: VisualDensity.compact,
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(
-                          minWidth: 32,
-                          minHeight: 32,
+                          ),
                         ),
-                        onPressed: onDelete,
+                      ),
+                    if (onDelete != null)
+                      Positioned(
+                        top: 4,
+                        right: 4,
+                        child: Material(
+                          color: Colors.black.withValues(alpha: 0.45),
+                          borderRadius: BorderRadius.circular(8),
+                          child: InkWell(
+                            onTap: onDelete,
+                            borderRadius: BorderRadius.circular(8),
+                            child: const Padding(
+                              padding: EdgeInsets.all(4),
+                              child: Icon(
+                                Icons.close,
+                                size: 15,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
                   ],
                 ),
               ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 4,
+              const SizedBox(height: 6),
+              ItemTitleText(
+                title: series.name,
+                maxLines: 1,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 12,
+                  height: 1.15,
+                ),
+              ),
+              Text(
+                subLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10,
+                  color: scheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              if (!series.isStandalone && stats.totalSlots > 0) ...[
+                const SizedBox(height: 4),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: stats.ownedProgress,
+                    minHeight: 4,
+                    backgroundColor: scheme.surfaceContainerHighest,
+                    color: stats.isComplete
+                        ? Colors.green.shade600
+                        : const Color(0xFF26A69A),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 4),
+              _MetaRow(
                 children: [
-                  _Chip(
-                    icon: Icons.library_books_outlined,
-                    label: 'Possédé ${stats.ownedLabel}',
-                    color: accent.withValues(alpha: 0.15),
-                    iconColor: accent,
+                  _MetaChip(
+                    icon: Icons.menu_book_outlined,
+                    label: stats.ownedLabel,
+                    color: ownedColor,
                   ),
-                  _Chip(
-                    icon: Icons.visibility_rounded,
-                    label: 'Lu ${stats.readLabel}',
-                    color: Colors.amber.withValues(alpha: 0.15),
-                    iconColor: Colors.amber.shade800,
+                  _MetaChip(
+                    icon: Icons.visibility_outlined,
+                    label: stats.readLabel,
+                    color: Colors.amber.shade800,
                   ),
-                  if (stats.ratingLabel != null)
-                    _Chip(
-                      icon: Icons.star_rounded,
-                      label: stats.ratingLabel!,
-                      color: scheme.tertiaryContainer,
-                      iconColor: scheme.onTertiaryContainer,
-                    ),
+                ],
+              ),
+              const SizedBox(height: 3),
+              _MetaRow(
+                children: [
+                  _MetaChip(
+                    icon: Icons.star_rounded,
+                    label: stats.ratingLabel ?? '—',
+                    color: Colors.amber.shade700,
+                  ),
+                  _MetaChip(
+                    icon: stats.valueLabel != null
+                        ? Icons.payments_outlined
+                        : Icons.place_outlined,
+                    label: stats.valueLabel ?? '—',
+                    color: Colors.teal.shade600,
+                  ),
                 ],
               ),
             ],
@@ -115,70 +189,62 @@ class BookSeriesTile extends StatelessWidget {
   }
 }
 
-class _Cover extends StatelessWidget {
-  final String? url;
+class _MetaRow extends StatelessWidget {
+  final List<Widget> children;
 
-  const _Cover({this.url});
+  const _MetaRow({required this.children});
 
   @override
   Widget build(BuildContext context) {
-    const size = 56.0;
-    if (url != null && url!.isNotEmpty) {
-      return CollectionCoverImage(
-        url: url!,
-        width: size,
-        height: size * 1.45,
-        bookCover: true,
-      );
-    }
-    return _placeholder(size);
-  }
-
-  Widget _placeholder(double size) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: Colors.grey.shade300,
-        borderRadius: BorderRadius.circular(8),
+    return SizedBox(
+      height: 20,
+      child: Row(
+        children: [
+          for (var i = 0; i < children.length; i++) ...[
+            if (i > 0) const SizedBox(width: 4),
+            Expanded(child: children[i]),
+          ],
+        ],
       ),
-      child: const Icon(Icons.auto_stories_outlined, color: Colors.white70),
     );
   }
 }
 
-class _Chip extends StatelessWidget {
+class _MetaChip extends StatelessWidget {
   final IconData icon;
   final String label;
   final Color color;
-  final Color iconColor;
 
-  const _Chip({
+  const _MetaChip({
     required this.icon,
     required this.label,
     required this.color,
-    required this.iconColor,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
       decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(8),
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
       ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: iconColor),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: iconColor,
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 2),
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: color,
+                height: 1.1,
+              ),
             ),
           ),
         ],

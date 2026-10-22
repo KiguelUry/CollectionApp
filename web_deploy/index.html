@@ -18,21 +18,72 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="Palomnia — tes collections, au même endroit.">
+  <meta name="description" content="Paloma — tes collections, au même endroit.">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="Palomnia">
+  <meta name="apple-mobile-web-app-title" content="Paloma">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>Palomnia</title>
+  <title>Paloma</title>
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: linear-gradient(180deg, #0F1419 0%, #1B2838 55%, #243447 100%);
+    }
+    .paloma-boot {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 16px;
+      color: #FFF6F0;
+      font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+      z-index: 0;
+      pointer-events: none;
+    }
+    .paloma-boot .mark {
+      width: 64px;
+      height: 64px;
+      border-radius: 16px;
+      background: #2A3A4D;
+      border: 1px solid rgba(255,246,240,0.14);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .paloma-boot .mark svg {
+      width: 40px;
+      height: 40px;
+    }
+    .paloma-boot .name {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }
+  </style>
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
+  <div class="paloma-boot" aria-hidden="true">
+    <div class="mark">
+      <svg viewBox="0 0 88 88" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M28 46 L51 16 L55 46 Z" fill="#FFF6F0" fill-opacity="0.72"/>
+        <path d="M25 46 L60 34 L48 55 L19 69 Z" fill="#FFF6F0"/>
+        <path d="M32 48 L69 51 L42 62 Z" fill="#FFF6F0" fill-opacity="0.72"/>
+        <path d="M58 34 L72 30 L60 40 Z" fill="#FFB74D"/>
+        <circle cx="51" cy="37" r="2.2" fill="#1B2838"/>
+      </svg>
+    </div>
+    <div class="name">Paloma</div>
+  </div>
   <!-- Requis par supabase_flutter (passkeys) sur le web -->
   <script src="passkeys_bundle.js" type="application/javascript"></script>
   <script src="flutter_bootstrap.js" async></script>

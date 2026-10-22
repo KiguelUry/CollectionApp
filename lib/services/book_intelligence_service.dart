@@ -1,5 +1,6 @@
 import '../models/book_subcategory.dart';
 import '../utils/book_title_parser.dart';
+import 'anilist_manga_service.dart';
 import 'google_books_service.dart';
 import 'open_library_service.dart';
 
@@ -107,7 +108,7 @@ abstract final class BookIntelligenceService {
     return '$name $vol';
   }
 
-  /// Couverture d'un tome via Google Books + Open Library (requête série + numéro).
+  /// Couverture d'un tome via Google Books + Open Library (+ AniList manga).
   static Future<String?> lookupVolumeCover({
     required String seriesName,
     required double volumeNumber,
@@ -115,6 +116,16 @@ abstract final class BookIntelligenceService {
   }) async {
     final query = volumeSearchQuery(seriesName, volumeNumber);
     if (query.trim().length < 3) return null;
+
+    // Tome 1 manga : couverture série AniList (HD) en priorité.
+    if (subcategory == BookSubcategory.manga &&
+        volumeNumber >= 0.99 &&
+        volumeNumber < 1.01) {
+      final ani = await AnilistMangaService.lookupManga(seriesName);
+      if (ani?.coverUrl != null && ani!.coverUrl!.isNotEmpty) {
+        return ani.coverUrl;
+      }
+    }
 
     final merged = <Map<String, String>>[];
     final seen = <String>{};

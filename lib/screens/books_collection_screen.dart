@@ -1,17 +1,16 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../constants/book_accent.dart';
 import '../coordinators/book_item_add_coordinator.dart';
 import '../models/book_subcategory.dart';
-import '../widgets/category_hub_header.dart';
-import '../widgets/category_type_hub.dart';
+import '../models/collection_category.dart';
+import '../widgets/app_app_bar.dart';
 import 'book/book_collection_screen.dart';
 import 'book/user_lists_hub_screen.dart';
-import 'book_subcategory_series_screen.dart';
 import 'book_wishlist_tab.dart';
+import 'collection_change_history_screen.dart';
 
-/// Hub découverte Livres (aligné sur jeux de société).
+/// Accueil Livres — entrée directe Collection / Wishlist (comme les jeux).
 class BooksCollectionScreen extends StatefulWidget {
   const BooksCollectionScreen({super.key});
 
@@ -19,177 +18,140 @@ class BooksCollectionScreen extends StatefulWidget {
   State<BooksCollectionScreen> createState() => _BooksCollectionScreenState();
 }
 
-class _BooksCollectionScreenState extends State<BooksCollectionScreen> {
-  static const _accent = BookAccent.primary;
-  static const _tipKey = 'ux_tip_books_hub_v2';
-  final _searchController = TextEditingController();
+class _BooksCollectionScreenState extends State<BooksCollectionScreen>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabs;
 
   @override
   void initState() {
     super.initState();
-    _maybeShowTip();
+    _tabs = TabController(length: 2, vsync: this);
   }
 
   @override
   void dispose() {
-    _searchController.dispose();
+    _tabs.dispose();
     super.dispose();
   }
 
-  Future<void> _maybeShowTip() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool(_tipKey) == true) return;
-    await prefs.setBool(_tipKey, true);
-    if (!mounted) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          content: const Text(
-            'Astuce : recherche « Naruto 1 » ou scanne l\'ISBN d\'un tome.',
-          ),
-          duration: const Duration(seconds: 5),
-        ),
-      );
-    });
-  }
-
   void _openSearch({BookSubcategory? subcategory}) {
-    final q = _searchController.text.trim();
-    BookItemAddCoordinator(context).openSearch(
-      subcategory: subcategory,
-      initialQuery: q.length >= 2 ? q : null,
-    );
+    BookItemAddCoordinator(context).openSearch(subcategory: subcategory);
   }
 
-  void _openCollection() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (ctx) => const BookCollectionScreen(),
-      ),
-    );
-  }
-
-  void _openWishlist() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (ctx) => Scaffold(
-          appBar: AppBar(
-            title: const Text('Wishlist Livres'),
-            backgroundColor: BookAccent.primary,
-            foregroundColor: Colors.white,
-          ),
-          body: const BookWishlistTab(),
-        ),
-      ),
-    );
+  void _scanIsbn() {
+    BookItemAddCoordinator(context).scanIsbn();
   }
 
   void _openLists() {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (ctx) => const UserListsHubScreen(),
-      ),
+      MaterialPageRoute(builder: (_) => const UserListsHubScreen()),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    const accent = BookAccent.primary;
     return Scaffold(
+      appBar: AppAppBar(
+        title: 'Mes livres',
+        backgroundColor: accent,
+        foregroundColor: Colors.white,
+        bottom: TabBar(
+          controller: _tabs,
+          indicatorColor: Colors.white,
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white70,
+          tabs: const [
+            Tab(text: 'Collection'),
+            Tab(text: 'Wishlist'),
+          ],
+        ),
+      ),
       body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const CategoryHubHeader(
-            title: 'Livres',
-            accentColor: _accent,
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: TextField(
-              controller: _searchController,
-              textInputAction: TextInputAction.search,
-              onSubmitted: (_) => _openSearch(),
-              decoration: InputDecoration(
-                hintText: 'Rechercher un livre (ex. « Dune », « One Piece 3 »)',
-                isDense: true,
-                prefixIcon: const Icon(Icons.search, size: 20),
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.arrow_forward),
-                  onPressed: () => _openSearch(),
-                ),
-              ),
-            ),
-          ),
-          Expanded(
-            child: CategoryTypeHub(
-              accentColor: _accent,
-              title: 'Livres',
-              showTitleInHero: false,
-              heroWatermark: Icons.menu_book_rounded,
-              subtitle:
-                  'Manga, BD, romans — couvertures épurées, listes perso.',
-              featuredItem: CategoryTypeHubItem(
-                label: 'Ma collection',
-                description:
-                    'Séries et tomes — possédé, lu, ajout en un tap',
-                icon: Icons.view_module_rounded,
-                color: _accent,
-                onTap: _openCollection,
-              ),
-              items: [
-                for (final sub in BookSubcategory.values)
-                  CategoryTypeHubItem(
-                    label: sub.label,
-                    description: sub.description,
-                    icon: sub.icon,
-                    color: sub.color,
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (ctx) =>
-                              BookSubcategorySeriesScreen(subcategory: sub),
-                        ),
-                      );
-                    },
-                  ),
-                CategoryTypeHubItem(
-                  label: 'Mes listes',
-                  description: 'Listes thématiques · style Letterboxd',
-                  icon: Icons.playlist_play_rounded,
-                  color: const Color(0xFF1B7F79),
-                  onTap: _openLists,
-                ),
-                CategoryTypeHubItem(
-                  label: 'Recherche catalogue',
-                  description: 'Google Books + iTunes · couvertures HD',
-                  icon: Icons.travel_explore,
-                  color: BookAccent.light,
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+            child: Row(
+              children: [
+                _ToolPill(
+                  icon: Icons.auto_awesome,
+                  label: 'Découvrir',
                   onTap: () => _openSearch(),
                 ),
-                CategoryTypeHubItem(
-                  label: 'Scanner ISBN',
-                  description: 'Ajout rapide par code-barres',
-                  icon: Icons.qr_code_scanner,
-                  color: const Color(0xFF256B5C),
-                  onTap: () => BookItemAddCoordinator(context).scanIsbn(),
+                _ToolPill(
+                  icon: Icons.menu_book_outlined,
+                  label: 'Pile à lire',
+                  onTap: () => _tabs.animateTo(0),
                 ),
-                CategoryTypeHubItem(
-                  label: 'Wishlist',
-                  description: 'Livres que tu veux acquérir',
-                  icon: Icons.favorite_outline,
-                  color: Colors.pink.shade300,
-                  onTap: _openWishlist,
+                _ToolPill(
+                  icon: Icons.qr_code_scanner,
+                  label: 'Scanner ISBN',
+                  onTap: _scanIsbn,
+                ),
+                _ToolPill(
+                  icon: Icons.list_alt,
+                  label: 'Mes listes',
+                  onTap: _openLists,
+                ),
+                _ToolPill(
+                  icon: Icons.restore_rounded,
+                  label: 'Modifs',
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const CollectionChangeHistoryScreen(
+                        category: CollectionCategory.book,
+                      ),
+                    ),
+                  ),
                 ),
               ],
             ),
           ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabs,
+              children: const [
+                BookCollectionScreen(embedded: true),
+                BookWishlistTab(),
+              ],
+            ),
+          ),
         ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _openSearch(),
+        backgroundColor: accent,
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.add),
+        label: const Text('Ajouter'),
+      ),
+    );
+  }
+}
+
+class _ToolPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _ToolPill({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: ActionChip(
+        avatar: Icon(icon, size: 18),
+        label: Text(label),
+        visualDensity: VisualDensity.compact,
+        onPressed: onTap,
       ),
     );
   }

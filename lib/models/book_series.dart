@@ -148,9 +148,28 @@ class BookSeriesStats {
   String get ownedLabel =>
       totalSlots > 0 ? '$ownedCount/$totalSlots' : '$ownedCount';
 
-  String get readLabel =>
-      totalSlots > 0 ? '$readCount/$totalSlots' : '$readCount';
+  /// Lu sur le nombre possédé (plus utile que /totalSlots).
+  String get readOwnedLabel =>
+      ownedCount > 0 ? '$readCount/$ownedCount' : '0/0';
 
-  String? get ratingLabel =>
-      displayRating?.toStringAsFixed(1);
+  String get readLabel =>
+      ownedCount > 0 ? readOwnedLabel : (totalSlots > 0 ? '$readCount/$totalSlots' : '$readCount');
+
+  bool get isComplete =>
+      totalSlots > 0 && ownedCount >= totalSlots;
+
+  double get ownedProgress =>
+      totalSlots > 0 ? (ownedCount / totalSlots).clamp(0.0, 1.0) : 0;
+
+  String? get ratingLabel {
+    final r = displayRating;
+    if (r == null) return null;
+    return '★ ${r.toStringAsFixed(1)}';
+  }
+
+  String? get valueLabel {
+    final v = totalUsedValue > 0 ? totalUsedValue : totalNewValue;
+    if (v <= 0) return null;
+    return '~${v.round()} €';
+  }
 }
