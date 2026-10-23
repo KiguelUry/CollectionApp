@@ -14,7 +14,7 @@ abstract final class BookSeriesNormalizer {
     'dragon ball': 42,
     'gannibal': 13,
     'dungeon crawler carl': 7,
-    'kagurabachi': 8,
+    'kagurabachi': 11,
     'boruto': 20,
     'boruto - two blue vortex': 5,
     'boruto: two blue vortex': 5,
@@ -59,6 +59,8 @@ abstract final class BookSeriesNormalizer {
   /// Catégorie préférée pour une série connue (fusion multi-dossiers).
   static BookSubcategory? preferredSubcategory(String seriesName) {
     final key = normalizeKey(seriesName);
+    // Toute série « Thorgal » (Mondes de Thorgal, etc.) → BD.
+    if (key.contains('thorgal')) return BookSubcategory.comic;
     if (knownBdSeries.contains(key) ||
         knownBdSeries.any((k) => key.startsWith(k) || k.startsWith(key))) {
       return BookSubcategory.comic;

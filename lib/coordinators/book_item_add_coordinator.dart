@@ -45,11 +45,19 @@ class BookItemAddCoordinator {
           metadata: BookCatalogService.metadataFromLookup(book),
         );
       },
-      onAddSeries: (name, sub) {
+      onAddSeries: (name, sub, {volumeCount, coversByVolume}) {
         _prepareAdd(
           title: name,
+          imageUrl: coversByVolume?[1],
           subcategory: subcategory ?? sub,
-          metadata: {'series_title': name},
+          metadata: {
+            'series_title': name,
+            if (volumeCount != null) 'estimated_volumes': '$volumeCount',
+            if (coversByVolume != null && coversByVolume.isNotEmpty)
+              'volume_covers_json': coversByVolume.entries
+                  .map((e) => '${e.key}:${e.value}')
+                  .join('|'),
+          },
         );
       },
     );
@@ -448,7 +456,10 @@ class BookItemAddCoordinator {
         },
         subcategory,
       );
-      var estimated = enriched.estimatedTotalVolumes ??
+      var estimated = int.tryParse(
+            metadata?['estimated_volumes']?.toString() ?? '',
+          ) ??
+          enriched.estimatedTotalVolumes ??
           BookSeriesNormalizer.expectedCount(parsed.seriesName!, subcategory);
       estimated ??= await OpenLibraryService.estimateSeriesVolumeCount(
         parsed.seriesName!,
@@ -473,6 +484,24 @@ class BookItemAddCoordinator {
             seriesId: resolved.seriesId,
             imageUrl: imageUrl,
           );
+        }
+        // Couvertures par tome découvertes à la recherche.
+        final coversRaw = metadata?['volume_covers_json']?.toString();
+        if (coversRaw != null && coversRaw.isNotEmpty) {
+          final map = <int, String>{};
+          for (final part in coversRaw.split('|')) {
+            final i = part.indexOf(':');
+            if (i <= 0) continue;
+            final n = int.tryParse(part.substring(0, i));
+            final url = part.substring(i + 1);
+            if (n != null && n > 0 && url.isNotEmpty) map[n] = url;
+          }
+          if (map.isNotEmpty) {
+            await _seriesService.applyVolumeCoversFromMap(
+              seriesId: resolved.seriesId,
+              coverByVolume: map,
+            );
+          }
         }
 
         // Ajout série entière (sans tome précis) → plage possédée + ouverture dossier.

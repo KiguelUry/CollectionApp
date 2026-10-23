@@ -35,8 +35,14 @@ class BookSeries {
 
   bool get isSubArc => parentSeriesId != null;
 
-  /// One-shot uniquement si flag ET pas de multi-tomes attendus.
+  /// One-shot uniquement pour Roman/Autre avec flag explicite et ≤ 1 tome.
+  /// Manga / BD / Comics ne sont JAMAIS « Œuvre unique » par défaut.
   bool get isStandalone {
+    if (subcategory == BookSubcategory.manga ||
+        subcategory == BookSubcategory.comic ||
+        subcategory == BookSubcategory.comics) {
+      return false;
+    }
     if (metadata['is_standalone'] != true) return false;
     final n = expectedVolumeCount;
     return n == null || n <= 1;

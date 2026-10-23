@@ -4,9 +4,8 @@ import '../../constants/book_accent.dart';
 import '../../models/book_subcategory.dart';
 import '../../services/book_catalog_service.dart';
 import '../../services/book_intelligence_service.dart';
-import '../../services/mangadex_service.dart';
 import '../../utils/book_series_normalizer.dart';
-import '../../utils/collection_grid_layout.dart';
+import '../../utils/collection_grid_layout.dart' show CollectionGridLayout;
 import '../../widgets/app_app_bar.dart';
 import '../../widgets/catalog/catalog_item_tile.dart';
 import '../../widgets/ui/empty_state.dart';
@@ -17,7 +16,12 @@ class BookCatalogGridScreen extends StatefulWidget {
   final String? initialQuery;
   final void Function(Map<String, String> book, BookSubcategory sub)?
       onBookSelected;
-  final void Function(String seriesName, BookSubcategory sub)? onAddSeries;
+  final void Function(
+    String seriesName,
+    BookSubcategory sub, {
+    int? volumeCount,
+    Map<int, String>? coversByVolume,
+  })? onAddSeries;
 
   const BookCatalogGridScreen({
     super.key,
@@ -40,10 +44,9 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
   final _publisherController = TextEditingController();
 
   List<EnrichedBookHit> _hits = [];
+  List<SeriesBannerCandidate> _banners = [];
   bool _loading = false;
   bool _searched = false;
-  String? _seriesBannerName;
-  int? _seriesBannerVolumes;
 
   @override
   void initState() {
@@ -85,8 +88,13 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       _searched = true;
     });
 
+    final q = filters.titleQuery.trim().isNotEmpty
+        ? filters.titleQuery.trim()
+        : apiQuery;
+    // Recherche « Titre Tome » pour maximiser les couvertures par numéro.
+    final tomeQuery = q.toLowerCase().contains('tome') ? q : '$q Tome';
     final raw = await BookCatalogService.searchBooks(
-      apiQuery.length >= 2 ? apiQuery : filters.publisherQuery,
+      tomeQuery.length >= 2 ? tomeQuery : filters.publisherQuery,
       subcategory: _sub,
       filters: filters,
     );
@@ -97,56 +105,62 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       filters: filters,
     );
 
-    final q = filters.titleQuery.trim();
-    String? seriesName = q;
-    int? seriesVols = BookSeriesNormalizer.expectedCount(q, _sub);
-    if (_sub == BookSubcategory.manga && seriesVols == null) {
-      final dex = await MangaDexService.lookupManga(q);
-      if (dex != null) {
-        seriesName = dex.title;
-        seriesVols = dex.volumesPublished;
-      }
-    }
-    // Infère le nom de série depuis le meilleur hit.
-    if (enriched.isNotEmpty && enriched.first.parsed.hasSeries) {
-      seriesName = enriched.first.parsed.seriesName;
-      seriesVols ??= enriched.first.estimatedTotalVolumes ??
-          BookSeriesNormalizer.expectedCount(seriesName!, _sub);
-    }
+    var banners = BookIntelligenceService.extractSeriesBanners(
+      enriched,
+      query: q,
+      subcategory: _sub,
+    );
+    // Filet de sécurité : max(dict, max tome dans résultats).
+    banners = [
+      for (final b in banners)
+        SeriesBannerCandidate(
+          name: b.name,
+          volumeCount: () {
+            final dict =
+                BookSeriesNormalizer.expectedCount(b.name, _sub) ?? 0;
+            return dict > b.volumeCount ? dict : b.volumeCount;
+          }(),
+          coversByVolume: b.coversByVolume,
+        ),
+    ];
 
     if (!mounted) return;
     setState(() {
       _hits = enriched;
-      _seriesBannerName =
-          (seriesName != null && seriesName.trim().length >= 2)
-              ? seriesName.trim()
-              : null;
-      _seriesBannerVolumes = seriesVols;
+      _banners = banners;
       _loading = false;
     });
   }
 
-  void _addSeries() {
-    final name = _seriesBannerName;
-    if (name == null) return;
+  void _addSeries(SeriesBannerCandidate banner) {
+    final preferred =
+        BookSeriesNormalizer.preferredSubcategory(banner.name) ?? _sub;
     final cb = widget.onAddSeries;
     if (cb != null) {
-      cb(name, _sub);
+      cb(
+        banner.name,
+        preferred,
+        volumeCount: banner.volumeCount,
+        coversByVolume: banner.coversByVolume,
+      );
       return;
     }
-    // Fallback : sélectionne un hit synthétique série.
     _select(
       EnrichedBookHit(
         raw: {
-          'title': name,
-          'series_title': name,
-          if (_seriesBannerVolumes != null)
-            'estimated_volumes': '$_seriesBannerVolumes',
+          'title': banner.name,
+          'series_title': banner.name,
+          'estimated_volumes': '${banner.volumeCount}',
+          if (banner.coversByVolume[1] != null)
+            'image_url': banner.coversByVolume[1]!,
+          'volume_covers_json': banner.coversByVolume.entries
+              .map((e) => '${e.key}:${e.value}')
+              .join('|'),
         },
-        parsed: BookSeriesNormalizer.parse(name),
-        displayTitle: name,
+        parsed: BookSeriesNormalizer.parse(banner.name),
+        displayTitle: banner.name,
         score: 999,
-        estimatedTotalVolumes: _seriesBannerVolumes,
+        estimatedTotalVolumes: banner.volumeCount,
       ),
     );
   }
@@ -166,26 +180,25 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-          child: SizedBox(
-            height: 40,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
               children: [
                 for (final s in BookSubcategory.filterChips)
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: FilterChip(
-                      label: Text(
-                        s.filterLabel,
-                        style: const TextStyle(fontSize: 12),
-                      ),
+                      avatar: Text(s.filterEmoji),
+                      label: Text(s.label),
                       selected: _sub == s,
                       selectedColor: BookAccent.surface,
+                      showCheckmark: false,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      labelPadding: const EdgeInsets.only(left: 2, right: 8),
                       onSelected: (_) {
                         setState(() => _sub = s);
                         if (_searched) _search();
                       },
-                      showCheckmark: false,
                     ),
                   ),
               ],
@@ -266,6 +279,54 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
     );
   }
 
+  Widget _buildBanner(SeriesBannerCandidate banner) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: Material(
+        color: _accent.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          onTap: () => _addSeries(banner),
+          borderRadius: BorderRadius.circular(14),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              children: [
+                const Text('📚', style: TextStyle(fontSize: 28)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Série : ${banner.name}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                        ),
+                      ),
+                      Text(
+                        '${banner.volumeCount} tomes parus — Ajouter la série',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade400,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                FilledButton(
+                  onPressed: () => _addSeries(banner),
+                  child: const Text('Ajouter'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -304,54 +365,13 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
               ),
             )
           else ...[
-            if (_seriesBannerName != null)
+            if (_banners.isNotEmpty)
               SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                  child: Material(
-                    color: _accent.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(14),
-                    child: InkWell(
-                      onTap: _addSeries,
-                      borderRadius: BorderRadius.circular(14),
-                      child: Padding(
-                        padding: const EdgeInsets.all(14),
-                        child: Row(
-                          children: [
-                            const Text('📚', style: TextStyle(fontSize: 28)),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Série : $_seriesBannerName',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w800,
-                                      fontSize: 15,
-                                    ),
-                                  ),
-                                  Text(
-                                    _seriesBannerVolumes != null
-                                        ? '$_seriesBannerVolumes tomes parus — Ajouter la série'
-                                        : 'Ajouter la série complète',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey.shade400,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            FilledButton(
-                              onPressed: _addSeries,
-                              child: const Text('Ajouter'),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
+                child: Column(
+                  children: [
+                    for (final b in _banners) _buildBanner(b),
+                    const SizedBox(height: 4),
+                  ],
                 ),
               ),
             SliverPadding(
@@ -361,21 +381,24 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
                   context,
                   mobileColumns: 3,
                   childAspectRatio: 0.62,
-                  spacing: 12,
                 ),
                 delegate: SliverChildBuilderDelegate(
-                  (context, i) {
-                    final hit = _hits[i];
+                  (context, index) {
+                    final hit = _hits[index];
                     return CatalogItemTile(
                       name: hit.displayTitle,
+                      subtitle: [
+                        if (hit.author != null && hit.author!.isNotEmpty)
+                          hit.author!,
+                        if (hit.parsed.volumeNumber != null)
+                          'Tome ${hit.parsed.volumeNumber!.round()}',
+                      ].join(' · '),
                       imageUrl: hit.imageUrl,
-                      accent: _accent,
-                      aspectRatio: 2 / 3,
-                      placeholderIcon: Icons.menu_book_rounded,
+                      accent: _sub.color,
+                      aspectRatio: 0.65,
                       highQualityImage: true,
-                      minimalStyle: true,
+                      placeholderIcon: Icons.menu_book_outlined,
                       onTap: () => _select(hit),
-                      onQuickAdd: () => _select(hit),
                     );
                   },
                   childCount: _hits.length,

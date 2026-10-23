@@ -26,6 +26,15 @@ enum BookSubcategory {
         BookSubcategory.other => 'Autre',
       };
 
+  /// Emoji seul (évite le texte tronqué dans les FilterChip étroits).
+  String get filterEmoji => switch (this) {
+        BookSubcategory.manga => '⛩️',
+        BookSubcategory.comic => '💬',
+        BookSubcategory.comics => '🦸',
+        BookSubcategory.novel => '📖',
+        BookSubcategory.other => '📚',
+      };
+
   String get description => switch (this) {
         BookSubcategory.manga => 'Séries, tomes, scan ISBN',
         BookSubcategory.comic => 'BD franco-belge',

@@ -1,8 +1,23 @@
 import '../models/book_subcategory.dart';
+import '../utils/book_series_normalizer.dart';
 import '../utils/book_title_parser.dart';
 import 'anilist_manga_service.dart';
 import 'google_books_service.dart';
+import 'itunes_books_service.dart';
 import 'open_library_service.dart';
+
+/// Bannière série détectée dans les résultats de recherche.
+class SeriesBannerCandidate {
+  final String name;
+  final int volumeCount;
+  final Map<int, String> coversByVolume;
+
+  const SeriesBannerCandidate({
+    required this.name,
+    required this.volumeCount,
+    this.coversByVolume = const {},
+  });
+}
 
 enum BookSearchField { title, author, publisher }
 
@@ -90,7 +105,130 @@ abstract final class BookIntelligenceService {
       });
     }
 
-    return filtered;
+    return dedupeBySeriesVolume(filtered);
+  }
+
+  /// Déduplique par (série, n° tome) — priorise VF + vraie couverture.
+  static List<EnrichedBookHit> dedupeBySeriesVolume(
+    List<EnrichedBookHit> hits,
+  ) {
+    final best = <String, EnrichedBookHit>{};
+    for (final h in hits) {
+      final seriesKey = BookSeriesNormalizer.normalizeKey(
+        h.parsed.seriesName ?? h.displayTitle,
+      );
+      final vol = h.parsed.volumeNumber?.round() ?? 0;
+      final key = '$seriesKey|$vol';
+      final prev = best[key];
+      if (prev == null || _preferHit(h, prev)) {
+        best[key] = h;
+      }
+    }
+    final out = best.values.toList()
+      ..sort((a, b) => b.score.compareTo(a.score));
+    return out;
+  }
+
+  static bool _preferHit(EnrichedBookHit a, EnrichedBookHit b) {
+    final aCover = a.imageUrl != null && a.imageUrl!.isNotEmpty;
+    final bCover = b.imageUrl != null && b.imageUrl!.isNotEmpty;
+    if (aCover != bCover) return aCover;
+    final aTitle = a.displayTitle.toLowerCase();
+    final bTitle = b.displayTitle.toLowerCase();
+    final aVf = aTitle.contains('tome') || aTitle.contains('t.');
+    final bVf = bTitle.contains('tome') || bTitle.contains('t.');
+    final aEn = aTitle.contains('vol.') || aTitle.contains('volume ');
+    final bEn = bTitle.contains('vol.') || bTitle.contains('volume ');
+    if (aVf && !bVf) return true;
+    if (bVf && !aVf) return false;
+    if (!aEn && bEn) return true;
+    if (!bEn && aEn) return false;
+    return a.score >= b.score;
+  }
+
+  /// Regroupe les hits en bannières multi-séries (Boruto / Thorgal…).
+  static List<SeriesBannerCandidate> extractSeriesBanners(
+    List<EnrichedBookHit> hits, {
+    required String query,
+    required BookSubcategory subcategory,
+  }) {
+    final groups = <String, _SeriesAgg>{};
+    for (final h in hits) {
+      final name = (h.parsed.seriesName ?? '').trim();
+      if (name.length < 2) continue;
+      final key = BookSeriesNormalizer.normalizeKey(name);
+      final agg = groups.putIfAbsent(
+        key,
+        () => _SeriesAgg(displayName: name),
+      );
+      if (name.length > agg.displayName.length) agg.displayName = name;
+      final n = h.parsed.volumeNumber?.round();
+      if (n != null && n > 0) {
+        if (n > agg.maxVol) agg.maxVol = n;
+        final img = h.imageUrl;
+        if (img != null && img.isNotEmpty) {
+          agg.covers.putIfAbsent(n, () => img);
+        }
+      }
+      final est = h.estimatedTotalVolumes;
+      if (est != null && est > agg.maxVol) agg.maxVol = est;
+    }
+
+    // Si aucun groupe mais query utile → une bannière depuis le dictionnaire.
+    if (groups.isEmpty && query.trim().length >= 2) {
+      final dict = BookSeriesNormalizer.expectedCount(query, subcategory);
+      final maxFromHits = hits
+          .map((h) => h.parsed.volumeNumber?.round() ?? 0)
+          .fold<int>(0, (a, b) => a > b ? a : b);
+      final count = [
+        dict ?? 0,
+        maxFromHits,
+      ].reduce((a, b) => a > b ? a : b);
+      if (count > 0 || hits.isNotEmpty) {
+        return [
+          SeriesBannerCandidate(
+            name: query.trim(),
+            volumeCount: count > 0 ? count : (dict ?? 1),
+          ),
+        ];
+      }
+      return const [];
+    }
+
+    final qKey = BookSeriesNormalizer.normalizeKey(query);
+    final banners = <SeriesBannerCandidate>[];
+    for (final agg in groups.values) {
+      final dict = BookSeriesNormalizer.expectedCount(
+            agg.displayName,
+            subcategory,
+          ) ??
+          0;
+      final count = [agg.maxVol, dict].reduce((a, b) => a > b ? a : b);
+      if (count < 1 && agg.covers.isEmpty) continue;
+      banners.add(
+        SeriesBannerCandidate(
+          name: agg.displayName,
+          volumeCount: count < 1 ? 1 : count,
+          coversByVolume: Map<int, String>.from(agg.covers),
+        ),
+      );
+    }
+    banners.sort((a, b) {
+      final aq = BookSeriesNormalizer.normalizeKey(a.name).contains(qKey);
+      final bq = BookSeriesNormalizer.normalizeKey(b.name).contains(qKey);
+      if (aq != bq) return aq ? -1 : 1;
+      return b.volumeCount.compareTo(a.volumeCount);
+    });
+    // Garde les séries pertinentes (nom lié à la requête) + top.
+    final relevant = banners.where((b) {
+      final k = BookSeriesNormalizer.normalizeKey(b.name);
+      return qKey.isEmpty ||
+          k.contains(qKey) ||
+          qKey.contains(k) ||
+          k.split(' ').any((p) => p.length >= 4 && qKey.contains(p));
+    }).toList();
+    final use = relevant.isNotEmpty ? relevant : banners;
+    return use.take(6).toList();
   }
 
   static EnrichedBookHit enrichSingle(
@@ -99,16 +237,16 @@ abstract final class BookIntelligenceService {
   ) =>
       _enrich(hit, subcategory);
 
-  /// Requête catalogue pour un tome (ex. « Thorgal 1 »).
+  /// Requête catalogue pour un tome (ex. « Kagurabachi Tome 3 »).
   static String volumeSearchQuery(String seriesName, double volumeNumber) {
     final name = seriesName.trim();
     final vol = volumeNumber == volumeNumber.roundToDouble()
         ? volumeNumber.toInt().toString()
         : volumeNumber.toString();
-    return '$name $vol';
+    return '$name Tome $vol';
   }
 
-  /// Couverture d'un tome via Google Books + Open Library (+ AniList manga).
+  /// Couverture d'un tome via Google Books + iTunes (+ OL / AniList).
   static Future<String?> lookupVolumeCover({
     required String seriesName,
     required double volumeNumber,
@@ -131,6 +269,7 @@ abstract final class BookIntelligenceService {
     final seen = <String>{};
     for (final list in [
       await GoogleBooksService.search(query, maxResults: 12, langRestrict: 'fr'),
+      await ItunesBooksService.search(query),
       await OpenLibraryService.searchBooks(query, subcategory: subcategory),
     ]) {
       for (final hit in list) {
@@ -289,4 +428,12 @@ abstract final class BookIntelligenceService {
     if (raw == null || raw.isEmpty) return null;
     return int.tryParse(raw.replaceAll(RegExp(r'[^\d]'), ''));
   }
+}
+
+class _SeriesAgg {
+  String displayName;
+  int maxVol = 0;
+  final Map<int, String> covers = {};
+
+  _SeriesAgg({required this.displayName});
 }

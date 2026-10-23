@@ -61,14 +61,29 @@ void main() {
 
   test('les liens boutiques pointent vers des recherches réelles', () {
     final casedepart = BoardgameMarketService.caseDepartSearchUrl('Pandemic');
-    expect(casedepart, contains('google.com/search'));
-    expect(casedepart, contains('casedepart.be'));
-    expect(casedepart, isNot(contains('btnI')));
-    expect(casedepart, isNot(contains('controller=search')));
+    expect(casedepart, contains('casedepart.be/recherche'));
+    expect(casedepart, contains('controller=search'));
+    expect(casedepart, contains('s=Pandemic'));
+    expect(casedepart, isNot(contains('google.com')));
 
     final zebre = BoardgameMarketService.zebreAPoisSearchUrl('Sea Salt & Paper');
-    expect(zebre, contains('leoproductsearch'));
-    expect(zebre, contains('search_query=Sea+Salt+Paper'));
+    expect(zebre, contains('zebreapois.be/recherche'));
+    expect(zebre, contains('controller=search'));
+    expect(zebre, contains('Sea'));
+
+    final accent = BoardgameMarketService.caseDepartSearchUrl('Le Château Blanc');
+    expect(accent, contains('Chateau'));
+    expect(accent.toLowerCase(), isNot(contains('ch+teau')));
+    expect(accent, isNot(contains('ch%20teau')));
+
+    expect(
+      BoardgameMarketService.maisonDuCormoranSearchUrl('Catan'),
+      contains('lamaisonducormoran.be'),
+    );
+    expect(
+      BoardgameMarketService.amazonFrSearchUrl('Catan'),
+      contains('amazon.fr/s'),
+    );
 
     expect(
       BoardgameMarketService.okkazeoSearchUrl('Catan'),

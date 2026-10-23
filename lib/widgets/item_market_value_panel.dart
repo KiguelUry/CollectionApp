@@ -443,7 +443,12 @@ class _ShopSearchLinks extends StatelessWidget {
     final shops = <(String, String)>[
       ('Case Départ', BoardgameMarketService.caseDepartSearchUrl(title)),
       ('Le Zèbre à Pois', BoardgameMarketService.zebreAPoisSearchUrl(title)),
+      (
+        'Maison du Cormoran',
+        BoardgameMarketService.maisonDuCormoranSearchUrl(title),
+      ),
       ('Philibert', BoardgameMarketService.philibertSearchUrl(title)),
+      ('Amazon', BoardgameMarketService.amazonFrSearchUrl(title)),
       ('Fnac', BoardgameMarketService.fnacSearchUrl(title)),
     ];
     final second = <(String, String)>[

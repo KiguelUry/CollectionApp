@@ -11,6 +11,7 @@ import '../services/bgg_service.dart';
 import '../services/collection_refresh.dart';
 import '../utils/wishlist_market_metadata.dart';
 import '../utils/boardgame_language.dart';
+import '../utils/shop_query_normalize.dart';
 
 /// Prix neufs (BoardGamePrices) + estimation occasion + enrichissement metadata.
 class BoardgameMarketService {
@@ -343,29 +344,36 @@ class BoardgameMarketService {
   }
 
   static String caseDepartSearchUrl(String title) {
-    final q = Uri.encodeQueryComponent('site:casedepart.be ${title.trim()}');
-    return 'https://www.google.com/search?q=$q';
+    final q = encodeShopQuery(title);
+    return 'https://www.casedepart.be/recherche?controller=search&s=$q';
   }
 
   static String zebreAPoisSearchUrl(String title) {
-    final cleaned = title
-        .replaceAll(RegExp(r'[&:;,.!?/\\()\[\]"“”‘’]+'), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-    return 'https://www.lezap.be/index.php?fc=module&module=leoproductsearch&controller=productsearch&search_query=${Uri.encodeQueryComponent(cleaned)}';
+    final q = encodeShopQuery(title);
+    return 'https://www.zebreapois.be/recherche?controller=search&s=$q';
+  }
+
+  static String maisonDuCormoranSearchUrl(String title) {
+    final q = encodeShopQuery(title);
+    return 'https://www.lamaisonducormoran.be/?s=$q&post_type=product';
+  }
+
+  static String amazonFrSearchUrl(String title) {
+    final q = encodeShopQuery('${normalizeShopQuery(title)} jeu de societe');
+    return 'https://www.amazon.fr/s?k=$q';
   }
 
   static String philibertSearchUrl(String title) =>
-      'https://www.philibertnet.com/fr/recherche?search_query=${Uri.encodeQueryComponent(title.trim())}';
+      'https://www.philibertnet.com/fr/recherche?search_query=${encodeShopQuery(title)}';
 
   static String fnacSearchUrl(String title) =>
-      'https://www.fnac.com/SearchResult/ResultList.aspx?Search=${Uri.encodeQueryComponent(title.trim())}';
+      'https://www.fnac.com/SearchResult/ResultList.aspx?Search=${encodeShopQuery(title)}';
 
   static String okkazeoSearchUrl(String title) =>
-      'https://www.okkazeo.com/jeux/resultats?rech_nom=${Uri.encodeQueryComponent(title.trim())}';
+      'https://www.okkazeo.com/jeux/resultats?rech_nom=${encodeShopQuery(title)}';
 
   static String leboncoinSearchUrl(String title) {
-    final q = Uri.encodeQueryComponent(title.trim());
+    final q = encodeShopQuery(title);
     return 'https://www.leboncoin.fr/recherche?text=$q&category=25';
   }
 
@@ -400,7 +408,10 @@ class BoardgameMarketService {
     if (host.contains('cultura')) return 'Cultura';
     if (host.contains('fantasy-inspirations')) return 'Fantasy Insp.';
     if (host.contains('casedepart')) return 'Case Départ';
-    if (host.contains('lezebreapois')) return 'Le Zèbre à Pois';
+    if (host.contains('zebreapois') || host.contains('lezap')) {
+      return 'Le Zèbre à Pois';
+    }
+    if (host.contains('lamaisonducormoran')) return 'Maison du Cormoran';
     if (host.contains('okkazeo')) return 'Okkazeo';
     if (host.contains('geekdo') || host.contains('boardgamegeek')) {
       return 'GeekMarket';

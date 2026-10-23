@@ -12,12 +12,13 @@ import '../services/books_collection_cache.dart';
 import '../widgets/app_app_bar.dart';
 import '../widgets/book_manual_volume_dialog.dart';
 import '../widgets/collection_cover_image.dart';
+import '../widgets/precision_star_rating_bar.dart';
 
 enum _VolumeFilter { all, owned, missing, toRead, wishlist }
 
-enum _MatrixView { collection, heatmap, covers }
+enum _HeatColorMode { status, rating }
 
-/// Dossier série — matrice SeriesGraph + tiroir tome + UI optimistic.
+/// Dossier série — mini-heatmap + grille de couvertures unifiée.
 class BookSeriesDetailScreen extends StatefulWidget {
   final String seriesId;
 
@@ -29,14 +30,17 @@ class BookSeriesDetailScreen extends StatefulWidget {
 
 class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   final _service = BookSeriesService();
+  final _scroll = ScrollController();
+  final _slotKeys = <String, GlobalKey>{};
   bool _loading = true;
   BookSeries? _series;
   BookSeriesStats? _stats;
   List<BookVolumeSlot> _slots = [];
   _VolumeFilter _filter = _VolumeFilter.all;
-  _MatrixView _view = _MatrixView.collection;
+  _HeatColorMode _heatMode = _HeatColorMode.status;
   bool _quickTap = false;
   String? _expandedVolumeId;
+  bool _refreshingPubs = false;
 
   @override
   void initState() {
@@ -44,12 +48,20 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
   Future<void> _load({bool silent = false}) async {
     if (!silent) setState(() => _loading = true);
     try {
-      final series = await _service.fetchSeriesById(widget.seriesId);
+      var series = await _service.fetchSeriesById(widget.seriesId);
       if (series == null) throw Exception('Série introuvable');
       await _service.dedupeVolumeItems(series.id);
+      // Force Thorgal → BD + compte réaliste si sous-estimé.
+      series = await _service.ensureRealisticVolumeCount(series);
       final volumes = await _service.fetchVolumes(series.id);
       final items = await _service.fetchSeriesItems(series.id);
       final stats = _service.computeStats(
@@ -79,9 +91,9 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
       // Couvertures en arrière-plan (ne bloque pas).
       Future(() async {
         final n = await _service.enrichMissingVolumeCovers(
-          series: series,
+          series: series!,
           volumes: volumes,
-          maxLookups: 8,
+          maxLookups: 12,
         );
         if (n > 0 && mounted) _load(silent: true);
       });
@@ -89,6 +101,41 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
       if (!mounted) return;
       setState(() => _loading = false);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  Future<void> _refreshPublications() async {
+    if (_series == null || _refreshingPubs) return;
+    setState(() => _refreshingPubs = true);
+    try {
+      await _service.refreshPublications(_series!);
+      if (mounted) await _load(silent: true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Parutions actualisées')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _refreshingPubs = false);
+    }
+  }
+
+  void _scrollToSlot(BookVolumeSlot slot) {
+    setState(() => _expandedVolumeId = slot.volume.id);
+    final key = _slotKeys[slot.volume.id];
+    final ctx = key?.currentContext;
+    if (ctx != null) {
+      Scrollable.ensureVisible(
+        ctx,
+        duration: const Duration(milliseconds: 280),
+        alignment: 0.2,
+      );
     }
   }
 
@@ -441,19 +488,28 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
           PopupMenuButton<String>(
             onSelected: (v) async {
               if (v == 'count') await _editExpectedCount();
+              if (v == 'refresh') await _refreshPublications();
               if (v == 'cleanup') await _cleanupVolumes();
               if (v == 'delete') await _confirmDelete(series);
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(
+            itemBuilder: (_) => [
+              const PopupMenuItem(
                 value: 'count',
                 child: Text('Ajuster le nombre de tomes'),
               ),
               PopupMenuItem(
+                value: 'refresh',
+                child: Text(
+                  _refreshingPubs
+                      ? 'Actualisation…'
+                      : '🔄 Actualiser les parutions',
+                ),
+              ),
+              const PopupMenuItem(
                 value: 'cleanup',
                 child: Text('🧹 Réinitialiser / Nettoyer les tomes'),
               ),
-              PopupMenuItem(
+              const PopupMenuItem(
                 value: 'delete',
                 child: Text('Supprimer la série'),
               ),
@@ -462,19 +518,19 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: _load,
+        onRefresh: () => _load(silent: true),
         color: accent,
         child: ListView(
+          controller: _scroll,
           padding: const EdgeInsets.only(bottom: 32),
           children: [
             _buildHero(series, stats, accent),
             _buildFilters(accent),
             _buildToolbar(accent),
-            _buildViewSwitch(accent),
-            if (_view == _MatrixView.heatmap) _buildHeatLegend(),
+            _buildMiniHeatmap(display, accent),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: _buildMatrix(display, accent),
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: _buildCoverGrid(display, accent),
             ),
             if (expanded != null) _buildVolumeDrawer(expanded, accent),
           ],
@@ -592,6 +648,20 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                         visualDensity: VisualDensity.compact,
                       ),
                     ),
+                    OutlinedButton.icon(
+                      onPressed: _refreshingPubs ? null : _refreshPublications,
+                      icon: _refreshingPubs
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.sync, size: 16),
+                      label: const Text('Parutions'),
+                      style: OutlinedButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
                   ],
                 ),
               ],
@@ -662,52 +732,89 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     );
   }
 
-  Widget _buildViewSwitch(Color accent) {
+  Widget _buildMiniHeatmap(List<BookVolumeSlot> slots, Color accent) {
+    if (slots.isEmpty) return const SizedBox.shrink();
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-      child: SegmentedButton<_MatrixView>(
-        segments: const [
-          ButtonSegment(
-            value: _MatrixView.collection,
-            label: Text('📦 Grille'),
-            icon: Icon(Icons.grid_view, size: 16),
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                'Frise',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12,
+                  color: Colors.grey.shade400,
+                ),
+              ),
+              const Spacer(),
+              SegmentedButton<_HeatColorMode>(
+                style: ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                segments: const [
+                  ButtonSegment(
+                    value: _HeatColorMode.status,
+                    label: Text('Statut', style: TextStyle(fontSize: 11)),
+                  ),
+                  ButtonSegment(
+                    value: _HeatColorMode.rating,
+                    label: Text('Notes /10', style: TextStyle(fontSize: 11)),
+                  ),
+                ],
+                selected: {_heatMode},
+                onSelectionChanged: (s) => setState(() => _heatMode = s.first),
+              ),
+            ],
           ),
-          ButtonSegment(
-            value: _MatrixView.heatmap,
-            label: Text('⭐ Notes'),
-            icon: Icon(Icons.grid_on, size: 16),
-          ),
-          ButtonSegment(
-            value: _MatrixView.covers,
-            label: Text('🖼️ Couv.'),
-            icon: Icon(Icons.image, size: 16),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 4,
+            runSpacing: 4,
+            children: [
+              for (final slot in slots)
+                SizedBox(
+                  width: 36,
+                  height: 36,
+                  child: Material(
+                    color: _heatMode == _HeatColorMode.rating
+                        ? _ratingColor(slot.item?.rating)
+                        : _statusColor(slot),
+                    borderRadius: BorderRadius.circular(6),
+                    child: InkWell(
+                      onTap: () => _scrollToSlot(slot),
+                      borderRadius: BorderRadius.circular(6),
+                      child: Center(
+                        child: Text(
+                          'T${slot.volume.displayNumber}',
+                          style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ],
-        selected: {_view},
-        onSelectionChanged: (s) => setState(() => _view = s.first),
       ),
     );
   }
 
-  Widget _buildHeatLegend() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 4,
-        children: const [
-          _LegendDot(color: Color(0xFF2E7D32), label: 'Excellent 9.0+'),
-          _LegendDot(color: Color(0xFF66BB6A), label: 'Très bon 8.0+'),
-          _LegendDot(color: Color(0xFFFFD54F), label: 'Bon 6.0+'),
-          _LegendDot(color: Color(0xFFFF9800), label: 'Moyen 4.0+'),
-          _LegendDot(color: Color(0xFFE53935), label: 'Faible <4'),
-          _LegendDot(color: Color(0xFF424242), label: 'Non noté'),
-        ],
-      ),
-    );
+  Color _statusColor(BookVolumeSlot slot) {
+    if (_slotRead(slot) && _slotOwned(slot)) return const Color(0xFF2E7D32);
+    if (_slotOwned(slot)) return const Color(0xFF00897B);
+    if (_slotWish(slot)) return const Color(0xFF7E57C2);
+    return const Color(0xFF2A2A2A);
   }
 
-  Widget _buildMatrix(List<BookVolumeSlot> slots, Color accent) {
+  Widget _buildCoverGrid(List<BookVolumeSlot> slots, Color accent) {
     if (slots.isEmpty) {
       return Padding(
         padding: const EdgeInsets.all(24),
@@ -719,154 +826,189 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
       );
     }
 
-    if (_view == _MatrixView.covers) {
-      return GridView.builder(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        itemCount: slots.length,
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 4,
-          mainAxisSpacing: 8,
-          crossAxisSpacing: 8,
-          childAspectRatio: 0.62,
-        ),
-        itemBuilder: (ctx, i) {
-          final slot = slots[i];
-          final owned = _slotOwned(slot);
-          final read = _slotRead(slot);
-          return InkWell(
-            onTap: () => _onCellTap(slot),
-            borderRadius: BorderRadius.circular(8),
-            child: Column(
-              children: [
-                Expanded(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Builder(
-                      builder: (context) {
-                        final image = slot.volume.coverUrl != null
-                            ? CollectionCoverImage(
-                                url: slot.volume.coverUrl!,
-                                bookCover: true,
-                                fit: BoxFit.cover,
-                              )
-                            : ColoredBox(
-                                color: Colors.grey.shade800,
-                                child: Center(
-                                  child: Text(
-                                    'T${slot.volume.displayNumber}',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              );
-                        if (owned) return image;
-                        return ColorFiltered(
-                          colorFilter: const ColorFilter.matrix(<double>[
-                            0.3, 0.4, 0.05, 0, 0,
-                            0.3, 0.4, 0.05, 0, 0,
-                            0.3, 0.4, 0.05, 0, 0,
-                            0, 0, 0, 0.5, 0,
-                          ]),
-                          child: image,
-                        );
-                      },
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.home,
-                      size: 12,
-                      color: owned ? accent : Colors.grey,
-                    ),
-                    const SizedBox(width: 4),
-                    Icon(
-                      Icons.visibility,
-                      size: 12,
-                      color: read ? Colors.amber : Colors.grey,
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          );
-        },
-      );
-    }
-
-    // Grille collection / heatmap : 10 colonnes (dizaines).
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       itemCount: slots.length,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 10,
-        mainAxisSpacing: 4,
-        crossAxisSpacing: 4,
-        childAspectRatio: 1,
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 155,
+        childAspectRatio: 0.62,
+        mainAxisSpacing: 12,
+        crossAxisSpacing: 12,
       ),
       itemBuilder: (ctx, i) {
         final slot = slots[i];
         final owned = _slotOwned(slot);
         final read = _slotRead(slot);
-        final wish = _slotWish(slot);
-        final selected = _expandedVolumeId == slot.volume.id;
-        Color bg;
-        if (_view == _MatrixView.heatmap) {
-          bg = _ratingColor(slot.item?.rating);
-        } else if (read && owned) {
-          bg = const Color(0xFF2E7D32);
-        } else if (owned) {
-          bg = const Color(0xFF00897B);
-        } else if (wish) {
-          bg = const Color(0xFF7E57C2);
-        } else {
-          bg = const Color(0xFF2A2A2A);
-        }
         final rating = slot.item?.rating;
-        return Material(
-          color: bg,
-          borderRadius: BorderRadius.circular(6),
-          child: InkWell(
-            onTap: () => _onCellTap(slot),
-            borderRadius: BorderRadius.circular(6),
-            child: Container(
-              decoration: selected
-                  ? BoxDecoration(
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: Colors.white, width: 2),
-                    )
-                  : null,
-              alignment: Alignment.center,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    'T${slot.volume.displayNumber}',
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w800,
-                      color: owned || wish || _view == _MatrixView.heatmap
-                          ? Colors.white
-                          : Colors.white54,
-                    ),
+        final onTen = rating == null
+            ? null
+            : (rating <= 5.0 ? rating * 2 : rating);
+        final key = _slotKeys.putIfAbsent(slot.volume.id, GlobalKey.new);
+        final coverUrl = slot.volume.coverUrl ?? slot.item?.imageUrl;
+
+        return KeyedSubtree(
+          key: key,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () => _onCellTap(slot),
+              borderRadius: BorderRadius.circular(10),
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: owned
+                        ? const Color(0xFF26A69A)
+                        : Colors.transparent,
+                    width: owned ? 2 : 0,
                   ),
-                  if (_view == _MatrixView.heatmap && rating != null)
-                    Text(
-                      (rating <= 5.0 ? rating * 2 : rating)
-                          .toStringAsFixed(1),
-                      style: const TextStyle(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Opacity(
+                      opacity: owned ? 1 : 0.45,
+                      child: coverUrl != null && coverUrl.isNotEmpty
+                          ? CollectionCoverImage(
+                              url: coverUrl,
+                              bookCover: true,
+                              fit: BoxFit.cover,
+                            )
+                          : ColoredBox(
+                              color: Colors.grey.shade800,
+                              child: Center(
+                                child: Text(
+                                  'T${slot.volume.displayNumber}',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 18,
+                                  ),
+                                ),
+                              ),
+                            ),
+                    ),
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: Container(
+                        padding: const EdgeInsets.fromLTRB(6, 18, 6, 6),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Colors.transparent,
+                              Colors.black.withValues(alpha: 0.85),
+                            ],
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Tome ${slot.volume.displayNumber}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 12,
+                                color: Colors.white,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            if (!owned)
+                              FilledButton(
+                                onPressed: () => _toggleOwned(slot),
+                                style: FilledButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                  ),
+                                  minimumSize: const Size(0, 28),
+                                ),
+                                child: const Text(
+                                  '+ Possédé',
+                                  style: TextStyle(fontSize: 11),
+                                ),
+                              )
+                            else
+                              Wrap(
+                                spacing: 4,
+                                runSpacing: 4,
+                                children: [
+                                  InkWell(
+                                    onTap: () => _toggleOwned(slot),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 2,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF26A69A),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: const Text(
+                                        '✓ Possédé',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w700,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  InkWell(
+                                    onTap: () => _toggleRead(slot),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 2,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: read
+                                            ? Colors.amber.shade800
+                                            : Colors.black54,
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        read ? '👁️ Lu' : '👁️ Lu',
+                                        style: const TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w700,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  if (onTen != null)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 2,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black54,
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        '★ ${onTen.toStringAsFixed(1)}',
+                                        style: const TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w700,
+                                          color: Colors.amber,
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                          ],
+                        ),
                       ),
                     ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -959,31 +1101,21 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      const Text('Note /10 : ', style: TextStyle(fontSize: 12)),
-                      for (var i = 1; i <= 5; i++)
-                        IconButton(
-                          visualDensity: VisualDensity.compact,
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(
-                            minWidth: 28,
-                            minHeight: 28,
-                          ),
-                          icon: Icon(
-                            ((slot.item?.rating ?? 0) > 5
-                                        ? (slot.item!.rating! / 2)
-                                        : (slot.item?.rating ?? 0)) >=
-                                    i
-                                ? Icons.star
-                                : Icons.star_border,
-                            size: 20,
-                            color: Colors.amber,
-                          ),
-                          onPressed: () =>
-                              _setVolumeRating(slot, (i * 2).toDouble()),
-                        ),
-                    ],
+                  Text(
+                    'Note /10',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade400,
+                    ),
+                  ),
+                  PrecisionStarRatingBar(
+                    starSize: 22,
+                    rating: () {
+                      final r = slot.item?.rating;
+                      if (r == null) return 0.0;
+                      return (r <= 5.0 ? r * 2 : r).toDouble();
+                    }(),
+                    onChanged: (v) => _setVolumeRating(slot, v),
                   ),
                   TextButton.icon(
                     onPressed: () => _setSeriesCoverFrom(slot),
@@ -1063,25 +1195,3 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   }
 }
 
-class _LegendDot extends StatelessWidget {
-  final Color color;
-  final String label;
-
-  const _LegendDot({required this.color, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 10,
-          height: 10,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        ),
-        const SizedBox(width: 4),
-        Text(label, style: const TextStyle(fontSize: 10)),
-      ],
-    );
-  }
-}

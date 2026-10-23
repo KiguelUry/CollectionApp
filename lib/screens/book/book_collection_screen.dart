@@ -90,16 +90,20 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
   }
 
   Future<void> _load({bool silent = false}) async {
-    if (!silent) setState(() => _loading = true);
+    // N'affiche le spinner que s'il n'y a rien à montrer.
+    if (!silent && _entries.isEmpty) {
+      setState(() => _loading = true);
+    }
     try {
-      // Migration lourde UNE SEULE fois (flag SharedPreferences).
-      await BooksMigrationService.runIfNeeded();
+      // Migration en arrière-plan — ne bloque jamais le premier paint.
+      // ignore: unawaited_futures
+      BooksMigrationService.runIfNeeded();
 
-      final seriesList = await _service.fetchAllRootSeries();
+      final bundle = await _service.fetchCollectionBundle();
       final entries = <_SeriesEntry>[];
-      for (final series in seriesList) {
-        final volumes = await _service.fetchVolumes(series.id);
-        final items = await _service.fetchSeriesItems(series.id);
+      for (final series in bundle.series) {
+        final volumes = bundle.volumesBySeries[series.id] ?? const [];
+        final items = bundle.itemsBySeries[series.id] ?? const [];
         final stats = _service.computeStats(
           series: series,
           volumes: volumes,
@@ -134,26 +138,43 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
           _loading = false;
         });
       }
-      // Couvertures manquantes en arrière-plan (sans relancer migration).
-      final needCover = entries
-          .where((e) =>
-              e.series.coverUrl == null || e.series.coverUrl!.isEmpty)
-          .take(3)
-          .toList();
-      if (needCover.isNotEmpty) {
-        Future(() async {
-          var any = false;
-          for (final e in needCover) {
-            final n = await _service.enrichMissingVolumeCovers(
-              series: e.series,
-              volumes: e.volumes,
-              maxLookups: 2,
-            );
-            if (n > 0) any = true;
-          }
-          if (any && mounted) _load(silent: true);
-        });
-      }
+      // Enrichissements réseau non-bloquants (couvertures + faux one-shots).
+      Future(() async {
+        var any = false;
+        final undercounted = entries
+            .where(
+              (e) =>
+                  !e.series.isStandalone &&
+                  (e.series.expectedVolumeCount ?? e.stats.totalSlots) <= 1 &&
+                  (e.series.subcategory == BookSubcategory.manga ||
+                      e.series.subcategory == BookSubcategory.comic ||
+                      e.series.subcategory == BookSubcategory.comics ||
+                      e.series.name.toLowerCase().contains('dungeon crawler')),
+            )
+            .take(4)
+            .toList();
+        for (final e in undercounted) {
+          final before = e.series.expectedVolumeCount;
+          final updated = await _service.ensureRealisticVolumeCount(e.series);
+          if (updated.expectedVolumeCount != before) any = true;
+        }
+        final needCover = entries
+            .where(
+              (e) =>
+                  e.series.coverUrl == null || e.series.coverUrl!.isEmpty,
+            )
+            .take(3)
+            .toList();
+        for (final e in needCover) {
+          final n = await _service.enrichMissingVolumeCovers(
+            series: e.series,
+            volumes: e.volumes,
+            maxLookups: 2,
+          );
+          if (n > 0) any = true;
+        }
+        if (any && mounted) _load(silent: true);
+      });
     } catch (e) {
       if (mounted) {
         setState(() => _loading = false);
@@ -375,6 +396,8 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
                       label: const Text('Tous'),
                       selected: _filterSub == null,
                       selectedColor: BookAccent.surface,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      labelPadding: const EdgeInsets.symmetric(horizontal: 8),
                       onSelected: (_) => setState(() => _filterSub = null),
                     ),
                     const SizedBox(width: 8),
@@ -382,9 +405,15 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
                       Padding(
                         padding: const EdgeInsets.only(right: 8),
                         child: FilterChip(
-                          label: Text(sub.filterLabel),
+                          avatar: Text(sub.filterEmoji),
+                          label: Text(sub.label),
                           selected: _filterSub == sub,
                           selectedColor: BookAccent.surface,
+                          showCheckmark: false,
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          labelPadding:
+                              const EdgeInsets.only(left: 2, right: 8),
                           onSelected: (_) =>
                               setState(() => _filterSub = sub),
                         ),

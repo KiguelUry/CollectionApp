@@ -47,15 +47,19 @@ class _BookSubcategorySeriesScreenState
         subcategory: widget.subcategory,
         rootsOnly: true,
       );
+      final ids = series.map((s) => s.id).toList();
       final statsMap = <String, BookSeriesStats>{};
-      for (final s in series) {
-        final volumes = await _service.fetchVolumes(s.id);
-        final items = await _service.fetchSeriesItems(s.id);
-        statsMap[s.id] = _service.computeStats(
-          series: s,
-          volumes: volumes,
-          items: items,
-        );
+      if (ids.isNotEmpty) {
+        final bundle = await _service.fetchCollectionBundle();
+        for (final s in series) {
+          final volumes = bundle.volumesBySeries[s.id] ?? const [];
+          final items = bundle.itemsBySeries[s.id] ?? const [];
+          statsMap[s.id] = _service.computeStats(
+            series: s,
+            volumes: volumes,
+            items: items,
+          );
+        }
       }
       final unassigned = await _service.fetchUnassignedBooks(widget.subcategory);
       if (mounted) {

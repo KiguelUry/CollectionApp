@@ -8,6 +8,7 @@ import '../models/collection_category.dart';
 import '../utils/book_series_normalizer.dart';
 import '../utils/book_title_parser.dart';
 import 'anilist_manga_service.dart';
+import 'book_catalog_service.dart';
 import 'book_intelligence_service.dart';
 import 'mangadex_service.dart';
 import 'open_library_service.dart';
@@ -114,6 +115,161 @@ class BookSeriesService {
     return List<Map<String, dynamic>>.from(rows)
         .map(BookVolume.fromJson)
         .toList();
+  }
+
+  /// Charge séries + volumes + items en 3 requêtes (plus de N+1).
+  Future<
+      ({
+        List<BookSeries> series,
+        Map<String, List<BookVolume>> volumesBySeries,
+        Map<String, List<CollectionItem>> itemsBySeries,
+      })> fetchCollectionBundle() async {
+    final series = await fetchAllRootSeries();
+    if (series.isEmpty) {
+      return (
+        series: series,
+        volumesBySeries: <String, List<BookVolume>>{},
+        itemsBySeries: <String, List<CollectionItem>>{},
+      );
+    }
+    final ids = series.map((s) => s.id).toList();
+
+    final volRows = await _client
+        .from('book_volumes')
+        .select()
+        .inFilter('series_id', ids)
+        .order('sort_index');
+    final volumesBySeries = <String, List<BookVolume>>{};
+    for (final row in List<Map<String, dynamic>>.from(volRows)) {
+      final v = BookVolume.fromJson(row);
+      volumesBySeries.putIfAbsent(v.seriesId, () => []).add(v);
+    }
+
+    final itemRows = await _client
+        .from('collection_items')
+        .select()
+        .eq('category', 'book')
+        .inFilter('series_id', ids);
+    final itemsBySeries = <String, List<CollectionItem>>{};
+    for (final row in List<Map<String, dynamic>>.from(itemRows)) {
+      final item = CollectionItem.fromJson(row);
+      if (item.addedBy != _userId && item.locationUserId != _userId) {
+        continue;
+      }
+      final sid = item.seriesId;
+      if (sid == null) continue;
+      itemsBySeries.putIfAbsent(sid, () => []).add(item);
+    }
+
+    return (
+      series: series,
+      volumesBySeries: volumesBySeries,
+      itemsBySeries: itemsBySeries,
+    );
+  }
+
+  /// Applique les couvertures découvertes en recherche (série → tome → url).
+  Future<int> applyVolumeCoversFromMap({
+    required String seriesId,
+    required Map<int, String> coverByVolume,
+  }) async {
+    if (coverByVolume.isEmpty) return 0;
+    final volumes = await fetchVolumes(seriesId);
+    var n = 0;
+    for (final v in volumes) {
+      final num = v.volumeNumber.round();
+      final url = coverByVolume[num];
+      if (url == null || url.isEmpty) continue;
+      if (v.coverUrl != null && v.coverUrl!.isNotEmpty) continue;
+      await setVolumeCoverUrl(v.id, url);
+      n++;
+    }
+    return n;
+  }
+
+  /// Met à jour expected_volume_count si de nouveaux tomes sont détectés.
+  Future<BookSeries?> bumpExpectedCountIfHigher(
+    BookSeries series,
+    int candidate,
+  ) async {
+    if (candidate < 1) return series;
+    final cur = series.expectedVolumeCount ?? 0;
+    if (candidate <= cur) return series;
+    await ensureVolumeSlots(series.id, candidate);
+    final updated = series.copyWith(expectedVolumeCount: candidate);
+    await updateSeries(updated);
+    return updated;
+  }
+
+  /// Interroge Google Books / iTunes (« [série] Tome ») pour nouveaux tomes + couvs.
+  Future<BookSeries> refreshPublications(BookSeries series) async {
+    final query = '${series.name.trim()} Tome';
+    final raw = await BookCatalogService.searchBooks(
+      query,
+      subcategory: series.subcategory,
+      filters: BookSearchFilters(titleQuery: series.name),
+    );
+    final hits = BookIntelligenceService.dedupeBySeriesVolume(
+      BookIntelligenceService.enrichAndRank(
+        raw,
+        subcategory: series.subcategory,
+        filters: BookSearchFilters(titleQuery: series.name),
+      ),
+    );
+    final covers = <int, String>{};
+    var maxVol = series.expectedVolumeCount ?? 0;
+    final dict = BookSeriesNormalizer.expectedCount(
+          series.name,
+          series.subcategory,
+        ) ??
+        0;
+    if (dict > maxVol) maxVol = dict;
+    for (final h in hits) {
+      final n = h.parsed.volumeNumber?.round();
+      if (n != null && n > 0) {
+        if (n > maxVol) maxVol = n;
+        final img = h.imageUrl;
+        if (img != null && img.isNotEmpty) {
+          covers.putIfAbsent(n, () => img);
+        }
+      }
+      final est = h.estimatedTotalVolumes;
+      if (est != null && est > maxVol) maxVol = est;
+    }
+    var updated = series;
+    if (maxVol > (series.expectedVolumeCount ?? 0)) {
+      updated = (await bumpExpectedCountIfHigher(series, maxVol)) ?? series;
+    }
+    // Force Thorgal → BD.
+    final preferred = BookSeriesNormalizer.preferredSubcategory(updated.name);
+    if (preferred != null && preferred != updated.subcategory) {
+      updated = updated.copyWith(subcategory: preferred);
+      await updateSeries(updated);
+    }
+    if (covers.isNotEmpty) {
+      await applyVolumeCoversFromMap(
+        seriesId: updated.id,
+        coverByVolume: covers,
+      );
+    }
+    return (await fetchSeriesById(updated.id)) ?? updated;
+  }
+
+  /// Si manga/BD/comics (ou roman multi) a ≤1 tome déclaré, sonde le catalogue.
+  Future<BookSeries> ensureRealisticVolumeCount(BookSeries series) async {
+    final preferred = BookSeriesNormalizer.preferredSubcategory(series.name);
+    var cur = series;
+    if (preferred != null && preferred != cur.subcategory) {
+      cur = cur.copyWith(subcategory: preferred);
+      await updateSeries(cur);
+    }
+    final isSerial = cur.subcategory == BookSubcategory.manga ||
+        cur.subcategory == BookSubcategory.comic ||
+        cur.subcategory == BookSubcategory.comics ||
+        BookSeriesNormalizer.expectedCount(cur.name, cur.subcategory) != null;
+    if (!isSerial) return cur;
+    if ((cur.expectedVolumeCount ?? 0) > 1) return cur;
+    return refreshPublications(cur);
   }
 
   Future<void> ensureVolumeSlots(String seriesId, int count) async {

@@ -29,7 +29,8 @@ class BookSeriesTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final isOneShot = series.isStandalone || stats.totalSlots <= 1;
+    // Manga/BD/Comics ne sont jamais « Œuvre unique » (voir BookSeries.isStandalone).
+    final isOneShot = series.isStandalone;
     final subLabel = isOneShot
         ? '${series.subcategory.label} · Œuvre unique'
         : '${series.subcategory.label} · ${stats.totalSlots} tomes';

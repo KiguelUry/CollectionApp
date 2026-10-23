@@ -46,13 +46,17 @@ void main() {
       );
       expect(
         BookSeriesNormalizer.expectedCount('Kagurabachi', BookSubcategory.manga),
-        8,
+        11,
       );
     });
 
     test('Thorgal / Astérix → catégorie BD', () {
       expect(
         BookSeriesNormalizer.preferredSubcategory('Thorgal'),
+        BookSubcategory.comic,
+      );
+      expect(
+        BookSeriesNormalizer.preferredSubcategory('Les Mondes de Thorgal'),
         BookSubcategory.comic,
       );
       expect(
