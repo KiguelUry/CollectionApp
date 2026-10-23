@@ -443,8 +443,6 @@ class BoardgameMarketService {
       return 'Le Zèbre à Pois';
     }
     if (host.contains('cormoran')) return 'Maison du Cormoran';
-    if (host.contains('cultura')) return 'Cultura';
-    if (host.contains('ludum')) return 'Ludum';
     if (host.contains('okkazeo')) return 'Okkazeo';
     if (host.contains('geekdo') || host.contains('boardgamegeek')) {
       return 'GeekMarket';
