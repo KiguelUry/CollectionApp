@@ -8,13 +8,13 @@ Future<void> showBookSearch(
   BuildContext context, {
   required void Function(Map<String, String> book, BookSubcategory subcategory)
       onBookSelected,
-  void Function(
+  Future<void> Function(
     String seriesName,
     BookSubcategory subcategory, {
     int? volumeCount,
     Map<int, String>? coversByVolume,
   })? onAddSeries,
-  BookSubcategory initialSub = BookSubcategory.manga,
+  BookSubcategory? initialSub,
   String? initialQuery,
   VoidCallback? onManualEntry,
 }) {
@@ -25,20 +25,12 @@ Future<void> showBookSearch(
         initialSub: initialSub,
         initialQuery: initialQuery,
         onBookSelected: (book, sub) {
+          // Tomes individuels : ferme la recherche (comportement historique).
           Navigator.pop(ctx);
           onBookSelected(book, sub);
         },
-        onAddSeries: onAddSeries == null
-            ? null
-            : (name, sub, {volumeCount, coversByVolume}) {
-                Navigator.pop(ctx);
-                onAddSeries(
-                  name,
-                  sub,
-                  volumeCount: volumeCount,
-                  coversByVolume: coversByVolume,
-                );
-              },
+        // Séries : reste sur la page de recherche.
+        onAddSeries: onAddSeries,
       ),
     ),
   );

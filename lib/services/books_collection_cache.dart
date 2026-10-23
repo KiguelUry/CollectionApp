@@ -29,10 +29,24 @@ class BooksCollectionCache {
     List<CollectionItem>? items,
     BookSeriesStats? stats,
   }) {
-    final list = entries;
-    if (list == null) return;
+    final list = entries ?? <CachedSeriesEntry>[];
+    entries = list;
     final i = list.indexWhere((e) => e.series.id == seriesId);
-    if (i < 0) return;
+    if (i < 0) {
+      if (series == null || volumes == null || items == null || stats == null) {
+        return;
+      }
+      list.add(
+        CachedSeriesEntry(
+          series: series,
+          volumes: volumes,
+          items: items,
+          stats: stats,
+        ),
+      );
+      loadedAt = DateTime.now();
+      return;
+    }
     final cur = list[i];
     list[i] = CachedSeriesEntry(
       series: series ?? cur.series,

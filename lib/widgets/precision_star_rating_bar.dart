@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// 10 étoiles = note 0.0 → 10.0 (1 étoile = 1 point), glisser via Slider natif.
+/// 5 étoiles = note 0.0 → 5.0 (précision 0.1).
+/// Glisser/cliquer directement sur les étoiles ; [onChanged] uniquement en fin de geste.
 class PrecisionStarRatingBar extends StatefulWidget {
   final double rating;
   final ValueChanged<double> onChanged;
@@ -22,28 +23,42 @@ class PrecisionStarRatingBar extends StatefulWidget {
 
 class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
   late double _local;
+  double? _committed;
 
   @override
   void initState() {
     super.initState();
-    _local = widget.rating.clamp(0.0, 10.0);
+    _local = widget.rating.clamp(0.0, 5.0);
+    _committed = _local;
   }
 
   @override
   void didUpdateWidget(covariant PrecisionStarRatingBar oldWidget) {
     super.didUpdateWidget(oldWidget);
     if ((oldWidget.rating - widget.rating).abs() > 0.01) {
-      _local = widget.rating.clamp(0.0, 10.0);
+      _local = widget.rating.clamp(0.0, 5.0);
+      _committed = _local;
     }
   }
 
-  void _set(double v) {
-    final r = double.parse(v.clamp(0.0, 10.0).toStringAsFixed(1));
-    if ((r - _local).abs() < 0.05) {
-      setState(() => _local = r);
-      return;
-    }
+  double _ratingFromDx(double dx, double width) {
+    if (width <= 0) return 0;
+    final t = (dx / width).clamp(0.0, 1.0);
+    final raw = t * 5.0;
+    return double.parse((raw * 10).round().clamp(0, 50).toStringAsFixed(0)) /
+        10.0;
+  }
+
+  void _preview(Offset local, double width) {
+    final r = _ratingFromDx(local.dx, width);
+    if ((r - _local).abs() < 0.05) return;
     setState(() => _local = r);
+  }
+
+  void _commit() {
+    final r = double.parse(_local.clamp(0.0, 5.0).toStringAsFixed(1));
+    if (_committed != null && (r - _committed!).abs() < 0.05) return;
+    _committed = r;
     widget.onChanged(r);
   }
 
@@ -53,7 +68,7 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
     final result = await showDialog<double>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Note /10'),
+        title: const Text('Note /5'),
         content: TextField(
           controller: ctrl,
           autofocus: true,
@@ -62,8 +77,8 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
             FilteringTextInputFormatter.allow(RegExp(r'[\d.,]')),
           ],
           decoration: const InputDecoration(
-            hintText: '8.3',
-            suffixText: '/ 10',
+            hintText: '4.3',
+            suffixText: '/ 5',
           ),
           onSubmitted: (v) {
             final n = double.tryParse(v.replaceAll(',', '.'));
@@ -87,83 +102,73 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
     );
     ctrl.dispose();
     if (result == null) return;
-    _set(result);
+    setState(() => _local = result.clamp(0.0, 5.0));
+    _commit();
   }
 
   @override
   Widget build(BuildContext context) {
-    final starH = widget.starSize + 4;
     return Row(
       children: [
         Expanded(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IgnorePointer(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final width = constraints.maxWidth;
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onPanDown: widget.readOnly
+                    ? null
+                    : (d) => _preview(d.localPosition, width),
+                onPanUpdate: widget.readOnly
+                    ? null
+                    : (d) => _preview(d.localPosition, width),
+                onPanEnd: widget.readOnly ? null : (_) => _commit(),
+                onPanCancel: widget.readOnly ? null : _commit,
+                onTapUp: widget.readOnly
+                    ? null
+                    : (d) {
+                        _preview(d.localPosition, width);
+                        _commit();
+                      },
                 child: SizedBox(
-                  height: starH,
+                  height: widget.starSize + 8,
                   child: Row(
-                    children: List.generate(10, (i) {
+                    mainAxisAlignment: MainAxisAlignment.start,
+                    children: List.generate(5, (i) {
                       final fill = (_local - i).clamp(0.0, 1.0);
-                      return Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 0.5),
-                          child: SizedBox(
-                            height: widget.starSize,
-                            child: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                Icon(
-                                  Icons.star_border,
-                                  size: widget.starSize,
-                                  color: Colors.amber.shade700,
-                                ),
-                                ClipRect(
-                                  child: Align(
-                                    alignment: Alignment.centerLeft,
-                                    widthFactor: fill,
-                                    child: Icon(
-                                      Icons.star,
-                                      size: widget.starSize,
-                                      color: Colors.amber.shade700,
-                                    ),
+                      return Padding(
+                        padding: EdgeInsets.only(right: i < 4 ? 6 : 0),
+                        child: SizedBox(
+                          width: widget.starSize,
+                          height: widget.starSize,
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              Icon(
+                                Icons.star_border,
+                                size: widget.starSize,
+                                color: Colors.amber.shade700,
+                              ),
+                              ClipRect(
+                                child: Align(
+                                  alignment: Alignment.centerLeft,
+                                  widthFactor: fill,
+                                  child: Icon(
+                                    Icons.star,
+                                    size: widget.starSize,
+                                    color: Colors.amber.shade700,
                                   ),
                                 ),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
                         ),
                       );
                     }),
                   ),
                 ),
-              ),
-              if (!widget.readOnly)
-                SliderTheme(
-                  data: SliderTheme.of(context).copyWith(
-                    trackHeight: 18,
-                    thumbShape: const RoundSliderThumbShape(
-                      enabledThumbRadius: 8,
-                    ),
-                    overlayShape: const RoundSliderOverlayShape(
-                      overlayRadius: 14,
-                    ),
-                    activeTrackColor: Colors.amber.shade700.withValues(
-                      alpha: 0.35,
-                    ),
-                    inactiveTrackColor: Colors.transparent,
-                    thumbColor: Colors.amber.shade800,
-                    overlayColor: Colors.amber.withValues(alpha: 0.2),
-                  ),
-                  child: Slider(
-                    value: _local,
-                    min: 0,
-                    max: 10,
-                    divisions: 100,
-                    onChanged: _set,
-                  ),
-                ),
-            ],
+              );
+            },
           ),
         ),
         const SizedBox(width: 8),
@@ -180,7 +185,7 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
               ),
             ),
             child: Text(
-              '${_local.toStringAsFixed(1)} / 10',
+              '${_local.toStringAsFixed(1)} / 5',
               style: TextStyle(
                 fontWeight: FontWeight.w800,
                 fontSize: 14,

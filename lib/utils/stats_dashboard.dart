@@ -252,15 +252,15 @@ class StatsDashboard {
       }
 
       final personalRaw = _num(row['rating']);
-      // Notes perso et BGG unifiées sur /10 pour le classement « mieux notés ».
-      final personalRating = personalRatingOnTen(
+      // Notes perso et BGG unifiées sur /5 pour le classement « mieux notés ».
+      final personalRating = personalRatingOnFive(
         personalRaw,
         metadata: meta is Map<String, dynamic> ? meta : null,
       );
-      final communityOnTen = bggRatingOnTen(meta?['bgg_avg_rating']);
+      final communityOnFive = bggRatingOnFive(meta?['bgg_avg_rating']);
       final ratingScore = (personalRating != null && personalRating > 0)
           ? personalRating
-          : communityOnTen;
+          : communityOnFive;
       if (ratingScore != null) {
         ratedItems.add(
           StatsDashboardItem(

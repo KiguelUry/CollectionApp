@@ -648,11 +648,12 @@ class BookSeriesService {
         .eq('id', volumeId);
   }
 
-  /// Récupère les couvertures manquantes (MangaDex / Google / AniList / OL).
+  /// Récupère les couvertures manquantes (GB / iTunes / MangaDex / AniList / OL).
+  /// Pour les longues séries, enchaîne par lots jusqu'à [maxLookups].
   Future<int> enrichMissingVolumeCovers({
     required BookSeries series,
     required List<BookVolume> volumes,
-    int maxLookups = 15,
+    int maxLookups = 40,
   }) async {
     var updated = 0;
     var lookups = 0;
@@ -673,6 +674,33 @@ class BookSeriesService {
       }
     }
 
+    // Précharge des lots « Série Tome » pour récupérer plusieurs couv. d'un coup.
+    final missing = volumes
+        .where((v) =>
+            !v.isHorsSerie &&
+            (v.coverUrl == null || v.coverUrl!.isEmpty))
+        .toList();
+    if (missing.length > 5) {
+      try {
+        final batch = await BookCatalogService.searchBooks(
+          '${series.name} Tome',
+          subcategory: series.subcategory,
+          filters: BookSearchFilters(titleQuery: series.name),
+        );
+        final ranked = BookIntelligenceService.enrichAndRank(
+          batch,
+          subcategory: series.subcategory,
+          filters: BookSearchFilters(titleQuery: series.name),
+        );
+        for (final h in ranked) {
+          final n = h.parsed.volumeNumber?.round();
+          final img = h.imageUrl;
+          if (n == null || n < 1 || img == null || img.isEmpty) continue;
+          dexCovers = {...dexCovers, n: img};
+        }
+      } catch (_) {}
+    }
+
     for (final vol in volumes) {
       if (lookups >= maxLookups) break;
       if (vol.isHorsSerie && vol.coverUrl != null && vol.coverUrl!.isNotEmpty) {
@@ -688,6 +716,10 @@ class BookSeriesService {
         subcategory: series.subcategory,
       );
       if (url != null && url.isNotEmpty) {
+        // Force https pour le web.
+        if (url.startsWith('http://')) {
+          url = 'https://${url.substring(7)}';
+        }
         await setVolumeCoverUrl(vol.id, url);
         updated++;
       }
@@ -1013,10 +1045,10 @@ class BookSeriesService {
   }
 
   Future<void> setItemRating(String itemId, double rating) async {
-    await _client
-        .from('collection_items')
-        .update({'rating': rating})
-        .eq('id', itemId);
+    final clamped = double.parse(rating.clamp(0.0, 5.0).toStringAsFixed(1));
+    await _client.from('collection_items').update({
+      'rating': clamped <= 0 ? null : clamped,
+    }).eq('id', itemId);
   }
 
   Future<void> toggleVolumeRead({

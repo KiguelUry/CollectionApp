@@ -92,7 +92,7 @@ class _BoardgameTileRatingSheetState extends State<_BoardgameTileRatingSheet> {
   @override
   void initState() {
     super.initState();
-    _rating = personalRatingOnTen(
+    _rating = personalRatingOnFive(
           widget.item.rating,
           metadata: widget.item.metadata,
         ) ??
@@ -101,15 +101,16 @@ class _BoardgameTileRatingSheetState extends State<_BoardgameTileRatingSheet> {
 
   Future<void> _saveRating(double value) async {
     if (widget.readOnly || _saving) return;
+    final clamped = double.parse(value.clamp(0.0, 5.0).toStringAsFixed(1));
     setState(() {
-      _rating = value;
+      _rating = clamped;
       _saving = true;
     });
     try {
       final meta = Map<String, dynamic>.from(widget.item.metadata ?? {});
-      meta['rating_scale'] = '10';
+      meta['rating_scale'] = '5';
       await Supabase.instance.client.from('collection_items').update({
-        'rating': value <= 0 ? null : value,
+        'rating': clamped <= 0 ? null : clamped,
         'metadata': meta,
       }).eq('id', widget.item.id);
       CollectionRefresh.instance.bump();

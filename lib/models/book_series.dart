@@ -177,9 +177,9 @@ class BookSeriesStats {
   String? get ratingLabel {
     final r = displayRating;
     if (r == null) return null;
-    // Affichage unifié /10 (legacy perso /5 → ×2 si ≤ 5).
-    final onTen = r <= 5.0 ? r * 2 : r;
-    return '★ ${onTen.toStringAsFixed(1)}';
+    // Affichage unifié /5 (legacy perso /10 → ÷2 si > 5).
+    final onFive = r > 5.0 ? r / 2 : r;
+    return '★ ${onFive.toStringAsFixed(1)}';
   }
 
   String? get valueLabel {

@@ -530,7 +530,7 @@ class _BggRatingPreview extends StatelessWidget {
           Icon(Icons.star_rounded, size: 18, color: Colors.amber.shade700),
           const SizedBox(width: 6),
           Text(
-            'Note BGG : $chipLabel / 10',
+            'Note BGG : $chipLabel / 5',
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,

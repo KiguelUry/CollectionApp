@@ -14,21 +14,21 @@ String? formatBggBestPlayersLabel(int? count) {
   return 'Conseillé : $count';
 }
 
-/// Libellé compact pour la tuile (note /10, 1 décimale).
+/// Libellé compact pour la tuile (note /5, 1 décimale).
 String? formatBggRatingChipLabel(dynamic raw) {
-  final onTen = bggRatingOnTen(raw);
-  if (onTen == null) return null;
-  return onTen.toStringAsFixed(1);
+  final onFive = bggRatingOnFive(raw);
+  if (onFive == null) return null;
+  return onFive.toStringAsFixed(1);
 }
 
-/// Affichage Découvrir / listes : `★ 8.3` (toujours /10).
+/// Affichage Découvrir / listes : `★ 4.1` (toujours /5).
 String formatBggRatingStarLabel(dynamic raw, {String placeholder = '…'}) {
   final label = formatBggRatingChipLabel(raw);
   if (label == null) return placeholder;
   return '★ $label';
 }
 
-/// Note moyenne BGG brute (échelle 0–10).
+/// Note moyenne BGG brute (échelle 0–10 côté API).
 double? parseBggAvgRating(dynamic raw) {
   if (raw is num) return raw > 0 ? raw.toDouble() : null;
   if (raw is String) {
@@ -38,36 +38,45 @@ double? parseBggAvgRating(dynamic raw) {
   return null;
 }
 
-/// Note BGG affichée sur /10 (1 décimale).
+/// Note BGG brute /10 (1 décimale) — usage interne / conversions.
 double? bggRatingOnTen(dynamic raw) {
   final avg = parseBggAvgRating(raw);
   if (avg == null) return null;
-  // Si une ancienne conversion /5 a fuité en cache (< 5.05 et pas > 5),
-  // on ne remultiplie pas : BGG API est déjà /10.
   return double.parse(avg.toStringAsFixed(1));
 }
 
-/// @Deprecated — alias de [bggRatingOnTen] (notes unifiées /10).
-double? bggRatingOnFive(dynamic raw) => bggRatingOnTen(raw);
-
-/// Normalise une note personnelle stockée vers /10.
-/// Anciennes notes /5 (≤ 5.0 sans flag) → ×2.
-double? personalRatingOnTen(double? stored, {Map<String, dynamic>? metadata}) {
-  if (stored == null || stored <= 0) return null;
-  final scale = metadata?['rating_scale']?.toString();
-  if (scale == '10') {
-    return double.parse(stored.clamp(0, 10).toStringAsFixed(1));
-  }
-  if (stored <= 5.0) {
-    return double.parse((stored * 2).clamp(0, 10).toStringAsFixed(1));
-  }
-  return double.parse(stored.clamp(0, 10).toStringAsFixed(1));
+/// Note BGG affichée sur /5 (API /10 ÷ 2).
+double? bggRatingOnFive(dynamic raw) {
+  final onTen = bggRatingOnTen(raw);
+  if (onTen == null) return null;
+  return double.parse((onTen / 2).toStringAsFixed(1));
 }
 
-String? formatPersonalRatingLabel(double? stored, {Map<String, dynamic>? metadata}) {
-  final onTen = personalRatingOnTen(stored, metadata: metadata);
-  if (onTen == null) return null;
-  return onTen.toStringAsFixed(1);
+/// Normalise une note personnelle stockée vers /5 pour l’UI.
+/// Anciennes notes /10 (`rating_scale=10` ou valeur > 5) → ÷2.
+double? personalRatingOnFive(double? stored, {Map<String, dynamic>? metadata}) {
+  if (stored == null || stored <= 0) return null;
+  final scale = metadata?['rating_scale']?.toString();
+  if (scale == '10' || stored > 5.0) {
+    return double.parse((stored / 2).clamp(0, 5).toStringAsFixed(1));
+  }
+  return double.parse(stored.clamp(0, 5).toStringAsFixed(1));
+}
+
+/// @Deprecated — utiliser [personalRatingOnFive].
+double? personalRatingOnTen(double? stored, {Map<String, dynamic>? metadata}) {
+  final onFive = personalRatingOnFive(stored, metadata: metadata);
+  if (onFive == null) return null;
+  return double.parse((onFive * 2).toStringAsFixed(1));
+}
+
+String? formatPersonalRatingLabel(
+  double? stored, {
+  Map<String, dynamic>? metadata,
+}) {
+  final onFive = personalRatingOnFive(stored, metadata: metadata);
+  if (onFive == null) return null;
+  return onFive.toStringAsFixed(1);
 }
 
 String? formatPlayerCount(int? min, int? max) {

@@ -88,15 +88,20 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         _slots = slots;
         _loading = false;
       });
-      // Couvertures en arrière-plan (ne bloque pas).
-      Future(() async {
-        final n = await _service.enrichMissingVolumeCovers(
-          series: series!,
-          volumes: volumes,
-          maxLookups: 12,
-        );
-        if (n > 0 && mounted) _load(silent: true);
-      });
+      // Couvertures manquantes en arrière-plan (lots, ne bloque pas).
+      final missing = volumes
+          .where((v) => v.coverUrl == null || v.coverUrl!.isEmpty)
+          .length;
+      if (missing > 0) {
+        Future(() async {
+          final n = await _service.enrichMissingVolumeCovers(
+            series: series!,
+            volumes: volumes,
+            maxLookups: missing.clamp(8, 60),
+          );
+          if (n > 0 && mounted) _load(silent: true);
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
@@ -126,15 +131,19 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     }
   }
 
-  void _scrollToSlot(BookVolumeSlot slot) {
+  Future<void> _onFriseOrCardTap(BookVolumeSlot slot) async {
+    if (_quickTap) {
+      await _toggleOwned(slot);
+      return;
+    }
     setState(() => _expandedVolumeId = slot.volume.id);
     final key = _slotKeys[slot.volume.id];
     final ctx = key?.currentContext;
     if (ctx != null) {
-      Scrollable.ensureVisible(
+      await Scrollable.ensureVisible(
         ctx,
         duration: const Duration(milliseconds: 280),
-        alignment: 0.2,
+        alignment: 0.15,
       );
     }
   }
@@ -420,17 +429,6 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     await _load(silent: true);
   }
 
-  Future<void> _onCellTap(BookVolumeSlot slot) async {
-    if (_quickTap) {
-      await _toggleOwned(slot);
-      return;
-    }
-    setState(() {
-      _expandedVolumeId =
-          _expandedVolumeId == slot.volume.id ? null : slot.volume.id;
-    });
-  }
-
   Future<void> _setSeriesCoverFrom(BookVolumeSlot slot) async {
     final url = slot.volume.coverUrl ?? slot.item?.imageUrl;
     if (url == null || url.isEmpty) return;
@@ -485,17 +483,43 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         backgroundColor: accent,
         foregroundColor: Colors.white,
         actions: [
+          IconButton(
+            tooltip: 'Rechercher un tome',
+            icon: const Icon(Icons.search),
+            onPressed: () async {
+              await BookItemAddCoordinator(context).addVolumeFromCatalog(
+                seriesId: series.id,
+                seriesName: series.name,
+                subcategory: series.subcategory,
+                expectedVolumeCount: series.expectedVolumeCount,
+              );
+              await _load(silent: true);
+            },
+          ),
           PopupMenuButton<String>(
             onSelected: (v) async {
-              if (v == 'count') await _editExpectedCount();
+              if (v == 'range') await _markRangeOwned();
+              if (v == 'tome') {
+                await showBookManualVolumeDialog(
+                  context,
+                  series: series,
+                  service: _service,
+                );
+                await _load(silent: true);
+              }
               if (v == 'refresh') await _refreshPublications();
+              if (v == 'count') await _editExpectedCount();
               if (v == 'cleanup') await _cleanupVolumes();
               if (v == 'delete') await _confirmDelete(series);
             },
             itemBuilder: (_) => [
               const PopupMenuItem(
-                value: 'count',
-                child: Text('Ajuster le nombre de tomes'),
+                value: 'range',
+                child: Text('⚡ Cocher une plage (X→Y)'),
+              ),
+              const PopupMenuItem(
+                value: 'tome',
+                child: Text('+ Ajouter un tome'),
               ),
               PopupMenuItem(
                 value: 'refresh',
@@ -504,6 +528,10 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                       ? 'Actualisation…'
                       : '🔄 Actualiser les parutions',
                 ),
+              ),
+              const PopupMenuItem(
+                value: 'count',
+                child: Text('Ajuster le nombre de tomes'),
               ),
               const PopupMenuItem(
                 value: 'cleanup',
@@ -601,7 +629,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                 const SizedBox(height: 6),
                 Text(
                   'Possédés : ${stats.ownedLabel} · Lus : ${stats.readLabel}'
-                  '${stats.ratingLabel != null ? ' · ${stats.ratingLabel}/10' : ''}',
+                  '${stats.ratingLabel != null ? ' · ${stats.ratingLabel}' : ''}',
                   style: const TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: 13,
@@ -618,51 +646,6 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                         ? Colors.green.shade600
                         : const Color(0xFF26A69A),
                   ),
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  children: [
-                    FilledButton.tonalIcon(
-                      onPressed: _markRangeOwned,
-                      icon: const Icon(Icons.bolt, size: 16),
-                      label: const Text('⚡ Plage X→Y'),
-                      style: FilledButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                      ),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () async {
-                        await showBookManualVolumeDialog(
-                          context,
-                          series: series,
-                          service: _service,
-                        );
-                        await _load(silent: true);
-                      },
-                      icon: const Icon(Icons.add, size: 16),
-                      label: const Text('Tome'),
-                      style: OutlinedButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: _refreshingPubs ? null : _refreshPublications,
-                      icon: _refreshingPubs
-                          ? const SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.sync, size: 16),
-                      label: const Text('Parutions'),
-                      style: OutlinedButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    ),
-                  ],
                 ),
               ],
             ),
@@ -701,33 +684,18 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   Widget _buildToolbar(Color accent) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-      child: Row(
-        children: [
-          FilterChip(
-            selected: _quickTap,
-            avatar: Icon(
-              Icons.bolt,
-              size: 16,
-              color: _quickTap ? accent : null,
-            ),
-            label: const Text('Mode coche rapide'),
-            onSelected: (v) => setState(() => _quickTap = v),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: FilterChip(
+          selected: _quickTap,
+          avatar: Icon(
+            Icons.bolt,
+            size: 16,
+            color: _quickTap ? accent : null,
           ),
-          const Spacer(),
-          IconButton(
-            tooltip: 'Rechercher un tome',
-            icon: const Icon(Icons.search),
-            onPressed: () async {
-              await BookItemAddCoordinator(context).addVolumeFromCatalog(
-                seriesId: _series!.id,
-                seriesName: _series!.name,
-                subcategory: _series!.subcategory,
-                expectedVolumeCount: _series!.expectedVolumeCount,
-              );
-              await _load(silent: true);
-            },
-          ),
-        ],
+          label: const Text('⚡ Coche rapide'),
+          onSelected: (v) => setState(() => _quickTap = v),
+        ),
       ),
     );
   }
@@ -762,7 +730,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                   ),
                   ButtonSegment(
                     value: _HeatColorMode.rating,
-                    label: Text('Notes /10', style: TextStyle(fontSize: 11)),
+                    label: Text('Notes /5', style: TextStyle(fontSize: 11)),
                   ),
                 ],
                 selected: {_heatMode},
@@ -785,7 +753,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                         : _statusColor(slot),
                     borderRadius: BorderRadius.circular(6),
                     child: InkWell(
-                      onTap: () => _scrollToSlot(slot),
+                      onTap: () => _onFriseOrCardTap(slot),
                       borderRadius: BorderRadius.circular(6),
                       child: Center(
                         child: Text(
@@ -831,7 +799,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
       physics: const NeverScrollableScrollPhysics(),
       itemCount: slots.length,
       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 155,
+        maxCrossAxisExtent: 150,
         childAspectRatio: 0.62,
         mainAxisSpacing: 12,
         crossAxisSpacing: 12,
@@ -841,9 +809,9 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         final owned = _slotOwned(slot);
         final read = _slotRead(slot);
         final rating = slot.item?.rating;
-        final onTen = rating == null
+        final onFive = rating == null
             ? null
-            : (rating <= 5.0 ? rating * 2 : rating);
+            : (rating > 5.0 ? rating / 2 : rating);
         final key = _slotKeys.putIfAbsent(slot.volume.id, GlobalKey.new);
         final coverUrl = slot.volume.coverUrl ?? slot.item?.imageUrl;
 
@@ -852,7 +820,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
           child: Material(
             color: Colors.transparent,
             child: InkWell(
-              onTap: () => _onCellTap(slot),
+              onTap: () => _onFriseOrCardTap(slot),
               borderRadius: BorderRadius.circular(10),
               child: Container(
                 decoration: BoxDecoration(
@@ -982,7 +950,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                                       ),
                                     ),
                                   ),
-                                  if (onTen != null)
+                                  if (onFive != null)
                                     Container(
                                       padding: const EdgeInsets.symmetric(
                                         horizontal: 6,
@@ -993,7 +961,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                                         borderRadius: BorderRadius.circular(6),
                                       ),
                                       child: Text(
-                                        '★ ${onTen.toStringAsFixed(1)}',
+                                        '★ ${onFive.toStringAsFixed(1)}',
                                         style: const TextStyle(
                                           fontSize: 10,
                                           fontWeight: FontWeight.w700,
@@ -1019,11 +987,11 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
 
   Color _ratingColor(double? r) {
     if (r == null) return const Color(0xFF424242);
-    final onTen = r <= 5.0 ? r * 2 : r;
-    if (onTen >= 9.0) return const Color(0xFF2E7D32);
-    if (onTen >= 8.0) return const Color(0xFF66BB6A);
-    if (onTen >= 6.0) return const Color(0xFFFFD54F);
-    if (onTen >= 4.0) return const Color(0xFFFF9800);
+    final onFive = r > 5.0 ? r / 2 : r;
+    if (onFive >= 4.5) return const Color(0xFF2E7D32);
+    if (onFive >= 4.0) return const Color(0xFF66BB6A);
+    if (onFive >= 3.0) return const Color(0xFFFFD54F);
+    if (onFive >= 2.0) return const Color(0xFFFF9800);
     return const Color(0xFFE53935);
   }
 
@@ -1102,7 +1070,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Note /10',
+                    'Note /5',
                     style: TextStyle(
                       fontSize: 12,
                       color: Colors.grey.shade400,
@@ -1113,7 +1081,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                     rating: () {
                       final r = slot.item?.rating;
                       if (r == null) return 0.0;
-                      return (r <= 5.0 ? r * 2 : r).toDouble();
+                      return (r > 5.0 ? r / 2 : r).toDouble();
                     }(),
                     onChanged: (v) => _setVolumeRating(slot, v),
                   ),

@@ -2071,19 +2071,21 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
         ),
         const SizedBox(height: 6),
         PrecisionStarRatingBar(
-          rating: personalRatingOnTen(
+          rating: personalRatingOnFive(
                 _item.rating,
                 metadata: _item.metadata,
               ) ??
               0,
           readOnly: ro,
           onChanged: (value) {
+            final clamped =
+                double.parse(value.clamp(0.0, 5.0).toStringAsFixed(1));
             final meta = Map<String, dynamic>.from(_item.metadata ?? {});
-            meta['rating_scale'] = '10';
+            meta['rating_scale'] = '5';
             setState(() {
               _item = _item.copyWith(
-                rating: value <= 0 ? null : value,
-                clearRating: value <= 0,
+                rating: clamped <= 0 ? null : clamped,
+                clearRating: clamped <= 0,
                 metadata: meta,
               );
             });
@@ -2320,18 +2322,18 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
 
   String _boardgameNotesBentoSubtitle() {
     final parts = <String>[];
-    final perso = personalRatingOnTen(
+    final perso = personalRatingOnFive(
       _item.rating,
       metadata: _item.metadata,
     );
     if (perso != null && perso > 0) {
-      parts.add('Perso ${perso.toStringAsFixed(1)}/10');
+      parts.add('Perso ${perso.toStringAsFixed(1)}/5');
     }
-    final onTen = bggRatingOnTen(
+    final onFive = bggRatingOnFive(
       _bggAvgRating ?? _item.metadata?['bgg_avg_rating'],
     );
-    if (onTen != null) {
-      parts.add('Commu ${onTen.toStringAsFixed(1)}/10');
+    if (onFive != null) {
+      parts.add('Commu ${onFive.toStringAsFixed(1)}/5');
     }
     if (parts.isEmpty) return 'Perso — · Commu —';
     return parts.join(' · ');
@@ -2841,20 +2843,20 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
 
   String _ratingBentoSubtitle() {
     final parts = <String>[];
-    final perso = personalRatingOnTen(
+    final perso = personalRatingOnFive(
       _item.rating,
       metadata: _item.metadata,
     );
     if (perso != null && perso > 0) {
-      parts.add('Perso ${perso.toStringAsFixed(1)}/10');
+      parts.add('Perso ${perso.toStringAsFixed(1)}/5');
     } else {
       parts.add('Perso —');
     }
-    final onTen = bggRatingOnTen(
+    final onFive = bggRatingOnFive(
       _bggAvgRating ?? _item.metadata?['bgg_avg_rating'],
     );
-    if (onTen != null) {
-      parts.add('Commu ${onTen.toStringAsFixed(1)}/10');
+    if (onFive != null) {
+      parts.add('Commu ${onFive.toStringAsFixed(1)}/5');
     } else {
       parts.add('Commu —');
     }

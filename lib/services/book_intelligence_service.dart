@@ -105,13 +105,20 @@ abstract final class BookIntelligenceService {
       });
     }
 
-    return dedupeBySeriesVolume(filtered);
+    final deduped = dedupeBySeriesVolume(filtered);
+    // Si le filtre titre a tout tué, garde les hits bruts dédupliqués.
+    if (deduped.isEmpty && enriched.isNotEmpty) {
+      return sortByVolumeThenScore(dedupeBySeriesVolume(enriched));
+    }
+    return sortByVolumeThenScore(deduped);
   }
 
-  /// Déduplique par (série, n° tome) — priorise VF + vraie couverture.
+  /// Déduplique par (série, n° tome) — priorise VF + vraie couverture,
+  /// mais ne jette jamais le dernier hit d'un numéro de tome.
   static List<EnrichedBookHit> dedupeBySeriesVolume(
     List<EnrichedBookHit> hits,
   ) {
+    if (hits.isEmpty) return hits;
     final best = <String, EnrichedBookHit>{};
     for (final h in hits) {
       final seriesKey = BookSeriesNormalizer.normalizeKey(
@@ -124,8 +131,24 @@ abstract final class BookIntelligenceService {
         best[key] = h;
       }
     }
-    final out = best.values.toList()
-      ..sort((a, b) => b.score.compareTo(a.score));
+    return best.values.toList();
+  }
+
+  /// Tri tomes croissants, puis score.
+  static List<EnrichedBookHit> sortByVolumeThenScore(
+    List<EnrichedBookHit> hits,
+  ) {
+    final out = List<EnrichedBookHit>.from(hits);
+    out.sort((a, b) {
+      final va = a.parsed.volumeNumber;
+      final vb = b.parsed.volumeNumber;
+      if (va != null && vb != null && (va - vb).abs() > 0.01) {
+        return va.compareTo(vb);
+      }
+      if (va != null && vb == null) return -1;
+      if (va == null && vb != null) return 1;
+      return b.score.compareTo(a.score);
+    });
     return out;
   }
 

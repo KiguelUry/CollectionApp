@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../utils/boardgame_display.dart';
 
-/// Note moyenne BGG (communauté), affichée sur /10.
+/// Note moyenne BGG (communauté), affichée sur /5.
 class BggCommunityRatingPanel extends StatelessWidget {
   final double? avgRating;
   final bool loading;
@@ -15,9 +15,7 @@ class BggCommunityRatingPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final onTen = bggRatingOnTen(avgRating);
-    // Remplissage étoiles : 10 pts → 5 étoiles.
-    final stars = onTen == null ? 0.0 : onTen / 2.0;
+    final onFive = bggRatingOnFive(avgRating);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -40,7 +38,7 @@ class BggCommunityRatingPanel extends StatelessWidget {
               ),
             ),
           )
-        else if (onTen == null)
+        else if (onFive == null)
           Text(
             'Note communautaire indisponible.',
             style: TextStyle(
@@ -52,8 +50,8 @@ class BggCommunityRatingPanel extends StatelessWidget {
           Row(
             children: [
               ...List.generate(5, (i) {
-                final filled = stars >= i + 1;
-                final half = !filled && stars >= i + 0.5;
+                final filled = onFive >= i + 1;
+                final half = !filled && onFive >= i + 0.5;
                 return Icon(
                   half
                       ? Icons.star_half
@@ -64,7 +62,7 @@ class BggCommunityRatingPanel extends StatelessWidget {
               }),
               const SizedBox(width: 10),
               Text(
-                '${onTen.toStringAsFixed(1)} / 10',
+                '${onFive.toStringAsFixed(1)} / 5',
                 style: const TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w600,

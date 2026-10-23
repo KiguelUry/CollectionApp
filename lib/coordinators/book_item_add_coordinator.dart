@@ -6,6 +6,7 @@ import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../screens/book_series_detail_screen.dart';
 import '../services/book_series_service.dart';
+import '../services/books_collection_cache.dart';
 import '../services/profile_service.dart';
 import '../services/book_catalog_service.dart';
 import '../services/open_library_service.dart';
@@ -35,7 +36,7 @@ class BookItemAddCoordinator {
   }) async {
     await showBookSearch(
       context,
-      initialSub: subcategory ?? BookSubcategory.manga,
+      initialSub: subcategory, // null = Tous
       initialQuery: initialQuery,
       onBookSelected: (book, sub) {
         _prepareAdd(
@@ -45,22 +46,129 @@ class BookItemAddCoordinator {
           metadata: BookCatalogService.metadataFromLookup(book),
         );
       },
-      onAddSeries: (name, sub, {volumeCount, coversByVolume}) {
-        _prepareAdd(
-          title: name,
-          imageUrl: coversByVolume?[1],
+      onAddSeries: (name, sub, {volumeCount, coversByVolume}) async {
+        await _addSeriesFromSearch(
+          name: name,
           subcategory: subcategory ?? sub,
-          metadata: {
-            'series_title': name,
-            if (volumeCount != null) 'estimated_volumes': '$volumeCount',
-            if (coversByVolume != null && coversByVolume.isNotEmpty)
-              'volume_covers_json': coversByVolume.entries
-                  .map((e) => '${e.key}:${e.value}')
-                  .join('|'),
-          },
+          volumeCount: volumeCount,
+          coversByVolume: coversByVolume,
+          coverUrl: coversByVolume?[1],
         );
       },
     );
+  }
+
+  /// Ajout série depuis la recherche : popup possession immédiat, reste sur la page.
+  Future<void> _addSeriesFromSearch({
+    required String name,
+    required BookSubcategory subcategory,
+    int? volumeCount,
+    Map<int, String>? coversByVolume,
+    String? coverUrl,
+  }) async {
+    final preferred =
+        BookSeriesNormalizer.preferredSubcategory(name) ?? subcategory;
+    final total = volumeCount ??
+        BookSeriesNormalizer.expectedCount(name, preferred) ??
+        1;
+
+    // Popup 0 ms — aucun réseau avant.
+    if (!context.mounted) return;
+    final range = await showBookOwnedRangeDialog(
+      context,
+      seriesName: name,
+      totalVolumes: total,
+    );
+    if (range == null || !context.mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const PopScope(
+        canPop: false,
+        child: AlertDialog(
+          content: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 20),
+              Flexible(child: Text('Ajout de la série…')),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    try {
+      final resolved = await _seriesService.resolveSeriesFromTitle(
+        title: name,
+        subcategory: preferred,
+        estimatedTotalVolumes: total,
+        coverUrl: coverUrl,
+      );
+      if (resolved == null) throw Exception('Série introuvable');
+
+      if (coverUrl != null && coverUrl.isNotEmpty) {
+        await _seriesService.ensureSeriesCoverFromItem(
+          seriesId: resolved.seriesId,
+          imageUrl: coverUrl,
+        );
+      }
+      if (coversByVolume != null && coversByVolume.isNotEmpty) {
+        await _seriesService.applyVolumeCoversFromMap(
+          seriesId: resolved.seriesId,
+          coverByVolume: coversByVolume,
+        );
+      }
+
+      final series = await _seriesService.fetchSeriesById(resolved.seriesId);
+      if (series != null) {
+        if (range.choice == BookOwnedRangeChoice.all) {
+          await _seriesService.markVolumesOwned(
+            series: series,
+            fromVolume: 1,
+            toVolume: total,
+          );
+        } else if (range.choice == BookOwnedRangeChoice.range &&
+            range.from != null &&
+            range.to != null) {
+          await _seriesService.markVolumesOwned(
+            series: series,
+            fromVolume: range.from!,
+            toVolume: range.to!,
+          );
+        }
+
+        final volumes = await _seriesService.fetchVolumes(series.id);
+        final items = await _seriesService.fetchSeriesItems(series.id);
+        final stats = _seriesService.computeStats(
+          series: series,
+          volumes: volumes,
+          items: items,
+        );
+        BooksCollectionCache.instance.updateSeries(
+          seriesId: series.id,
+          series: series,
+          volumes: volumes,
+          items: items,
+          stats: stats,
+        );
+      }
+
+      if (context.mounted) {
+        Navigator.pop(context); // loading
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('« $name » ajoutée à ta collection')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        Navigator.pop(context); // loading
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur: $e')),
+        );
+      }
+    }
   }
 
   Future<void> scanIsbn() async {

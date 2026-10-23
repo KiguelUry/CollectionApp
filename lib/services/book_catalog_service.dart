@@ -149,20 +149,15 @@ class BookCatalogService {
     BookSubcategory sub,
     bool frenchOnly,
   ) {
-    final q = query.trim();
-    return switch (sub) {
-      BookSubcategory.manga => '$q manga',
-      BookSubcategory.comic => '$q bande dessinée',
-      BookSubcategory.novel => frenchOnly ? '$q lang:fr' : q,
-      _ => frenchOnly ? '$q lang:fr' : q,
-    };
+    // Ne bride plus la requête API par catégorie (métadonnées GB imprécises).
+    return query.trim();
   }
 
   static bool _preferFrenchEdition(Map<String, String> hit) {
     final lang = (hit['language'] ?? hit['lang'] ?? '').toLowerCase();
     if (lang.isEmpty) return true;
     if (lang.contains('fr') || lang == 'fre' || lang == 'french') return true;
-    if (lang.contains('en') || lang == 'eng') return false;
+    // Garde les éditions EN si pas de signal FR clair (ex. Kagurabachi).
     return true;
   }
 
