@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 /// 5 étoiles = note 0.0 → 5.0 (précision 0.1).
-/// Glisser/cliquer directement sur les étoiles ; [onChanged] uniquement en fin de geste.
+/// Hover PC prévisualise ; clic / fin de pan sauvegarde via [onChanged].
 class PrecisionStarRatingBar extends StatefulWidget {
   final double rating;
   final ValueChanged<double> onChanged;
@@ -22,49 +22,69 @@ class PrecisionStarRatingBar extends StatefulWidget {
 }
 
 class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
-  late double _local;
-  double? _committed;
+  /// Note réellement sauvegardée (0 = non noté).
+  late double _saved;
+  /// Prévisualisation hover / drag (null = afficher [_saved]).
+  double? _preview;
 
   @override
   void initState() {
     super.initState();
-    _local = widget.rating.clamp(0.0, 5.0);
-    _committed = _local;
+    _saved = widget.rating.clamp(0.0, 5.0);
   }
 
   @override
   void didUpdateWidget(covariant PrecisionStarRatingBar oldWidget) {
     super.didUpdateWidget(oldWidget);
     if ((oldWidget.rating - widget.rating).abs() > 0.01) {
-      _local = widget.rating.clamp(0.0, 5.0);
-      _committed = _local;
+      _saved = widget.rating.clamp(0.0, 5.0);
+      _preview = null;
     }
   }
 
+  double get _display {
+    final v = _preview ?? _saved;
+    return v.clamp(0.0, 5.0);
+  }
+
+  bool get _isUnrated => _display <= 0.001;
+
   double _ratingFromDx(double dx, double width) {
     if (width <= 0) return 0;
+    // Petite marge gauche : clic tout à gauche = 0 (vider).
     final t = (dx / width).clamp(0.0, 1.0);
     final raw = t * 5.0;
     return double.parse((raw * 10).round().clamp(0, 50).toStringAsFixed(0)) /
         10.0;
   }
 
-  void _preview(Offset local, double width) {
+  void _setPreview(Offset local, double width) {
     final r = _ratingFromDx(local.dx, width);
-    if ((r - _local).abs() < 0.05) return;
-    setState(() => _local = r);
+    if (_preview != null && (r - _preview!).abs() < 0.05) return;
+    setState(() => _preview = r);
   }
 
-  void _commit() {
-    final r = double.parse(_local.clamp(0.0, 5.0).toStringAsFixed(1));
-    if (_committed != null && (r - _committed!).abs() < 0.05) return;
-    _committed = r;
+  void _commitPreview() {
+    final r = double.parse((_preview ?? _saved).clamp(0.0, 5.0).toStringAsFixed(1));
+    setState(() {
+      _saved = r;
+      _preview = null;
+    });
+    if ((r - widget.rating).abs() < 0.05 && r > 0) return;
+    // Autorise aussi sauvegarder 0 (clear).
     widget.onChanged(r);
+  }
+
+  void _exitHover() {
+    if (_preview == null) return;
+    setState(() => _preview = null);
   }
 
   Future<void> _editNumeric() async {
     if (widget.readOnly) return;
-    final ctrl = TextEditingController(text: _local.toStringAsFixed(1));
+    final ctrl = TextEditingController(
+      text: _saved <= 0 ? '' : _saved.toStringAsFixed(1),
+    );
     final result = await showDialog<double>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -81,6 +101,10 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
             suffixText: '/ 5',
           ),
           onSubmitted: (v) {
+            if (v.trim().isEmpty) {
+              Navigator.pop(ctx, 0.0);
+              return;
+            }
             final n = double.tryParse(v.replaceAll(',', '.'));
             Navigator.pop(ctx, n);
           },
@@ -92,6 +116,10 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
           ),
           FilledButton(
             onPressed: () {
+              if (ctrl.text.trim().isEmpty) {
+                Navigator.pop(ctx, 0.0);
+                return;
+              }
               final n = double.tryParse(ctrl.text.replaceAll(',', '.'));
               Navigator.pop(ctx, n);
             },
@@ -102,69 +130,87 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
     );
     ctrl.dispose();
     if (result == null) return;
-    setState(() => _local = result.clamp(0.0, 5.0));
-    _commit();
+    setState(() {
+      _saved = result.clamp(0.0, 5.0);
+      _preview = null;
+    });
+    widget.onChanged(_saved);
   }
 
   @override
   Widget build(BuildContext context) {
+    final badgeText =
+        _isUnrated ? '— / 5' : '${_display.toStringAsFixed(1)} / 5';
+
     return Row(
       children: [
         Expanded(
           child: LayoutBuilder(
             builder: (context, constraints) {
               final width = constraints.maxWidth;
-              return GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onPanDown: widget.readOnly
+              return MouseRegion(
+                onHover: widget.readOnly
                     ? null
-                    : (d) => _preview(d.localPosition, width),
-                onPanUpdate: widget.readOnly
-                    ? null
-                    : (d) => _preview(d.localPosition, width),
-                onPanEnd: widget.readOnly ? null : (_) => _commit(),
-                onPanCancel: widget.readOnly ? null : _commit,
-                onTapUp: widget.readOnly
-                    ? null
-                    : (d) {
-                        _preview(d.localPosition, width);
-                        _commit();
-                      },
-                child: SizedBox(
-                  height: widget.starSize + 8,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.start,
-                    children: List.generate(5, (i) {
-                      final fill = (_local - i).clamp(0.0, 1.0);
-                      return Padding(
-                        padding: EdgeInsets.only(right: i < 4 ? 6 : 0),
-                        child: SizedBox(
-                          width: widget.starSize,
-                          height: widget.starSize,
-                          child: Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              Icon(
-                                Icons.star_border,
-                                size: widget.starSize,
-                                color: Colors.amber.shade700,
-                              ),
-                              ClipRect(
-                                child: Align(
-                                  alignment: Alignment.centerLeft,
-                                  widthFactor: fill,
-                                  child: Icon(
-                                    Icons.star,
-                                    size: widget.starSize,
-                                    color: Colors.amber.shade700,
+                    : (e) => _setPreview(e.localPosition, width),
+                onExit: widget.readOnly ? null : (_) => _exitHover(),
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onPanDown: widget.readOnly
+                      ? null
+                      : (d) => _setPreview(d.localPosition, width),
+                  onPanUpdate: widget.readOnly
+                      ? null
+                      : (d) => _setPreview(d.localPosition, width),
+                  onPanEnd: widget.readOnly ? null : (_) => _commitPreview(),
+                  onPanCancel: widget.readOnly ? null : _exitHover,
+                  onTapUp: widget.readOnly
+                      ? null
+                      : (d) {
+                          _setPreview(d.localPosition, width);
+                          _commitPreview();
+                        },
+                  child: SizedBox(
+                    height: widget.starSize + 8,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.start,
+                      children: List.generate(5, (i) {
+                        // Note 0 → aucune étoile remplie (contours seuls).
+                        final fill = _isUnrated
+                            ? 0.0
+                            : (_display - i).clamp(0.0, 1.0);
+                        return Padding(
+                          padding: EdgeInsets.only(right: i < 4 ? 6 : 0),
+                          child: SizedBox(
+                            width: widget.starSize,
+                            height: widget.starSize,
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                Icon(
+                                  Icons.star_border_rounded,
+                                  size: widget.starSize,
+                                  color: Colors.amber.shade700.withValues(
+                                    alpha: 0.85,
                                   ),
                                 ),
-                              ),
-                            ],
+                                if (fill > 0.01)
+                                  ClipRect(
+                                    child: Align(
+                                      alignment: Alignment.centerLeft,
+                                      widthFactor: fill,
+                                      child: Icon(
+                                        Icons.star_rounded,
+                                        size: widget.starSize,
+                                        color: Colors.amber.shade700,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
-                        ),
-                      );
-                    }),
+                        );
+                      }),
+                    ),
                   ),
                 ),
               );
@@ -185,7 +231,7 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
               ),
             ),
             child: Text(
-              '${_local.toStringAsFixed(1)} / 5',
+              badgeText,
               style: TextStyle(
                 fontWeight: FontWeight.w800,
                 fontSize: 14,

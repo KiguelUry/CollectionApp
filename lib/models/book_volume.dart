@@ -36,6 +36,40 @@ class BookVolume {
 
   bool get isHorsSerie => metadata['is_hors_serie'] == true;
 
+  /// Date de parution catalogue (ISO / YYYY-MM-DD / YYYY).
+  DateTime? get publishedDate {
+    final raw = metadata['published_date']?.toString().trim();
+    if (raw == null || raw.isEmpty) return null;
+    final full = DateTime.tryParse(raw);
+    if (full != null) return full;
+    if (RegExp(r'^\d{4}-\d{2}$').hasMatch(raw)) {
+      return DateTime.tryParse('$raw-01');
+    }
+    if (RegExp(r'^\d{4}$').hasMatch(raw)) {
+      return DateTime.tryParse('$raw-01-01');
+    }
+    return null;
+  }
+
+  /// Tome pas encore sorti (précommande / date future).
+  bool get isUpcoming {
+    if (metadata['is_upcoming'] == true) return true;
+    final d = publishedDate;
+    if (d == null) return false;
+    final today = DateTime.now();
+    final day = DateTime(today.year, today.month, today.day);
+    return d.isAfter(day);
+  }
+
+  String? get upcomingLabel {
+    if (!isUpcoming) return null;
+    final d = publishedDate;
+    if (d == null) return '⏳ À paraître';
+    final dd = d.day.toString().padLeft(2, '0');
+    final mm = d.month.toString().padLeft(2, '0');
+    return '⏳ À paraître · $dd/$mm/${d.year}';
+  }
+
   String? get volumeTitle {
     final fromMeta = metadata['volume_title']?.toString().trim();
     if (fromMeta != null && fromMeta.isNotEmpty && !_isGenericLabel(fromMeta)) {

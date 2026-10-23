@@ -180,8 +180,12 @@ class BookSeriesService {
       final num = v.volumeNumber.round();
       final url = coverByVolume[num];
       if (url == null || url.isEmpty) continue;
-      if (v.coverUrl != null && v.coverUrl!.isNotEmpty) continue;
-      await setVolumeCoverUrl(v.id, url);
+      if (v.coverUrl != null &&
+          v.coverUrl!.isNotEmpty &&
+          v.metadata['cover_volume_verified'] == num) {
+        continue;
+      }
+      await setVolumeCoverUrl(v.id, url, verifiedVolume: num);
       n++;
     }
     return n;
@@ -632,7 +636,13 @@ class BookSeriesService {
         .eq('id', volumeId);
   }
 
-  Future<void> setVolumeCoverUrl(String volumeId, String coverUrl) async {
+  Future<void> setVolumeCoverUrl(
+    String volumeId,
+    String coverUrl, {
+    int? verifiedVolume,
+    String? publishedDate,
+    bool? upcoming,
+  }) async {
     if (coverUrl.isEmpty) return;
     final row = await _client
         .from('book_volumes')
@@ -641,117 +651,208 @@ class BookSeriesService {
         .maybeSingle();
     if (row == null) return;
     final meta = Map<String, dynamic>.from(row['metadata'] as Map? ?? {});
-    meta['cover_url'] = coverUrl;
+    var url = coverUrl;
+    if (url.startsWith('http://')) url = 'https://${url.substring(7)}';
+    meta['cover_url'] = url;
+    if (verifiedVolume != null) {
+      meta['cover_volume_verified'] = verifiedVolume;
+    }
+    if (publishedDate != null && publishedDate.isNotEmpty) {
+      meta['published_date'] = publishedDate;
+    }
+    if (upcoming != null) {
+      if (upcoming) {
+        meta['is_upcoming'] = true;
+      } else {
+        meta.remove('is_upcoming');
+      }
+    }
     await _client
         .from('book_volumes')
         .update({'metadata': meta})
         .eq('id', volumeId);
   }
 
-  /// Récupère les couvertures manquantes (GB / iTunes / MangaDex / AniList / OL).
-  /// Pour les longues séries, enchaîne par lots jusqu'à [maxLookups].
+  Future<void> patchVolumeMetadata(
+    String volumeId,
+    Map<String, dynamic> patch,
+  ) async {
+    final row = await _client
+        .from('book_volumes')
+        .select('metadata')
+        .eq('id', volumeId)
+        .maybeSingle();
+    if (row == null) return;
+    final meta = Map<String, dynamic>.from(row['metadata'] as Map? ?? {});
+    meta.addAll(patch);
+    await _client
+        .from('book_volumes')
+        .update({'metadata': meta})
+        .eq('id', volumeId);
+  }
+
+  /// Couvertures manquantes + réparation des mauvaises attributions (T1≠T16).
   Future<int> enrichMissingVolumeCovers({
     required BookSeries series,
     required List<BookVolume> volumes,
     int maxLookups = 40,
+    bool repairUnverified = true,
   }) async {
     var updated = 0;
     var lookups = 0;
 
-    Map<int, String> dexCovers = const {};
-    if (series.subcategory == BookSubcategory.manga) {
-      final dex = await MangaDexService.lookupManga(series.name);
-      if (dex != null) {
-        dexCovers = dex.coverByVolume;
-        final published = dex.volumesPublished;
-        if (published != null &&
-            published > (series.expectedVolumeCount ?? 0)) {
-          await ensureVolumeSlots(series.id, published);
-          await updateSeries(
-            series.copyWith(expectedVolumeCount: published),
-          );
+    // Batch « Série Tome » — uniquement hits au numéro STRICT.
+    final batchCovers = <int, String>{};
+    final batchPub = <int, String>{};
+    try {
+      final batch = await BookCatalogService.searchBooks(
+        '${series.name} Tome',
+        subcategory: series.subcategory,
+        filters: BookSearchFilters(titleQuery: series.name),
+      );
+      final ranked = BookIntelligenceService.enrichAndRank(
+        batch,
+        subcategory: series.subcategory,
+        filters: BookSearchFilters(titleQuery: series.name),
+      );
+      for (final h in ranked) {
+        final img = h.imageUrl;
+        if (img == null || img.isEmpty) continue;
+        final n = BookTitleParser.extractVolumeNumberStrict(
+          '${h.raw['title'] ?? ''} ${h.raw['subtitle'] ?? ''}',
+        );
+        if (n == null || n < 1) continue;
+        if (!BookIntelligenceService.hitMatchesVolumeExactly(h, n)) continue;
+        batchCovers.putIfAbsent(n, () => img);
+        final pub = h.raw['published_date'] ?? h.raw['year'];
+        if (pub != null && pub.isNotEmpty) {
+          batchPub.putIfAbsent(n, () => pub);
         }
       }
-    }
-
-    // Précharge des lots « Série Tome » pour récupérer plusieurs couv. d'un coup.
-    final missing = volumes
-        .where((v) =>
-            !v.isHorsSerie &&
-            (v.coverUrl == null || v.coverUrl!.isEmpty))
-        .toList();
-    if (missing.length > 5) {
-      try {
-        final batch = await BookCatalogService.searchBooks(
-          '${series.name} Tome',
-          subcategory: series.subcategory,
-          filters: BookSearchFilters(titleQuery: series.name),
-        );
-        final ranked = BookIntelligenceService.enrichAndRank(
-          batch,
-          subcategory: series.subcategory,
-          filters: BookSearchFilters(titleQuery: series.name),
-        );
-        for (final h in ranked) {
-          final n = h.parsed.volumeNumber?.round();
-          final img = h.imageUrl;
-          if (n == null || n < 1 || img == null || img.isEmpty) continue;
-          dexCovers = {...dexCovers, n: img};
-        }
-      } catch (_) {}
-    }
+    } catch (_) {}
 
     for (final vol in volumes) {
       if (lookups >= maxLookups) break;
-      if (vol.isHorsSerie && vol.coverUrl != null && vol.coverUrl!.isNotEmpty) {
-        continue;
-      }
-      if (vol.coverUrl != null && vol.coverUrl!.isNotEmpty) continue;
-      lookups++;
+      if (vol.isHorsSerie) continue;
       final n = vol.volumeNumber.round();
-      var url = dexCovers[n];
-      url ??= await BookIntelligenceService.lookupVolumeCover(
-        seriesName: series.name,
-        volumeNumber: vol.volumeNumber,
-        subcategory: series.subcategory,
-      );
+      final verified = vol.metadata['cover_volume_verified'];
+      final hasCover = vol.coverUrl != null && vol.coverUrl!.isNotEmpty;
+      final needsRepair = repairUnverified &&
+          hasCover &&
+          (verified == null || verified != n);
+      // Toujours revalider les premiers tomes (bug Naruto/Thorgal T1).
+      final forceCheck = n <= 3 && (needsRepair || !hasCover || verified != n);
+      if (hasCover && !needsRepair && !forceCheck) continue;
+
+      lookups++;
+      String? url = batchCovers[n];
+      String? pub = batchPub[n];
+      var upcoming = false;
+      if (url == null) {
+        final meta = await BookIntelligenceService.lookupVolumeCoverMeta(
+          seriesName: series.name,
+          volumeNumber: vol.volumeNumber,
+          subcategory: series.subcategory,
+        );
+        url = meta.coverUrl;
+        pub = meta.publishedDate;
+        upcoming = meta.upcoming;
+      } else {
+        upcoming = BookIntelligenceService.isFuturePublishedDate(pub);
+      }
+
       if (url != null && url.isNotEmpty) {
-        // Force https pour le web.
-        if (url.startsWith('http://')) {
-          url = 'https://${url.substring(7)}';
-        }
-        await setVolumeCoverUrl(vol.id, url);
+        await setVolumeCoverUrl(
+          vol.id,
+          url,
+          verifiedVolume: n,
+          publishedDate: pub,
+          upcoming: upcoming,
+        );
         updated++;
+      } else if (pub != null) {
+        await patchVolumeMetadata(vol.id, {
+          'published_date': pub,
+          if (upcoming) 'is_upcoming': true,
+        });
       }
     }
-    // Répare la couverture principale de la série si vide.
+
+    // Couverture série = Tome 1 vérifié (jamais un autre tome).
     final fresh = await fetchSeriesById(series.id);
-    if (fresh != null &&
-        (fresh.coverUrl == null || fresh.coverUrl!.isEmpty)) {
-      final refreshed = await fetchVolumes(series.id);
-      String? pick;
+    final refreshed = await fetchVolumes(series.id);
+    String? tome1;
+    for (final v in refreshed) {
+      if (v.volumeNumber >= 0.99 &&
+          v.volumeNumber < 1.01 &&
+          v.coverUrl != null &&
+          v.coverUrl!.isNotEmpty &&
+          v.metadata['cover_volume_verified'] == 1) {
+        tome1 = v.coverUrl;
+        break;
+      }
+    }
+    if (tome1 == null) {
       for (final v in refreshed) {
         if (v.volumeNumber >= 0.99 &&
             v.volumeNumber < 1.01 &&
             v.coverUrl != null &&
             v.coverUrl!.isNotEmpty) {
-          pick = v.coverUrl;
+          tome1 = v.coverUrl;
           break;
         }
       }
-      pick ??= refreshed
-          .map((v) => v.coverUrl)
-          .firstWhere((u) => u != null && u.isNotEmpty, orElse: () => null);
-      if (pick == null && series.subcategory == BookSubcategory.manga) {
-        final ani = await AnilistMangaService.lookupManga(series.name);
-        pick = ani?.coverUrl;
-      }
-      if (pick != null && pick.isNotEmpty) {
-        await updateSeries(fresh.copyWith(coverUrl: pick));
-        updated++;
-      }
+    }
+    if (fresh != null &&
+        tome1 != null &&
+        tome1.isNotEmpty &&
+        fresh.coverUrl != tome1) {
+      await updateSeries(fresh.copyWith(coverUrl: tome1));
+      updated++;
+    } else if (fresh != null &&
+        (fresh.coverUrl == null || fresh.coverUrl!.isEmpty) &&
+        tome1 != null) {
+      await updateSeries(fresh.copyWith(coverUrl: tome1));
+      updated++;
     }
     return updated;
+  }
+
+  Future<void> toggleVolumeWishlist({
+    required BookSeries series,
+    required BookVolumeSlot slot,
+    required bool wishlist,
+  }) async {
+    final items = await fetchSeriesItems(series.id);
+    final existing = items
+        .where((i) => i.volumeId == slot.volume.id && !i.isSold)
+        .toList();
+    if (!wishlist) {
+      for (final i in existing.where((e) => e.isWishlist)) {
+        await removeVolumeItem(i.id);
+      }
+      return;
+    }
+    // Déjà possédé → ne pas forcer wishlist.
+    if (existing.any((e) => !e.isWishlist)) return;
+    if (existing.any((e) => e.isWishlist)) return;
+
+    await ProfileService().ensureCurrentUserProfile();
+    final n = slot.volume.volumeNumber.ceil();
+    await _client.from('collection_items').insert({
+      'title': '${series.name} - Tome $n',
+      'category': CollectionCategory.book.dbValue,
+      'subcategory': series.subcategory.dbValue,
+      'series_id': series.id,
+      'volume_id': slot.volume.id,
+      'is_wishlist': true,
+      'quantity': 1,
+      'added_by': _userId,
+      'location_user_id': _userId,
+      'metadata': {
+        if (slot.volume.coverUrl != null) 'image_url': slot.volume.coverUrl,
+      },
+    });
   }
 
   Future<void> ensureSeriesCoverFromItem({

@@ -148,6 +148,39 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     }
   }
 
+  String _seriesStatsLine(BookSeriesStats stats) {
+    final upcoming =
+        _slots.where((s) => s.volume.isUpcoming).length;
+    final published = (_slots.length - upcoming).clamp(0, _slots.length);
+    final ownedPub = _slots
+        .where((s) => !s.volume.isUpcoming && _slotOwned(s))
+        .length;
+    final base =
+        'Possédés : $ownedPub/$published parus · Lus : ${stats.readLabel}';
+    final up = upcoming > 0 ? ' · +$upcoming à paraître' : '';
+    final rating =
+        stats.ratingLabel != null ? ' · ${stats.ratingLabel}' : '';
+    return '$base$up$rating';
+  }
+
+  Future<void> _toggleWishlist(BookVolumeSlot slot) async {
+    final next = !_slotWish(slot);
+    try {
+      await _service.toggleVolumeWishlist(
+        series: _series!,
+        slot: slot,
+        wishlist: next,
+      );
+      await _load(silent: true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e')),
+        );
+      }
+    }
+  }
+
   bool _slotOwned(BookVolumeSlot s) =>
       s.item != null && !s.item!.isWishlist;
 
@@ -628,8 +661,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Possédés : ${stats.ownedLabel} · Lus : ${stats.readLabel}'
-                  '${stats.ratingLabel != null ? ' · ${stats.ratingLabel}' : ''}',
+                  _seriesStatsLine(stats),
                   style: const TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: 13,
@@ -857,6 +889,32 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                               ),
                             ),
                     ),
+                    if (slot.volume.isUpcoming)
+                      Positioned(
+                        top: 6,
+                        left: 6,
+                        right: 6,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.deepPurple.shade700,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            slot.volume.upcomingLabel ?? '⏳ À paraître',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
                     Positioned(
                       left: 0,
                       right: 0,
@@ -886,7 +944,25 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                               ),
                             ),
                             const SizedBox(height: 4),
-                            if (!owned)
+                            if (!owned && slot.volume.isUpcoming)
+                              FilledButton(
+                                onPressed: () => _toggleWishlist(slot),
+                                style: FilledButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  backgroundColor: Colors.deepPurple,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                  ),
+                                  minimumSize: const Size(0, 28),
+                                ),
+                                child: Text(
+                                  _slotWish(slot)
+                                      ? '💜 En wishlist'
+                                      : '💜 Wishlist',
+                                  style: const TextStyle(fontSize: 11),
+                                ),
+                              )
+                            else if (!owned)
                               FilledButton(
                                 onPressed: () => _toggleOwned(slot),
                                 style: FilledButton.styleFrom(

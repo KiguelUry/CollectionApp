@@ -83,7 +83,8 @@ class ItunesBooksService {
           '',
     );
 
-    final year = m['releaseDate']?.toString();
+    final release = m['releaseDate']?.toString();
+    final year = release;
     final yearStr = year != null && year.length >= 4 ? year.substring(0, 4) : '';
 
     final result = <String, String>{
@@ -93,6 +94,7 @@ class ItunesBooksService {
       'image_url': imageUrl,
       'itunes_id': m['trackId']?.toString() ?? '',
       'source': 'itunes',
+      if (release != null && release.isNotEmpty) 'published_date': release,
     };
 
     if (series != null &&

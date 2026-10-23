@@ -28,6 +28,32 @@ void main() {
       expect(p.hasVolume, isFalse);
       expect(p.hasSeries, isFalse);
     });
+
+    test('match strict du n° de tome (1 ≠ 16)', () {
+      expect(
+        BookTitleParser.titleMatchesVolumeExactly('Naruto - Tome 1', 1),
+        isTrue,
+      );
+      expect(
+        BookTitleParser.titleMatchesVolumeExactly('Naruto - Tome 16', 1),
+        isFalse,
+      );
+      expect(
+        BookTitleParser.titleMatchesVolumeExactly('Naruto Vol. 16', 1),
+        isFalse,
+      );
+      expect(
+        BookTitleParser.titleMatchesVolumeExactly(
+          'Thorgal - La Gardienne des clés Tome 17',
+          1,
+        ),
+        isFalse,
+      );
+      expect(
+        BookTitleParser.extractVolumeNumberStrict('Kagurabachi, Vol. 11'),
+        11,
+      );
+    });
   });
 
   group('BookSeriesNormalizer', () {

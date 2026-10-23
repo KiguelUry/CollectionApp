@@ -108,6 +108,30 @@ abstract final class BookTitleParser {
     return n;
   }
 
+  /// Extrait le n° de tome avec borne stricte (1 ≠ 16, 1 ≠ 17).
+  static int? extractVolumeNumberStrict(String title) {
+    final m = RegExp(
+      r'\b(?:tome|vol\.?|volume|t\.?)\s*0*(\d+)\b',
+      caseSensitive: false,
+    ).firstMatch(title);
+    if (m == null) return null;
+    return int.tryParse(m.group(1)!);
+  }
+
+  /// Vrai seulement si le titre référence exactement [targetVolume].
+  static bool titleMatchesVolumeExactly(String title, int targetVolume) {
+    if (targetVolume < 0) return false;
+    final re = RegExp(
+      r'\b(?:tome|vol\.?|volume|t\.?)\s*0*'
+      '${RegExp.escape('$targetVolume')}'
+      r'(?!\d)\b',
+      caseSensitive: false,
+    );
+    if (!re.hasMatch(title)) return false;
+    final extracted = extractVolumeNumberStrict(title);
+    return extracted == targetVolume;
+  }
+
   static bool seriesNamesMatch(String a, String b) {
     final na = _normName(a);
     final nb = _normName(b);

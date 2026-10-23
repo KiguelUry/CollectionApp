@@ -121,6 +121,7 @@ class GoogleBooksService {
       'image_url': imageHttps,
       'source': 'google_books',
       'google_books_id': item['id']?.toString() ?? '',
+      if (published.isNotEmpty) 'published_date': published,
       if (isbn != null && isbn.isNotEmpty) 'isbn': isbn,
     };
 

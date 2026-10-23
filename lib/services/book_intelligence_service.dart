@@ -1,7 +1,6 @@
 import '../models/book_subcategory.dart';
 import '../utils/book_series_normalizer.dart';
 import '../utils/book_title_parser.dart';
-import 'anilist_manga_service.dart';
 import 'google_books_service.dart';
 import 'itunes_books_service.dart';
 import 'open_library_service.dart';
@@ -269,30 +268,34 @@ abstract final class BookIntelligenceService {
     return '$name Tome $vol';
   }
 
-  /// Couverture d'un tome via Google Books + iTunes (+ OL / AniList).
-  static Future<String?> lookupVolumeCover({
+  /// Hit catalogue dont le n° de tome matche [target] de façon stricte.
+  static bool hitMatchesVolumeExactly(EnrichedBookHit hit, int target) {
+    final title = hit.raw['title'] ?? hit.displayTitle;
+    final subtitle = hit.raw['subtitle'] ?? '';
+    final combined = '$title $subtitle';
+    return BookTitleParser.titleMatchesVolumeExactly(combined, target);
+  }
+
+  /// Couverture + méta (date) pour un tome — match STRICT du numéro.
+  static Future<({String? coverUrl, String? publishedDate, bool upcoming})>
+      lookupVolumeCoverMeta({
     required String seriesName,
     required double volumeNumber,
     required BookSubcategory subcategory,
   }) async {
+    final target = volumeNumber.round();
     final query = volumeSearchQuery(seriesName, volumeNumber);
-    if (query.trim().length < 3) return null;
-
-    // Tome 1 manga : couverture série AniList (HD) en priorité.
-    if (subcategory == BookSubcategory.manga &&
-        volumeNumber >= 0.99 &&
-        volumeNumber < 1.01) {
-      final ani = await AnilistMangaService.lookupManga(seriesName);
-      if (ani?.coverUrl != null && ani!.coverUrl!.isNotEmpty) {
-        return ani.coverUrl;
-      }
+    if (query.trim().length < 3) {
+      return (coverUrl: null, publishedDate: null, upcoming: false);
     }
 
     final merged = <Map<String, String>>[];
     final seen = <String>{};
+    // FR d'abord, puis sans filtre langue (précommandes EN).
     for (final list in [
-      await GoogleBooksService.search(query, maxResults: 12, langRestrict: 'fr'),
+      await GoogleBooksService.search(query, maxResults: 16, langRestrict: 'fr'),
       await ItunesBooksService.search(query),
+      await GoogleBooksService.search(query, maxResults: 16),
       await OpenLibraryService.searchBooks(query, subcategory: subcategory),
     ]) {
       for (final hit in list) {
@@ -305,32 +308,59 @@ abstract final class BookIntelligenceService {
     final ranked = enrichAndRank(
       merged,
       subcategory: subcategory,
-      filters: BookSearchFilters(titleQuery: query),
+      filters: BookSearchFilters(titleQuery: seriesName),
     );
 
+    EnrichedBookHit? best;
     for (final hit in ranked) {
       final img = hit.imageUrl;
       if (img == null || img.isEmpty) continue;
-      final vol = hit.parsed.volumeNumber;
-      if (hit.parsed.hasSeries &&
-          hit.parsed.seriesName != null &&
-          BookTitleParser.seriesNamesMatch(hit.parsed.seriesName!, seriesName) &&
-          vol != null &&
-          (vol - volumeNumber).abs() < 0.01) {
-        return img;
-      }
+      if (!hitMatchesVolumeExactly(hit, target)) continue;
+      // Priorise VF (Tome) avec image.
+      if (best == null || _preferHit(hit, best)) best = hit;
     }
 
-    for (final hit in ranked) {
-      final img = hit.imageUrl;
-      if (img != null && img.isNotEmpty) return img;
+    if (best == null) {
+      // Aucun fallback « première image » — évite Tome 16 sur Tome 1.
+      return (coverUrl: null, publishedDate: null, upcoming: false);
     }
 
-    return OpenLibraryService.lookupVolumeCover(
-      seriesName,
-      volumeNumber,
-      subcategory,
+    final pub = best.raw['published_date'] ?? best.raw['year'];
+    final upcoming = isFuturePublishedDate(pub);
+    return (
+      coverUrl: best.imageUrl,
+      publishedDate: pub,
+      upcoming: upcoming,
     );
+  }
+
+  static bool isFuturePublishedDate(String? raw) {
+    if (raw == null || raw.isEmpty) return false;
+    DateTime? d = DateTime.tryParse(raw);
+    d ??= RegExp(r'^\d{4}-\d{2}$').hasMatch(raw)
+        ? DateTime.tryParse('$raw-01')
+        : null;
+    d ??= RegExp(r'^\d{4}$').hasMatch(raw)
+        ? DateTime.tryParse('$raw-01-01')
+        : null;
+    if (d == null) return false;
+    final today = DateTime.now();
+    return d.isAfter(DateTime(today.year, today.month, today.day));
+  }
+
+  /// Couverture d'un tome via Google Books + iTunes (+ OL).
+  /// Match STRICT du numéro — jamais de couverture d'un autre tome.
+  static Future<String?> lookupVolumeCover({
+    required String seriesName,
+    required double volumeNumber,
+    required BookSubcategory subcategory,
+  }) async {
+    final meta = await lookupVolumeCoverMeta(
+      seriesName: seriesName,
+      volumeNumber: volumeNumber,
+      subcategory: subcategory,
+    );
+    return meta.coverUrl;
   }
 
   static bool _matchesFilters(EnrichedBookHit hit, BookSearchFilters filters) {

@@ -195,6 +195,40 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
     );
   }
 
+  Widget _booksFilterChip({
+    required String label,
+    String? emoji,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    final fg = selected ? Colors.white : null;
+    return FilterChip(
+      avatar: emoji != null
+          ? Text(emoji, style: TextStyle(color: fg, fontSize: 14))
+          : null,
+      label: Text(
+        label,
+        style: TextStyle(
+          color: fg,
+          fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+        ),
+      ),
+      selected: selected,
+      selectedColor: BookAccent.primary,
+      checkmarkColor: Colors.white,
+      showCheckmark: false,
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      labelPadding: EdgeInsets.only(left: emoji != null ? 2 : 8, right: 8),
+      side: BorderSide(
+        color: selected
+            ? BookAccent.primary
+            : Theme.of(context).colorScheme.outlineVariant,
+      ),
+      onSelected: (_) => onTap(),
+    );
+  }
+
   List<_SeriesEntry> get _visible {
     final q = _search.text.trim().toLowerCase();
     return _entries.where((e) {
@@ -392,30 +426,20 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                 child: Row(
                   children: [
-                    FilterChip(
-                      label: const Text('Tous'),
+                    _booksFilterChip(
+                      label: 'Tous',
                       selected: _filterSub == null,
-                      selectedColor: BookAccent.surface,
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      labelPadding: const EdgeInsets.symmetric(horizontal: 8),
-                      onSelected: (_) => setState(() => _filterSub = null),
+                      onTap: () => setState(() => _filterSub = null),
                     ),
                     const SizedBox(width: 8),
                     for (final sub in BookSubcategory.filterChips)
                       Padding(
                         padding: const EdgeInsets.only(right: 8),
-                        child: FilterChip(
-                          avatar: Text(sub.filterEmoji),
-                          label: Text(sub.label),
+                        child: _booksFilterChip(
+                          label: sub.label,
+                          emoji: sub.filterEmoji,
                           selected: _filterSub == sub,
-                          selectedColor: BookAccent.surface,
-                          showCheckmark: false,
-                          materialTapTargetSize:
-                              MaterialTapTargetSize.shrinkWrap,
-                          labelPadding:
-                              const EdgeInsets.only(left: 2, right: 8),
-                          onSelected: (_) =>
-                              setState(() => _filterSub = sub),
+                          onTap: () => setState(() => _filterSub = sub),
                         ),
                       ),
                   ],
