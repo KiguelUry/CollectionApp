@@ -441,15 +441,17 @@ class _ShopSearchLinks extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final shops = <(String, String)>[
-      ('Case Départ', BoardgameMarketService.caseDepartSearchUrl(title)),
       ('Le Zèbre à Pois', BoardgameMarketService.zebreAPoisSearchUrl(title)),
+      ('Philibert', BoardgameMarketService.philibertSearchUrl(title)),
       (
         'Maison du Cormoran',
         BoardgameMarketService.maisonDuCormoranSearchUrl(title),
       ),
-      ('Philibert', BoardgameMarketService.philibertSearchUrl(title)),
-      ('Amazon', BoardgameMarketService.amazonFrSearchUrl(title)),
+      ('Case Départ', BoardgameMarketService.caseDepartSearchUrl(title)),
+      ('Ludum', BoardgameMarketService.ludumSearchUrl(title)),
+      ('Cultura', BoardgameMarketService.culturaSearchUrl(title)),
       ('Fnac', BoardgameMarketService.fnacSearchUrl(title)),
+      ('Amazon', BoardgameMarketService.amazonFrSearchUrl(title)),
     ];
     final second = <(String, String)>[
       ('Vinted', BoardgameMarketService.vintedSearchUrl(title)),

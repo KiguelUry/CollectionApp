@@ -60,29 +60,37 @@ void main() {
   });
 
   test('les liens boutiques pointent vers des recherches réelles', () {
+    // Case Départ : token de session opaque → Google site: borné.
     final casedepart = BoardgameMarketService.caseDepartSearchUrl('Pandemic');
-    expect(casedepart, contains('casedepart.be/recherche'));
-    expect(casedepart, contains('controller=search'));
-    expect(casedepart, contains('s=Pandemic'));
-    expect(casedepart, isNot(contains('google.com')));
+    expect(casedepart, contains('google.com/search'));
+    expect(casedepart, contains('casedepart.be'));
+    expect(casedepart, contains('Pandemic'));
 
-    final zebre = BoardgameMarketService.zebreAPoisSearchUrl('Sea Salt & Paper');
-    expect(zebre, contains('zebreapois.be/recherche'));
-    expect(zebre, contains('controller=search'));
-    expect(zebre, contains('Sea'));
+    final zebre = BoardgameMarketService.zebreAPoisSearchUrl('Scythe');
+    expect(zebre, contains('lezap.be'));
+    expect(zebre, contains('leoproductsearch'));
+    expect(zebre, contains('search_query=Scythe'));
 
-    final accent = BoardgameMarketService.caseDepartSearchUrl('Le Château Blanc');
+    final accent =
+        BoardgameMarketService.zebreAPoisSearchUrl('Le Château Blanc');
     expect(accent, contains('Chateau'));
     expect(accent.toLowerCase(), isNot(contains('ch+teau')));
-    expect(accent, isNot(contains('ch%20teau')));
 
     expect(
-      BoardgameMarketService.maisonDuCormoranSearchUrl('Catan'),
-      contains('lamaisonducormoran.be'),
+      BoardgameMarketService.maisonDuCormoranSearchUrl('rebirth'),
+      'https://www.cormoran.be/website/search?search=rebirth&order=name+asc',
     );
     expect(
       BoardgameMarketService.amazonFrSearchUrl('Catan'),
       contains('amazon.fr/s'),
+    );
+    expect(
+      BoardgameMarketService.culturaSearchUrl('Catan'),
+      contains('cultura.com/search'),
+    );
+    expect(
+      BoardgameMarketService.ludumSearchUrl('Catan'),
+      contains('ludum.fr/recherche'),
     );
 
     expect(

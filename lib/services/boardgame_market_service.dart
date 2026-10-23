@@ -343,19 +343,27 @@ class BoardgameMarketService {
     return 'https://www.vinted.be/catalog?search_text=$q';
   }
 
+  /// Case Départ : la barre interne génère un token de session opaque
+  /// (`catalogueliste-recherche=…`), pas une URL stable avec le titre.
+  /// On ouvre donc une recherche Google bornée au site (meilleur filet fiable).
   static String caseDepartSearchUrl(String title) {
-    final q = encodeShopQuery(title);
-    return 'https://www.casedepart.be/recherche?controller=search&s=$q';
+    final q = Uri.encodeQueryComponent(
+      'site:casedepart.be ${normalizeShopQuery(title)}',
+    );
+    return 'https://www.google.com/search?q=$q';
   }
 
+  /// Le Zèbre à Pois (LEZAP) — moteur LeoProductSearch sur lezap.be.
   static String zebreAPoisSearchUrl(String title) {
     final q = encodeShopQuery(title);
-    return 'https://www.zebreapois.be/recherche?controller=search&s=$q';
+    return 'https://www.lezap.be/index.php?fc=module&module=leoproductsearch'
+        '&controller=productsearch&search_query=$q';
   }
 
+  /// Maison du Cormoran (Odoo) — domaine cormoran.be.
   static String maisonDuCormoranSearchUrl(String title) {
     final q = encodeShopQuery(title);
-    return 'https://www.lamaisonducormoran.be/?s=$q&post_type=product';
+    return 'https://www.cormoran.be/website/search?search=$q&order=name+asc';
   }
 
   static String amazonFrSearchUrl(String title) {
@@ -366,8 +374,31 @@ class BoardgameMarketService {
   static String philibertSearchUrl(String title) =>
       'https://www.philibertnet.com/fr/recherche?search_query=${encodeShopQuery(title)}';
 
+  /// Philibert accepte aussi l’EAN/GTIN (souvent 1 résultat → quasi page produit).
+  static String philibertSearchByEan(String ean) {
+    final cleaned = ean.replaceAll(RegExp(r'[^0-9]'), '');
+    return philibertSearchUrl(cleaned);
+  }
+
+  /// LEZAP : recherche par EAN (souvent un seul hit).
+  static String zebreAPoisSearchByEan(String ean) {
+    final cleaned = ean.replaceAll(RegExp(r'[^0-9]'), '');
+    return zebreAPoisSearchUrl(cleaned);
+  }
+
   static String fnacSearchUrl(String title) =>
       'https://www.fnac.com/SearchResult/ResultList.aspx?Search=${encodeShopQuery(title)}';
+
+  static String culturaSearchUrl(String title) {
+    final q = encodeShopQuery(title);
+    return 'https://www.cultura.com/search/results?searchterm=$q';
+  }
+
+  static String ludumSearchUrl(String title) {
+    final q = encodeShopQuery(title);
+    return 'https://www.ludum.fr/recherche?controller=search&orderby=position'
+        '&orderway=desc&search_query=$q&submit_search=';
+  }
 
   static String okkazeoSearchUrl(String title) =>
       'https://www.okkazeo.com/jeux/resultats?rech_nom=${encodeShopQuery(title)}';
@@ -411,7 +442,9 @@ class BoardgameMarketService {
     if (host.contains('zebreapois') || host.contains('lezap')) {
       return 'Le Zèbre à Pois';
     }
-    if (host.contains('lamaisonducormoran')) return 'Maison du Cormoran';
+    if (host.contains('cormoran')) return 'Maison du Cormoran';
+    if (host.contains('cultura')) return 'Cultura';
+    if (host.contains('ludum')) return 'Ludum';
     if (host.contains('okkazeo')) return 'Okkazeo';
     if (host.contains('geekdo') || host.contains('boardgamegeek')) {
       return 'GeekMarket';
