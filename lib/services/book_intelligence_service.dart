@@ -151,16 +151,33 @@ abstract final class BookIntelligenceService {
     return out;
   }
 
+  static final _vfCompactTitle = RegExp(
+    r'\bt\.?\s*\d+\b',
+    caseSensitive: false,
+  );
+
+  static bool looksVfTitle(String title) {
+    final t = title.toLowerCase();
+    return t.contains('tome') || _vfCompactTitle.hasMatch(t);
+  }
+
+  static bool looksEnVolTitle(String title) {
+    final t = title.toLowerCase();
+    return t.contains('vol.') ||
+        t.contains('volume ') ||
+        RegExp(r',\s*vol\.?\s*\d', caseSensitive: false).hasMatch(t);
+  }
+
   static bool _preferHit(EnrichedBookHit a, EnrichedBookHit b) {
     final aCover = a.imageUrl != null && a.imageUrl!.isNotEmpty;
     final bCover = b.imageUrl != null && b.imageUrl!.isNotEmpty;
     if (aCover != bCover) return aCover;
     final aTitle = a.displayTitle.toLowerCase();
     final bTitle = b.displayTitle.toLowerCase();
-    final aVf = aTitle.contains('tome') || aTitle.contains('t.');
-    final bVf = bTitle.contains('tome') || bTitle.contains('t.');
-    final aEn = aTitle.contains('vol.') || aTitle.contains('volume ');
-    final bEn = bTitle.contains('vol.') || bTitle.contains('volume ');
+    final aVf = looksVfTitle(aTitle);
+    final bVf = looksVfTitle(bTitle);
+    final aEn = looksEnVolTitle(aTitle);
+    final bEn = looksEnVolTitle(bTitle);
     if (aVf && !bVf) return true;
     if (bVf && !aVf) return false;
     if (!aEn && bEn) return true;
@@ -268,6 +285,18 @@ abstract final class BookIntelligenceService {
     return '$name Tome $vol';
   }
 
+  /// Variante VF compacte Fnac/Kana : « Kagurabachi T10 ».
+  static String volumeSearchQueryCompact(
+    String seriesName,
+    double volumeNumber,
+  ) {
+    final name = seriesName.trim();
+    final vol = volumeNumber == volumeNumber.roundToDouble()
+        ? volumeNumber.toInt().toString()
+        : volumeNumber.toString();
+    return '$name T$vol';
+  }
+
   /// Hit catalogue dont le n° de tome matche [target] de façon stricte.
   static bool hitMatchesVolumeExactly(EnrichedBookHit hit, int target) {
     final title = hit.raw['title'] ?? hit.displayTitle;
@@ -289,12 +318,19 @@ abstract final class BookIntelligenceService {
       return (coverUrl: null, publishedDate: null, upcoming: false);
     }
 
+    final compact = volumeSearchQueryCompact(seriesName, volumeNumber);
     final merged = <Map<String, String>>[];
     final seen = <String>{};
-    // FR d'abord, puis sans filtre langue (précommandes EN).
+    // FR « Tome N » + « TN » (Kana/Fnac), puis sans filtre langue.
     for (final list in [
       await GoogleBooksService.search(query, maxResults: 16, langRestrict: 'fr'),
+      await GoogleBooksService.search(
+        compact,
+        maxResults: 12,
+        langRestrict: 'fr',
+      ),
       await ItunesBooksService.search(query),
+      await ItunesBooksService.search(compact),
       await GoogleBooksService.search(query, maxResults: 16),
       await OpenLibraryService.searchBooks(query, subcategory: subcategory),
     ]) {

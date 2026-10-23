@@ -28,8 +28,15 @@ class ParsedBookTitle {
 }
 
 abstract final class BookTitleParser {
+  /// « Kagurabachi T10 », « Naruto - Tome 16 », « One Piece Vol.12 ».
   static final _volumePrefix = RegExp(
     r'^(.*?)[,\s:-]+(?:vol\.?|volume|tome|t\.?|#|n°|no\.?)\s*(\d+(?:[.,]\d+)?)\s*$',
+    caseSensitive: false,
+  );
+
+  /// Compact VF : « Kagurabachi T10 » / « Kagurabachi T.11 » (sans séparateur forcé).
+  static final _compactTVolume = RegExp(
+    r'^(.*?)\s+t\.?\s*(\d{1,3})\s*$',
     caseSensitive: false,
   );
 
@@ -56,7 +63,7 @@ abstract final class BookTitleParser {
     t = t.replaceAll(RegExp(r'[–—−]'), '-');
     t = t.replaceAll(_stripSuffix, '').trim();
 
-    for (final pattern in [_volumePrefix, _hashVolume]) {
+    for (final pattern in [_volumePrefix, _compactTVolume, _hashVolume]) {
       final m = pattern.firstMatch(t);
       if (m != null) {
         final series = _cleanSeriesName(m.group(1)!);
@@ -108,7 +115,7 @@ abstract final class BookTitleParser {
     return n;
   }
 
-  /// Extrait le n° de tome avec borne stricte (1 ≠ 16, 1 ≠ 17).
+  /// Extrait le n° de tome avec borne stricte (1 ≠ 16 ; matche aussi `T10`).
   static int? extractVolumeNumberStrict(String title) {
     final m = RegExp(
       r'\b(?:tome|vol\.?|volume|t\.?)\s*0*(\d+)\b',
@@ -118,7 +125,8 @@ abstract final class BookTitleParser {
     return int.tryParse(m.group(1)!);
   }
 
-  /// Vrai seulement si le titre référence exactement [targetVolume].
+  /// Vrai seulement si le titre référence exactement [targetVolume]
+  /// (`Tome 10`, `T10`, `T.10`, `Vol. 10` — pas `Tome 16` pour 1).
   static bool titleMatchesVolumeExactly(String title, int targetVolume) {
     if (targetVolume < 0) return false;
     final re = RegExp(

@@ -54,6 +54,26 @@ void main() {
         11,
       );
     });
+
+    test('VF compacte T10 / T.11 reconnue', () {
+      final t10 = BookTitleParser.parse('Kagurabachi T10');
+      expect(t10.seriesName, 'Kagurabachi');
+      expect(t10.volumeNumber?.round(), 10);
+      final t11 = BookTitleParser.parse('Kagurabachi T.11');
+      expect(t11.volumeNumber?.round(), 11);
+      expect(
+        BookTitleParser.titleMatchesVolumeExactly('Kagurabachi T10', 10),
+        isTrue,
+      );
+      expect(
+        BookTitleParser.titleMatchesVolumeExactly('Kagurabachi T10', 1),
+        isFalse,
+      );
+      expect(
+        BookTitleParser.extractVolumeNumberStrict('Kagurabachi T11'),
+        11,
+      );
+    });
   });
 
   group('BookSeriesNormalizer', () {
@@ -110,6 +130,21 @@ void main() {
       expect(
         BookSeriesNormalizer.displaySeriesName('Naruto - Tome 16'),
         'Naruto',
+      );
+    });
+
+    test('stripOrphanVolumeSuffix retire « - Tome » sans numéro', () {
+      expect(
+        BookSeriesNormalizer.stripOrphanVolumeSuffix('Thorgal - Tome'),
+        'Thorgal',
+      );
+      expect(
+        BookSeriesNormalizer.stripOrphanVolumeSuffix('Thorgal - Vol'),
+        'Thorgal',
+      );
+      expect(
+        BookSeriesNormalizer.displaySeriesName('Thorgal - Tome'),
+        'Thorgal',
       );
     });
 

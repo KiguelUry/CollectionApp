@@ -52,13 +52,15 @@ class BookVolume {
   }
 
   /// Tome pas encore sorti (précommande / date future).
+  /// Si `publishedDate` ≤ aujourd'hui → paru (ignore un vieux flag is_upcoming).
   bool get isUpcoming {
-    if (metadata['is_upcoming'] == true) return true;
     final d = publishedDate;
-    if (d == null) return false;
     final today = DateTime.now();
     final day = DateTime(today.year, today.month, today.day);
-    return d.isAfter(day);
+    if (d != null) {
+      return d.isAfter(day);
+    }
+    return metadata['is_upcoming'] == true;
   }
 
   String? get upcomingLabel {
@@ -68,6 +70,20 @@ class BookVolume {
     final dd = d.day.toString().padLeft(2, '0');
     final mm = d.month.toString().padLeft(2, '0');
     return '⏳ À paraître · $dd/$mm/${d.year}';
+  }
+
+  /// Édition physique / numérique (metadata `edition`).
+  BookVolumeEdition get edition =>
+      BookVolumeEdition.fromMeta(metadata['edition']?.toString());
+
+  String? get editionBadge {
+    return switch (edition) {
+      BookVolumeEdition.collector => '✨ Collector',
+      BookVolumeEdition.firstEdition => 'EO',
+      BookVolumeEdition.boxset => '📚 Coffret',
+      BookVolumeEdition.digital => '🌐 Scan',
+      BookVolumeEdition.standard => null,
+    };
   }
 
   String? get volumeTitle {
@@ -165,4 +181,38 @@ class BookVolumeSlot {
     this.item,
     required this.status,
   });
+}
+
+enum BookVolumeEdition {
+  standard,
+  collector,
+  firstEdition,
+  boxset,
+  digital;
+
+  String get dbValue => switch (this) {
+        BookVolumeEdition.standard => 'standard',
+        BookVolumeEdition.collector => 'collector',
+        BookVolumeEdition.firstEdition => 'first',
+        BookVolumeEdition.boxset => 'boxset',
+        BookVolumeEdition.digital => 'digital',
+      };
+
+  String get label => switch (this) {
+        BookVolumeEdition.standard => '📗 Standard',
+        BookVolumeEdition.collector => '✨ Édition Spéciale / Collector',
+        BookVolumeEdition.firstEdition => '🥇 1ère Édition (EO)',
+        BookVolumeEdition.boxset => '📚 Coffret / Intégrale',
+        BookVolumeEdition.digital => '🌐 Numérique / Scan',
+      };
+
+  static BookVolumeEdition fromMeta(String? raw) {
+    return switch (raw) {
+      'collector' => BookVolumeEdition.collector,
+      'first' => BookVolumeEdition.firstEdition,
+      'boxset' => BookVolumeEdition.boxset,
+      'digital' => BookVolumeEdition.digital,
+      _ => BookVolumeEdition.standard,
+    };
+  }
 }

@@ -529,8 +529,9 @@ class BookSeriesService {
     }
     final ownedCount = ownedNumbers.length;
 
+    // Lus = tous les tomes marqués lus (possédés OU non).
     final readNumbers = <int>{};
-    for (final i in owned) {
+    for (final i in active) {
       if (!i.isRead) continue;
       final vol = i.volumeId != null ? volById[i.volumeId!] : null;
       if (vol == null || vol.isHorsSerie) continue;
@@ -540,16 +541,20 @@ class BookSeriesService {
     for (final v in volumes) {
       if (!v.isRead || v.isHorsSerie) continue;
       final n = v.volumeNumber.round();
-      if (ownedNumbers.contains(n)) readNumbers.add(n);
+      if (n >= 1) readNumbers.add(n);
     }
     final readCount = readNumbers.length;
 
+    // Moyenne UNIQUEMENT sur notes > 0 (jamais ★ 0.0 / ★ 0.3 fantômes).
     double? rating = series.userRating;
+    if (rating != null && rating <= 0) rating = null;
     if (rating == null) {
-      final rated = owned.where((i) => i.rating != null).toList();
+      final rated = active
+          .where((i) => i.rating != null && i.rating! > 0)
+          .map((i) => i.rating! > 5.0 ? i.rating! / 2 : i.rating!)
+          .toList();
       if (rated.isNotEmpty) {
-        rating = rated.map((i) => i.rating!).reduce((a, b) => a + b) /
-            rated.length;
+        rating = rated.reduce((a, b) => a + b) / rated.length;
       }
     }
 
@@ -701,35 +706,46 @@ class BookSeriesService {
     var updated = 0;
     var lookups = 0;
 
-    // Batch « Série Tome » — uniquement hits au numéro STRICT.
+    // Batch « Série Tome » + « Série T » (VF Kana/Fnac) — match STRICT.
     final batchCovers = <int, String>{};
     final batchPub = <int, String>{};
-    try {
-      final batch = await BookCatalogService.searchBooks(
-        '${series.name} Tome',
-        subcategory: series.subcategory,
-        filters: BookSearchFilters(titleQuery: series.name),
-      );
-      final ranked = BookIntelligenceService.enrichAndRank(
-        batch,
-        subcategory: series.subcategory,
-        filters: BookSearchFilters(titleQuery: series.name),
-      );
-      for (final h in ranked) {
-        final img = h.imageUrl;
-        if (img == null || img.isEmpty) continue;
-        final n = BookTitleParser.extractVolumeNumberStrict(
-          '${h.raw['title'] ?? ''} ${h.raw['subtitle'] ?? ''}',
+    final batchVf = <int, bool>{};
+    Future<void> ingestBatch(String q) async {
+      try {
+        final batch = await BookCatalogService.searchBooks(
+          q,
+          subcategory: series.subcategory,
+          filters: BookSearchFilters(titleQuery: series.name),
         );
-        if (n == null || n < 1) continue;
-        if (!BookIntelligenceService.hitMatchesVolumeExactly(h, n)) continue;
-        batchCovers.putIfAbsent(n, () => img);
-        final pub = h.raw['published_date'] ?? h.raw['year'];
-        if (pub != null && pub.isNotEmpty) {
-          batchPub.putIfAbsent(n, () => pub);
+        final ranked = BookIntelligenceService.enrichAndRank(
+          batch,
+          subcategory: series.subcategory,
+          filters: BookSearchFilters(titleQuery: series.name),
+        );
+        for (final h in ranked) {
+          final img = h.imageUrl;
+          if (img == null || img.isEmpty) continue;
+          final combined =
+              '${h.raw['title'] ?? ''} ${h.raw['subtitle'] ?? ''}';
+          final vn = BookTitleParser.extractVolumeNumberStrict(combined);
+          if (vn == null || vn < 1) continue;
+          if (!BookIntelligenceService.hitMatchesVolumeExactly(h, vn)) continue;
+          final isVf = BookIntelligenceService.looksVfTitle(combined);
+          final existingVf = batchVf[vn] == true;
+          if (!batchCovers.containsKey(vn) || (isVf && !existingVf)) {
+            batchCovers[vn] = img;
+            batchVf[vn] = isVf;
+          }
+          final pub = h.raw['published_date'] ?? h.raw['year'];
+          if (pub != null && pub.isNotEmpty) {
+            batchPub.putIfAbsent(vn, () => pub);
+          }
         }
-      }
-    } catch (_) {}
+      } catch (_) {}
+    }
+
+    await ingestBatch('${series.name} Tome');
+    await ingestBatch('${series.name} T');
 
     for (final vol in volumes) {
       if (lookups >= maxLookups) break;
@@ -742,7 +758,15 @@ class BookSeriesService {
           (verified == null || verified != n);
       // Toujours revalider les premiers tomes (bug Naruto/Thorgal T1).
       final forceCheck = n <= 3 && (needsRepair || !hasCover || verified != n);
-      if (hasCover && !needsRepair && !forceCheck) continue;
+      // Remplace une fiche EN « Vol. X » dès qu'une couverture VF existe.
+      final titleHint =
+          '${vol.volumeTitle ?? ''} ${vol.label ?? ''} ${vol.metadata['source_title'] ?? ''}'
+              .toLowerCase();
+      final looksEnVol = titleHint.contains('vol.') ||
+          titleHint.contains('volume ') ||
+          RegExp(r',\s*vol\.?\s*\d').hasMatch(titleHint);
+      final preferVf = looksEnVol && batchVf[n] == true;
+      if (hasCover && !needsRepair && !forceCheck && !preferVf) continue;
 
       lookups++;
       String? url = batchCovers[n];
@@ -773,7 +797,7 @@ class BookSeriesService {
       } else if (pub != null) {
         await patchVolumeMetadata(vol.id, {
           'published_date': pub,
-          if (upcoming) 'is_upcoming': true,
+          'is_upcoming': upcoming,
         });
       }
     }
@@ -1156,15 +1180,32 @@ class BookSeriesService {
     required BookVolumeSlot slot,
     required bool read,
   }) async {
+    // Lu possible sans possession (scan / bibliothèque) via flag volume.
     final item = slot.item;
     if (item != null && !item.isWishlist) {
       await setItemRead(item.id, read);
-      if (!read) {
-        await setVolumeReadFlag(slot.volume.id, false);
-      }
+      await setVolumeReadFlag(slot.volume.id, read);
       return;
     }
     await setVolumeReadFlag(slot.volume.id, read);
+  }
+
+  Future<void> setVolumeEdition({
+    required String volumeId,
+    required BookVolumeEdition edition,
+  }) async {
+    await patchVolumeMetadata(volumeId, {
+      'edition': edition.dbValue,
+    });
+  }
+
+  /// Nettoie le nom série (« Thorgal - Tome » → « Thorgal ») si besoin.
+  Future<BookSeries> sanitizeSeriesName(BookSeries series) async {
+    final clean = BookSeriesNormalizer.displaySeriesName(series.name);
+    if (clean == series.name.trim()) return series;
+    final updated = series.copyWith(name: clean);
+    await updateSeries(updated);
+    return updated;
   }
 
   Future<BookSeries?> findSeriesByName(

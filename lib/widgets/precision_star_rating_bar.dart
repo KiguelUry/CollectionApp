@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// 5 étoiles = note 0.0 → 5.0 (précision 0.1).
-/// Hover PC prévisualise ; clic / fin de pan sauvegarde via [onChanged].
+/// 5 étoiles au clic : 1er clic = N.0, 2e = N−0.5, 3e = effacer.
+/// Aucun glissement / hover (évite les conflits avec les cartes parentes).
 class PrecisionStarRatingBar extends StatefulWidget {
   final double rating;
   final ValueChanged<double> onChanged;
@@ -14,7 +14,7 @@ class PrecisionStarRatingBar extends StatefulWidget {
     required this.rating,
     required this.onChanged,
     this.readOnly = false,
-    this.starSize = 28,
+    this.starSize = 32,
   });
 
   @override
@@ -22,10 +22,7 @@ class PrecisionStarRatingBar extends StatefulWidget {
 }
 
 class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
-  /// Note réellement sauvegardée (0 = non noté).
   late double _saved;
-  /// Prévisualisation hover / drag (null = afficher [_saved]).
-  double? _preview;
 
   @override
   void initState() {
@@ -38,52 +35,37 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
     super.didUpdateWidget(oldWidget);
     if ((oldWidget.rating - widget.rating).abs() > 0.01) {
       _saved = widget.rating.clamp(0.0, 5.0);
-      _preview = null;
     }
   }
 
-  double get _display {
-    final v = _preview ?? _saved;
-    return v.clamp(0.0, 5.0);
-  }
+  bool get _isUnrated => _saved <= 0.001;
 
-  bool get _isUnrated => _display <= 0.001;
-
-  double _ratingFromDx(double dx, double width) {
-    if (width <= 0) return 0;
-    // Petite marge gauche : clic tout à gauche = 0 (vider).
-    final t = (dx / width).clamp(0.0, 1.0);
-    final raw = t * 5.0;
-    return double.parse((raw * 10).round().clamp(0, 50).toStringAsFixed(0)) /
-        10.0;
-  }
-
-  void _setPreview(Offset local, double width) {
-    final r = _ratingFromDx(local.dx, width);
-    if (_preview != null && (r - _preview!).abs() < 0.05) return;
-    setState(() => _preview = r);
-  }
-
-  void _commitPreview() {
-    final r = double.parse((_preview ?? _saved).clamp(0.0, 5.0).toStringAsFixed(1));
-    setState(() {
-      _saved = r;
-      _preview = null;
-    });
-    if ((r - widget.rating).abs() < 0.05 && r > 0) return;
-    // Autorise aussi sauvegarder 0 (clear).
-    widget.onChanged(r);
-  }
-
-  void _exitHover() {
-    if (_preview == null) return;
-    setState(() => _preview = null);
+  void _onStarTap(int starIndex) {
+    if (widget.readOnly) return;
+    // starIndex 0..4 → étoile N = starIndex+1
+    final n = (starIndex + 1).toDouble();
+    final full = n;
+    final half = n - 0.5;
+    double next;
+    if ((_saved - full).abs() < 0.05) {
+      // Déjà N.0 → demi
+      next = half;
+    } else if ((_saved - half).abs() < 0.05) {
+      // Déjà N−0.5 → effacer
+      next = 0;
+    } else {
+      // Autre valeur → entier N.0
+      next = full;
+    }
+    next = double.parse(next.clamp(0.0, 5.0).toStringAsFixed(1));
+    setState(() => _saved = next);
+    widget.onChanged(next);
   }
 
   Future<void> _editNumeric() async {
     if (widget.readOnly) return;
     final ctrl = TextEditingController(
-      text: _saved <= 0 ? '' : _saved.toStringAsFixed(1),
+      text: _isUnrated ? '' : _saved.toStringAsFixed(1),
     );
     final result = await showDialog<double>(
       context: context,
@@ -97,7 +79,7 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
             FilteringTextInputFormatter.allow(RegExp(r'[\d.,]')),
           ],
           decoration: const InputDecoration(
-            hintText: '4.3',
+            hintText: '4.5',
             suffixText: '/ 5',
           ),
           onSubmitted: (v) {
@@ -105,8 +87,7 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
               Navigator.pop(ctx, 0.0);
               return;
             }
-            final n = double.tryParse(v.replaceAll(',', '.'));
-            Navigator.pop(ctx, n);
+            Navigator.pop(ctx, double.tryParse(v.replaceAll(',', '.')));
           },
         ),
         actions: [
@@ -120,8 +101,10 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
                 Navigator.pop(ctx, 0.0);
                 return;
               }
-              final n = double.tryParse(ctrl.text.replaceAll(',', '.'));
-              Navigator.pop(ctx, n);
+              Navigator.pop(
+                ctx,
+                double.tryParse(ctrl.text.replaceAll(',', '.')),
+              );
             },
             child: const Text('OK'),
           ),
@@ -130,117 +113,73 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
     );
     ctrl.dispose();
     if (result == null) return;
-    setState(() {
-      _saved = result.clamp(0.0, 5.0);
-      _preview = null;
-    });
-    widget.onChanged(_saved);
+    final r = double.parse(result.clamp(0.0, 5.0).toStringAsFixed(1));
+    setState(() => _saved = r);
+    widget.onChanged(r);
+  }
+
+  IconData _iconFor(int i) {
+    final threshold = i + 1.0;
+    if (_saved >= threshold - 0.01) return Icons.star_rounded;
+    if (_saved >= threshold - 0.5 - 0.01) return Icons.star_half_rounded;
+    return Icons.star_border_rounded;
   }
 
   @override
   Widget build(BuildContext context) {
-    final badgeText =
-        _isUnrated ? '— / 5' : '${_display.toStringAsFixed(1)} / 5';
-
-    return Row(
-      children: [
-        Expanded(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final width = constraints.maxWidth;
-              return MouseRegion(
-                onHover: widget.readOnly
-                    ? null
-                    : (e) => _setPreview(e.localPosition, width),
-                onExit: widget.readOnly ? null : (_) => _exitHover(),
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onPanDown: widget.readOnly
-                      ? null
-                      : (d) => _setPreview(d.localPosition, width),
-                  onPanUpdate: widget.readOnly
-                      ? null
-                      : (d) => _setPreview(d.localPosition, width),
-                  onPanEnd: widget.readOnly ? null : (_) => _commitPreview(),
-                  onPanCancel: widget.readOnly ? null : _exitHover,
-                  onTapUp: widget.readOnly
-                      ? null
-                      : (d) {
-                          _setPreview(d.localPosition, width);
-                          _commitPreview();
-                        },
-                  child: SizedBox(
-                    height: widget.starSize + 8,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.start,
-                      children: List.generate(5, (i) {
-                        // Note 0 → aucune étoile remplie (contours seuls).
-                        final fill = _isUnrated
-                            ? 0.0
-                            : (_display - i).clamp(0.0, 1.0);
-                        return Padding(
-                          padding: EdgeInsets.only(right: i < 4 ? 6 : 0),
-                          child: SizedBox(
-                            width: widget.starSize,
-                            height: widget.starSize,
-                            child: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                Icon(
-                                  Icons.star_border_rounded,
-                                  size: widget.starSize,
-                                  color: Colors.amber.shade700.withValues(
-                                    alpha: 0.85,
-                                  ),
-                                ),
-                                if (fill > 0.01)
-                                  ClipRect(
-                                    child: Align(
-                                      alignment: Alignment.centerLeft,
-                                      widthFactor: fill,
-                                      child: Icon(
-                                        Icons.star_rounded,
-                                        size: widget.starSize,
-                                        color: Colors.amber.shade700,
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        );
-                      }),
+    final badge = _isUnrated ? '— / 5' : '${_saved.toStringAsFixed(1)} / 5';
+    // GestureDetector opaque : les clics ne remontent jamais à la carte parent.
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {},
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < 5; i++)
+            Padding(
+              padding: EdgeInsets.only(right: i < 4 ? 2 : 0),
+              child: SizedBox(
+                width: 32,
+                height: 32,
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: widget.readOnly ? null : () => _onStarTap(i),
+                    customBorder: const CircleBorder(),
+                    child: Icon(
+                      _iconFor(i),
+                      size: widget.starSize.clamp(18, 28),
+                      color: Colors.amber.shade700,
                     ),
                   ),
                 ),
-              );
-            },
-          ),
-        ),
-        const SizedBox(width: 8),
-        InkWell(
-          onTap: widget.readOnly ? null : _editNumeric,
-          borderRadius: BorderRadius.circular(8),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.amber.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: Colors.amber.shade700.withValues(alpha: 0.4),
               ),
             ),
-            child: Text(
-              badgeText,
-              style: TextStyle(
-                fontWeight: FontWeight.w800,
-                fontSize: 14,
-                color: Colors.amber.shade900,
+          const SizedBox(width: 8),
+          InkWell(
+            onTap: widget.readOnly ? null : _editNumeric,
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.amber.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: Colors.amber.shade700.withValues(alpha: 0.4),
+                ),
+              ),
+              child: Text(
+                badge,
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 14,
+                  color: Colors.amber.shade900,
+                ),
               ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

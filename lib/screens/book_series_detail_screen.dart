@@ -16,9 +16,7 @@ import '../widgets/precision_star_rating_bar.dart';
 
 enum _VolumeFilter { all, owned, missing, toRead, wishlist }
 
-enum _HeatColorMode { status, rating }
-
-/// Dossier série — mini-heatmap + grille de couvertures unifiée.
+/// Dossier série — frise hybride + grille de couvertures.
 class BookSeriesDetailScreen extends StatefulWidget {
   final String seriesId;
 
@@ -37,8 +35,6 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   BookSeriesStats? _stats;
   List<BookVolumeSlot> _slots = [];
   _VolumeFilter _filter = _VolumeFilter.all;
-  _HeatColorMode _heatMode = _HeatColorMode.status;
-  bool _quickTap = false;
   String? _expandedVolumeId;
   bool _refreshingPubs = false;
 
@@ -59,6 +55,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     try {
       var series = await _service.fetchSeriesById(widget.seriesId);
       if (series == null) throw Exception('Série introuvable');
+      series = await _service.sanitizeSeriesName(series);
       await _service.dedupeVolumeItems(series.id);
       // Force Thorgal → BD + compte réaliste si sous-estimé.
       series = await _service.ensureRealisticVolumeCount(series);
@@ -131,13 +128,18 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     }
   }
 
-  Future<void> _onFriseOrCardTap(BookVolumeSlot slot) async {
-    if (_quickTap) {
-      await _toggleOwned(slot);
-      return;
-    }
-    setState(() => _expandedVolumeId = slot.volume.id);
-    final key = _slotKeys[slot.volume.id];
+  /// Frise : 1 clic = bascule Possédé ↔ Manquant.
+  Future<void> _onFriseTap(BookVolumeSlot slot) async {
+    await _toggleOwned(slot);
+  }
+
+  /// Carte couverture : ouvre / ferme le tiroir détail.
+  Future<void> _onCardTap(BookVolumeSlot slot) async {
+    final id = slot.volume.id;
+    final closing = _expandedVolumeId == id;
+    setState(() => _expandedVolumeId = closing ? null : id);
+    if (closing) return;
+    final key = _slotKeys[id];
     final ctx = key?.currentContext;
     if (ctx != null) {
       await Scrollable.ensureVisible(
@@ -149,14 +151,10 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   }
 
   String _seriesStatsLine(BookSeriesStats stats) {
-    final upcoming =
-        _slots.where((s) => s.volume.isUpcoming).length;
-    final published = (_slots.length - upcoming).clamp(0, _slots.length);
-    final ownedPub = _slots
-        .where((s) => !s.volume.isUpcoming && _slotOwned(s))
-        .length;
+    final total = stats.totalSlots > 0 ? stats.totalSlots : _slots.length;
     final base =
-        'Possédés : $ownedPub/$published parus · Lus : ${stats.readLabel}';
+        'Possédés : ${stats.ownedCount}/$total · Lus : ${stats.readCount}/$total';
+    final upcoming = _slots.where((s) => s.volume.isUpcoming).length;
     final up = upcoming > 0 ? ' · +$upcoming à paraître' : '';
     final rating =
         stats.ratingLabel != null ? ' · ${stats.ratingLabel}' : '';
@@ -227,6 +225,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     bool? owned,
     bool? read,
     bool? wishlist,
+    BookVolumeEdition? edition,
   }) {
     final idx = _slots.indexWhere((s) => s.volume.id == slot.volume.id);
     if (idx < 0) return;
@@ -235,8 +234,17 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     final nextRead = read ?? _slotRead(cur);
     final nextWish = wishlist ?? _slotWish(cur);
 
+    var nextVolume = cur.volume;
+    if (read != null) {
+      nextVolume = nextVolume.copyWithMetadata({'is_read': nextRead});
+    }
+    if (edition != null) {
+      nextVolume = nextVolume.copyWithMetadata({'edition': edition.dbValue});
+    }
+
     CollectionItem? nextItem;
     if (!nextOwned && !nextWish) {
+      // Lu sans possession : flag volume uniquement.
       nextItem = null;
     } else {
       nextItem = _fakeItem(cur, wishlist: nextWish, read: nextRead);
@@ -249,7 +257,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     setState(() {
       _slots = List.of(_slots);
       _slots[idx] = BookVolumeSlot(
-        volume: cur.volume,
+        volume: nextVolume,
         item: nextItem,
         status: status,
       );
@@ -321,14 +329,24 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   }
 
   Future<void> _toggleRead(BookVolumeSlot slot) async {
+    // Lu possible sans possession (scan / en ligne).
     final next = !_slotRead(slot);
-    if (!_slotOwned(slot) && next) {
-      await _toggleOwned(slot);
-    }
-    _patchSlotLocal(slot, read: next, owned: true);
+    _patchSlotLocal(slot, read: next);
     try {
       final refreshed = _slots.firstWhere((s) => s.volume.id == slot.volume.id);
       await _service.toggleVolumeRead(slot: refreshed, read: next);
+    } catch (e) {
+      if (mounted) await _load(silent: true);
+    }
+  }
+
+  Future<void> _setEdition(BookVolumeSlot slot, BookVolumeEdition edition) async {
+    _patchSlotLocal(slot, edition: edition);
+    try {
+      await _service.setVolumeEdition(
+        volumeId: slot.volume.id,
+        edition: edition,
+      );
     } catch (e) {
       if (mounted) await _load(silent: true);
     }
@@ -586,9 +604,8 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
           padding: const EdgeInsets.only(bottom: 32),
           children: [
             _buildHero(series, stats, accent),
-            _buildFilters(accent),
-            _buildToolbar(accent),
-            _buildMiniHeatmap(display, accent),
+            _buildFilterMenu(accent),
+            _buildHybridFrise(display, accent),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
               child: _buildCoverGrid(display, accent),
@@ -687,88 +704,73 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     );
   }
 
-  Widget _buildFilters(Color accent) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-      child: Row(
-        children: [
-          for (final f in _VolumeFilter.values)
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: FilterChip(
-                selected: _filter == f,
-                label: Text(switch (f) {
-                  _VolumeFilter.all => 'Tous (${_countFilter(f)})',
-                  _VolumeFilter.owned => 'Possédés (${_countFilter(f)})',
-                  _VolumeFilter.missing => 'Manquants (${_countFilter(f)})',
-                  _VolumeFilter.toRead => 'À lire (${_countFilter(f)})',
-                  _VolumeFilter.wishlist => 'Wishlist (${_countFilter(f)})',
-                }),
-                onSelected: (_) => setState(() => _filter = f),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
+  String _filterLabel(_VolumeFilter f) => switch (f) {
+        _VolumeFilter.all => 'Tous (${_countFilter(f)})',
+        _VolumeFilter.owned => 'Possédés (${_countFilter(f)})',
+        _VolumeFilter.missing => 'Manquants (${_countFilter(f)})',
+        _VolumeFilter.toRead => 'À lire (${_countFilter(f)})',
+        _VolumeFilter.wishlist => 'Wishlist (${_countFilter(f)})',
+      };
 
-  Widget _buildToolbar(Color accent) {
+  Widget _buildFilterMenu(Color accent) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
       child: Align(
         alignment: Alignment.centerLeft,
-        child: FilterChip(
-          selected: _quickTap,
-          avatar: Icon(
-            Icons.bolt,
-            size: 16,
-            color: _quickTap ? accent : null,
+        child: PopupMenuButton<_VolumeFilter>(
+          initialValue: _filter,
+          onSelected: (f) => setState(() => _filter = f),
+          itemBuilder: (_) => [
+            for (final f in _VolumeFilter.values)
+              PopupMenuItem(
+                value: f,
+                child: Text(_filterLabel(f)),
+              ),
+          ],
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: accent.withValues(alpha: 0.45)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('🌪️ ', style: TextStyle(fontSize: 13)),
+                Text(
+                  'Filtre : ${_filterLabel(_filter)}',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                    color: accent,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(Icons.arrow_drop_down, color: accent, size: 20),
+              ],
+            ),
           ),
-          label: const Text('⚡ Coche rapide'),
-          onSelected: (v) => setState(() => _quickTap = v),
         ),
       ),
     );
   }
 
-  Widget _buildMiniHeatmap(List<BookVolumeSlot> slots, Color accent) {
+  /// Frise hybride : barre statut 4px + corps note IMDb (ou gris).
+  Widget _buildHybridFrise(List<BookVolumeSlot> slots, Color accent) {
     if (slots.isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Text(
-                'Frise',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12,
-                  color: Colors.grey.shade400,
-                ),
-              ),
-              const Spacer(),
-              SegmentedButton<_HeatColorMode>(
-                style: ButtonStyle(
-                  visualDensity: VisualDensity.compact,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                segments: const [
-                  ButtonSegment(
-                    value: _HeatColorMode.status,
-                    label: Text('Statut', style: TextStyle(fontSize: 11)),
-                  ),
-                  ButtonSegment(
-                    value: _HeatColorMode.rating,
-                    label: Text('Notes /5', style: TextStyle(fontSize: 11)),
-                  ),
-                ],
-                selected: {_heatMode},
-                onSelectionChanged: (s) => setState(() => _heatMode = s.first),
-              ),
-            ],
+          Text(
+            'Frise',
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 12,
+              color: Colors.grey.shade400,
+            ),
           ),
           const SizedBox(height: 8),
           Wrap(
@@ -777,24 +779,38 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
             children: [
               for (final slot in slots)
                 SizedBox(
-                  width: 36,
-                  height: 36,
+                  width: 40,
+                  height: 40,
                   child: Material(
-                    color: _heatMode == _HeatColorMode.rating
-                        ? _ratingColor(slot.item?.rating)
-                        : _statusColor(slot),
-                    borderRadius: BorderRadius.circular(6),
+                    color: Colors.transparent,
                     child: InkWell(
-                      onTap: () => _onFriseOrCardTap(slot),
+                      onTap: () => _onFriseTap(slot),
                       borderRadius: BorderRadius.circular(6),
-                      child: Center(
-                        child: Text(
-                          'T${slot.volume.displayNumber}',
-                          style: const TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.white,
-                          ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: Column(
+                          children: [
+                            Container(
+                              height: 4,
+                              width: double.infinity,
+                              color: _statusBarColor(slot),
+                            ),
+                            Expanded(
+                              child: ColoredBox(
+                                color: _friseBodyColor(slot),
+                                child: Center(
+                                  child: Text(
+                                    _friseCellLabel(slot),
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w800,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -807,11 +823,28 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     );
   }
 
-  Color _statusColor(BookVolumeSlot slot) {
-    if (_slotRead(slot) && _slotOwned(slot)) return const Color(0xFF2E7D32);
-    if (_slotOwned(slot)) return const Color(0xFF00897B);
+  /// 🟢 Possédé · 🟠 Lu non possédé · 💜 Wishlist · ⚫ Manquant.
+  Color _statusBarColor(BookVolumeSlot slot) {
+    if (_slotOwned(slot)) return const Color(0xFF43A047);
+    if (_slotRead(slot)) return const Color(0xFFFB8C00);
     if (_slotWish(slot)) return const Color(0xFF7E57C2);
+    return const Color(0xFF616161);
+  }
+
+  Color _friseBodyColor(BookVolumeSlot slot) {
+    final r = slot.item?.rating;
+    if (r != null && r > 0) return _ratingColor(r);
+    if (_slotOwned(slot)) return const Color(0xFF1B3A2F);
     return const Color(0xFF2A2A2A);
+  }
+
+  String _friseCellLabel(BookVolumeSlot slot) {
+    final r = slot.item?.rating;
+    if (r != null && r > 0) {
+      final onFive = r > 5.0 ? r / 2 : r;
+      return onFive.toStringAsFixed(1);
+    }
+    return 'T${slot.volume.displayNumber}';
   }
 
   Widget _buildCoverGrid(List<BookVolumeSlot> slots, Color accent) {
@@ -847,12 +880,14 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         final key = _slotKeys.putIfAbsent(slot.volume.id, GlobalKey.new);
         final coverUrl = slot.volume.coverUrl ?? slot.item?.imageUrl;
 
+        final editionBadge = slot.volume.editionBadge;
+
         return KeyedSubtree(
           key: key,
           child: Material(
             color: Colors.transparent,
             child: InkWell(
-              onTap: () => _onFriseOrCardTap(slot),
+              onTap: () => _onCardTap(slot),
               borderRadius: BorderRadius.circular(10),
               child: Container(
                 decoration: BoxDecoration(
@@ -869,7 +904,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                   fit: StackFit.expand,
                   children: [
                     Opacity(
-                      opacity: owned ? 1 : 0.45,
+                      opacity: owned || read ? 1 : 0.45,
                       child: coverUrl != null && coverUrl.isNotEmpty
                           ? CollectionCoverImage(
                               url: coverUrl,
@@ -910,6 +945,35 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                             style: const TextStyle(
                               fontSize: 9,
                               fontWeight: FontWeight.w800,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (editionBadge != null)
+                      Positioned(
+                        top: slot.volume.isUpcoming ? 40 : 6,
+                        right: 6,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFC9A227),
+                            borderRadius: BorderRadius.circular(6),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Colors.black38,
+                                blurRadius: 3,
+                              ),
+                            ],
+                          ),
+                          child: Text(
+                            editionBadge,
+                            style: const TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w900,
                               color: Colors.white,
                             ),
                           ),
@@ -962,27 +1026,13 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                                   style: const TextStyle(fontSize: 11),
                                 ),
                               )
-                            else if (!owned)
-                              FilledButton(
-                                onPressed: () => _toggleOwned(slot),
-                                style: FilledButton.styleFrom(
-                                  visualDensity: VisualDensity.compact,
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 6,
-                                  ),
-                                  minimumSize: const Size(0, 28),
-                                ),
-                                child: const Text(
-                                  '+ Possédé',
-                                  style: TextStyle(fontSize: 11),
-                                ),
-                              )
                             else
                               Wrap(
                                 spacing: 4,
                                 runSpacing: 4,
                                 children: [
-                                  InkWell(
+                                  GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
                                     onTap: () => _toggleOwned(slot),
                                     child: Container(
                                       padding: const EdgeInsets.symmetric(
@@ -990,12 +1040,14 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                                         vertical: 2,
                                       ),
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFF26A69A),
+                                        color: owned
+                                            ? const Color(0xFF26A69A)
+                                            : Colors.black54,
                                         borderRadius: BorderRadius.circular(6),
                                       ),
-                                      child: const Text(
-                                        '✓ Possédé',
-                                        style: TextStyle(
+                                      child: Text(
+                                        owned ? '✓ Possédé' : '+ Possédé',
+                                        style: const TextStyle(
                                           fontSize: 10,
                                           fontWeight: FontWeight.w700,
                                           color: Colors.white,
@@ -1003,7 +1055,8 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                                       ),
                                     ),
                                   ),
-                                  InkWell(
+                                  GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
                                     onTap: () => _toggleRead(slot),
                                     child: Container(
                                       padding: const EdgeInsets.symmetric(
@@ -1017,7 +1070,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                                         borderRadius: BorderRadius.circular(6),
                                       ),
                                       child: Text(
-                                        read ? '👁️ Lu' : '👁️ Lu',
+                                        read ? '👁️ Lu' : '👁️ Non lu',
                                         style: const TextStyle(
                                           fontSize: 10,
                                           fontWeight: FontWeight.w700,
@@ -1061,13 +1114,14 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     );
   }
 
+  /// IMDb / SeriesGraph : ≥4.2 émeraude · ≥3.5 vert · ≥2.5 jaune · ≥1.5 orange · rouge.
   Color _ratingColor(double? r) {
-    if (r == null) return const Color(0xFF424242);
+    if (r == null || r <= 0) return const Color(0xFF424242);
     final onFive = r > 5.0 ? r / 2 : r;
-    if (onFive >= 4.5) return const Color(0xFF2E7D32);
-    if (onFive >= 4.0) return const Color(0xFF66BB6A);
-    if (onFive >= 3.0) return const Color(0xFFFFD54F);
-    if (onFive >= 2.0) return const Color(0xFFFF9800);
+    if (onFive >= 4.2) return const Color(0xFF00695C);
+    if (onFive >= 3.5) return const Color(0xFF43A047);
+    if (onFive >= 2.5) return const Color(0xFFFBC02D);
+    if (onFive >= 1.5) return const Color(0xFFFB8C00);
     return const Color(0xFFE53935);
   }
 
@@ -1075,6 +1129,8 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     final owned = _slotOwned(slot);
     final read = _slotRead(slot);
     final wish = _slotWish(slot);
+    final edition = slot.volume.edition;
+    final upcoming = slot.volume.upcomingLabel;
     return Card(
       margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
       child: Padding(
@@ -1116,6 +1172,17 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                       fontSize: 15,
                     ),
                   ),
+                  if (upcoming != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      upcoming,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.deepPurple.shade300,
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 6,
@@ -1126,22 +1193,40 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                         child: Text(owned ? '✓ Possédé' : '+ Possédé'),
                       ),
                       OutlinedButton(
-                        onPressed: owned ? () => _toggleRead(slot) : null,
+                        onPressed: () => _toggleRead(slot),
                         child: Text(read ? '👁️ Lu' : '👁️ Non lu'),
                       ),
                       OutlinedButton(
-                        onPressed: () async {
-                          _patchSlotLocal(
-                            slot,
-                            owned: false,
-                            wishlist: !wish,
-                          );
-                          // Wishlist via owned toggle + item flag is complex;
-                          // for now toggle owned off then leave wish visual.
-                          if (!wish && owned) await _toggleOwned(slot);
-                        },
+                        onPressed: () => _toggleWishlist(slot),
                         child: Text(wish ? '❤️ Wishlist' : '♡ Wishlist'),
                       ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Édition',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade400,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final e in BookVolumeEdition.values)
+                        ChoiceChip(
+                          label: Text(
+                            e.label,
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                          selected: edition == e,
+                          onSelected: (_) => _setEdition(slot, e),
+                          visualDensity: VisualDensity.compact,
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                        ),
                     ],
                   ),
                   const SizedBox(height: 8),
@@ -1153,10 +1238,10 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                     ),
                   ),
                   PrecisionStarRatingBar(
-                    starSize: 22,
+                    starSize: 28,
                     rating: () {
                       final r = slot.item?.rating;
-                      if (r == null) return 0.0;
+                      if (r == null || r <= 0) return 0.0;
                       return (r > 5.0 ? r / 2 : r).toDouble();
                     }(),
                     onChanged: (v) => _setVolumeRating(slot, v),

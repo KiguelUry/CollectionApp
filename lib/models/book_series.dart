@@ -161,12 +161,9 @@ class BookSeriesStats {
   String get ownedLabel =>
       totalSlots > 0 ? '$ownedCount/$totalSlots' : '$ownedCount';
 
-  /// Lu sur le nombre possédé (plus utile que /totalSlots).
-  String get readOwnedLabel =>
-      ownedCount > 0 ? '$readCount/$ownedCount' : '0/0';
-
+  /// Lus / total des tomes (lus même sans possession).
   String get readLabel =>
-      ownedCount > 0 ? readOwnedLabel : (totalSlots > 0 ? '$readCount/$totalSlots' : '$readCount');
+      totalSlots > 0 ? '$readCount/$totalSlots' : '$readCount';
 
   bool get isComplete =>
       totalSlots > 0 && ownedCount >= totalSlots;
@@ -176,9 +173,9 @@ class BookSeriesStats {
 
   String? get ratingLabel {
     final r = displayRating;
-    if (r == null) return null;
-    // Affichage unifié /5 (legacy perso /10 → ÷2 si > 5).
+    if (r == null || r <= 0) return null;
     final onFive = r > 5.0 ? r / 2 : r;
+    if (onFive <= 0) return null;
     return '★ ${onFive.toStringAsFixed(1)}';
   }
 

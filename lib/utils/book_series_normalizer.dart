@@ -123,10 +123,27 @@ abstract final class BookSeriesNormalizer {
     return null;
   }
 
-  /// Titre d’affichage canonique (sans « - Tome N »).
+  /// Titre d’affichage canonique (sans « - Tome N » / suffixes orphelins).
   static String displaySeriesName(String rawTitle) {
     final parsed = parse(rawTitle);
-    if (parsed.hasSeries) return parsed.seriesName!.trim();
-    return rawTitle.trim();
+    var name = parsed.hasSeries
+        ? parsed.seriesName!.trim()
+        : rawTitle.trim();
+    return stripOrphanVolumeSuffix(name);
+  }
+
+  /// Retire « - Tome », « - Vol », « Tome », « Volume » sans numéro en fin.
+  static String stripOrphanVolumeSuffix(String name) {
+    var s = name.trim();
+    s = s.replaceAll(RegExp(r'[–—−]'), '-');
+    s = s.replaceAll(
+      RegExp(
+        r'[\s\-–—]*\b(?:tome|tomes|vol\.?|volume|volumes)\s*$',
+        caseSensitive: false,
+      ),
+      '',
+    );
+    s = s.replaceAll(RegExp(r'[\s,;:\-]+$'), '').trim();
+    return s.isEmpty ? name.trim() : s;
   }
 }
