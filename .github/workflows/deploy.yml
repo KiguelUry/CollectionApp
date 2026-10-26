@@ -43,7 +43,11 @@ jobs:
         run: bash scripts/write_ci_env.sh
 
       - name: Build web
-        run: flutter build web --release --base-href "/CollectionApp/"
+        env:
+          GOOGLE_BOOKS_API_KEY: ${{ secrets.GOOGLE_BOOKS_API_KEY }}
+        run: >
+          flutter build web --release --base-href "/CollectionApp/"
+          --dart-define=GOOGLE_BOOKS_API_KEY=${GOOGLE_BOOKS_API_KEY}
 
       - name: Strip missing flutter.js.map sourcemap refs
         run: |

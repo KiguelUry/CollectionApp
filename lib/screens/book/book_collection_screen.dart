@@ -316,61 +316,9 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
           _loading = false;
         });
       }
-      // Enrichissements réseau non-bloquants (notes, couvertures, compteurs).
-      Future(() async {
-        var any = false;
-        final needRating = entries
-            .where((e) => e.series.communityRating == null)
-            .take(6)
-            .toList();
-        for (final e in needRating) {
-          final before = e.series.communityRating;
-          final updated = await _service.hydrateCommunityRating(e.series);
-          if (updated.communityRating != before) any = true;
-        }
-        final undercounted = entries
-            .where(
-              (e) =>
-                  !e.series.isStandalone &&
-                  (e.series.expectedVolumeCount ?? e.stats.totalSlots) <= 1 &&
-                  (e.series.subcategory == BookSubcategory.manga ||
-                      e.series.subcategory == BookSubcategory.comic ||
-                      e.series.subcategory == BookSubcategory.comics),
-            )
-            .take(4)
-            .toList();
-        for (final e in undercounted) {
-          final before = e.series.expectedVolumeCount;
-          final updated = await _service.ensureRealisticVolumeCount(e.series);
-          if (updated.expectedVolumeCount != before) any = true;
-        }
-        final needCover = entries
-            .where(
-              (e) =>
-                  e.series.coverUrl == null ||
-                  e.series.coverUrl!.isEmpty ||
-                  e.volumes.any(
-                    (v) =>
-                        !v.isHorsSerie &&
-                        v.volumeNumber <= 20 &&
-                        (v.coverUrl == null ||
-                            v.coverUrl!.isEmpty ||
-                            v.metadata['cover_volume_verified'] !=
-                                v.volumeNumber.round()),
-                  ),
-            )
-            .take(3)
-            .toList();
-        for (final e in needCover) {
-          final n = await _service.enrichMissingVolumeCovers(
-            series: e.series,
-            volumes: e.volumes,
-            maxLookups: 8,
-          );
-          if (n > 0) any = true;
-        }
-        if (any && mounted) _load(silent: true);
-      });
+      // Mes livres = lecture Supabase uniquement.
+      // Pas de Google Books / MangaDex en tâche de fond sur toute la liste
+      // (évite 429). Enrichissement couvertures = fiche série seulement.
     } catch (e) {
       if (mounted) {
         setState(() => _loading = false);

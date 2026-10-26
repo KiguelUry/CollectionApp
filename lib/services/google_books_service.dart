@@ -1,22 +1,29 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 
+import '../config/app_env.dart';
 import 'open_library_service.dart';
 
 /// Google Books API — meilleur taux de succès ISBN (FR, éditions récentes).
-/// Clé optionnelle : `GOOGLE_BOOKS_API_KEY` dans `.env`.
+/// Clé : `GOOGLE_BOOKS_API_KEY` (.env / --dart-define) via [AppEnv].
 class GoogleBooksService {
-  static String? get _apiKey {
-    final k = dotenv.env['GOOGLE_BOOKS_API_KEY']?.trim();
-    return (k != null && k.isNotEmpty) ? k : null;
-  }
+  static String? get _apiKey => AppEnv.googleBooksApiKey;
+
+  static bool get hasApiKey => _apiKey != null && _apiKey!.isNotEmpty;
 
   static Uri _volumesUri(Map<String, String> query) {
-    if (_apiKey != null) query['key'] = _apiKey!;
-    return Uri.https('www.googleapis.com', '/books/v1/volumes', query);
+    final params = Map<String, String>.from(query);
+    final key = _apiKey;
+    if (key != null && key.isNotEmpty) {
+      params['key'] = key;
+    } else if (kDebugMode) {
+      debugPrint(
+        'Google Books: GOOGLE_BOOKS_API_KEY absente → risque de 429',
+      );
+    }
+    return Uri.https('www.googleapis.com', '/books/v1/volumes', params);
   }
 
   /// Résultat normalisé (même forme qu'Open Library + champs série).

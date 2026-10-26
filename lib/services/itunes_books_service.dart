@@ -5,12 +5,14 @@ import 'package:http/http.dart' as http;
 
 import '../utils/catalog_http.dart';
 
-/// Recherche livres / mangas / BD — API iTunes (gratuite, couvertures HD).
+/// Recherche livres / mangas / BD — API iTunes (couvertures HD).
+/// Sur le web : désactivé (CORS bloqué ; corsproxy.io renvoie 403).
 class ItunesBooksService {
   static Future<List<Map<String, String>>> search(
     String query, {
     int limit = 25,
   }) async {
+    if (kIsWeb) return const [];
     final q = query.trim();
     if (q.length < 2) return [];
 
@@ -31,6 +33,7 @@ class ItunesBooksService {
   }
 
   static Future<Map<String, String>?> lookupByIsbn(String isbn) async {
+    if (kIsWeb) return null;
     final cleaned = isbn.replaceAll(RegExp(r'[^0-9Xx]'), '');
     if (cleaned.length < 10) return null;
     final hits = await search(cleaned, limit: 5);
@@ -52,11 +55,7 @@ class ItunesBooksService {
         'country': 'FR',
         'lang': 'fr_fr',
       });
-      // Web : proxy CORS obligatoire (itunes.apple.com bloque Origin).
-      final response = await http.get(
-        catalogProxiedUri(uri),
-        headers: catalogHttpHeaders,
-      );
+      final response = await http.get(uri, headers: catalogHttpHeaders);
       if (response.statusCode != 200) {
         if (kDebugMode) {
           debugPrint('iTunes books ${response.statusCode}: ${response.body}');

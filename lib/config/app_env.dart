@@ -19,6 +19,17 @@ abstract final class AppEnv {
     return SupabasePublicConfig.anonKey;
   }
 
+  /// Clé Google Books : `--dart-define` puis `.env` (obligatoire en prod web).
+  static String? get googleBooksApiKey {
+    const fromDefine = String.fromEnvironment('GOOGLE_BOOKS_API_KEY');
+    if (fromDefine.trim().isNotEmpty) return fromDefine.trim();
+    try {
+      final v = dotenv.env['GOOGLE_BOOKS_API_KEY']?.trim();
+      if (v != null && v.isNotEmpty) return v;
+    } catch (_) {}
+    return null;
+  }
+
   static String _normalizeSupabaseUrl(String url) {
     const correctHost = 'jfudrneoblsiingjqsio.supabase.co';
     if (url.contains(correctHost)) return url;

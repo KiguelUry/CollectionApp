@@ -8,6 +8,7 @@ import '../../services/book_catalog_service.dart';
 import '../../services/book_intelligence_service.dart';
 import '../../services/book_search_history.dart';
 import '../../services/book_series_service.dart';
+import '../../services/mangadex_service.dart';
 import '../../utils/book_series_normalizer.dart';
 import '../../widgets/app_app_bar.dart';
 import '../../widgets/catalog/catalog_item_tile.dart';
@@ -203,27 +204,75 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       publisherQuery: filters.publisherQuery,
     );
 
-    // AniList EN PREMIER (volumes + cover officielle manga).
-    final anilistBanners = <SeriesBannerCandidate>[];
+    // AniList + MangaDex EN PREMIER (volumes réels + covers, même si GB 429).
+    final officialBanners = <SeriesBannerCandidate>[];
+    MangaDexSeriesMeta? primaryMangaDex;
     if (seriesQ.length >= 2 &&
         (_sub == null || _sub == BookSubcategory.manga)) {
       try {
+        final mdList = await MangaDexService.searchManga(
+          seriesQ,
+          authorHint: filters.authorQuery.trim().isEmpty
+              ? null
+              : filters.authorQuery.trim(),
+          limit: 3,
+        );
+        if (mdList.isNotEmpty) primaryMangaDex = mdList.first;
+
         final aniResults =
             await AnilistMangaService.searchManga(seriesQ, limit: 3);
+
+        // Fusionne AniList + MangaDex par titre normalisé.
+        final byKey = <String, SeriesBannerCandidate>{};
+        for (final md in mdList) {
+          final key = BookSeriesNormalizer.mergeKey(md.title);
+          final vols = md.volumesPublished ?? 0;
+          byKey[key] = SeriesBannerCandidate(
+            name: md.title,
+            volumeCount: vols > 0 ? vols : 1,
+            coversByVolume: Map<int, String>.from(md.coverByVolume),
+            detectedSubcategory: BookSubcategory.manga,
+            author: md.author,
+            coverUrl: md.seriesCoverUrl ?? md.coverByVolume[1],
+            fromAnilist: true,
+          );
+        }
         for (final ani in aniResults) {
-          // Priorité absolue au compteur AniList s'il est non-null.
-          final volCount = ani.volumes ?? 1;
-          anilistBanners.add(
+          final key = BookSeriesNormalizer.mergeKey(ani.title);
+          final existing = byKey[key];
+          final mdVols = existing?.volumeCount ?? 0;
+          final aniVols = ani.volumes ?? 0;
+          final count = [aniVols, mdVols].reduce((a, b) => a > b ? a : b);
+          final covers = <int, String>{
+            ...?existing?.coversByVolume,
+            if (ani.coverUrl != null && ani.coverUrl!.isNotEmpty)
+              1: existing?.coversByVolume[1] ?? ani.coverUrl!,
+          };
+          byKey[key] = SeriesBannerCandidate(
+            name: existing?.name ?? ani.title,
+            volumeCount: count > 0 ? count : (existing?.volumeCount ?? 0),
+            coversByVolume: covers,
+            detectedSubcategory: BookSubcategory.manga,
+            author: existing?.author ?? ani.author,
+            coverUrl: existing?.coverUrl ?? ani.coverUrl ?? covers[1],
+            fromAnilist: true,
+          );
+        }
+        // Ne jamais afficher « 1 tomes » si on n'a aucune info réelle.
+        for (final e in byKey.values) {
+          if (e.volumeCount < 1 && e.coversByVolume.isEmpty) continue;
+          officialBanners.add(
             SeriesBannerCandidate(
-              name: ani.title,
-              volumeCount: volCount,
-              coversByVolume: {
-                if (ani.coverUrl != null && ani.coverUrl!.isNotEmpty)
-                  1: ani.coverUrl!,
-              },
+              name: e.name,
+              volumeCount: e.volumeCount > 0
+                  ? e.volumeCount
+                  : (e.coversByVolume.keys.isEmpty
+                      ? 0
+                      : e.coversByVolume.keys.reduce((a, b) => a > b ? a : b)),
+              coversByVolume: e.coversByVolume,
               detectedSubcategory: BookSubcategory.manga,
-              author: ani.author,
-              coverUrl: ani.coverUrl,
+              author: e.author,
+              coverUrl: e.coverUrl,
               fromAnilist: true,
             ),
           );
@@ -231,13 +280,13 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       } catch (_) {}
     }
 
-    // Google Books + iTunes : 1 requête principale (+ 1 filet max si vide).
+    // Google Books (+ iTunes natif seulement) — 1 requête (+ filet si vide).
     var raw = await BookCatalogService.searchBooks(
       apiQuery.length >= 2 ? apiQuery : filters.publisherQuery,
       subcategory: _effectiveSub,
       filters: searchFilters,
     );
-    if (raw.isEmpty && seriesQ.length >= 2) {
+    if (raw.isEmpty && seriesQ.length >= 2 && officialBanners.isEmpty) {
       await Future<void>.delayed(const Duration(milliseconds: 600));
       raw = await BookCatalogService.searchBooks(
         volumeHint != null ? '$seriesQ Tome $volumeHint' : seriesQ,
@@ -264,7 +313,70 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       );
     }
 
-    // Filtre catégorie détectée.
+    // Série officielle exacte → filtre strict « Tomes reliés » (pas Crooked Kingdom).
+    final primarySeries = officialBanners.isNotEmpty
+        ? officialBanners.first.name
+        : seriesQ;
+    final hasExactOfficial = officialBanners.any(
+      (b) =>
+          BookSeriesNormalizer.normalizeKey(b.name) ==
+              BookSeriesNormalizer.normalizeKey(seriesQ) ||
+          BookSeriesNormalizer.hitBelongsToSeries(b.name, seriesQ) ||
+          BookSeriesNormalizer.normalizeKey(b.name).startsWith(
+                BookSeriesNormalizer.normalizeKey(seriesQ),
+              ),
+    );
+    if (hasExactOfficial) {
+      enriched = enriched.where((h) {
+        final title = h.raw['title'] ?? h.displayTitle;
+        return BookSeriesNormalizer.hitBelongsToSeries(title, primarySeries);
+      }).toList();
+    }
+
+    // Cartes tomes depuis MangaDex si grille vide / partielle.
+    if (primaryMangaDex != null && primaryMangaDex.coverByVolume.isNotEmpty) {
+      final md = primaryMangaDex;
+      final existingVols = <int>{
+        for (final h in enriched)
+          if (h.parsed.volumeNumber != null) h.parsed.volumeNumber!.round(),
+      };
+      final toInject = volumeHint != null
+          ? [if (md.coverByVolume.containsKey(volumeHint)) volumeHint]
+          : (md.coverByVolume.keys.toList()..sort()).take(40);
+      for (final n in toInject) {
+        if (existingVols.contains(n)) continue;
+        final cover = md.coverByVolume[n];
+        enriched.add(
+          EnrichedBookHit(
+            raw: {
+              'title': '${md.title} - Tome $n',
+              'series_title': md.title,
+              'series_volume': '$n',
+              if (md.author != null) 'author': md.author!,
+              if (cover != null) 'image_url': cover,
+              'source': 'mangadex',
+            },
+            parsed: BookSeriesNormalizer.parse('${md.title} - Tome $n'),
+            displayTitle: '${md.title} - Tome $n',
+            author: md.author,
+            score: 15000.0 - n,
+            estimatedTotalVolumes: md.volumesPublished,
+            detectedSubcategory: BookSubcategory.manga,
+          ),
+        );
+      }
+      enriched.sort((a, b) {
+        final av = a.parsed.volumeNumber?.round() ?? 9999;
+        final bv = b.parsed.volumeNumber?.round() ?? 9999;
+        if (volumeHint != null) {
+          final aHit = av == volumeHint ? 0 : 1;
+          final bHit = bv == volumeHint ? 0 : 1;
+          if (aHit != bHit) return aHit.compareTo(bHit);
+        }
+        return av.compareTo(bv);
+      });
+    }
+
     if (_sub != null) {
       enriched = enriched.where((h) {
         final det = h.detectedSubcategory ??
@@ -275,100 +387,6 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
             );
         return det == null || det == _sub;
       }).toList();
-    }
-
-    // Si tome ciblé : remonte le vrai tome en tête + filtre hors-série.
-    if (volumeHint != null && seriesQ.isNotEmpty) {
-      enriched = enriched.where((h) {
-        final title = h.raw['title'] ?? h.displayTitle;
-        if (!BookSeriesNormalizer.hitBelongsToSeries(title, seriesQ)) {
-          // Garde si le hit a exactement le n° demandé et série partielle.
-          final vn = h.parsed.volumeNumber?.round();
-          return vn == volumeHint &&
-              BookSeriesNormalizer.normalizeKey(title)
-                  .contains(BookSeriesNormalizer.normalizeKey(seriesQ));
-        }
-        return true;
-      }).toList();
-      enriched.sort((a, b) {
-        final av = a.parsed.volumeNumber?.round() == volumeHint ? 0 : 1;
-        final bv = b.parsed.volumeNumber?.round() == volumeHint ? 0 : 1;
-        if (av != bv) return av.compareTo(bv);
-        final aOk = BookSeriesNormalizer.hitBelongsToSeries(
-              a.raw['title'] ?? a.displayTitle,
-              seriesQ,
-            )
-            ? 0
-            : 1;
-        final bOk = BookSeriesNormalizer.hitBelongsToSeries(
-              b.raw['title'] ?? b.displayTitle,
-              seriesQ,
-            )
-            ? 0
-            : 1;
-        if (aOk != bOk) return aOk.compareTo(bOk);
-        return b.score.compareTo(a.score);
-      });
-
-      // Tome ciblé : carte synthétique AniList / hits (SANS spam Google par tome).
-      final hasTarget = enriched.any(
-        (h) =>
-            h.parsed.volumeNumber?.round() == volumeHint &&
-            !BookSeriesNormalizer.looksLikeChapterOrScan(
-              h.raw['title'] ?? h.displayTitle,
-            ) &&
-            BookSeriesNormalizer.hitBelongsToSeries(
-              h.raw['title'] ?? h.displayTitle,
-              seriesQ,
-            ),
-      );
-      if (!hasTarget && anilistBanners.isNotEmpty) {
-        final ani = anilistBanners.first;
-        enriched.insert(
-          0,
-          EnrichedBookHit(
-            raw: {
-              'title': '${ani.name} - Tome $volumeHint',
-              'series_title': ani.name,
-              'series_volume': '$volumeHint',
-              if (ani.author != null) 'author': ani.author!,
-              if (ani.coverUrl != null) 'image_url': ani.coverUrl!,
-            },
-            parsed: BookSeriesNormalizer.parse(
-              '${ani.name} - Tome $volumeHint',
-            ),
-            displayTitle: '${ani.name} - Tome $volumeHint',
-            author: ani.author,
-            score: 20_000,
-            estimatedTotalVolumes: ani.volumeCount,
-            detectedSubcategory: BookSubcategory.manga,
-          ),
-        );
-      }
-    }
-
-    // Force Manga + volumes AniList sur les hits de la série AniList.
-    if (anilistBanners.isNotEmpty) {
-      final ani = anilistBanners.first;
-      enriched = [
-        for (final h in enriched)
-          if (BookSeriesNormalizer.hitBelongsToSeries(
-            h.raw['title'] ?? h.displayTitle,
-            ani.name,
-          ))
-            EnrichedBookHit(
-              raw: h.raw,
-              parsed: h.parsed,
-              displayTitle: h.displayTitle,
-              author: h.author ?? ani.author,
-              publisher: h.publisher,
-              estimatedTotalVolumes: ani.volumeCount,
-              score: h.score + 50,
-              detectedSubcategory: BookSubcategory.manga,
-            )
-          else
-            h,
-      ];
     }
 
     var banners = BookIntelligenceService.extractSeriesBanners(
@@ -384,40 +402,30 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       }).toList();
     }
 
-    // AniList en tête ; déduplique par (série, sous-catégorie) — pas auteur.
+    // Officiel (AniList/MangaDex) en tête ; jamais « Aucun résultat » si bannière.
     final mergedBanners = <SeriesBannerCandidate>[];
     final seenKeys = <String>{};
-    for (final b in [...anilistBanners, ...banners]) {
+    for (final b in [...officialBanners, ...banners]) {
       final det = b.detectedSubcategory ??
           BookSeriesNormalizer.detectSubcategory(seriesName: b.name);
       final key = BookSeriesNormalizer.seriesSubcategoryKey(b.name, det);
-      if (!seenKeys.add(key)) {
-        // Si AniList déjà présent, ne remplace pas par une bannière GB plus faible.
-        continue;
-      }
+      if (!seenKeys.add(key)) continue;
       if (!b.fromAnilist && b.volumeCount < 1) continue;
-      // AniList : volumes officiels ; sinon max des hits locaux.
       var count = b.volumeCount;
-      if (b.fromAnilist && b.volumeCount > 0) {
-        count = b.volumeCount;
-      } else if (anilistBanners.any(
-        (a) =>
-            BookSeriesNormalizer.mergeKey(a.name) ==
-            BookSeriesNormalizer.mergeKey(b.name),
-      )) {
-        final ani = anilistBanners.firstWhere(
-          (a) =>
-              BookSeriesNormalizer.mergeKey(a.name) ==
-              BookSeriesNormalizer.mergeKey(b.name),
-        );
-        count = ani.volumeCount;
+      // Enrichit avec max MangaDex / AniList déjà fusionné.
+      for (final o in officialBanners) {
+        if (BookSeriesNormalizer.mergeKey(o.name) ==
+            BookSeriesNormalizer.mergeKey(b.name)) {
+          if (o.volumeCount > count) count = o.volumeCount;
+        }
       }
+      if (count < 1) continue;
       mergedBanners.add(
         SeriesBannerCandidate(
           name: BookSeriesNormalizer.displaySeriesName(b.name),
           volumeCount: count,
           coversByVolume: b.coversByVolume,
-          detectedSubcategory: det,
+          detectedSubcategory: det ?? BookSubcategory.manga,
           author: b.author,
           coverUrl: b.coverUrl ?? b.coversByVolume[1],
           fromAnilist: b.fromAnilist,
@@ -742,7 +750,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
               child: Text(
-                'Google Books + iTunes + AniList · couvertures HD',
+                'AniList + MangaDex + Google Books · couvertures HD',
                 style: TextStyle(
                   fontSize: 11,
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -1027,11 +1035,11 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
                 iconColor: _accent,
               ),
             )
-          else if (_loading && _hits.isEmpty)
+          else if (_loading && _hits.isEmpty && _banners.isEmpty)
             const SliverFillRemaining(
               child: Center(child: CircularProgressIndicator()),
             )
-          else if (_hits.isEmpty)
+          else if (_hits.isEmpty && _banners.isEmpty)
             SliverFillRemaining(
               hasScrollBody: false,
               child: EmptyState(

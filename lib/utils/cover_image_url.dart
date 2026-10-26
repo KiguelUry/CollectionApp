@@ -51,8 +51,9 @@ String gridThumbnailUrl(
   if (host == kThumbnailCdnHost ||
       host == 'localhost' ||
       host.startsWith('127.') ||
-      // wsrv renvoie 400 sur le CDN AniList.
-      host.contains('anilist.co')) {
+      // wsrv renvoie 400 sur AniList / MangaDex uploads.
+      host.contains('anilist.co') ||
+      host.contains('mangadex.org')) {
     return src;
   }
   // Stockage Supabase : seules les URLs publiques sont stables.

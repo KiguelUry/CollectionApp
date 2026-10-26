@@ -263,7 +263,7 @@ class BookSeriesService {
         }
       }
     }
-    // Manga : AniList volumes (dynamique).
+    // Manga : max(AniList, MangaDex, hits GB).
     var workingSeries = series;
     if (workingSeries.subcategory == BookSubcategory.manga) {
       final ani = await AnilistMangaService.lookupManga(workingSeries.name);
@@ -276,6 +276,22 @@ class BookSeriesService {
             ani.author!.isNotEmpty) {
           workingSeries =
               await ensureSeriesAuthor(workingSeries, ani.author!);
+        }
+      }
+      final md = await MangaDexService.lookupManga(
+        workingSeries.name,
+        authorHint: workingSeries.author ?? seriesAuthor,
+      );
+      if (md != null) {
+        final mdVols = md.volumesPublished ?? 0;
+        if (mdVols > maxVol) maxVol = mdVols;
+        for (final e in md.coverByVolume.entries) {
+          covers.putIfAbsent(e.key, () => e.value);
+        }
+        if ((workingSeries.author == null || workingSeries.author!.isEmpty) &&
+            md.author != null &&
+            md.author!.isNotEmpty) {
+          workingSeries = await ensureSeriesAuthor(workingSeries, md.author!);
         }
       }
     }
@@ -821,7 +837,7 @@ class BookSeriesService {
     }
   }
 
-  /// Couvertures manquantes via BATCH Google Books (1–3 pages), jamais 1 req/tome.
+  /// Couvertures manquantes : MangaDex batch d'abord (manga), puis GB en secours.
   /// [onProgress] est appelé tous les [progressEvery] tomes trouvés (UI live).
   Future<int> enrichMissingVolumeCovers({
     required BookSeries series,
@@ -844,13 +860,57 @@ class BookSeriesService {
       }
     }
 
-    // UNE seule passe batch (pages séquentielles + délai) — zéro boucle HTTP/tome.
-    final batch = await BookIntelligenceService.batchFetchSeriesCovers(
-      seriesName: working.name,
-      subcategory: working.subcategory,
-      authorHint: seriesAuthor,
-      maxPages: 3,
+    // Map tome → cover (MangaDex prioritaire pour manga).
+    final batch = <int, ({String coverUrl, String? publishedDate})>{};
+
+    if (working.subcategory == BookSubcategory.manga) {
+      try {
+        final md = await MangaDexService.lookupManga(
+          working.name,
+          authorHint: seriesAuthor,
+        );
+        if (md != null) {
+          for (final e in md.coverByVolume.entries) {
+            batch[e.key] = (coverUrl: e.value, publishedDate: null);
+          }
+          final mdVols = md.volumesPublished;
+          if (mdVols != null &&
+              mdVols > (working.expectedVolumeCount ?? 0)) {
+            working =
+                (await bumpExpectedCountIfHigher(working, mdVols)) ?? working;
+          }
+          if ((seriesAuthor == null || seriesAuthor.isEmpty) &&
+              md.author != null &&
+              md.author!.isNotEmpty) {
+            working = await ensureSeriesAuthor(working, md.author!);
+            seriesAuthor = working.author;
+          }
+        }
+      } catch (_) {}
+    }
+
+    // Secours Google Books (BD / roman / tomes manquants) — batch seulement.
+    final stillMissing = volumes.any(
+      (v) =>
+          !v.isHorsSerie &&
+          !batch.containsKey(v.volumeNumber.round()) &&
+          (v.coverUrl == null || v.coverUrl!.isEmpty),
     );
+    if (stillMissing ||
+        working.subcategory != BookSubcategory.manga ||
+        batch.isEmpty) {
+      try {
+        final gb = await BookIntelligenceService.batchFetchSeriesCovers(
+          seriesName: working.name,
+          subcategory: working.subcategory,
+          authorHint: seriesAuthor,
+          maxPages: working.subcategory == BookSubcategory.manga ? 2 : 3,
+        );
+        for (final e in gb.entries) {
+          batch.putIfAbsent(e.key, () => e.value);
+        }
+      } catch (_) {}
+    }
 
     final ordered = List<BookVolume>.from(volumes)
       ..sort((a, b) => a.volumeNumber.compareTo(b.volumeNumber));
