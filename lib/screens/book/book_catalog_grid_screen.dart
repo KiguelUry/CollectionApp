@@ -8,6 +8,7 @@ import '../../services/book_catalog_service.dart';
 import '../../services/book_intelligence_service.dart';
 import '../../services/book_search_history.dart';
 import '../../services/book_series_service.dart';
+import '../../services/itunes_books_service.dart';
 import '../../services/mangadex_service.dart';
 import '../../utils/book_series_normalizer.dart';
 import '../../widgets/app_app_bar.dart';
@@ -333,19 +334,97 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       }).toList();
     }
 
-    // Cartes tomes depuis MangaDex si grille vide / partielle.
-    if (primaryMangaDex != null && primaryMangaDex.coverByVolume.isNotEmpty) {
+    // Cartes tomes depuis MangaDex (+ fallback iTunes FR pour covers / dates).
+    if (primaryMangaDex != null) {
       final md = primaryMangaDex;
       final existingVols = <int>{
         for (final h in enriched)
           if (h.parsed.volumeNumber != null) h.parsed.volumeNumber!.round(),
       };
-      final toInject = volumeHint != null
-          ? [if (md.coverByVolume.containsKey(volumeHint)) volumeHint]
-          : (md.coverByVolume.keys.toList()..sort()).take(40);
+      final coverKeys = md.coverByVolume.keys.toList()..sort();
+      final maxFromCovers =
+          coverKeys.isEmpty ? 0 : coverKeys.reduce((a, b) => a > b ? a : b);
+      final maxVol = [
+        md.volumesPublished ?? 0,
+        maxFromCovers,
+      ].reduce((a, b) => a > b ? a : b);
+
+      List<int> toInject;
+      if (volumeHint != null) {
+        toInject = (volumeHint >= 1 &&
+                (maxVol == 0 || volumeHint <= maxVol ||
+                    md.coverByVolume.containsKey(volumeHint)))
+            ? [volumeHint]
+            : const [];
+      } else if (maxVol > 0) {
+        toInject = [for (var i = 1; i <= maxVol.clamp(1, 40); i++) i];
+      } else {
+        toInject = coverKeys.take(40).toList();
+      }
+
+      // Tomes sans cover MD ou sans date VF → iTunes FR (Kana/Glénat…).
+      final needItunes = <int>[
+        for (final n in toInject)
+          if (!existingVols.contains(n) &&
+              (md.coverByVolume[n] == null ||
+                  md.coverByVolume[n]!.trim().isEmpty))
+            n,
+        // Enrichit aussi les hits déjà présents sans image / date.
+        for (final h in enriched)
+          if ((h.parsed.seriesName != null &&
+                  BookSeriesNormalizer.mergeKey(h.parsed.seriesName!) ==
+                      BookSeriesNormalizer.mergeKey(md.title)) &&
+              h.parsed.volumeNumber != null &&
+              ((h.imageUrl == null || h.imageUrl!.isEmpty) ||
+                  h.publishedDate == null))
+            h.parsed.volumeNumber!.round(),
+      ];
+      final itunesByVol = needItunes.isEmpty
+          ? const <int, Map<String, String>>{}
+          : await ItunesBooksService.lookupFrenchVolumesBatch(
+              md.title,
+              needItunes,
+            );
+
       for (final n in toInject) {
-        if (existingVols.contains(n)) continue;
-        final cover = md.coverByVolume[n];
+        if (existingVols.contains(n)) {
+          // Patch cover / date manquantes sur hit existant.
+          final idx = enriched.indexWhere(
+            (h) => h.parsed.volumeNumber?.round() == n,
+          );
+          if (idx >= 0) {
+            final h = enriched[idx];
+            final it = itunesByVol[n];
+            final cover = (h.imageUrl != null && h.imageUrl!.isNotEmpty)
+                ? h.imageUrl
+                : (md.coverByVolume[n] ?? it?['image_url']);
+            final pub = h.publishedDate ?? it?['published_date'];
+            if ((cover != null && cover.isNotEmpty && h.imageUrl != cover) ||
+                (pub != null && pub.isNotEmpty && h.publishedDate != pub)) {
+              final raw = Map<String, String>.from(h.raw);
+              if (cover != null && cover.isNotEmpty) raw['image_url'] = cover;
+              if (pub != null && pub.isNotEmpty) raw['published_date'] = pub;
+              if (it != null) raw['source'] = raw['source'] ?? 'itunes';
+              enriched[idx] = EnrichedBookHit(
+                raw: raw,
+                parsed: h.parsed,
+                displayTitle: h.displayTitle,
+                author: h.author ?? it?['author'] ?? md.author,
+                publisher: h.publisher,
+                estimatedTotalVolumes: h.estimatedTotalVolumes ?? maxVol,
+                score: h.score,
+                detectedSubcategory: BookSubcategory.manga,
+              );
+            }
+          }
+          continue;
+        }
+        final it = itunesByVol[n];
+        final mdCover = md.coverByVolume[n];
+        final cover = (mdCover != null && mdCover.trim().isNotEmpty)
+            ? mdCover
+            : it?['image_url'];
+        final pub = it?['published_date'];
         enriched.add(
           EnrichedBookHit(
             raw: {
@@ -353,14 +432,19 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
               'series_title': md.title,
               'series_volume': '$n',
               if (md.author != null) 'author': md.author!,
-              if (cover != null) 'image_url': cover,
-              'source': 'mangadex',
+              if (cover != null && cover.isNotEmpty) 'image_url': cover,
+              if (pub != null && pub.isNotEmpty) 'published_date': pub,
+              'source': (cover != null &&
+                      mdCover != null &&
+                      cover == mdCover)
+                  ? 'mangadex'
+                  : (it != null ? 'itunes' : 'mangadex'),
             },
             parsed: BookSeriesNormalizer.parse('${md.title} - Tome $n'),
             displayTitle: '${md.title} - Tome $n',
-            author: md.author,
+            author: md.author ?? it?['author'],
             score: 15000.0 - n,
-            estimatedTotalVolumes: md.volumesPublished,
+            estimatedTotalVolumes: maxVol > 0 ? maxVol : md.volumesPublished,
             detectedSubcategory: BookSubcategory.manga,
           ),
         );
@@ -859,6 +943,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
                     if (hit.author != null && hit.author!.isNotEmpty)
                       hit.author!,
                     if (!chapterBadge && vol != null) 'Tome $vol',
+                    if (!chapterBadge && hit.isUpcoming) '⏳ À paraître',
                   ].where((s) => s.isNotEmpty).join(' · '),
                   imageUrl: hit.imageUrl,
                   accent: chapterBadge
@@ -886,6 +971,29 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
                       ),
                       child: const Text(
                         'Chapitre',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ),
+                if (!chapterBadge && hit.isUpcoming)
+                  Positioned(
+                    top: 4,
+                    left: 4,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.shade800,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text(
+                        '⏳ À paraître',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 9,

@@ -1,4 +1,5 @@
 import 'package:collection_app/models/book_subcategory.dart';
+import 'package:collection_app/services/mangadex_service.dart';
 import 'package:collection_app/utils/book_series_normalizer.dart';
 import 'package:collection_app/utils/book_title_parser.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -375,6 +376,73 @@ void main() {
       );
       expect(
         BookSeriesNormalizer.looksLikeChapterOrScan('One Piece - Tome 5'),
+        isFalse,
+      );
+    });
+  });
+
+  group('MangaDexService parasite filter', () {
+    test('rejette Bonus / Fan Colored / Colored / Doujinshi / Anthology / Side Story', () {
+      expect(MangaDexService.looksLikeParasiteTitle('Kagurabachi'), isFalse);
+      expect(
+        MangaDexService.looksLikeParasiteTitle('Kagurabachi (Fan Colored)'),
+        isTrue,
+      );
+      expect(
+        MangaDexService.looksLikeParasiteTitle('Kagurabachi: Bonus Chapter'),
+        isTrue,
+      );
+      expect(
+        MangaDexService.looksLikeParasiteTitle('One Piece Colored'),
+        isTrue,
+      );
+      expect(
+        MangaDexService.looksLikeParasiteTitle('Naruto Doujinshi'),
+        isTrue,
+      );
+      expect(
+        MangaDexService.looksLikeParasiteTitle('One Piece Anthology'),
+        isTrue,
+      );
+      expect(
+        MangaDexService.looksLikeParasiteTitle('Boruto Side Story'),
+        isTrue,
+      );
+    });
+
+    test('isParasiteMangaEntry lit title + altTitles', () {
+      expect(
+        MangaDexService.isParasiteMangaEntry({
+          'attributes': {
+            'title': {'en': 'Kagurabachi (Fan Colored)'},
+            'altTitles': [],
+            'tags': [],
+          },
+        }),
+        isTrue,
+      );
+      expect(
+        MangaDexService.isParasiteMangaEntry({
+          'attributes': {
+            'title': {'ja-ro': 'Kagurabachi'},
+            'altTitles': [
+              {'en': 'Kagurabachi: Bonus Chapter'},
+            ],
+            'tags': [],
+          },
+        }),
+        isTrue,
+      );
+      expect(
+        MangaDexService.isParasiteMangaEntry({
+          'attributes': {
+            'title': {'en': 'Kagurabachi'},
+            'altTitles': [
+              {'fr': 'Kagurabachi'},
+            ],
+            'tags': [],
+          },
+        }),
         isFalse,
       );
     });

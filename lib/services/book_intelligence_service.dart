@@ -89,6 +89,15 @@ class EnrichedBookHit {
     if (u == null || u.isEmpty) return null;
     return u;
   }
+
+  String? get publishedDate {
+    final u = raw['published_date'] ?? raw['year'];
+    if (u == null || u.isEmpty) return null;
+    return u;
+  }
+
+  bool get isUpcoming =>
+      BookIntelligenceService.isFuturePublishedDate(publishedDate);
 }
 
 /// Nettoie, parse et classe les résultats catalogue.

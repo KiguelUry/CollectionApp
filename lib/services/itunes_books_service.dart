@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import '../utils/book_series_normalizer.dart';
+import '../utils/book_title_parser.dart';
 import '../utils/catalog_http.dart';
 import '../utils/web_catalog_proxy.dart';
 
@@ -38,6 +40,67 @@ class ItunesBooksService {
     final hits = await search(cleaned, limit: 5);
     if (hits.isEmpty) return null;
     return hits.first;
+  }
+
+  /// Fallback VF (Kana / Glénat / Crunchyroll) : couverture + date FR.
+  /// Requête : `"$seriesName Tome $volume"` · country=FR.
+  static Future<Map<String, String>?> lookupFrenchVolume(
+    String seriesName,
+    int volume,
+  ) async {
+    final name = seriesName.trim();
+    if (name.length < 2 || volume < 1) return null;
+    final term = '$name Tome $volume';
+    final hits = await search(term, limit: 10);
+    if (hits.isEmpty) return null;
+
+    Map<String, String>? best;
+    var bestScore = -1;
+    for (final h in hits) {
+      final title = h['title'] ?? '';
+      if (title.isEmpty) continue;
+      // Doit appartenir à la série et matcher le n° de tome.
+      if (!BookSeriesNormalizer.hitBelongsToSeries(title, name) &&
+          !BookSeriesNormalizer.normalizeKey(title).contains(
+                BookSeriesNormalizer.normalizeKey(name),
+              )) {
+        continue;
+      }
+      final volOk = BookTitleParser.titleMatchesVolumeExactly(title, volume) ||
+          BookTitleParser.extractVolumeNumberStrict(title) == volume;
+      if (!volOk) continue;
+      var score = 10;
+      if ((h['image_url'] ?? '').isNotEmpty) score += 5;
+      if ((h['published_date'] ?? '').isNotEmpty) score += 5;
+      if (score > bestScore) {
+        bestScore = score;
+        best = h;
+      }
+    }
+    return best;
+  }
+
+  /// Enrichit plusieurs tomes (lots de 4) — couvertures / dates FR manquantes.
+  static Future<Map<int, Map<String, String>>> lookupFrenchVolumesBatch(
+    String seriesName,
+    Iterable<int> volumes,
+  ) async {
+    final out = <int, Map<String, String>>{};
+    final list = volumes.where((v) => v > 0).toSet().toList()..sort();
+    for (var i = 0; i < list.length; i += 4) {
+      final chunk = list.skip(i).take(4).toList();
+      final results = await Future.wait(
+        chunk.map((n) => lookupFrenchVolume(seriesName, n)),
+      );
+      for (var j = 0; j < chunk.length; j++) {
+        final hit = results[j];
+        if (hit != null) out[chunk[j]] = hit;
+      }
+      if (i + 4 < list.length) {
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+      }
+    }
+    return out;
   }
 
   static Future<List<Map<String, String>>> _searchEntity(

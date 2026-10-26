@@ -66,12 +66,20 @@ abstract final class MangaDexService {
       final scored = <({MangaDexSeriesMeta meta, double score})>[];
       for (final raw in data) {
         if (raw is! Map<String, dynamic>) continue;
-        if (_isParasiteEntry(raw)) continue;
+        // Filtrage local STRICT (l'API ignore souvent excludedTags).
+        if (isParasiteMangaEntry(raw)) continue;
         final meta = await _mapManga(raw, q, authorHint);
         if (meta == null) continue;
+        if (looksLikeParasiteTitle(meta.title)) continue;
         scored.add((meta: meta, score: _rankScore(raw, meta, q)));
       }
-      scored.sort((a, b) => b.score.compareTo(a.score));
+      // Exact match (insensible à la casse) toujours en tête absolue.
+      scored.sort((a, b) {
+        final aExact = _hasExactTitleMatch(a.meta, q);
+        final bExact = _hasExactTitleMatch(b.meta, q);
+        if (aExact != bExact) return aExact ? -1 : 1;
+        return b.score.compareTo(a.score);
+      });
       return scored.take(limit.clamp(1, 10)).map((e) => e.meta).toList();
     } catch (e) {
       if (kDebugMode) debugPrint('MangaDex search: $e');
@@ -79,8 +87,21 @@ abstract final class MangaDexService {
     }
   }
 
-  /// Fan-colored / bonus / anthologies parasites.
-  static bool _isParasiteEntry(Map<String, dynamic> manga) {
+  /// Mots parasites (Bonus, Fan Colored, Colored, Doujinshi, Anthology, Side Story).
+  static final _parasiteTitleRe = RegExp(
+    r'\b(?:bonus|fan\s*colou?red|colou?red|doujinshi|anthology|side\s*story)\b',
+    caseSensitive: false,
+  );
+
+  /// Exposé pour tests / réutilisation.
+  static bool looksLikeParasiteTitle(String title) {
+    final t = title.trim();
+    if (t.isEmpty) return false;
+    return _parasiteTitleRe.hasMatch(t);
+  }
+
+  /// Filtre Dart post-JSON : titres EN/JA/romaji + tags.
+  static bool isParasiteMangaEntry(Map<String, dynamic> manga) {
     final attrs = manga['attributes'] as Map<String, dynamic>? ?? {};
     final titles = attrs['title'] as Map<String, dynamic>? ?? {};
     final altTitles = attrs['altTitles'] as List<dynamic>? ?? const [];
@@ -90,13 +111,8 @@ abstract final class MangaDexService {
         if (alt is Map)
           for (final v in alt.values) v?.toString() ?? '',
     ];
-    final joined = blobs.join(' ').toLowerCase();
-    if (RegExp(
-      r'fan\s*colou?red|bonus\s*chapter|one[\s-]?shot\s*bonus|'
-      r'colored\s*version|colour\s*version|\(colored\)|\(fan',
-      caseSensitive: false,
-    ).hasMatch(joined)) {
-      return true;
+    for (final blob in blobs) {
+      if (looksLikeParasiteTitle(blob)) return true;
     }
     final tags = attrs['tags'] as List<dynamic>? ?? const [];
     for (final t in tags) {
@@ -105,14 +121,20 @@ abstract final class MangaDexService {
       if (_excludedTagIds.contains(id)) return true;
       final name = (t['attributes'] as Map?)?['name'];
       if (name is Map) {
-        final en = (name['en'] ?? '').toString().toLowerCase();
-        if (en.contains('fan colored') || en == 'doujinshi') return true;
+        final en = (name['en'] ?? '').toString();
+        if (looksLikeParasiteTitle(en)) return true;
       }
     }
     return false;
   }
 
-  /// Exact match ≫ startsWith ≫ contains ; bonus followers.
+  static bool _hasExactTitleMatch(MangaDexSeriesMeta meta, String query) {
+    final qKey = BookSeriesNormalizer.normalizeKey(query);
+    if (qKey.isEmpty) return false;
+    return BookSeriesNormalizer.normalizeKey(meta.title) == qKey;
+  }
+
+  /// Exact match ≫ startsWith ≫ contains ; bonus volumes / covers.
   static double _rankScore(
     Map<String, dynamic> raw,
     MangaDexSeriesMeta meta,
@@ -122,14 +144,17 @@ abstract final class MangaDexService {
     final tKey = BookSeriesNormalizer.normalizeKey(meta.title);
     var score = 0.0;
     if (tKey == qKey) {
-      score += 1000;
+      score += 10000;
     } else if (tKey.startsWith(qKey) || qKey.startsWith(tKey)) {
       score += 500;
     } else if (tKey.contains(qKey) || qKey.contains(tKey)) {
       score += 200;
     }
+    // Pénalise les spin-offs / sous-titres longs même sans mot parasite.
+    if (meta.title.contains(':') || meta.title.contains(' - ')) {
+      score -= 80;
+    }
     final attrs = raw['attributes'] as Map<String, dynamic>? ?? {};
-    // Préfère l'œuvre « ongoing/completed » principale.
     final status = (attrs['status'] ?? '').toString();
     if (status == 'ongoing' || status == 'completed') score += 50;
     final year = attrs['year'];
