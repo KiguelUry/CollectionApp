@@ -7,7 +7,11 @@ import '../config/app_env.dart';
 Uri proxiedCatalogUri(Uri target) {
   if (!kIsWeb) return target;
   final host = target.host.toLowerCase();
-  const allowed = {'api.mangadex.org', 'itunes.apple.com'};
+  const allowed = {
+    'api.mangadex.org',
+    'itunes.apple.com',
+    'www.googleapis.com',
+  };
   if (!allowed.contains(host)) return target;
 
   final base = AppEnv.supabaseUrl.replaceAll(RegExp(r'/+$'), '');

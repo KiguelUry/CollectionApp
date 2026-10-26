@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../utils/book_series_normalizer.dart';
 import '../utils/book_title_parser.dart';
+import '../utils/book_vf_edition.dart';
 import '../utils/catalog_http.dart';
 import '../utils/web_catalog_proxy.dart';
 
@@ -59,6 +60,15 @@ class ItunesBooksService {
     for (final h in hits) {
       final title = h['title'] ?? '';
       if (title.isEmpty) continue;
+      // Zéro édition US VIZ (« Vol. N »).
+      if (BookVfEdition.isUsVolTitle(title)) continue;
+      if (!BookVfEdition.isFrenchEdition(
+        title: title,
+        language: h['language'],
+        source: h['source'],
+      )) {
+        continue;
+      }
       // Doit appartenir à la série et matcher le n° de tome.
       if (!BookSeriesNormalizer.hitBelongsToSeries(title, name) &&
           !BookSeriesNormalizer.normalizeKey(title).contains(
@@ -69,7 +79,10 @@ class ItunesBooksService {
       final volOk = BookTitleParser.titleMatchesVolumeExactly(title, volume) ||
           BookTitleParser.extractVolumeNumberStrict(title) == volume;
       if (!volOk) continue;
-      var score = 10;
+      // Préfère les titres « Tome N » (VF) aux formats anglo.
+      var score = RegExp(r'\btome\s*\d+', caseSensitive: false).hasMatch(title)
+          ? 20
+          : 5;
       if ((h['image_url'] ?? '').isNotEmpty) score += 5;
       if ((h['published_date'] ?? '').isNotEmpty) score += 5;
       if (score > bestScore) {
@@ -150,9 +163,12 @@ class ItunesBooksService {
     final title =
         m['trackName']?.toString() ?? m['collectionName']?.toString();
     if (title == null || title.isEmpty) return null;
+    // Rejette pollution US VIZ (« Kagurabachi, Vol. 10 »).
+    if (BookVfEdition.isUsVolTitle(title)) return null;
 
     final author = m['artistName']?.toString() ?? '';
     final series = m['collectionName']?.toString();
+    if (series != null && BookVfEdition.isUsVolTitle(series)) return null;
     final imageUrl = _hdArtwork(
       m['artworkUrl600']?.toString() ?? m['artworkUrl100']?.toString() ?? '',
     );
@@ -161,6 +177,7 @@ class ItunesBooksService {
     final yearStr =
         release != null && release.length >= 4 ? release.substring(0, 4) : '';
 
+    // country=FR → on marque language=fr pour les dates À paraître.
     final result = <String, String>{
       'title': title,
       'author': author,
@@ -168,6 +185,7 @@ class ItunesBooksService {
       'image_url': imageUrl,
       'itunes_id': m['trackId']?.toString() ?? '',
       'source': 'itunes',
+      'language': 'fr',
       if (release != null && release.isNotEmpty) 'published_date': release,
     };
 

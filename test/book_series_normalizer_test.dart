@@ -1,7 +1,9 @@
 import 'package:collection_app/models/book_subcategory.dart';
+import 'package:collection_app/services/anilist_manga_service.dart';
 import 'package:collection_app/services/mangadex_service.dart';
 import 'package:collection_app/utils/book_series_normalizer.dart';
 import 'package:collection_app/utils/book_title_parser.dart';
+import 'package:collection_app/utils/book_vf_edition.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -377,6 +379,80 @@ void main() {
       expect(
         BookSeriesNormalizer.looksLikeChapterOrScan('One Piece - Tome 5'),
         isFalse,
+      );
+    });
+  });
+
+  group('BookVfEdition', () {
+    test('rejette Vol. US et accepte Tome VF', () {
+      expect(
+        BookVfEdition.isUsVolTitle('Kagurabachi, Vol. 10'),
+        isTrue,
+      );
+      expect(
+        BookVfEdition.isFrenchEdition(
+          title: 'Kagurabachi, Vol. 10',
+          language: 'en',
+        ),
+        isFalse,
+      );
+      expect(
+        BookVfEdition.isFrenchEdition(
+          title: 'Kagurabachi - Tome 10',
+          language: 'fr',
+        ),
+        isTrue,
+      );
+      expect(
+        BookVfEdition.canShowUpcoming(
+          title: 'Kagurabachi, Vol. 10',
+          language: 'en',
+          source: 'itunes',
+          publishedDate: '2027-01-01',
+        ),
+        isFalse,
+      );
+      expect(
+        BookVfEdition.canShowUpcoming(
+          title: 'Kagurabachi - Tome 11',
+          language: 'fr',
+          source: 'google_books',
+          publishedDate: '2026-11-06',
+        ),
+        isTrue,
+      );
+      expect(
+        BookVfEdition.canShowUpcoming(
+          title: 'Kagurabachi - Tome 12',
+          source: 'mangadex',
+          publishedDate: '2027-01-01',
+        ),
+        isFalse,
+      );
+    });
+  });
+
+  group('AnilistMangaService parasite filter', () {
+    test('rejette Bathhouse / Bonus / One-Shot', () {
+      expect(
+        AnilistMangaService.looksLikeParasiteTitle('Kagurabachi'),
+        isFalse,
+      );
+      expect(
+        AnilistMangaService.looksLikeParasiteTitle(
+          'Kagurabachi: Bathhouse Quest',
+        ),
+        isTrue,
+      );
+      expect(
+        AnilistMangaService.looksLikeParasiteTitle(
+          'Kagurabachi Bonus Chapter',
+        ),
+        isTrue,
+      );
+      expect(
+        AnilistMangaService.looksLikeParasiteTitle('One-Shot Special'),
+        isTrue,
       );
     });
   });

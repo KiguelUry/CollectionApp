@@ -51,10 +51,13 @@ String gridThumbnailUrl(
   if (host == kThumbnailCdnHost ||
       host == 'localhost' ||
       host.startsWith('127.') ||
-      // wsrv renvoie 400 sur AniList / MangaDex uploads.
-      host.contains('anilist.co') ||
-      host.contains('mangadex.org')) {
+      // wsrv renvoie 400 sur AniList.
+      host.contains('anilist.co')) {
     return src;
+  }
+  // MangaDex : jamais en direct (Referer → bannière anti-hotlink).
+  if (host.contains('mangadex.org')) {
+    return coverUrlForWeb(src);
   }
   // Stockage Supabase : seules les URLs publiques sont stables.
   if (uri.path.contains('/storage/v1/object/') &&

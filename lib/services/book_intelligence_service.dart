@@ -1,6 +1,7 @@
 import '../models/book_subcategory.dart';
 import '../utils/book_series_normalizer.dart';
 import '../utils/book_title_parser.dart';
+import '../utils/book_vf_edition.dart';
 import 'google_books_service.dart';
 
 /// Bannière série détectée dans les résultats de recherche.
@@ -91,13 +92,38 @@ class EnrichedBookHit {
   }
 
   String? get publishedDate {
-    final u = raw['published_date'] ?? raw['year'];
+    final u = raw['published_date'];
     if (u == null || u.isEmpty) return null;
     return u;
   }
 
-  bool get isUpcoming =>
-      BookIntelligenceService.isFuturePublishedDate(publishedDate);
+  /// « À paraître » uniquement si fiche VF (jamais US Vol. / MangaDex seul).
+  bool get isUpcoming {
+    final title = raw['title'] ?? displayTitle;
+    if (!BookVfEdition.canShowUpcoming(
+      title: title,
+      language: raw['language'],
+      source: raw['source'],
+      publishedDate: publishedDate,
+    )) {
+      return false;
+    }
+    return BookIntelligenceService.isFuturePublishedDate(publishedDate);
+  }
+
+  /// Badge mauve daté : `⏳ À paraître · JJ/MM/AAAA`.
+  String? get upcomingLabel {
+    if (!isUpcoming) return null;
+    final rawDate = publishedDate!;
+    DateTime? d = DateTime.tryParse(rawDate);
+    d ??= RegExp(r'^\d{4}-\d{2}$').hasMatch(rawDate)
+        ? DateTime.tryParse('$rawDate-01')
+        : null;
+    if (d == null) return '⏳ À paraître';
+    final dd = d.day.toString().padLeft(2, '0');
+    final mm = d.month.toString().padLeft(2, '0');
+    return '⏳ À paraître · $dd/$mm/${d.year}';
+  }
 }
 
 /// Nettoie, parse et classe les résultats catalogue.

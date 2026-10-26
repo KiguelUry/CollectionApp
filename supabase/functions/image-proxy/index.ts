@@ -27,6 +27,8 @@ const ALLOWED_HOSTS = new Set([
   "m.media-amazon.com",
   "books.google.com",
   "lh3.googleusercontent.com",
+  // MangaDex CDN : interdit en direct (Referer → bannière anti-hotlink).
+  "uploads.mangadex.org",
 ]);
 
 Deno.serve(async (req) => {
@@ -61,8 +63,13 @@ Deno.serve(async (req) => {
     });
   }
 
+  // Pas de Referer (critique pour uploads.mangadex.org).
   const res = await fetch(target.toString(), {
-    headers: { "User-Agent": "Collectingo/1.1" },
+    headers: {
+      "User-Agent": "Collectingo/1.1",
+      Accept: "image/*,*/*",
+    },
+    redirect: "follow",
   });
 
   const contentType = res.headers.get("Content-Type") ?? "image/jpeg";

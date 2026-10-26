@@ -12,6 +12,8 @@ const corsHeaders: Record<string, string> = {
 const ALLOWED_HOSTS = new Set([
   "api.mangadex.org",
   "itunes.apple.com",
+  "www.googleapis.com",
+  "uploads.mangadex.org",
 ]);
 
 Deno.serve(async (req) => {
@@ -47,21 +49,31 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const isImage = host === "uploads.mangadex.org";
     const upstream = await fetch(target.toString(), {
-      headers: {
-        Accept: "application/json",
-        "User-Agent": "Collectingo/1.1",
-      },
+      // Pas de Referer → évite le hotlink MangaDex « You can read this at MANGADEX ».
+      headers: isImage
+        ? {
+          "User-Agent": "Collectingo/1.1",
+          Accept: "image/*,*/*",
+        }
+        : {
+          Accept: "application/json",
+          "User-Agent": "Collectingo/1.1",
+        },
+      redirect: "follow",
     });
     const body = await upstream.arrayBuffer();
-    const contentType =
-      upstream.headers.get("Content-Type") ?? "application/json";
+    const contentType = upstream.headers.get("Content-Type") ??
+      (isImage ? "image/jpeg" : "application/json");
     return new Response(body, {
       status: upstream.status,
       headers: {
         ...corsHeaders,
         "Content-Type": contentType,
-        "Cache-Control": "public, max-age=120",
+        "Cache-Control": isImage
+          ? "public, max-age=86400"
+          : "public, max-age=120",
       },
     });
   } catch (e) {

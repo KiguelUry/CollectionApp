@@ -9,6 +9,16 @@ import '../utils/book_series_normalizer.dart';
 abstract final class AnilistMangaService {
   static const _endpoint = 'https://graphql.anilist.co';
 
+  /// Parasites : one-shots / spin-offs (Bathhouse Quest, Bonus Chapter…).
+  static final _parasiteTitleRe = RegExp(
+    r'\b(?:bonus\s*chapter|bathhouse|one[\s-]?shot|side\s*story|'
+    r'fan\s*colou?red|anthology|doujinshi)\b',
+    caseSensitive: false,
+  );
+
+  static bool looksLikeParasiteTitle(String title) =>
+      _parasiteTitleRe.hasMatch(title);
+
   static Future<int?> estimateVolumeCount(String seriesName) async {
     final meta = await lookupManga(seriesName);
     return meta?.volumes;
@@ -26,11 +36,18 @@ abstract final class AnilistMangaService {
   }) async {
     final q = query.trim();
     if (q.length < 2) return const [];
+    // format_in: [MANGA] — exclut ONE_SHOT et NOVEL.
     const gql = r'''
 query ($search: String, $perPage: Int) {
   Page(page: 1, perPage: $perPage) {
-    media(search: $search, type: MANGA, sort: SEARCH_MATCH) {
+    media(
+      search: $search
+      type: MANGA
+      format_in: [MANGA]
+      sort: SEARCH_MATCH
+    ) {
       id
+      format
       title { romaji english native }
       volumes
       chapters
@@ -59,7 +76,7 @@ query ($search: String, $perPage: Int) {
               'query': gql,
               'variables': {
                 'search': q,
-                'perPage': limit.clamp(1, 10),
+                'perPage': (limit.clamp(1, 10) * 2).clamp(3, 15),
               },
             }),
           )
@@ -73,7 +90,16 @@ query ($search: String, $perPage: Int) {
         if (raw is! Map<String, dynamic>) continue;
         final meta = _mapMedia(raw, q);
         if (meta != null) out.add(meta);
+        if (out.length >= limit.clamp(1, 10)) break;
       }
+      // Exact match en tête.
+      out.sort((a, b) {
+        final qKey = BookSeriesNormalizer.normalizeKey(q);
+        final aExact = BookSeriesNormalizer.normalizeKey(a.title) == qKey;
+        final bExact = BookSeriesNormalizer.normalizeKey(b.title) == qKey;
+        if (aExact != bExact) return aExact ? -1 : 1;
+        return 0;
+      });
       return out;
     } catch (e) {
       if (kDebugMode) debugPrint('AniList search: $e');
@@ -82,19 +108,33 @@ query ($search: String, $perPage: Int) {
   }
 
   static AnilistMangaMeta? _mapMedia(Map<String, dynamic> media, String q) {
+    final format = (media['format'] ?? '').toString().toUpperCase();
+    if (format == 'ONE_SHOT' || format == 'NOVEL') return null;
+
     final titleMap = media['title'] as Map<String, dynamic>? ?? {};
+    final candidates = <String>[
+      titleMap['english']?.toString() ?? '',
+      titleMap['romaji']?.toString() ?? '',
+      titleMap['native']?.toString() ?? '',
+    ].where((t) => t.isNotEmpty).toList();
+
+    for (final t in candidates) {
+      if (looksLikeParasiteTitle(t)) return null;
+    }
+
     final title = (titleMap['english'] ??
             titleMap['romaji'] ??
             titleMap['native'] ??
             q)
         .toString();
-    // Rejette les homonymes trop éloignés (ex. « Fallen Kingdom » pour « kingdom »).
+    if (looksLikeParasiteTitle(title)) return null;
+
+    // Rejette les homonymes trop éloignés.
     if (!BookSeriesNormalizer.hitBelongsToSeries(title, q) &&
         !BookSeriesNormalizer.normalizeKey(title)
             .contains(BookSeriesNormalizer.normalizeKey(q)) &&
         !BookSeriesNormalizer.normalizeKey(q)
             .contains(BookSeriesNormalizer.normalizeKey(title))) {
-      // Accepte si la clé query est égale au romaji/english nettoyé.
       final romaji = titleMap['romaji']?.toString() ?? '';
       final english = titleMap['english']?.toString() ?? '';
       final qKey = BookSeriesNormalizer.normalizeKey(q);
@@ -139,7 +179,6 @@ query ($search: String, $perPage: Int) {
         break;
       }
     }
-    // Fallback : premier staff.
     if (author == null) {
       for (final edge in edges) {
         if (edge is! Map<String, dynamic>) continue;

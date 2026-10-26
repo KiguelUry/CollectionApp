@@ -2,60 +2,196 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_env.dart';
+import '../utils/book_vf_edition.dart';
+import '../utils/web_catalog_proxy.dart';
 import 'open_library_service.dart';
 
-/// Google Books API — meilleur taux de succès ISBN (FR, éditions récentes).
-/// Clé : `GOOGLE_BOOKS_API_KEY` (.env / --dart-define) via [AppEnv].
-/// Sur 429 / erreur : retourne `[]` sans casser MangaDex / AniList.
+/// Google Books API — source prioritaire VF (`langRestrict=fr`).
+/// Sur 429/403 avec clé : retry **sans** `&key=`, puis via `catalog-proxy`.
+/// Cache mémoire + SharedPreferences (TTL 24h) par requête `q`.
 class GoogleBooksService {
   static String? get _apiKey => AppEnv.googleBooksApiKey;
 
   static bool get hasApiKey => _apiKey != null && _apiKey!.isNotEmpty;
 
-  /// Circuit-breaker session : après un 429, on saute les appels jusqu'au reload.
-  static bool _rateLimited = false;
+  /// Après un 429/403 sur la clé, on saute `&key=` pour le reste de la session.
+  static bool _preferKeyless = false;
 
-  static Uri _volumesUri(Map<String, String> query) {
+  static final Map<String, _CacheEntry> _memCache = {};
+  static const _prefsPrefix = 'gb_cache_v1:';
+  static const _ttl = Duration(hours: 24);
+
+  static Uri _volumesUri(Map<String, String> query, {required bool withKey}) {
     final params = Map<String, String>.from(query);
-    final key = _apiKey;
-    if (key != null && key.isNotEmpty) {
-      params['key'] = key;
-    } else if (kDebugMode) {
-      debugPrint(
-        'Google Books: GOOGLE_BOOKS_API_KEY absente → risque de 429',
-      );
+    if (withKey) {
+      final key = _apiKey;
+      if (key != null && key.isNotEmpty) params['key'] = key;
     }
     return Uri.https('www.googleapis.com', '/books/v1/volumes', params);
   }
 
-  static void _tripRateLimit(String where) {
-    _rateLimited = true;
-    if (kDebugMode) {
-      debugPrint('Google Books 429 ($where) — pause session, fallback autres sources');
+  static String _cacheKey(Map<String, String> params) {
+    final keys = params.keys.toList()..sort();
+    return keys.map((k) => '$k=${params[k]}').join('&');
+  }
+
+  static Future<List<Map<String, String>>?> _readCache(String key) async {
+    final mem = _memCache[key];
+    if (mem != null && !mem.isExpired) return mem.hits;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('$_prefsPrefix$key');
+      if (raw == null || raw.isEmpty) return null;
+      final decoded = jsonDecode(raw) as Map<String, dynamic>;
+      final ts = decoded['ts'] as int? ?? 0;
+      if (DateTime.now().millisecondsSinceEpoch - ts > _ttl.inMilliseconds) {
+        await prefs.remove('$_prefsPrefix$key');
+        return null;
+      }
+      final list = decoded['hits'] as List<dynamic>? ?? const [];
+      final hits = list
+          .map((e) => Map<String, String>.from(
+                (e as Map).map((k, v) => MapEntry('$k', '$v')),
+              ))
+          .toList();
+      _memCache[key] = _CacheEntry(hits, DateTime.fromMillisecondsSinceEpoch(ts));
+      return hits;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<void> _writeCache(
+    String key,
+    List<Map<String, String>> hits,
+  ) async {
+    final now = DateTime.now();
+    _memCache[key] = _CacheEntry(hits, now);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        '$_prefsPrefix$key',
+        jsonEncode({
+          'ts': now.millisecondsSinceEpoch,
+          'hits': hits,
+        }),
+      );
+    } catch (_) {}
+  }
+
+  /// GET volumes : clé → sans clé → catalog-proxy.
+  static Future<http.Response?> _fetchVolumes(Map<String, String> params) async {
+    Future<http.Response> get(Uri uri) =>
+        http.get(uri).timeout(const Duration(seconds: 15));
+
+    // 1) Avec clé (si dispo et pas encore brûlée).
+    if (!_preferKeyless && hasApiKey) {
+      try {
+        final res = await get(_volumesUri(params, withKey: true));
+        if (res.statusCode == 200) return res;
+        if (res.statusCode == 429 || res.statusCode == 403) {
+          _preferKeyless = true;
+          if (kDebugMode) {
+            debugPrint(
+              'Google Books ${res.statusCode} avec clé → retry sans key',
+            );
+          }
+        } else {
+          return res;
+        }
+      } catch (e) {
+        if (kDebugMode) debugPrint('Google Books keyed: $e');
+      }
+    }
+
+    // 2) Sans clé (quota anonyme / IP).
+    try {
+      final res = await get(_volumesUri(params, withKey: false));
+      if (res.statusCode == 200) return res;
+      if (res.statusCode == 429 || res.statusCode == 403) {
+        if (kDebugMode) {
+          debugPrint('Google Books ${res.statusCode} keyless → catalog-proxy');
+        }
+      } else {
+        return res;
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('Google Books keyless: $e');
+    }
+
+    // 3) Edge proxy (CORS + contournement navigateur).
+    try {
+      final target = _volumesUri(params, withKey: false);
+      final proxied = proxiedCatalogUri(target);
+      // Force proxy même hors web pour le retry serveur.
+      final uri = kIsWeb
+          ? proxied
+          : Uri.parse(
+              '${AppEnv.supabaseUrl.replaceAll(RegExp(r'/+$'), '')}'
+              '/functions/v1/catalog-proxy'
+              '?url=${Uri.encodeComponent(target.toString())}'
+              '&apikey=${Uri.encodeComponent(AppEnv.supabaseAnonKey)}',
+            );
+      final res = await http
+          .get(
+            uri,
+            headers: {
+              'Accept': 'application/json',
+              'apikey': AppEnv.supabaseAnonKey,
+              'Authorization': 'Bearer ${AppEnv.supabaseAnonKey}',
+            },
+          )
+          .timeout(const Duration(seconds: 20));
+      return res;
+    } catch (e) {
+      if (kDebugMode) debugPrint('Google Books proxy: $e');
+      return null;
+    }
+  }
+
+  static List<Map<String, String>> _parseItems(
+    String body, {
+    String isbnFallback = '',
+  }) {
+    try {
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      final items = data['items'] as List<dynamic>? ?? [];
+      final out = <Map<String, String>>[];
+      for (final raw in items) {
+        final mapped = _mapVolume(raw as Map<String, dynamic>, isbnFallback);
+        if (mapped == null) continue;
+        if (!BookVfEdition.isFrenchEdition(
+          title: mapped['title'] ?? '',
+          language: mapped['language'],
+          source: mapped['source'],
+        )) {
+          continue;
+        }
+        out.add(mapped);
+      }
+      return out;
+    } catch (_) {
+      return [];
     }
   }
 
   /// Résultat normalisé (même forme qu'Open Library + champs série).
   static Future<Map<String, String>?> lookupByIsbn(String isbn) async {
-    if (_rateLimited) return null;
     for (final variant in OpenLibraryService.isbnLookupVariants(isbn)) {
       try {
-        final url = _volumesUri({'q': 'isbn:$variant', 'maxResults': '3'});
-        final response = await http.get(url);
-        if (response.statusCode == 429) {
-          _tripRateLimit('isbn');
-          return null;
-        }
-        if (response.statusCode != 200) continue;
+        final params = {'q': 'isbn:$variant', 'maxResults': '3'};
+        final key = _cacheKey(params);
+        final cached = await _readCache(key);
+        if (cached != null && cached.isNotEmpty) return cached.first;
 
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        final items = data['items'] as List<dynamic>? ?? [];
-        for (final raw in items) {
-          final mapped = _mapVolume(raw as Map<String, dynamic>, variant);
-          if (mapped != null) return mapped;
-        }
+        final response = await _fetchVolumes(params);
+        if (response == null || response.statusCode != 200) continue;
+        final hits = _parseItems(response.body, isbnFallback: variant);
+        await _writeCache(key, hits);
+        if (hits.isNotEmpty) return hits.first;
       } catch (e) {
         if (kDebugMode) debugPrint('Google Books ISBN: $e');
       }
@@ -71,7 +207,6 @@ class GoogleBooksService {
   }) async {
     final q = query.trim();
     if (q.length < 2) return [];
-    if (_rateLimited) return [];
 
     try {
       final params = <String, String>{
@@ -83,27 +218,22 @@ class GoogleBooksService {
       if (langRestrict != null && langRestrict.isNotEmpty) {
         params['langRestrict'] = langRestrict;
       }
-      final url = _volumesUri(params);
-      final response = await http.get(url);
-      if (response.statusCode == 429) {
-        _tripRateLimit('search');
-        return [];
-      }
-      if (response.statusCode != 200) {
+      final key = _cacheKey(params);
+      final cached = await _readCache(key);
+      if (cached != null) return cached;
+
+      final response = await _fetchVolumes(params);
+      if (response == null || response.statusCode != 200) {
         if (kDebugMode) {
-          debugPrint('Google Books ${response.statusCode} — ignore');
+          debugPrint(
+            'Google Books search ${response?.statusCode ?? 'null'} — []',
+          );
         }
         return [];
       }
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      final items = data['items'] as List<dynamic>? ?? [];
-      final out = <Map<String, String>>[];
-      for (final raw in items) {
-        final mapped = _mapVolume(raw as Map<String, dynamic>, '');
-        if (mapped != null) out.add(mapped);
-      }
-      return out;
+      final hits = _parseItems(response.body);
+      await _writeCache(key, hits);
+      return hits;
     } catch (e) {
       if (kDebugMode) debugPrint('Google Books search: $e');
       return [];
@@ -111,7 +241,6 @@ class GoogleBooksService {
   }
 
   /// 1–3 pages séquentielles (jamais en parallèle) pour une série entière.
-  /// Évite le DDoS « 1 requête par tome ».
   static Future<List<Map<String, String>>> searchSeriesBatched(
     String seriesTitle, {
     String? author,
@@ -155,6 +284,20 @@ class GoogleBooksService {
 
     final title = info['title'] as String?;
     if (title == null || title.isEmpty) return null;
+    // Rejet strict éditions US « Vol. N ».
+    if (BookVfEdition.isUsVolTitle(title)) return null;
+    final subtitle = info['subtitle'] as String?;
+    if (subtitle != null && BookVfEdition.isUsVolTitle(subtitle)) return null;
+
+    final langRaw = info['language'];
+    final language = langRaw is List
+        ? langRaw.map((e) => e.toString()).join(',')
+        : langRaw?.toString();
+    if (language != null &&
+        language.isNotEmpty &&
+        !BookVfEdition.isFrenchLanguage(language)) {
+      return null;
+    }
 
     final authors = (info['authors'] as List<dynamic>?)
         ?.map((a) => a.toString())
@@ -166,8 +309,11 @@ class GoogleBooksService {
 
     final links = info['imageLinks'] as Map<String, dynamic>?;
     final rawImage =
-        (links?['extraLarge'] ?? links?['large'] ?? links?['medium'] ??
-                links?['thumbnail'] ?? links?['smallThumbnail'])
+        (links?['extraLarge'] ??
+                links?['large'] ??
+                links?['medium'] ??
+                links?['thumbnail'] ??
+                links?['smallThumbnail'])
             ?.toString() ??
             '';
     final imageHttps = _hdGoogleCover(rawImage);
@@ -194,9 +340,9 @@ class GoogleBooksService {
       'google_books_id': item['id']?.toString() ?? '',
       if (published.isNotEmpty) 'published_date': published,
       if (isbn != null && isbn.isNotEmpty) 'isbn': isbn,
+      if (language != null && language.isNotEmpty) 'language': language,
     };
 
-    final subtitle = info['subtitle'] as String?;
     if (subtitle != null && subtitle.isNotEmpty) {
       result['subtitle'] = subtitle;
     }
@@ -208,16 +354,8 @@ class GoogleBooksService {
 
     final avgRating = info['averageRating'];
     if (avgRating is num && avgRating > 0) {
-      // Google Books = déjà /5.
       result['community_rating'] =
           avgRating.toDouble().clamp(0, 5).toStringAsFixed(2);
-    }
-
-    final langs = (info['language'] as List<dynamic>?)
-        ?.map((e) => e.toString())
-        .join(',');
-    if (langs != null && langs.isNotEmpty) {
-      result['language'] = langs;
     }
 
     final seriesInfo = info['seriesInfo'] as Map<String, dynamic>?;
@@ -234,7 +372,6 @@ class GoogleBooksService {
       }
     }
 
-    // Titre du type « Série, Tome 3 »
     final parsed = _parseSeriesFromTitle(title);
     if (parsed != null) {
       result.putIfAbsent('series_title', () => parsed.$1);
@@ -246,7 +383,10 @@ class GoogleBooksService {
 
   static (String, String)? _parseSeriesFromTitle(String title) {
     final patterns = [
-      RegExp(r'^(.+?)\s*[,:\-–]\s*(?:tome|vol\.?|volume|#)\s*(\d+)', caseSensitive: false),
+      RegExp(
+        r'^(.+?)\s*[,:\-–]\s*(?:tome|vol\.?|volume|#)\s*(\d+)',
+        caseSensitive: false,
+      ),
       RegExp(r'^(.+?)\s+\((\d+)\)$'),
     ];
     for (final p in patterns) {
@@ -263,7 +403,6 @@ class GoogleBooksService {
     var out = url.replaceFirst('http://', 'https://');
     out = out.replaceAll('&edge=curl', '');
     out = out.replaceAll(RegExp(r'[&?]edge=curl'), '');
-    // zoom=2 = HD net sur mobile (évite flou zoom=1 / curl).
     if (out.contains('zoom=')) {
       out = out.replaceAll(RegExp(r'zoom=\d'), 'zoom=2');
     } else if (out.contains('books.google.com') ||
@@ -272,4 +411,12 @@ class GoogleBooksService {
     }
     return out;
   }
+}
+
+class _CacheEntry {
+  final List<Map<String, String>> hits;
+  final DateTime at;
+  _CacheEntry(this.hits, this.at);
+  bool get isExpired =>
+      DateTime.now().difference(at) > const Duration(hours: 24);
 }

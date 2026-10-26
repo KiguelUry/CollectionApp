@@ -12,18 +12,16 @@ const _directWebImageHosts = {
   'cards.lorcast.io',
   'cdn.riftscribe.gg',
   'www.optcgapi.com',
-  // AniList / MangaDex CDN : CORS OK en <img>, wsrv renvoie souvent 400.
+  // AniList CDN : OK en <img>.
   's4.anilist.co',
   'anilist.co',
-  'uploads.mangadex.org',
+  // uploads.mangadex.org : JAMAIS en direct (hotlink → bannière blanche).
 };
 
 const _proxiedHosts = {
   'covers.openlibrary.org',
   'api.tcgdex.net',
   'images.pokemontcg.io',
-  // BGG : <img> natif (cf. collection_cover_image) — pas le proxy.
-  // Lorcast / OPTCG : chargement direct aussi.
   'i.discogs.com',
   'img.discogs.com',
   'st.discogs.com',
@@ -35,17 +33,35 @@ const _proxiedHosts = {
   'm.media-amazon.com',
   'books.google.com',
   'lh3.googleusercontent.com',
+  'uploads.mangadex.org',
 };
 
-/// Sur le web, route les couvertures externes via l'Edge Function Supabase (CORS).
+/// Sur le web, route les couvertures externes via l'Edge Function (CORS / anti-hotlink).
 String coverUrlForWeb(String url) {
-  if (!kIsWeb) return url;
+  if (!kIsWeb) {
+    // Mobile aussi : MangaDex bloque parfois selon Referer WebView.
+    final uri = Uri.tryParse(url);
+    if (uri != null &&
+        uri.host.toLowerCase() == 'uploads.mangadex.org') {
+      return _supabaseImageProxy(url);
+    }
+    return url;
+  }
 
   final uri = Uri.tryParse(url);
   if (uri == null || !uri.hasScheme) return url;
-  if (_directWebImageHosts.contains(uri.host.toLowerCase())) return url;
-  if (!_proxiedHosts.contains(uri.host.toLowerCase())) return url;
+  final host = uri.host.toLowerCase();
+  if (_directWebImageHosts.contains(host)) return url;
+  if (!_proxiedHosts.contains(host)) {
+    // MangaDex hors liste explicite → forcer proxy si host mangadex.
+    if (host.endsWith('mangadex.org')) return _supabaseImageProxy(url);
+    return url;
+  }
 
+  return _supabaseImageProxy(url);
+}
+
+String _supabaseImageProxy(String url) {
   final base = (AppEnv.supabaseUrl.isNotEmpty
           ? AppEnv.supabaseUrl
           : SupabasePublicConfig.url)
@@ -55,5 +71,6 @@ String coverUrlForWeb(String url) {
   if (anon.isNotEmpty) {
     qp.write('&apikey=${Uri.encodeComponent(anon)}');
   }
+  // image-proxy (images) ; fallback wsrv si besoin côté caller.
   return '$base/functions/v1/image-proxy?$qp';
 }
