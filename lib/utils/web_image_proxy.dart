@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../config/app_env.dart';
 import '../config/supabase_public_config.dart';
 
 /// Hôtes chargés en direct sur le web (<img> natif, CORS OK — pas le proxy).
@@ -45,6 +46,14 @@ String coverUrlForWeb(String url) {
   if (_directWebImageHosts.contains(uri.host.toLowerCase())) return url;
   if (!_proxiedHosts.contains(uri.host.toLowerCase())) return url;
 
-  final base = SupabasePublicConfig.url.replaceAll(RegExp(r'/+$'), '');
-  return '$base/functions/v1/image-proxy?url=${Uri.encodeComponent(url)}';
+  final base = (AppEnv.supabaseUrl.isNotEmpty
+          ? AppEnv.supabaseUrl
+          : SupabasePublicConfig.url)
+      .replaceAll(RegExp(r'/+$'), '');
+  final anon = AppEnv.supabaseAnonKey;
+  final qp = StringBuffer('url=${Uri.encodeComponent(url)}');
+  if (anon.isNotEmpty) {
+    qp.write('&apikey=${Uri.encodeComponent(anon)}');
+  }
+  return '$base/functions/v1/image-proxy?$qp';
 }

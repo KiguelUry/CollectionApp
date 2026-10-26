@@ -4,8 +4,10 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../utils/book_series_normalizer.dart';
+import '../utils/web_catalog_proxy.dart';
 
-/// Métadonnées manga via MangaDex (CORS OK, sans clé).
+/// Métadonnées manga via MangaDex (sans clé).
+/// Sur le web : Edge Function `catalog-proxy` (CORS).
 /// 1 recherche + 1–N pages `/cover` → tous les tomes + couvertures HD.
 abstract final class MangaDexService {
   static const _base = 'https://api.mangadex.org';
@@ -37,10 +39,10 @@ abstract final class MangaDexService {
       );
       final searchRes = await http
           .get(
-            withIncludes,
-            headers: const {'Accept': 'application/json'},
+            proxiedCatalogUri(withIncludes),
+            headers: proxiedCatalogHeaders(),
           )
-          .timeout(const Duration(seconds: 15));
+          .timeout(const Duration(seconds: 20));
       if (searchRes.statusCode != 200) return const [];
       final body = jsonDecode(searchRes.body) as Map<String, dynamic>;
       final data = body['data'] as List<dynamic>? ?? const [];
@@ -164,8 +166,11 @@ abstract final class MangaDexService {
           '&order[volume]=asc',
         );
         final res = await http
-            .get(uri, headers: const {'Accept': 'application/json'})
-            .timeout(const Duration(seconds: 15));
+            .get(
+              proxiedCatalogUri(uri),
+              headers: proxiedCatalogHeaders(),
+            )
+            .timeout(const Duration(seconds: 20));
         if (res.statusCode != 200) break;
         final body = jsonDecode(res.body) as Map<String, dynamic>;
         final data = body['data'] as List<dynamic>? ?? const [];

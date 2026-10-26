@@ -1,10 +1,25 @@
 #!/usr/bin/env bash
 # Génère .env pour le build CI (GitHub Actions) à partir des secrets du repo.
 # SUPABASE_URL doit être exact : https://jfudrneoblsiingjqsio.supabase.co (deux « i »).
+# Les secrets vides ("") sont traités comme absents → fallback (évite "No API key").
 set -euo pipefail
 
-SUPABASE_URL="${SUPABASE_URL:-https://jfudrneoblsiingjqsio.supabase.co}"
-SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY:-sb_publishable_lyB3xo2ORzY6zwrbkn5g3A_7p5ddw7n}"
+_default_url='https://jfudrneoblsiingjqsio.supabase.co'
+_default_anon='sb_publishable_lyB3xo2ORzY6zwrbkn5g3A_7p5ddw7n'
+
+# ${VAR:-default} ne s'applique PAS si VAR="" (set but empty) → on normalise.
+_pick() {
+  local val="${1:-}"
+  local fallback="$2"
+  if [ -n "$val" ]; then
+    printf '%s' "$val"
+  else
+    printf '%s' "$fallback"
+  fi
+}
+
+SUPABASE_URL="$(_pick "${SUPABASE_URL:-}" "$_default_url")"
+SUPABASE_ANON_KEY="$(_pick "${SUPABASE_ANON_KEY:-}" "$_default_anon")"
 
 cat > .env <<EOF
 SUPABASE_URL=${SUPABASE_URL}
@@ -16,3 +31,5 @@ TMDB_API_KEY=${TMDB_API_KEY:-}
 RAWG_API_KEY=${RAWG_API_KEY:-}
 REBRICKABLE_API_KEY=${REBRICKABLE_API_KEY:-}
 EOF
+
+echo "write_ci_env: SUPABASE key length=${#SUPABASE_ANON_KEY}, GB key length=${#GOOGLE_BOOKS_API_KEY}"

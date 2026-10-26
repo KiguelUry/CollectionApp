@@ -4,9 +4,10 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../utils/catalog_http.dart';
+import '../utils/web_catalog_proxy.dart';
 
 /// Recherche livres / mangas / BD — API iTunes (couvertures HD).
-/// Sur le web : proxy CORS `api.allorigins.win` (corsproxy.io renvoie 403).
+/// Sur le web : Edge Function Supabase `catalog-proxy` (CORS).
 class ItunesBooksService {
   static Future<List<Map<String, String>>> search(
     String query, {
@@ -39,13 +40,6 @@ class ItunesBooksService {
     return hits.first;
   }
 
-  static Uri _requestUri(Uri itunesUri) {
-    if (!kIsWeb) return itunesUri;
-    return Uri.parse(
-      'https://api.allorigins.win/raw?url=${Uri.encodeComponent(itunesUri.toString())}',
-    );
-  }
-
   static Future<List<Map<String, String>>> _searchEntity(
     String query, {
     required String entity,
@@ -61,8 +55,14 @@ class ItunesBooksService {
         'lang': 'fr_fr',
       });
       final response = await http
-          .get(_requestUri(itunesUri), headers: catalogHttpHeaders)
-          .timeout(const Duration(seconds: 12));
+          .get(
+            proxiedCatalogUri(itunesUri),
+            headers: {
+              ...catalogHttpHeaders,
+              ...proxiedCatalogHeaders(),
+            },
+          )
+          .timeout(const Duration(seconds: 15));
       if (response.statusCode != 200) {
         if (kDebugMode) {
           debugPrint('iTunes books ${response.statusCode}: ${response.body}');

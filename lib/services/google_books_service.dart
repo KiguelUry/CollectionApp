@@ -8,10 +8,14 @@ import 'open_library_service.dart';
 
 /// Google Books API — meilleur taux de succès ISBN (FR, éditions récentes).
 /// Clé : `GOOGLE_BOOKS_API_KEY` (.env / --dart-define) via [AppEnv].
+/// Sur 429 / erreur : retourne `[]` sans casser MangaDex / AniList.
 class GoogleBooksService {
   static String? get _apiKey => AppEnv.googleBooksApiKey;
 
   static bool get hasApiKey => _apiKey != null && _apiKey!.isNotEmpty;
+
+  /// Circuit-breaker session : après un 429, on saute les appels jusqu'au reload.
+  static bool _rateLimited = false;
 
   static Uri _volumesUri(Map<String, String> query) {
     final params = Map<String, String>.from(query);
@@ -26,12 +30,24 @@ class GoogleBooksService {
     return Uri.https('www.googleapis.com', '/books/v1/volumes', params);
   }
 
+  static void _tripRateLimit(String where) {
+    _rateLimited = true;
+    if (kDebugMode) {
+      debugPrint('Google Books 429 ($where) — pause session, fallback autres sources');
+    }
+  }
+
   /// Résultat normalisé (même forme qu'Open Library + champs série).
   static Future<Map<String, String>?> lookupByIsbn(String isbn) async {
+    if (_rateLimited) return null;
     for (final variant in OpenLibraryService.isbnLookupVariants(isbn)) {
       try {
         final url = _volumesUri({'q': 'isbn:$variant', 'maxResults': '3'});
         final response = await http.get(url);
+        if (response.statusCode == 429) {
+          _tripRateLimit('isbn');
+          return null;
+        }
         if (response.statusCode != 200) continue;
 
         final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -55,6 +71,7 @@ class GoogleBooksService {
   }) async {
     final q = query.trim();
     if (q.length < 2) return [];
+    if (_rateLimited) return [];
 
     try {
       final params = <String, String>{
@@ -69,10 +86,15 @@ class GoogleBooksService {
       final url = _volumesUri(params);
       final response = await http.get(url);
       if (response.statusCode == 429) {
-        if (kDebugMode) debugPrint('Google Books 429 — rate limit');
+        _tripRateLimit('search');
         return [];
       }
-      if (response.statusCode != 200) return [];
+      if (response.statusCode != 200) {
+        if (kDebugMode) {
+          debugPrint('Google Books ${response.statusCode} — ignore');
+        }
+        return [];
+      }
 
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       final items = data['items'] as List<dynamic>? ?? [];
