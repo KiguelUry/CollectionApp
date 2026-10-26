@@ -210,6 +210,8 @@ class BookCatalogService {
         'estimated_volumes': book['estimated_volumes']!,
       if ((book['volume_covers_json'] ?? '').isNotEmpty)
         'volume_covers_json': book['volume_covers_json']!,
+      if ((book['volume_dates_json'] ?? '').isNotEmpty)
+        'volume_dates_json': book['volume_dates_json']!,
     };
   }
 

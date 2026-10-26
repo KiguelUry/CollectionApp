@@ -13,6 +13,7 @@ Future<void> showBookSearch(
     BookSubcategory subcategory, {
     int? volumeCount,
     Map<int, String>? coversByVolume,
+    Map<int, String>? publishedDatesByVolume,
     String? author,
   })? onAddSeries,
   BookSubcategory? initialSub,

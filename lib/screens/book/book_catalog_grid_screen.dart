@@ -28,6 +28,7 @@ class BookCatalogGridScreen extends StatefulWidget {
     BookSubcategory sub, {
     int? volumeCount,
     Map<int, String>? coversByVolume,
+    Map<int, String>? publishedDatesByVolume,
     String? author,
   })? onAddSeries;
 
@@ -497,8 +498,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       }).toList();
     }
 
-    // Officiel (AniList/MangaDex) en tête ; jamais « Aucun résultat » si bannière.
-    // MangaDex/AniList → toujours Manga (jamais badge « Autre »).
+    // Officiel (AniList/MangaDex) en tête, puis écrasé par la grille VF.
     final officialMergeKeys = {
       for (final o in officialBanners) BookSeriesNormalizer.mergeKey(o.name),
     };
@@ -507,13 +507,11 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
     for (final b in [...officialBanners, ...banners]) {
       final mergeKey = BookSeriesNormalizer.mergeKey(b.name);
       final fromOfficial = b.fromAnilist || officialMergeKeys.contains(mergeKey);
-      // Zéro exception : source officielle manga → BookSubcategory.manga.
       final det = fromOfficial
           ? BookSubcategory.manga
           : (b.detectedSubcategory ??
               BookSeriesNormalizer.detectSubcategory(seriesName: b.name) ??
               BookSubcategory.manga);
-      // Une seule bannière par série : l'officielle Manga gagne sur « Autre ».
       final key = fromOfficial
           ? 'official|$mergeKey'
           : BookSeriesNormalizer.seriesSubcategoryKey(b.name, det);
@@ -521,22 +519,50 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       if (!fromOfficial && officialMergeKeys.contains(mergeKey)) continue;
       if (!seenKeys.add(key)) continue;
       if (!b.fromAnilist && b.volumeCount < 1) continue;
+
+      // Hits VF de la grille = source de vérité (covers, dates, max tome).
+      final vf = vfCatalogFromHits(enriched, b.name);
       var count = b.volumeCount;
-      // Enrichit avec max MangaDex / AniList déjà fusionné.
-      for (final o in officialBanners) {
-        if (BookSeriesNormalizer.mergeKey(o.name) == mergeKey) {
-          if (o.volumeCount > count) count = o.volumeCount;
+      final covers = Map<int, String>.from(b.coversByVolume);
+      final dates = Map<int, String>.from(b.publishedDatesByVolume);
+
+      if (vf.maxVol >= 1) {
+        // Ne laisse PAS MangaDex ajouter un T12 JP si VF s'arrête à 11.
+        count = vf.maxVol;
+        for (final e in vf.covers.entries) {
+          covers[e.key] = e.value;
+        }
+        covers.removeWhere((k, _) => k > vf.maxVol);
+        for (final e in vf.dates.entries) {
+          dates[e.key] = e.value;
+        }
+        dates.removeWhere((k, _) => k > vf.maxVol);
+      } else {
+        for (final o in officialBanners) {
+          if (BookSeriesNormalizer.mergeKey(o.name) == mergeKey) {
+            if (o.volumeCount > count) count = o.volumeCount;
+          }
         }
       }
       if (count < 1) continue;
+
+      // Miniature bannière = Tome 1 VF en priorité absolue.
+      final t1Vf = covers[1];
+      final coverUrl = (t1Vf != null &&
+              t1Vf.isNotEmpty &&
+              !t1Vf.contains('mangadex'))
+          ? t1Vf
+          : (t1Vf ?? b.coverUrl ?? covers[1]);
+
       mergedBanners.add(
         SeriesBannerCandidate(
           name: BookSeriesNormalizer.displaySeriesName(b.name),
           volumeCount: count,
-          coversByVolume: b.coversByVolume,
+          coversByVolume: covers,
+          publishedDatesByVolume: dates,
           detectedSubcategory: det,
           author: b.author,
-          coverUrl: b.coverUrl ?? b.coversByVolume[1],
+          coverUrl: coverUrl,
           fromAnilist: fromOfficial,
         ),
       );
@@ -570,6 +596,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
         preferred,
         volumeCount: banner.volumeCount,
         coversByVolume: banner.coversByVolume,
+        publishedDatesByVolume: banner.publishedDatesByVolume,
         author: banner.author,
       );
       if (!mounted) return;
@@ -589,6 +616,10 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
           'volume_covers_json': banner.coversByVolume.entries
               .map((e) => '${e.key}:${e.value}')
               .join('|'),
+          if (banner.publishedDatesByVolume.isNotEmpty)
+            'volume_dates_json': banner.publishedDatesByVolume.entries
+                .map((e) => '${e.key}:${e.value}')
+                .join('|'),
         },
         parsed: BookSeriesNormalizer.parse(banner.name),
         displayTitle: banner.name,
@@ -619,7 +650,8 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
         break;
       }
     }
-    final estimated = hit.estimatedTotalVolumes ?? banner?.volumeCount;
+    // Toujours le total VF de la bannière (ex. 11), jamais seulement le tome X.
+    final estimated = banner?.volumeCount ?? hit.estimatedTotalVolumes;
     if (estimated != null && estimated > 0) {
       raw['estimated_volumes'] = '$estimated';
     }
@@ -630,6 +662,11 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       if ((raw['image_url'] ?? '').isEmpty && covers[1] != null) {
         raw['image_url'] = covers[1]!;
       }
+    }
+    final dates = banner?.publishedDatesByVolume;
+    if (dates != null && dates.isNotEmpty) {
+      raw['volume_dates_json'] =
+          dates.entries.map((e) => '${e.key}:${e.value}').join('|');
     }
     if (callback != null) {
       callback(raw, sub);

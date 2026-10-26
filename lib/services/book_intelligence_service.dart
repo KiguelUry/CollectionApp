@@ -9,6 +9,8 @@ class SeriesBannerCandidate {
   final String name;
   final int volumeCount;
   final Map<int, String> coversByVolume;
+  /// Dates VF par tome (`published_date` ISO) — pour badge « À paraître ».
+  final Map<int, String> publishedDatesByVolume;
   final BookSubcategory? detectedSubcategory;
   /// Auteur dominant détecté dynamiquement dans les hits API.
   final String? author;
@@ -21,11 +23,60 @@ class SeriesBannerCandidate {
     required this.name,
     required this.volumeCount,
     this.coversByVolume = const {},
+    this.publishedDatesByVolume = const {},
     this.detectedSubcategory,
     this.author,
     this.coverUrl,
     this.fromAnilist = false,
   });
+}
+
+/// Agrégat VF depuis la grille « Tomes reliés » (prioritaire sur MangaDex/AniList).
+typedef VfSeriesCatalog = ({
+  Map<int, String> covers,
+  Map<int, String> dates,
+  int maxVol,
+});
+
+VfSeriesCatalog vfCatalogFromHits(
+  List<EnrichedBookHit> hits,
+  String seriesName,
+) {
+  final want = BookSeriesNormalizer.mergeKey(seriesName);
+  final covers = <int, String>{};
+  final dates = <int, String>{};
+  var maxVol = 0;
+  for (final h in hits) {
+    final sn = h.parsed.seriesName ?? h.raw['series_title'];
+    if (sn == null || sn.isEmpty) continue;
+    if (BookSeriesNormalizer.mergeKey(sn) != want) continue;
+    final n = h.parsed.volumeNumber?.round();
+    if (n == null || n < 1) continue;
+    final title = h.raw['title'] ?? h.displayTitle;
+    if (!BookVfEdition.isFrenchEdition(
+      title: title,
+      language: h.raw['language'],
+      source: h.raw['source'],
+    )) {
+      continue;
+    }
+    if (n > maxVol) maxVol = n;
+    final img = h.imageUrl;
+    if (img != null && img.isNotEmpty) {
+      final prev = covers[n];
+      final prevMd = prev != null && prev.contains('mangadex');
+      final curMd = img.contains('mangadex');
+      // GB FR / iTunes FR écrasent MangaDex.
+      if (prev == null || prev.isEmpty || (prevMd && !curMd)) {
+        covers[n] = img;
+      }
+    }
+    final pub = h.publishedDate;
+    if (pub != null && pub.isNotEmpty) {
+      dates[n] = pub;
+    }
+  }
+  return (covers: covers, dates: dates, maxVol: maxVol);
 }
 
 enum BookSearchField { title, author, publisher }

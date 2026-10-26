@@ -190,27 +190,115 @@ class BookSeriesService {
     );
   }
 
-  /// Applique les couvertures découvertes en recherche (série → tome → url).
+  static bool isMangaDexCoverUrl(String? url) {
+    if (url == null || url.isEmpty) return false;
+    final u = url.toLowerCase();
+    return u.contains('mangadex');
+  }
+
+  /// Applique couvertures + dates VF (GB écrase MangaDex).
   Future<int> applyVolumeCoversFromMap({
     required String seriesId,
     required Map<int, String> coverByVolume,
+    Map<int, String>? publishedDatesByVolume,
   }) async {
-    if (coverByVolume.isEmpty) return 0;
+    if (coverByVolume.isEmpty &&
+        (publishedDatesByVolume == null || publishedDatesByVolume.isEmpty)) {
+      return 0;
+    }
     final volumes = await fetchVolumes(seriesId);
     var n = 0;
     for (final v in volumes) {
       final num = v.volumeNumber.round();
       final url = coverByVolume[num];
-      if (url == null || url.isEmpty) continue;
-      if (v.coverUrl != null &&
+      final pub = publishedDatesByVolume?[num];
+      final upcoming =
+          BookIntelligenceService.isFuturePublishedDate(pub);
+      final hasVerified = v.coverUrl != null &&
           v.coverUrl!.isNotEmpty &&
-          v.metadata['cover_volume_verified'] == num) {
+          v.metadata['cover_volume_verified'] == num;
+      final overwriteMd = hasVerified &&
+          isMangaDexCoverUrl(v.coverUrl) &&
+          url != null &&
+          url.isNotEmpty &&
+          !isMangaDexCoverUrl(url);
+
+      if (url != null && url.isNotEmpty && (!hasVerified || overwriteMd)) {
+        await setVolumeCoverUrl(
+          v.id,
+          url,
+          verifiedVolume: num,
+          publishedDate: pub,
+          upcoming: pub != null ? upcoming : null,
+        );
+        n++;
         continue;
       }
-      await setVolumeCoverUrl(v.id, url, verifiedVolume: num);
-      n++;
+      if (pub != null && pub.isNotEmpty) {
+        await patchVolumePublishedDate(
+          v.id,
+          publishedDate: pub,
+          upcoming: upcoming,
+        );
+        n++;
+      }
     }
     return n;
+  }
+
+  Future<void> patchVolumePublishedDate(
+    String volumeId, {
+    required String publishedDate,
+    required bool upcoming,
+  }) async {
+    final row = await _client
+        .from('book_volumes')
+        .select('metadata')
+        .eq('id', volumeId)
+        .maybeSingle();
+    if (row == null) return;
+    final meta = Map<String, dynamic>.from(row['metadata'] as Map? ?? {});
+    meta['published_date'] = publishedDate;
+    if (upcoming) {
+      meta['is_upcoming'] = true;
+    } else {
+      meta.remove('is_upcoming');
+    }
+    await _client
+        .from('book_volumes')
+        .update({'metadata': meta})
+        .eq('id', volumeId);
+  }
+
+  /// Plafonne la série au max VF : retire les tomes JP orphelins (ex. T12).
+  Future<BookSeries> trimToVfMax(BookSeries series, int vfMax) async {
+    if (vfMax < 1) return series;
+    final cur = series.expectedVolumeCount ?? 0;
+    if (cur < vfMax) {
+      await ensureVolumeSlots(series.id, vfMax);
+      final updated = series.copyWith(expectedVolumeCount: vfMax);
+      await updateSeries(updated);
+      return updated;
+    }
+    if (cur <= vfMax) return series;
+
+    final volumes = await fetchVolumes(series.id);
+    final items = await fetchSeriesItems(series.id);
+    final linked = items
+        .map((i) => i.volumeId)
+        .whereType<String>()
+        .toSet();
+    for (final v in volumes) {
+      final n = v.volumeNumber.round();
+      if (n > vfMax && !linked.contains(v.id) && !v.isHorsSerie) {
+        try {
+          await _client.from('book_volumes').delete().eq('id', v.id);
+        } catch (_) {}
+      }
+    }
+    final updated = series.copyWith(expectedVolumeCount: vfMax);
+    await updateSeries(updated);
+    return updated;
   }
 
   /// Met à jour expected_volume_count si de nouveaux tomes sont détectés.
@@ -263,12 +351,15 @@ class BookSeriesService {
         }
       }
     }
-    // Manga : max(AniList, MangaDex, hits GB).
+    // Manga : hits catalogue VF d'abord ; MangaDex comble les trous ≤ max VF.
+    final vfMaxFromHits = maxVol;
     var workingSeries = series;
     if (workingSeries.subcategory == BookSubcategory.manga) {
       final ani = await AnilistMangaService.lookupManga(workingSeries.name);
       if (ani != null) {
-        if (ani.volumes != null && ani.volumes! > maxVol) {
+        if (vfMaxFromHits < 1 &&
+            ani.volumes != null &&
+            ani.volumes! > maxVol) {
           maxVol = ani.volumes!;
         }
         if ((seriesAuthor == null || seriesAuthor.isEmpty) &&
@@ -284,8 +375,9 @@ class BookSeriesService {
       );
       if (md != null) {
         final mdVols = md.volumesPublished ?? 0;
-        if (mdVols > maxVol) maxVol = mdVols;
+        if (vfMaxFromHits < 1 && mdVols > maxVol) maxVol = mdVols;
         for (final e in md.coverByVolume.entries) {
+          if (vfMaxFromHits >= 1 && e.key > vfMaxFromHits) continue;
           covers.putIfAbsent(e.key, () => e.value);
         }
         if ((workingSeries.author == null || workingSeries.author!.isEmpty) &&
@@ -837,7 +929,7 @@ class BookSeriesService {
     }
   }
 
-  /// Couvertures manquantes : MangaDex batch d'abord (manga), puis GB en secours.
+  /// Couvertures : Google Books FR d'abord (écrase MangaDex), MD comble les trous.
   /// [onProgress] est appelé tous les [progressEvery] tomes trouvés (UI live).
   Future<int> enrichMissingVolumeCovers({
     required BookSeries series,
@@ -860,9 +952,24 @@ class BookSeriesService {
       }
     }
 
-    // Map tome → cover (MangaDex prioritaire pour manga).
     final batch = <int, ({String coverUrl, String? publishedDate})>{};
+    var vfMax = 0;
 
+    // 1) Google Books FR = source de vérité VF (covers + dates + max tome).
+    try {
+      final gb = await BookIntelligenceService.batchFetchSeriesCovers(
+        seriesName: working.name,
+        subcategory: working.subcategory,
+        authorHint: seriesAuthor,
+        maxPages: working.subcategory == BookSubcategory.manga ? 2 : 3,
+      );
+      for (final e in gb.entries) {
+        batch[e.key] = e.value;
+        if (e.key > vfMax) vfMax = e.key;
+      }
+    } catch (_) {}
+
+    // 2) MangaDex comble uniquement les trous ≤ max VF (jamais un T12 JP).
     if (working.subcategory == BookSubcategory.manga) {
       try {
         final md = await MangaDexService.lookupManga(
@@ -871,13 +978,19 @@ class BookSeriesService {
         );
         if (md != null) {
           for (final e in md.coverByVolume.entries) {
-            batch[e.key] = (coverUrl: e.value, publishedDate: null);
+            if (vfMax >= 1 && e.key > vfMax) continue;
+            batch.putIfAbsent(
+              e.key,
+              () => (coverUrl: e.value, publishedDate: null),
+            );
           }
-          final mdVols = md.volumesPublished;
-          if (mdVols != null &&
-              mdVols > (working.expectedVolumeCount ?? 0)) {
-            working =
-                (await bumpExpectedCountIfHigher(working, mdVols)) ?? working;
+          if (vfMax < 1) {
+            final mdVols = md.volumesPublished;
+            if (mdVols != null &&
+                mdVols > (working.expectedVolumeCount ?? 0)) {
+              working = (await bumpExpectedCountIfHigher(working, mdVols)) ??
+                  working;
+            }
           }
           if ((seriesAuthor == null || seriesAuthor.isEmpty) &&
               md.author != null &&
@@ -889,35 +1002,17 @@ class BookSeriesService {
       } catch (_) {}
     }
 
-    // Secours Google Books (BD / roman / tomes manquants) — batch seulement.
-    final stillMissing = volumes.any(
-      (v) =>
-          !v.isHorsSerie &&
-          !batch.containsKey(v.volumeNumber.round()) &&
-          (v.coverUrl == null || v.coverUrl!.isEmpty),
-    );
-    if (stillMissing ||
-        working.subcategory != BookSubcategory.manga ||
-        batch.isEmpty) {
-      try {
-        final gb = await BookIntelligenceService.batchFetchSeriesCovers(
-          seriesName: working.name,
-          subcategory: working.subcategory,
-          authorHint: seriesAuthor,
-          maxPages: working.subcategory == BookSubcategory.manga ? 2 : 3,
-        );
-        for (final e in gb.entries) {
-          batch.putIfAbsent(e.key, () => e.value);
-        }
-      } catch (_) {}
+    if (vfMax >= 1) {
+      working = await trimToVfMax(working, vfMax);
     }
 
-    final ordered = List<BookVolume>.from(volumes)
+    final ordered = List<BookVolume>.from(await fetchVolumes(working.id))
       ..sort((a, b) => a.volumeNumber.compareTo(b.volumeNumber));
 
     for (final vol in ordered) {
       if (vol.isHorsSerie) continue;
       final n = vol.volumeNumber.round();
+      if (vfMax >= 1 && n > vfMax) continue;
       final hit = batch[n];
       final verified = vol.metadata['cover_volume_verified'];
       final hasCover = vol.coverUrl != null && vol.coverUrl!.isNotEmpty;
@@ -926,7 +1021,6 @@ class BookSeriesService {
           (verified == null || verified != n);
 
       if (hit == null) {
-        // Pas de spam individuel : on laisse le placeholder.
         if (hasCover && needsRepair) {
           await clearVolumeCover(vol.id);
           updated++;
@@ -937,10 +1031,45 @@ class BookSeriesService {
       final url = hit.coverUrl;
       final pub = hit.publishedDate;
       final upcoming = BookIntelligenceService.isFuturePublishedDate(pub);
+      final overwriteMd = hasCover &&
+          isMangaDexCoverUrl(vol.coverUrl) &&
+          !isMangaDexCoverUrl(url);
+      final sameCover = hasCover && vol.coverUrl == url;
+      final dateMissing = pub != null &&
+          pub.isNotEmpty &&
+          (vol.metadata['published_date'] == null ||
+              vol.metadata['published_date'].toString().isEmpty);
+
       if (hasCover &&
           !needsRepair &&
           verified == n &&
-          vol.coverUrl == url) {
+          sameCover &&
+          !overwriteMd) {
+        if (dateMissing) {
+          await patchVolumePublishedDate(
+            vol.id,
+            publishedDate: pub,
+            upcoming: upcoming,
+          );
+          updated++;
+        }
+        continue;
+      }
+
+      if (hasCover &&
+          !needsRepair &&
+          verified == n &&
+          !overwriteMd &&
+          !sameCover) {
+        // Couverture VF déjà vérifiée différente → garder, sync date.
+        if (dateMissing) {
+          await patchVolumePublishedDate(
+            vol.id,
+            publishedDate: pub,
+            upcoming: upcoming,
+          );
+          updated++;
+        }
         continue;
       }
 
@@ -960,9 +1089,9 @@ class BookSeriesService {
       }
     }
 
-    // Couverture série = Tome 1 vérifié.
-    final fresh = await fetchSeriesById(series.id);
-    final refreshed = await fetchVolumes(series.id);
+    // Couverture série = Tome 1 vérifié (VF si possible).
+    final fresh = await fetchSeriesById(working.id);
+    final refreshed = await fetchVolumes(working.id);
     String? tome1;
     for (final v in refreshed) {
       if (v.volumeNumber >= 0.99 &&
@@ -976,7 +1105,7 @@ class BookSeriesService {
     if (fresh != null &&
         tome1 != null &&
         tome1.isNotEmpty &&
-        fresh.coverUrl != tome1) {
+        (fresh.coverUrl != tome1 || isMangaDexCoverUrl(fresh.coverUrl))) {
       await updateSeries(fresh.copyWith(coverUrl: tome1));
       updated++;
     } else if (fresh != null &&
@@ -1495,9 +1624,30 @@ class BookSeriesService {
       );
     }
 
+    // Ne JAMAIS plafonner au seul tome X ajouté : total VF de la série.
+    final solidVfEstimate =
+        estimatedTotalVolumes != null && estimatedTotalVolumes >= 1;
     var total = estimatedTotalVolumes;
     final volCeil = parsed.volumeNumber?.ceil() ?? 0;
-    if (total == null || total < volCeil) {
+
+    if (!solidVfEstimate || (total != null && total < volCeil)) {
+      // Batch GB FR avant MangaDex (évite de s'arrêter au tome X).
+      try {
+        final gb = await BookIntelligenceService.batchFetchSeriesCovers(
+          seriesName: parsed.seriesName!,
+          subcategory: subcategory,
+          authorHint: author,
+          maxPages: subcategory == BookSubcategory.manga ? 2 : 3,
+        );
+        if (gb.isNotEmpty) {
+          final gbMax = gb.keys.reduce((a, b) => a > b ? a : b);
+          if (gbMax > (total ?? 0)) total = gbMax;
+        }
+      } catch (_) {}
+    }
+
+    // MangaDex / AniList seulement si pas d'estimat VF solide.
+    if (!solidVfEstimate && (total == null || total < volCeil)) {
       if (subcategory == BookSubcategory.manga) {
         final fromDex =
             await MangaDexService.lookupManga(parsed.seriesName!);
@@ -1521,6 +1671,9 @@ class BookSeriesService {
           total = volCeil;
         }
       }
+    } else if (solidVfEstimate) {
+      // Garde le max VF (ex. 11) — n'infle PAS avec le T12 JP MangaDex.
+      total = estimatedTotalVolumes;
     }
     if (total != null && volCeil > total) total = volCeil;
 

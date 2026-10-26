@@ -48,12 +48,20 @@ class BookItemAddCoordinator {
           metadata: BookCatalogService.metadataFromLookup(book),
         );
       },
-      onAddSeries: (name, sub, {volumeCount, coversByVolume, author}) async {
+      onAddSeries: (
+        name,
+        sub, {
+        volumeCount,
+        coversByVolume,
+        publishedDatesByVolume,
+        author,
+      }) async {
         await _addSeriesFromSearch(
           name: name,
           subcategory: subcategory ?? sub,
           volumeCount: volumeCount,
           coversByVolume: coversByVolume,
+          publishedDatesByVolume: publishedDatesByVolume,
           coverUrl: coversByVolume?[1],
           author: author,
         );
@@ -67,6 +75,7 @@ class BookItemAddCoordinator {
     required BookSubcategory subcategory,
     int? volumeCount,
     Map<int, String>? coversByVolume,
+    Map<int, String>? publishedDatesByVolume,
     String? coverUrl,
     String? author,
   }) async {
@@ -119,10 +128,13 @@ class BookItemAddCoordinator {
           imageUrl: seriesCover,
         );
       }
-      if (coversByVolume != null && coversByVolume.isNotEmpty) {
+      if ((coversByVolume != null && coversByVolume.isNotEmpty) ||
+          (publishedDatesByVolume != null &&
+              publishedDatesByVolume.isNotEmpty)) {
         await _seriesService.applyVolumeCoversFromMap(
           seriesId: series.id,
-          coverByVolume: coversByVolume,
+          coverByVolume: coversByVolume ?? const {},
+          publishedDatesByVolume: publishedDatesByVolume,
         );
       }
 
@@ -607,23 +619,35 @@ class BookItemAddCoordinator {
             await _seriesService.ensureSeriesAuthor(s, authorFromMeta);
           }
         }
-        // Couvertures par tome découvertes à la recherche.
+        // Couvertures + dates VF par tome découvertes à la recherche.
         final coversRaw = metadata?['volume_covers_json']?.toString();
+        final datesRaw = metadata?['volume_dates_json']?.toString();
+        final coverMap = <int, String>{};
+        final dateMap = <int, String>{};
         if (coversRaw != null && coversRaw.isNotEmpty) {
-          final map = <int, String>{};
           for (final part in coversRaw.split('|')) {
             final i = part.indexOf(':');
             if (i <= 0) continue;
             final n = int.tryParse(part.substring(0, i));
             final url = part.substring(i + 1);
-            if (n != null && n > 0 && url.isNotEmpty) map[n] = url;
+            if (n != null && n > 0 && url.isNotEmpty) coverMap[n] = url;
           }
-          if (map.isNotEmpty) {
-            await _seriesService.applyVolumeCoversFromMap(
-              seriesId: resolved.seriesId,
-              coverByVolume: map,
-            );
+        }
+        if (datesRaw != null && datesRaw.isNotEmpty) {
+          for (final part in datesRaw.split('|')) {
+            final i = part.indexOf(':');
+            if (i <= 0) continue;
+            final n = int.tryParse(part.substring(0, i));
+            final d = part.substring(i + 1);
+            if (n != null && n > 0 && d.isNotEmpty) dateMap[n] = d;
           }
+        }
+        if (coverMap.isNotEmpty || dateMap.isNotEmpty) {
+          await _seriesService.applyVolumeCoversFromMap(
+            seriesId: resolved.seriesId,
+            coverByVolume: coverMap,
+            publishedDatesByVolume: dateMap.isEmpty ? null : dateMap,
+          );
         }
 
         // Ajout série entière (sans tome précis) → plage possédée + ouverture dossier.
