@@ -135,6 +135,13 @@ class GoogleBooksService {
       result['publisher'] = publisher;
     }
 
+    final avgRating = info['averageRating'];
+    if (avgRating is num && avgRating > 0) {
+      // Google Books = déjà /5.
+      result['community_rating'] =
+          avgRating.toDouble().clamp(0, 5).toStringAsFixed(2);
+    }
+
     final langs = (info['language'] as List<dynamic>?)
         ?.map((e) => e.toString())
         .join(',');
@@ -184,10 +191,13 @@ class GoogleBooksService {
     if (url.isEmpty) return '';
     var out = url.replaceFirst('http://', 'https://');
     out = out.replaceAll('&edge=curl', '');
+    out = out.replaceAll(RegExp(r'[&?]edge=curl'), '');
+    // zoom=2 = HD net sur mobile (évite flou zoom=1 / curl).
     if (out.contains('zoom=')) {
-      out = out.replaceAll(RegExp(r'zoom=\d'), 'zoom=0');
-    } else if (out.contains('books.google.com')) {
-      out = '$out&zoom=0';
+      out = out.replaceAll(RegExp(r'zoom=\d'), 'zoom=2');
+    } else if (out.contains('books.google.com') ||
+        out.contains('googleusercontent.com')) {
+      out = out.contains('?') ? '$out&zoom=2' : '$out?zoom=2';
     }
     return out;
   }

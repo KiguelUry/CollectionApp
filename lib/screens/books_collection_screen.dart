@@ -34,8 +34,9 @@ class _BooksCollectionScreenState extends State<BooksCollectionScreen>
     super.dispose();
   }
 
-  void _openSearch({BookSubcategory? subcategory}) {
-    BookItemAddCoordinator(context).openSearch(subcategory: subcategory);
+  Future<void> _openSearch({BookSubcategory? subcategory}) async {
+    await BookItemAddCoordinator(context).openSearch(subcategory: subcategory);
+    // Rafraîchissement Mes livres via CollectionRefresh (écouteur) + cache.
   }
 
   void _scanIsbn() {

@@ -9,6 +9,7 @@ import '../utils/boardgame_display.dart';
 import '../utils/boardgame_expansions.dart';
 import '../utils/item_copy_units.dart';
 import '../utils/item_group_count.dart';
+import '../utils/tile_rating_display.dart';
 import '../utils/wishlist_market_metadata.dart';
 import 'boardgame_tile_inventory_sheets.dart';
 import 'boardgame_tile_sheets.dart';
@@ -75,8 +76,19 @@ class BoardgameTileMetaIcons extends StatelessWidget {
     return null;
   }
 
-  String? get _bggRatingLabel =>
-      formatBggRatingChipLabel(item.metadata?['bgg_avg_rating']);
+  TileRatingChip get _ratingChip => resolveTileRating(
+        personalOnFive: personalRatingOnFive(
+          item.rating,
+          metadata: item.metadata,
+        ),
+        communityOnFive: bggRatingOnFive(item.metadata?['bgg_avg_rating']),
+      );
+
+  String? get _bggRatingLabel {
+    final chip = _ratingChip;
+    if (chip.label == TileRatingChip.empty.label) return null;
+    return chip.label.replaceFirst('★ ', '');
+  }
 
   Future<void> _showQuantitySheet(BuildContext context) {
     return showBoardgameTileQuantitySheet(
@@ -240,7 +252,7 @@ class BoardgameTileMetaIcons extends StatelessWidget {
           child: _metaChip(
             icon: Icons.star_rounded,
             suffix: rating ?? '—',
-            color: Colors.amber.shade700,
+            color: _ratingChip.color,
             shrinkSuffix: true,
           ),
         );

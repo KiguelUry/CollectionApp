@@ -54,6 +54,13 @@ class BookSeries {
   double? get totalUsedValue =>
       _parseDouble(metadata['total_value_used']);
 
+  /// Note communauté /5 (AniList / Google Books / OpenLibrary).
+  double? get communityRating {
+    final r = _parseDouble(metadata['community_rating']);
+    if (r == null || r <= 0) return null;
+    return r > 5.0 ? r / 2 : r;
+  }
+
   static double? _parseDouble(dynamic v) {
     if (v == null) return null;
     if (v is num) return v.toDouble();
@@ -144,7 +151,10 @@ class BookSeriesStats {
   final int readCount;
   final int wishlistVolumeCount;
   final int totalSlots;
+  /// Moyenne des notes personnelles (tomes / série).
   final double? displayRating;
+  /// Note communauté /5.
+  final double? communityRating;
   final double totalNewValue;
   final double totalUsedValue;
 
@@ -154,6 +164,7 @@ class BookSeriesStats {
     this.wishlistVolumeCount = 0,
     this.totalSlots = 0,
     this.displayRating,
+    this.communityRating,
     this.totalNewValue = 0,
     this.totalUsedValue = 0,
   });
@@ -172,7 +183,7 @@ class BookSeriesStats {
       totalSlots > 0 ? (ownedCount / totalSlots).clamp(0.0, 1.0) : 0;
 
   String? get ratingLabel {
-    final r = displayRating;
+    final r = displayRating ?? communityRating;
     if (r == null || r <= 0) return null;
     final onFive = r > 5.0 ? r / 2 : r;
     if (onFive <= 0) return null;

@@ -85,20 +85,24 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         _slots = slots;
         _loading = false;
       });
-      // Couvertures manquantes en arrière-plan (lots, ne bloque pas).
-      final missing = volumes
-          .where((v) => v.coverUrl == null || v.coverUrl!.isEmpty)
-          .length;
-      if (missing > 0) {
-        Future(() async {
-          final n = await _service.enrichMissingVolumeCovers(
-            series: series!,
-            volumes: volumes,
-            maxLookups: missing.clamp(8, 60),
-          );
-          if (n > 0 && mounted) _load(silent: true);
-        });
-      }
+      // Couvertures manquantes / erronées + note communauté (arrière-plan).
+      final seriesForBg = series;
+      Future(() async {
+        var any = false;
+        if (seriesForBg.communityRating == null) {
+          final hydrated =
+              await _service.hydrateCommunityRating(seriesForBg);
+          if (hydrated.communityRating != null) any = true;
+        }
+        final n = await _service.enrichMissingVolumeCovers(
+          series: seriesForBg,
+          volumes: volumes,
+          maxLookups: 40,
+          repairUnverified: true,
+        );
+        if (n > 0) any = true;
+        if (any && mounted) _load(silent: true);
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
@@ -1126,7 +1130,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                                         style: const TextStyle(
                                           fontSize: 10,
                                           fontWeight: FontWeight.w700,
-                                          color: Colors.amber,
+                                          color: Color(0xFF38BDF8),
                                         ),
                                       ),
                                     ),

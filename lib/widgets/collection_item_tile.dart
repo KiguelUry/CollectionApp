@@ -12,6 +12,7 @@ import '../utils/friend_item_overlap.dart';
 import '../utils/holder_label_utils.dart';
 import '../utils/item_copy_units.dart';
 import '../utils/item_group_count.dart';
+import '../utils/tile_rating_display.dart';
 import '../utils/wishlist_market_metadata.dart';
 import '../utils/tcg_card_display.dart';
 import 'boardgame_tile_inventory_sheets.dart';
@@ -489,8 +490,24 @@ class CollectionItemTile extends StatelessWidget {
     return null;
   }
 
-  String? get _bggRatingLabel =>
-      _isBoardgame ? formatBggRatingChipLabel(item.metadata?['bgg_avg_rating']) : null;
+  TileRatingChip get _ratingChip {
+    if (!_isBoardgame) return TileRatingChip.empty;
+    return resolveTileRating(
+      personalOnFive: personalRatingOnFive(
+        item.rating,
+        metadata: item.metadata,
+      ),
+      communityOnFive: bggRatingOnFive(item.metadata?['bgg_avg_rating']),
+    );
+  }
+
+  String? get _bggRatingLabel {
+    final chip = _ratingChip;
+    if (chip.label == TileRatingChip.empty.label) return null;
+    return chip.label.replaceFirst('★ ', '');
+  }
+
+  Color get _ratingChipColor => _ratingChip.color;
 
   String? get _whereLine {
     if (item.locationLabel == null || item.locationLabel!.trim().isEmpty) {
@@ -653,7 +670,7 @@ class CollectionItemTile extends StatelessWidget {
           child: _metaChip(
             icon: Icons.star_rounded,
             suffix: rating ?? '—',
-            color: Colors.amber.shade700,
+            color: _ratingChipColor,
             shrinkSuffix: true,
           ),
         );
@@ -789,7 +806,7 @@ class CollectionItemTile extends StatelessWidget {
           _metaChip(
             icon: Icons.star_rounded,
             suffix: rating,
-            color: Colors.amber.shade700,
+            color: _ratingChipColor,
           ),
         if (rating != null && location != null) const SizedBox(width: 4),
         if (location != null)

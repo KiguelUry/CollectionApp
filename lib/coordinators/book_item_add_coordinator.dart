@@ -7,6 +7,7 @@ import '../models/collection_item.dart';
 import '../screens/book_series_detail_screen.dart';
 import '../services/book_series_service.dart';
 import '../services/books_collection_cache.dart';
+import '../services/collection_refresh.dart';
 import '../services/profile_service.dart';
 import '../services/book_catalog_service.dart';
 import '../services/open_library_service.dart';
@@ -156,6 +157,10 @@ class BookItemAddCoordinator {
         items: items,
         stats: stats,
       );
+      // Hydrate note communauté en arrière-plan.
+      // ignore: unawaited_futures
+      _seriesService.hydrateCommunityRating(series);
+      CollectionRefresh.instance.bump();
 
       if (context.mounted) {
         Navigator.pop(context); // loading
@@ -642,12 +647,14 @@ class BookItemAddCoordinator {
             }
           }
           if (!context.mounted) return;
+          CollectionRefresh.instance.bump();
           await Navigator.push(
             context,
             MaterialPageRoute(
               builder: (_) => BookSeriesDetailScreen(seriesId: resolved.seriesId),
             ),
           );
+          CollectionRefresh.instance.bump();
           return;
         }
       }
@@ -775,6 +782,7 @@ class BookItemAddCoordinator {
         );
       }
 
+      CollectionRefresh.instance.bump();
       if (context.mounted) {
         Navigator.pop(dialogContext);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -787,6 +795,7 @@ class BookItemAddCoordinator {
               builder: (ctx) => BookSeriesDetailScreen(seriesId: seriesId),
             ),
           );
+          CollectionRefresh.instance.bump();
         }
       }
     } on PostgrestException catch (e) {

@@ -545,7 +545,7 @@ class BookSeriesService {
     }
     final readCount = readNumbers.length;
 
-    // Moyenne UNIQUEMENT sur notes > 0 (jamais ★ 0.0 / ★ 0.3 fantômes).
+    // Moyenne perso UNIQUEMENT sur notes > 0.
     double? rating = series.userRating;
     if (rating != null && rating <= 0) rating = null;
     if (rating == null) {
@@ -557,6 +557,7 @@ class BookSeriesService {
         rating = rated.reduce((a, b) => a + b) / rated.length;
       }
     }
+    final community = series.communityRating;
 
     var totalNew = series.totalNewValue ?? 0;
     var totalUsed = series.totalUsedValue ?? 0;
@@ -584,9 +585,50 @@ class BookSeriesService {
       wishlistVolumeCount: wishlistCount,
       totalSlots: totalSlots,
       displayRating: rating,
+      communityRating: community,
       totalNewValue: totalNew,
       totalUsedValue: totalUsed,
     );
+  }
+
+  /// Hydrate note communauté (AniList / GB) si absente.
+  Future<BookSeries> hydrateCommunityRating(BookSeries series) async {
+    if (series.communityRating != null) return series;
+    double? onFive;
+    if (series.subcategory == BookSubcategory.manga) {
+      final meta = await AnilistMangaService.lookupManga(series.name);
+      onFive = meta?.ratingOnFive;
+    }
+    if (onFive == null || onFive <= 0) {
+      try {
+        final hits = await BookCatalogService.searchBooks(
+          series.name,
+          subcategory: series.subcategory,
+          filters: BookSearchFilters(titleQuery: series.name),
+        );
+        for (final h in hits.take(8)) {
+          if (!BookSeriesNormalizer.hitBelongsToSeries(
+            h['title'] ?? '',
+            series.name,
+          )) {
+            continue;
+          }
+          final raw = h['community_rating'];
+          final n = double.tryParse(raw ?? '');
+          if (n != null && n > 0) {
+            onFive = n.clamp(0, 5);
+            break;
+          }
+        }
+      } catch (_) {}
+    }
+    if (onFive == null || onFive <= 0) return series;
+    final meta = Map<String, dynamic>.from(series.metadata);
+    meta['community_rating'] =
+        double.parse(onFive.toStringAsFixed(2));
+    final updated = series.copyWith(metadata: meta);
+    await updateSeries(updated);
+    return updated;
   }
 
   double _num(dynamic v) {
@@ -647,6 +689,7 @@ class BookSeriesService {
     int? verifiedVolume,
     String? publishedDate,
     bool? upcoming,
+    double? communityRating,
   }) async {
     if (coverUrl.isEmpty) return;
     final row = await _client
@@ -672,6 +715,27 @@ class BookSeriesService {
         meta.remove('is_upcoming');
       }
     }
+    if (communityRating != null && communityRating > 0) {
+      meta['community_rating'] =
+          double.parse(communityRating.clamp(0, 5).toStringAsFixed(2));
+    }
+    await _client
+        .from('book_volumes')
+        .update({'metadata': meta})
+        .eq('id', volumeId);
+  }
+
+  /// Efface une couverture erronée (hors-série / mauvais tome).
+  Future<void> clearVolumeCover(String volumeId) async {
+    final row = await _client
+        .from('book_volumes')
+        .select('metadata')
+        .eq('id', volumeId)
+        .maybeSingle();
+    if (row == null) return;
+    final meta = Map<String, dynamic>.from(row['metadata'] as Map? ?? {});
+    meta.remove('cover_url');
+    meta.remove('cover_volume_verified');
     await _client
         .from('book_volumes')
         .update({'metadata': meta})
@@ -727,6 +791,18 @@ class BookSeriesService {
           if (img == null || img.isEmpty) continue;
           final combined =
               '${h.raw['title'] ?? ''} ${h.raw['subtitle'] ?? ''}';
+          if (!BookSeriesNormalizer.hitBelongsToSeries(
+            combined,
+            series.name,
+          )) {
+            continue;
+          }
+          if (!BookSeriesNormalizer.authorMatchesSeries(
+            h.author,
+            series.name,
+          )) {
+            continue;
+          }
           final vn = BookTitleParser.extractVolumeNumberStrict(combined);
           if (vn == null || vn < 1) continue;
           if (!BookIntelligenceService.hitMatchesVolumeExactly(h, vn)) continue;
@@ -803,11 +879,17 @@ class BookSeriesService {
           upcoming: upcoming,
         );
         updated++;
-      } else if (pub != null) {
-        await patchVolumeMetadata(vol.id, {
-          'published_date': pub,
-          'is_upcoming': upcoming,
-        });
+      } else {
+        // Pas de hit strict → efface les fausses couvertures (Tyran, Realist Hero…).
+        if (hasCover && (needsRepair || forceCheck || preferVf)) {
+          await clearVolumeCover(vol.id);
+          updated++;
+        } else if (pub != null) {
+          await patchVolumeMetadata(vol.id, {
+            'published_date': pub,
+            'is_upcoming': upcoming,
+          });
+        }
       }
     }
 

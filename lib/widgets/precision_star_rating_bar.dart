@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../constants/rating_colors.dart';
+
 /// 5 étoiles au clic : 1er clic = N.0, 2e = N−0.5, 3e = effacer.
-/// Aucun glissement / hover (évite les conflits avec les cartes parentes).
+/// Note personnelle = bleu métallique (jamais or communauté).
 class PrecisionStarRatingBar extends StatefulWidget {
   final double rating;
   final ValueChanged<double> onChanged;
   final bool readOnly;
   final double starSize;
+  final Color? starColor;
 
   const PrecisionStarRatingBar({
     super.key,
@@ -15,6 +18,7 @@ class PrecisionStarRatingBar extends StatefulWidget {
     required this.onChanged,
     this.readOnly = false,
     this.starSize = 32,
+    this.starColor,
   });
 
   @override
@@ -127,8 +131,8 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
 
   @override
   Widget build(BuildContext context) {
+    final color = widget.starColor ?? RatingColors.personal;
     final badge = _isUnrated ? '— / 5' : '${_saved.toStringAsFixed(1)} / 5';
-    // GestureDetector opaque : les clics ne remontent jamais à la carte parent.
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {},
@@ -149,7 +153,7 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
                     child: Icon(
                       _iconFor(i),
                       size: widget.starSize.clamp(18, 28),
-                      color: Colors.amber.shade700,
+                      color: color,
                     ),
                   ),
                 ),
@@ -162,18 +166,16 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: Colors.amber.withValues(alpha: 0.15),
+                color: color.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: Colors.amber.shade700.withValues(alpha: 0.4),
-                ),
+                border: Border.all(color: color.withValues(alpha: 0.45)),
               ),
               child: Text(
                 badge,
                 style: TextStyle(
                   fontWeight: FontWeight.w800,
                   fontSize: 14,
-                  color: Colors.amber.shade900,
+                  color: RatingColors.personalDark,
                 ),
               ),
             ),

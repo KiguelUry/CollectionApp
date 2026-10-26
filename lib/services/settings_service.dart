@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../constants/rating_colors.dart';
 import 'profile_cache_service.dart';
 import 'profile_service.dart';
 
@@ -17,6 +18,7 @@ class SettingsService extends ChangeNotifier {
   static const _keyHideFromNonFriends = 'settings_hide_from_non_friends';
   static const _keyHideFromFriends = 'settings_hide_from_friends';
   static const _keyShareWishlist = 'settings_share_wishlist_with_friends';
+  static const _keyTileRatingMode = 'settings_tile_rating_display_mode';
 
   SharedPreferences? _prefs;
   bool _loaded = false;
@@ -29,6 +31,9 @@ class SettingsService extends ChangeNotifier {
   bool hideCollectionFromFriends = false;
   /// Wishlist visible par les amis (défaut : oui).
   bool shareWishlistWithFriends = true;
+  /// Puce ★ sur tuiles : perso / communauté.
+  TileRatingDisplayMode tileRatingDisplayMode =
+      TileRatingDisplayMode.personalThenCommunity;
 
   Future<void> load() async {
     if (_loaded) return;
@@ -53,6 +58,13 @@ class SettingsService extends ChangeNotifier {
         _prefs!.getBool(_keyHideFromFriends) ?? false;
     shareWishlistWithFriends =
         _prefs!.getBool(_keyShareWishlist) ?? true;
+    final ratingMode = _prefs!.getString(_keyTileRatingMode);
+    if (ratingMode != null) {
+      tileRatingDisplayMode = TileRatingDisplayMode.values.firstWhere(
+        (m) => m.name == ratingMode,
+        orElse: () => TileRatingDisplayMode.personalThenCommunity,
+      );
+    }
     _loaded = true;
     notifyListeners();
     await ProfileCacheService.instance.hydrate();
@@ -131,6 +143,12 @@ class SettingsService extends ChangeNotifier {
     } catch (_) {
       // Profil non synchronisé (migration SQL à exécuter)
     }
+  }
+
+  Future<void> setTileRatingDisplayMode(TileRatingDisplayMode value) async {
+    tileRatingDisplayMode = value;
+    await _prefs?.setString(_keyTileRatingMode, value.name);
+    notifyListeners();
   }
 
   ThemeMode get themeMode => switch (themePreference) {

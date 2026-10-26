@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../constants/book_accent.dart';
 import '../models/book_series.dart';
+import '../utils/tile_rating_display.dart';
 import 'collection_cover_image.dart';
 import 'item_title_text.dart';
 
@@ -187,21 +188,29 @@ class BookSeriesTile extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 3),
-                _MetaRow(
-                  children: [
-                    _MetaChip(
-                      icon: Icons.star_rounded,
-                      label: stats.ratingLabel ?? '—',
-                      color: Colors.amber.shade700,
-                    ),
-                    _MetaChip(
-                      icon: stats.valueLabel != null
-                          ? Icons.payments_outlined
-                          : Icons.place_outlined,
-                      label: stats.valueLabel ?? '—',
-                      color: Colors.teal.shade600,
-                    ),
-                  ],
+                Builder(
+                  builder: (context) {
+                    final chip = resolveTileRating(
+                      personalOnFive: stats.displayRating,
+                      communityOnFive: stats.communityRating,
+                    );
+                    return _MetaRow(
+                      children: [
+                        _MetaChip(
+                          icon: Icons.star_rounded,
+                          label: chip.label.replaceFirst('★ ', ''),
+                          color: chip.color,
+                        ),
+                        _MetaChip(
+                          icon: stats.valueLabel != null
+                              ? Icons.payments_outlined
+                              : Icons.place_outlined,
+                          label: stats.valueLabel ?? '—',
+                          color: Colors.teal.shade600,
+                        ),
+                      ],
+                    );
+                  },
                 ),
               ],
             ],

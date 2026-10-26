@@ -198,5 +198,65 @@ void main() {
         isTrue,
       );
     });
+
+    test('hitBelongsToSeries rejette les faux Kingdom', () {
+      expect(
+        BookSeriesNormalizer.hitBelongsToSeries(
+          'Kingdom - Tome 2',
+          'Kingdom',
+        ),
+        isTrue,
+      );
+      expect(
+        BookSeriesNormalizer.hitBelongsToSeries('TYRAN', 'Kingdom'),
+        isFalse,
+      );
+      expect(
+        BookSeriesNormalizer.hitBelongsToSeries(
+          'How a Realist Hero Rebuilt the Kingdom Vol. 5',
+          'Kingdom',
+        ),
+        isFalse,
+      );
+      expect(
+        BookSeriesNormalizer.hitBelongsToSeries(
+          'Fallen Kingdom 1: Gestohlenes Erbe',
+          'Kingdom',
+        ),
+        isFalse,
+      );
+      expect(
+        BookSeriesNormalizer.hitBelongsToSeries(
+          'The Kingdoms of Ruin Vol. 9',
+          'Kingdom',
+        ),
+        isFalse,
+      );
+    });
+
+    test('authorMatchesSeries filtre Frazier pour Kingdom', () {
+      expect(
+        BookSeriesNormalizer.authorMatchesSeries('Yasuhisa Hara', 'Kingdom'),
+        isTrue,
+      );
+      expect(
+        BookSeriesNormalizer.authorMatchesSeries('T.M. Frazier', 'Kingdom'),
+        isFalse,
+      );
+    });
+
+    test('parseCatalogSearchQuery sépare titre + tome', () {
+      final a = BookSeriesNormalizer.parseCatalogSearchQuery('kingdom 2');
+      expect(a.seriesQuery.toLowerCase(), 'kingdom');
+      expect(a.volumeNumber, 2);
+      final b = BookSeriesNormalizer.parseCatalogSearchQuery('one piece 15');
+      expect(b.seriesQuery.toLowerCase(), 'one piece');
+      expect(b.volumeNumber, 15);
+      final c = BookSeriesNormalizer.parseCatalogSearchQuery(
+        'One Piece - Édition originale',
+      );
+      expect(c.seriesQuery, 'One Piece');
+      expect(c.volumeNumber, isNull);
+    });
   });
 }

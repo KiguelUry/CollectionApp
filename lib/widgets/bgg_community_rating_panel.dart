@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../constants/rating_colors.dart';
 import '../utils/boardgame_display.dart';
 
-/// Note moyenne BGG (communauté), affichée sur /5.
+/// Note moyenne BGG (communauté), affichée sur /5 — toujours or/ambre.
 class BggCommunityRatingPanel extends StatelessWidget {
   final double? avgRating;
   final bool loading;
@@ -54,10 +55,10 @@ class BggCommunityRatingPanel extends StatelessWidget {
                 final half = !filled && onFive >= i + 0.5;
                 return Icon(
                   half
-                      ? Icons.star_half
-                      : (filled ? Icons.star : Icons.star_border),
+                      ? Icons.star_half_rounded
+                      : (filled ? Icons.star_rounded : Icons.star_border_rounded),
                   size: 22,
-                  color: Colors.amber.shade700,
+                  color: RatingColors.community,
                 );
               }),
               const SizedBox(width: 10),
@@ -65,7 +66,8 @@ class BggCommunityRatingPanel extends StatelessWidget {
                 '${onFive.toStringAsFixed(1)} / 5',
                 style: const TextStyle(
                   fontSize: 15,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w700,
+                  color: RatingColors.communityDark,
                 ),
               ),
             ],

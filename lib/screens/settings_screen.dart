@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../constants/rating_colors.dart';
 import '../services/account_deletion_service.dart';
 import '../services/account_export_service.dart';
 import '../services/settings_service.dart';
@@ -177,6 +178,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onSelectionChanged: (selection) {
                 _settings.setThemePreference(selection.first);
               },
+            ),
+          ),
+          const _SectionHeader('Notes sur les tuiles'),
+          ListTile(
+            leading: const Icon(Icons.star_rounded, color: RatingColors.personal),
+            title: const Text('Affichage de la note'),
+            subtitle: Text(_settings.tileRatingDisplayMode.subtitle),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Column(
+              children: [
+                for (final mode in TileRatingDisplayMode.values)
+                  RadioListTile<TileRatingDisplayMode>(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(mode.label),
+                    subtitle: Text(
+                      mode.subtitle,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                    value: mode,
+                    groupValue: _settings.tileRatingDisplayMode,
+                    activeColor: mode == TileRatingDisplayMode.alwaysCommunity
+                        ? RatingColors.community
+                        : RatingColors.personal,
+                    onChanged: (v) {
+                      if (v != null) _settings.setTileRatingDisplayMode(v);
+                    },
+                  ),
+              ],
             ),
           ),
           const _SectionHeader('Notifications'),

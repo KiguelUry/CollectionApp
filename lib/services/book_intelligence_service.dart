@@ -223,8 +223,13 @@ abstract final class BookIntelligenceService {
     }
 
     // Si aucun groupe mais query utile → une bannière depuis le dictionnaire.
-    if (groups.isEmpty && query.trim().length >= 2) {
-      final dict = BookSeriesNormalizer.expectedCount(query, subcategory);
+    // « kingdom 1 » → série « Kingdom » (pas « kingdom 1 »).
+    final parsedQuery = BookSeriesNormalizer.parseCatalogSearchQuery(query);
+    final bannerSeed = parsedQuery.seriesQuery.trim().isNotEmpty
+        ? parsedQuery.seriesQuery.trim()
+        : query.trim();
+    if (groups.isEmpty && bannerSeed.length >= 2) {
+      final dict = BookSeriesNormalizer.expectedCount(bannerSeed, subcategory);
       final maxFromHits = hits
           .map((h) => h.parsed.volumeNumber?.round() ?? 0)
           .fold<int>(0, (a, b) => a > b ? a : b);
@@ -235,7 +240,7 @@ abstract final class BookIntelligenceService {
       if (count > 0 || hits.isNotEmpty) {
         return [
           SeriesBannerCandidate(
-            name: query.trim(),
+            name: BookSeriesNormalizer.displaySeriesName(bannerSeed),
             volumeCount: count > 0 ? count : (dict ?? 1),
           ),
         ];
@@ -243,7 +248,7 @@ abstract final class BookIntelligenceService {
       return const [];
     }
 
-    final qKey = BookSeriesNormalizer.normalizeKey(query);
+    final qKey = BookSeriesNormalizer.normalizeKey(bannerSeed);
     final banners = <SeriesBannerCandidate>[];
     for (final agg in groups.values) {
       final dict = BookSeriesNormalizer.expectedCount(
@@ -329,24 +334,31 @@ abstract final class BookIntelligenceService {
     return BookTitleParser.titleMatchesVolumeExactly(combined, target);
   }
 
-  /// Couverture + méta (date) pour un tome — match STRICT du numéro.
+  /// Couverture + méta (date) pour un tome — match STRICT n° + série (+ auteur).
   static Future<({String? coverUrl, String? publishedDate, bool upcoming})>
       lookupVolumeCoverMeta({
     required String seriesName,
     required double volumeNumber,
     required BookSubcategory subcategory,
+    String? authorHint,
   }) async {
     final target = volumeNumber.round();
-    final query = volumeSearchQuery(seriesName, volumeNumber);
+    final cleanName = BookSeriesNormalizer.coverSearchSeriesName(seriesName);
+    final authors = BookSeriesNormalizer.knownAuthorsFor(cleanName);
+    final authorQ = authorHint?.trim().isNotEmpty == true
+        ? authorHint!.trim()
+        : (authors != null && authors.isNotEmpty ? authors.first : null);
+
+    var query = volumeSearchQuery(cleanName, volumeNumber);
+    if (authorQ != null) query = '$query $authorQ';
     if (query.trim().length < 3) {
       return (coverUrl: null, publishedDate: null, upcoming: false);
     }
 
-    final compact = volumeSearchQueryCompact(seriesName, volumeNumber);
-    final padded = volumeSearchQueryPadded(seriesName, volumeNumber);
+    final compact = volumeSearchQueryCompact(cleanName, volumeNumber);
+    final padded = volumeSearchQueryPadded(cleanName, volumeNumber);
     final merged = <Map<String, String>>[];
     final seen = <String>{};
-    // FR « Tome N » + « TN » + « T0N » (Glénat), puis sans filtre langue.
     for (final list in [
       await GoogleBooksService.search(query, maxResults: 16, langRestrict: 'fr'),
       await GoogleBooksService.search(
@@ -376,7 +388,7 @@ abstract final class BookIntelligenceService {
     final ranked = enrichAndRank(
       merged,
       subcategory: subcategory,
-      filters: BookSearchFilters(titleQuery: seriesName),
+      filters: BookSearchFilters(titleQuery: cleanName),
     );
 
     EnrichedBookHit? best;
@@ -384,12 +396,17 @@ abstract final class BookIntelligenceService {
       final img = hit.imageUrl;
       if (img == null || img.isEmpty) continue;
       if (!hitMatchesVolumeExactly(hit, target)) continue;
-      // Priorise VF (Tome) avec image.
+      final title = hit.raw['title'] ?? hit.displayTitle;
+      if (!BookSeriesNormalizer.hitBelongsToSeries(title, cleanName)) {
+        continue;
+      }
+      if (!BookSeriesNormalizer.authorMatchesSeries(hit.author, cleanName)) {
+        continue;
+      }
       if (best == null || _preferHit(hit, best)) best = hit;
     }
 
     if (best == null) {
-      // Aucun fallback « première image » — évite Tome 16 sur Tome 1.
       return (coverUrl: null, publishedDate: null, upcoming: false);
     }
 

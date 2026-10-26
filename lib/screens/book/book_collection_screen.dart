@@ -11,9 +11,11 @@ import '../../models/collection_list_filters.dart';
 import '../../services/book_series_service.dart';
 import '../../services/books_collection_cache.dart';
 import '../../services/books_migration_service.dart';
+import '../../services/collection_refresh.dart';
 import '../../services/group_service.dart';
 import '../../utils/book_series_focus.dart';
 import '../../utils/collection_grid_layout.dart';
+import '../../utils/tile_rating_display.dart';
 import '../../widgets/app_app_bar.dart';
 import '../../widgets/author_avatar.dart';
 import '../../widgets/book_series_tile.dart';
@@ -21,13 +23,15 @@ import '../../widgets/collection_cover_image.dart';
 import '../../widgets/collection_filter_bar.dart' show GroupFilterOption;
 import '../../widgets/collection_item_tile.dart';
 import '../../widgets/focus_filter_button.dart';
+import '../../widgets/item_title_text.dart';
 import '../book_author_detail_screen.dart';
 import '../book_series_detail_screen.dart';
 import '../item_detail_screen.dart';
 
 enum _BookCollectionViewMode { bySeries, allBooks, byAuthor }
 
-enum _BookLayoutMode { grid, list }
+/// Grille détaillée (2 col) → compacte (3 col) → liste.
+enum _BookLayoutMode { grid, gridCompact, list }
 
 enum _BookSeriesSort { alpha, progress, rating, recent }
 
@@ -65,6 +69,7 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
   @override
   void initState() {
     super.initState();
+    CollectionRefresh.instance.addListener(_onCollectionRefresh);
     _loadGroups();
     // Affiche le cache immédiatement si dispo, puis refresh silencieux.
     final cached = _cache.entries;
@@ -86,8 +91,13 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
     }
   }
 
+  void _onCollectionRefresh() {
+    if (mounted) _load(silent: true);
+  }
+
   @override
   void dispose() {
+    CollectionRefresh.instance.removeListener(_onCollectionRefresh);
     _search.dispose();
     super.dispose();
   }
@@ -152,9 +162,18 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
           _loading = false;
         });
       }
-      // Enrichissements réseau non-bloquants (couvertures + faux one-shots).
+      // Enrichissements réseau non-bloquants (notes, couvertures, compteurs).
       Future(() async {
         var any = false;
+        final needRating = entries
+            .where((e) => e.series.communityRating == null)
+            .take(6)
+            .toList();
+        for (final e in needRating) {
+          final before = e.series.communityRating;
+          final updated = await _service.hydrateCommunityRating(e.series);
+          if (updated.communityRating != before) any = true;
+        }
         final undercounted = entries
             .where(
               (e) =>
@@ -175,7 +194,17 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
         final needCover = entries
             .where(
               (e) =>
-                  e.series.coverUrl == null || e.series.coverUrl!.isEmpty,
+                  e.series.coverUrl == null ||
+                  e.series.coverUrl!.isEmpty ||
+                  e.volumes.any(
+                    (v) =>
+                        !v.isHorsSerie &&
+                        v.volumeNumber <= 20 &&
+                        (v.coverUrl == null ||
+                            v.coverUrl!.isEmpty ||
+                            v.metadata['cover_volume_verified'] !=
+                                v.volumeNumber.round()),
+                  ),
             )
             .take(3)
             .toList();
@@ -183,7 +212,7 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
           final n = await _service.enrichMissingVolumeCovers(
             series: e.series,
             volumes: e.volumes,
-            maxLookups: 2,
+            maxLookups: 8,
           );
           if (n > 0) any = true;
         }
@@ -363,17 +392,29 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
   }
 
   Widget _layoutToggle() {
+    final (icon, tip) = switch (_layout) {
+      _BookLayoutMode.grid => (
+          Icons.grid_view_outlined,
+          'Grille 2 col. → compacte',
+        ),
+      _BookLayoutMode.gridCompact => (
+          Icons.apps_outlined,
+          'Grille compacte → liste',
+        ),
+      _BookLayoutMode.list => (
+          Icons.view_list_outlined,
+          'Liste → grille 2 col.',
+        ),
+    };
     return IconButton(
-      tooltip: _layout == _BookLayoutMode.grid ? 'Vue liste' : 'Vue grille',
-      icon: Icon(
-        _layout == _BookLayoutMode.grid
-            ? Icons.view_list_outlined
-            : Icons.grid_view_outlined,
-      ),
+      tooltip: tip,
+      icon: Icon(icon),
       onPressed: () => setState(() {
-        _layout = _layout == _BookLayoutMode.grid
-            ? _BookLayoutMode.list
-            : _BookLayoutMode.grid;
+        _layout = switch (_layout) {
+          _BookLayoutMode.grid => _BookLayoutMode.gridCompact,
+          _BookLayoutMode.gridCompact => _BookLayoutMode.list,
+          _BookLayoutMode.list => _BookLayoutMode.grid,
+        };
         _viewMode = _BookCollectionViewMode.bySeries;
       }),
     );
@@ -465,8 +506,7 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
                         controller: _search,
                         onChanged: (_) => setState(() {}),
                         decoration: InputDecoration(
-                          hintText:
-                              'Rechercher une série, un livre, un auteur…',
+                          hintText: 'Rechercher…',
                           isDense: true,
                           prefixIcon: const Icon(Icons.search, size: 20),
                           suffixIcon: _search.text.isNotEmpty
@@ -481,16 +521,9 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
                         ),
                       ),
                     ),
-                    FocusFilterButton(
-                      filters: _focusFilters,
-                      groupOptions: _groupOptions,
-                      activeColor: BookAccent.primary,
-                      onChanged: (f) => setState(() => _focusFilters = f),
-                    ),
                     if (_viewMode == _BookCollectionViewMode.bySeries)
                       _sortMenu(),
                     _layoutToggle(),
-                    if (widget.embedded) _viewModeMenu(),
                   ],
                 ),
               ),
@@ -530,6 +563,14 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
                           onTap: () => setState(() => _filterSub = sub),
                         ),
                       ),
+                    const SizedBox(width: 4),
+                    FocusFilterButton(
+                      filters: _focusFilters,
+                      groupOptions: _groupOptions,
+                      activeColor: BookAccent.primary,
+                      onChanged: (f) => setState(() => _focusFilters = f),
+                    ),
+                    if (widget.embedded) _viewModeMenu(),
                   ],
                 ),
               ),
@@ -612,11 +653,42 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
       );
     }
 
+    if (_layout == _BookLayoutMode.gridCompact) {
+      return SliverPadding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 24),
+        sliver: SliverGrid(
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: CollectionGridLayout.crossAxisCount(
+              context,
+              mobile: 3,
+            ),
+            mainAxisSpacing: 8,
+            crossAxisSpacing: 8,
+            childAspectRatio: 0.62,
+          ),
+          delegate: SliverChildBuilderDelegate(
+            (context, index) {
+              final entry = visible[index];
+              return _BookSeriesCompactGridTile(
+                series: entry.series,
+                stats: _displayStats(entry),
+                onTap: () => openSeries(entry),
+              );
+            },
+            childCount: visible.length,
+          ),
+        ),
+      );
+    }
+
     return SliverPadding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
       sliver: SliverGrid(
-        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-          maxCrossAxisExtent: 200,
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: CollectionGridLayout.crossAxisCount(
+            context,
+            mobile: 2,
+          ),
           mainAxisSpacing: 10,
           crossAxisSpacing: 10,
           childAspectRatio: 0.58,
@@ -945,19 +1017,108 @@ class _BookSeriesCompactRow extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    Text(
-                      stats.ratingLabel ?? '★ —',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.amber.shade800,
-                      ),
+                    Builder(
+                      builder: (_) {
+                        final chip = resolveTileRating(
+                          personalOnFive: stats.displayRating,
+                          communityOnFive: stats.communityRating,
+                        );
+                        return Text(
+                          chip.label,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: chip.color,
+                          ),
+                        );
+                      },
                     ),
                   ],
                 ),
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Tuile compacte 3 colonnes : couverture + titre + badge ownership overlay.
+class _BookSeriesCompactGridTile extends StatelessWidget {
+  final BookSeries series;
+  final BookSeriesStats stats;
+  final VoidCallback onTap;
+
+  const _BookSeriesCompactGridTile({
+    required this.series,
+    required this.stats,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
+      borderRadius: BorderRadius.circular(12),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  series.coverUrl != null && series.coverUrl!.trim().isNotEmpty
+                      ? CollectionCoverImage(
+                          url: series.coverUrl!,
+                          bookCover: true,
+                          boxedCover: true,
+                          compact: true,
+                          fit: BoxFit.contain,
+                        )
+                      : CoverImagePlaceholder(bookCover: true),
+                  Positioned(
+                    right: 4,
+                    bottom: 4,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.7),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        stats.ownedLabel,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 4, 4, 6),
+              child: ItemTitleText(
+                title: series.name,
+                maxLines: 1,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 11,
+                  height: 1.1,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

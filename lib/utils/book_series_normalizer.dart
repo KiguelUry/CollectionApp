@@ -230,13 +230,62 @@ abstract final class BookSeriesNormalizer {
     return null;
   }
 
-  /// Titre d’affichage canonique (sans « - Tome N » / suffixes orphelins).
+  /// Auteurs canoniques (filtrage strict des couvertures hors-sujet).
+  static const knownSeriesAuthors = <String, List<String>>{
+    'kingdom': ['yasuhisa hara', 'hara'],
+    'one piece': ['eiichiro oda', 'oda'],
+    'naruto': ['masashi kishimoto', 'kishimoto'],
+    'thorgal': ['van hamme', 'rosinski', 'jean van hamme'],
+    'asterix': ['goscinny', 'uderzo'],
+    'astérix': ['goscinny', 'uderzo'],
+    'berserk': ['kentaro miura', 'miura'],
+    'kagurabachi': ['takeru hokazono', 'hokazono'],
+  };
+
+  static List<String>? knownAuthorsFor(String seriesName) {
+    final key = normalizeKey(
+      stripEditionSuffix(stripOrphanVolumeSuffix(seriesName)),
+    );
+    for (final e in knownSeriesAuthors.entries) {
+      if (key == e.key || key.startsWith(e.key) || e.key.startsWith(key)) {
+        return e.value;
+      }
+    }
+    return null;
+  }
+
+  /// Vrai si le titre du hit appartient strictement à la série [seriesName].
+  /// Rejette « Fallen Kingdom », « Realist Hero Rebuilt the Kingdom », etc.
+  static bool hitBelongsToSeries(String hitTitle, String seriesName) {
+    final want = normalizeKey(
+      stripEditionSuffix(stripOrphanVolumeSuffix(seriesName)),
+    );
+    if (want.isEmpty) return false;
+    final parsed = parse(hitTitle);
+    final extracted = parsed.hasSeries
+        ? normalizeKey(stripEditionSuffix(parsed.seriesName!))
+        : normalizeKey(stripEditionSuffix(stripOrphanVolumeSuffix(hitTitle)));
+    if (extracted.isEmpty) return false;
+    // Égalité stricte (pas contains : évite « kingdom » ⊂ « fallen kingdom »).
+    return extracted == want;
+  }
+
+  static bool authorMatchesSeries(String? author, String seriesName) {
+    final known = knownAuthorsFor(seriesName);
+    if (known == null || known.isEmpty) return true; // pas de filtre
+    if (author == null || author.trim().isEmpty) return false;
+    final a = author.toLowerCase().trim();
+    return known.any((k) => a.contains(k) || k.contains(a));
+  }
+
+  /// Titre d’affichage canonique (sans « - Tome N » / « Édition originale »).
   static String displaySeriesName(String rawTitle) {
     final parsed = parse(rawTitle);
     var name = parsed.hasSeries
         ? parsed.seriesName!.trim()
         : rawTitle.trim();
-    return stripOrphanVolumeSuffix(name);
+    name = stripOrphanVolumeSuffix(name);
+    return stripEditionSuffix(name);
   }
 
   /// Retire « - Tome », « - Vol », « Tome », « Volume » sans numéro en fin.
@@ -254,11 +303,9 @@ abstract final class BookSeriesNormalizer {
     return s.isEmpty ? name.trim() : s;
   }
 
-  /// Pour les requêtes de couverture : retire « Édition originale », etc.
-  static String coverSearchSeriesName(String raw) {
-    var s = displaySeriesName(raw);
-    s = s.replaceAll(RegExp(r'[–—−]'), '-');
-    // Coupe après « - Édition … » / « Édition originale » / omnibus…
+  /// Retire « - Édition originale », omnibus, coffret…
+  static String stripEditionSuffix(String name) {
+    var s = name.trim().replaceAll(RegExp(r'[–—−]'), '-');
     final dashParts = s.split(RegExp(r'\s+-\s+'));
     if (dashParts.length > 1) {
       final kept = <String>[];
@@ -283,5 +330,24 @@ abstract final class BookSeriesNormalizer {
       '',
     );
     return s.replaceAll(RegExp(r'[\s,;:\-]+$'), '').trim();
+  }
+
+  /// Alias pour requêtes de couverture (= displaySeriesName).
+  static String coverSearchSeriesName(String raw) => displaySeriesName(raw);
+
+  /// Décompose « kingdom 2 » / « one piece 15 » → série + n° tome.
+  static ({String seriesQuery, int? volumeNumber}) parseCatalogSearchQuery(
+    String raw,
+  ) {
+    final t = raw.trim();
+    if (t.isEmpty) return (seriesQuery: '', volumeNumber: null);
+    final parsed = parse(t);
+    if (parsed.hasSeries && parsed.hasVolume) {
+      return (
+        seriesQuery: displaySeriesName(parsed.seriesName!),
+        volumeNumber: parsed.volumeNumber!.round(),
+      );
+    }
+    return (seriesQuery: displaySeriesName(t), volumeNumber: null);
   }
 }

@@ -63,6 +63,10 @@ class OpenLibraryService {
           'year': year,
           'image_url': imageUrl,
           if (ratingAvg != null) 'rating_avg': ratingAvg.toStringAsFixed(1),
+          // Open Library ratings_average est déjà /5.
+          if (ratingAvg != null && ratingAvg > 0)
+            'community_rating':
+                ratingAvg.clamp(0, 5).toStringAsFixed(2),
           'rating_count': ratingCount.toString(),
           if (doc['language'] != null)
             'language': (doc['language'] as List).map((e) => e.toString()).join(','),
