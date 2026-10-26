@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_category.dart';
 import '../models/collection_group.dart';
 import '../models/collection_item.dart';
+import '../utils/boardgame_display.dart';
 import '../utils/collection_item_filters.dart';
 import '../utils/group_game_night.dart';
 import '../utils/supabase_embeds.dart';
@@ -120,8 +121,13 @@ class _GroupGameNightSheetState extends State<_GroupGameNightSheet> {
                     title: Text(p.item.title),
                     subtitle: Text(
                       [
-                        if (p.item.minPlayers != null && p.item.maxPlayers != null)
-                          '${p.item.minPlayers}–${p.item.maxPlayers} j.',
+                        if (formatPlayerCount(
+                              p.item.minPlayers, p.item.maxPlayers) !=
+                            null)
+                          formatPlayerCount(
+                            p.item.minPlayers,
+                            p.item.maxPlayers,
+                          )!,
                         if (p.item.playingTime != null) '${p.item.playingTime} min',
                       ].join(' · '),
                     ),

@@ -744,10 +744,18 @@ class BookSeriesService {
       } catch (_) {}
     }
 
-    await ingestBatch('${series.name} Tome');
-    await ingestBatch('${series.name} T');
+    final coverName =
+        BookSeriesNormalizer.coverSearchSeriesName(series.name);
+    await ingestBatch('$coverName Tome');
+    await ingestBatch('$coverName T');
+    // Glénat / One Piece : « T01 »…
+    await ingestBatch('$coverName T0');
 
-    for (final vol in volumes) {
+    // Priorité absolue aux premiers tomes (T1→T20) avant les suivants.
+    final ordered = List<BookVolume>.from(volumes)
+      ..sort((a, b) => a.volumeNumber.compareTo(b.volumeNumber));
+
+    for (final vol in ordered) {
       if (lookups >= maxLookups) break;
       if (vol.isHorsSerie) continue;
       final n = vol.volumeNumber.round();
@@ -756,8 +764,9 @@ class BookSeriesService {
       final needsRepair = repairUnverified &&
           hasCover &&
           (verified == null || verified != n);
-      // Toujours revalider les premiers tomes (bug Naruto/Thorgal T1).
-      final forceCheck = n <= 3 && (needsRepair || !hasCover || verified != n);
+      // Priorise fortement T1–T20 (souvent manquants : T01 Glénat).
+      final forceCheck =
+          n <= 20 && (needsRepair || !hasCover || verified != n);
       // Remplace une fiche EN « Vol. X » dès qu'une couverture VF existe.
       final titleHint =
           '${vol.volumeTitle ?? ''} ${vol.label ?? ''} ${vol.metadata['source_title'] ?? ''}'
@@ -1310,18 +1319,29 @@ class BookSeriesService {
     String? coverUrl,
   }) async {
     var parsed = BookSeriesNormalizer.parse(title);
-    // Titre nu d'une série connue (« Thorgal », « Naruto ») → dossier série.
+    // Titre nu (« Kingdom », « Thorgal ») → dossier série si multi-tomes connu
+    // ou si un total estimé est fourni (bannière recherche).
     if (!parsed.hasSeries) {
+      final clean = BookSeriesNormalizer.displaySeriesName(title);
       final known =
-          BookSeriesNormalizer.expectedCount(title.trim(), subcategory);
-      if (known != null && known > 1) {
+          BookSeriesNormalizer.expectedCount(clean, subcategory);
+      final hasEstimate =
+          estimatedTotalVolumes != null && estimatedTotalVolumes > 1;
+      if ((known != null && known > 1) || hasEstimate || clean.length >= 2) {
         parsed = ParsedBookTitle(
           rawTitle: title,
-          seriesName: title.trim(),
+          seriesName: clean.isNotEmpty ? clean : title.trim(),
         );
       } else {
         return null;
       }
+    } else {
+      // Nettoie « Kingdom - Tome » → « Kingdom ».
+      parsed = ParsedBookTitle(
+        rawTitle: parsed.rawTitle,
+        seriesName: BookSeriesNormalizer.displaySeriesName(parsed.seriesName!),
+        volumeNumber: parsed.volumeNumber,
+      );
     }
 
     var total = estimatedTotalVolumes;

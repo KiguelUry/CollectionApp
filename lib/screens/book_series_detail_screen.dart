@@ -35,7 +35,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   BookSeriesStats? _stats;
   List<BookVolumeSlot> _slots = [];
   _VolumeFilter _filter = _VolumeFilter.all;
-  String? _expandedVolumeId;
+  bool _friseExpanded = false;
   bool _refreshingPubs = false;
 
   @override
@@ -133,21 +133,38 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     await _toggleOwned(slot);
   }
 
-  /// Carte couverture : ouvre / ferme le tiroir détail.
+  /// Carte couverture : ouvre le détail en bottom sheet (pas en bas de page).
   Future<void> _onCardTap(BookVolumeSlot slot) async {
-    final id = slot.volume.id;
-    final closing = _expandedVolumeId == id;
-    setState(() => _expandedVolumeId = closing ? null : id);
-    if (closing) return;
-    final key = _slotKeys[id];
-    final ctx = key?.currentContext;
-    if (ctx != null) {
-      await Scrollable.ensureVisible(
-        ctx,
-        duration: const Duration(milliseconds: 280),
-        alignment: 0.15,
-      );
-    }
+    final accent = BookAccent.primary;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      useSafeArea: true,
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.viewInsetsOf(ctx).bottom,
+          ),
+          child: DraggableScrollableSheet(
+            expand: false,
+            initialChildSize: 0.72,
+            minChildSize: 0.45,
+            maxChildSize: 0.95,
+            builder: (_, scrollCtrl) {
+              return ListView(
+                controller: scrollCtrl,
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 24),
+                children: [
+                  _buildVolumeDrawer(slot, accent, inSheet: true),
+                ],
+              );
+            },
+          ),
+        );
+      },
+    );
+    if (mounted) await _load(silent: true);
   }
 
   String _seriesStatsLine(BookSeriesStats stats) {
@@ -519,14 +536,6 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     final stats = _stats!;
     final accent = BookAccent.primary;
     final display = _displaySlots;
-    final expanded = _expandedVolumeId == null
-        ? null
-        : display
-            .cast<BookVolumeSlot?>()
-            .firstWhere(
-              (s) => s?.volume.id == _expandedVolumeId,
-              orElse: () => null,
-            );
 
     return Scaffold(
       appBar: AppAppBar(
@@ -610,7 +619,6 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
               child: _buildCoverGrid(display, accent),
             ),
-            if (expanded != null) _buildVolumeDrawer(expanded, accent),
           ],
         ),
       ),
@@ -757,8 +765,12 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   }
 
   /// Frise hybride : barre statut 4px + corps note IMDb (ou gris).
+  /// Au-delà de 14 tomes : aperçu 2 lignes + bouton étendre.
   Widget _buildHybridFrise(List<BookVolumeSlot> slots, Color accent) {
     if (slots.isEmpty) return const SizedBox.shrink();
+    const previewLimit = 14;
+    final collapsed = slots.length > previewLimit && !_friseExpanded;
+    final shown = collapsed ? slots.take(previewLimit).toList() : slots;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
       child: Column(
@@ -777,7 +789,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
             spacing: 4,
             runSpacing: 4,
             children: [
-              for (final slot in slots)
+              for (final slot in shown)
                 SizedBox(
                   width: 40,
                   height: 40,
@@ -818,6 +830,26 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                 ),
             ],
           ),
+          if (slots.length > previewLimit)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () =>
+                    setState(() => _friseExpanded = !_friseExpanded),
+                icon: Icon(
+                  _friseExpanded
+                      ? Icons.keyboard_arrow_up
+                      : Icons.keyboard_arrow_down,
+                  size: 18,
+                ),
+                label: Text(
+                  _friseExpanded
+                      ? '🔼 Réduire la frise'
+                      : '🔽 Voir toute la frise (${slots.length} tomes)',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -1125,14 +1157,21 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     return const Color(0xFFE53935);
   }
 
-  Widget _buildVolumeDrawer(BookVolumeSlot slot, Color accent) {
+  Widget _buildVolumeDrawer(
+    BookVolumeSlot slot,
+    Color accent, {
+    bool inSheet = false,
+  }) {
     final owned = _slotOwned(slot);
     final read = _slotRead(slot);
     final wish = _slotWish(slot);
     final edition = slot.volume.edition;
     final upcoming = slot.volume.upcomingLabel;
     return Card(
-      margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      margin: inSheet
+          ? EdgeInsets.zero
+          : const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      elevation: inSheet ? 0 : null,
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Row(

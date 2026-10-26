@@ -206,6 +206,10 @@ class BookCatalogService {
         'series_volume': book['series_volume']!,
       if ((book['subtitle'] ?? '').isNotEmpty) 'subtitle': book['subtitle']!,
       if ((book['source'] ?? '').isNotEmpty) 'catalog_source': book['source']!,
+      if ((book['estimated_volumes'] ?? '').isNotEmpty)
+        'estimated_volumes': book['estimated_volumes']!,
+      if ((book['volume_covers_json'] ?? '').isNotEmpty)
+        'volume_covers_json': book['volume_covers_json']!,
     };
   }
 

@@ -39,6 +39,8 @@ class AddItemOptions {
 class AddItemOptionsDialog extends StatefulWidget {
   final String itemTitle;
   final String? itemImageUrl;
+  /// Couverture verticale livre (2:3) au lieu du carré jeux.
+  final bool bookCover;
   final bool defaultWishlist;
   final double? bggAvgRating;
   final int? yearPublished;
@@ -57,6 +59,7 @@ class AddItemOptionsDialog extends StatefulWidget {
     required this.itemTitle,
     required this.onConfirm,
     this.itemImageUrl,
+    this.bookCover = false,
     this.defaultWishlist = false,
     this.bggAvgRating,
     this.yearPublished,
@@ -191,16 +194,14 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
   String get _metaLine {
     final parts = <String>[];
     if (widget.yearPublished != null) parts.add('${widget.yearPublished}');
-    if (widget.minPlayers != null) {
-      parts.add(
-        '${widget.minPlayers}–${widget.maxPlayers ?? '?'} joueurs',
-      );
-    }
+    final players = formatPlayerCount(widget.minPlayers, widget.maxPlayers);
+    if (players != null) parts.add(players);
     if (widget.playingTime != null && widget.playingTime! > 0) {
       parts.add('${widget.playingTime} min');
     }
     return parts.join(' · ');
   }
+
 
   String get _cleanDescription => cleanBggText(widget.description);
 
@@ -233,23 +234,31 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                                     context,
                                     imageUrl: widget.itemImageUrl,
                                     title: widget.itemTitle,
+                                    bookCover: widget.bookCover,
                                   )
                               : null,
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(12),
                             child: SizedBox(
-                              width: 96,
-                              height: 96,
+                              width: widget.bookCover ? 72 : 96,
+                              height: widget.bookCover ? 108 : 96,
                               child: (widget.itemImageUrl != null &&
                                       widget.itemImageUrl!.trim().isNotEmpty)
-                                  ? BggNetworkImage(
-                                      url: widget.itemImageUrl!,
-                                      boxedCover: true,
-                                      compact: true,
-                                    )
-                                  : const CoverImagePlaceholder(
-                                      width: 96,
-                                      height: 96,
+                                  ? (widget.bookCover
+                                      ? CollectionCoverImage(
+                                          url: widget.itemImageUrl!,
+                                          bookCover: true,
+                                          fit: BoxFit.cover,
+                                        )
+                                      : BggNetworkImage(
+                                          url: widget.itemImageUrl!,
+                                          boxedCover: true,
+                                          compact: true,
+                                        ))
+                                  : CoverImagePlaceholder(
+                                      width: widget.bookCover ? 72 : 96,
+                                      height: widget.bookCover ? 108 : 96,
+                                      bookCover: widget.bookCover,
                                     ),
                             ),
                           ),
@@ -517,27 +526,26 @@ class _BggRatingPreview extends StatelessWidget {
     final chipLabel =
         formatBggRatingChipLabel(avgRating) ?? onFive.toStringAsFixed(1);
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.amber.shade700.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.amber.shade700.withValues(alpha: 0.35)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.star_rounded, size: 18, color: Colors.amber.shade700),
-          const SizedBox(width: 6),
-          Text(
-            'Note BGG : $chipLabel / 5',
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: Colors.amber.shade800,
-            ),
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.amber.shade700.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(8),
+          border:
+              Border.all(color: Colors.amber.shade700.withValues(alpha: 0.35)),
+        ),
+        child: Text(
+          '★ BGG $chipLabel / 5',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: Colors.amber.shade800,
           ),
-        ],
+        ),
       ),
     );
   }

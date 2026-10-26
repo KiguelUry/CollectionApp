@@ -125,21 +125,47 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       );
     }
 
+    // Filtre par vraie catégorie détectée (pas la pilule comme vérité).
+    if (_sub != null) {
+      enriched = enriched.where((h) {
+        final det = h.detectedSubcategory ??
+            BookSeriesNormalizer.detectSubcategory(
+              seriesName: h.parsed.seriesName,
+              title: h.displayTitle,
+              publisher: h.publisher,
+            );
+        // Si indétectable, on laisse passer (évite grille vide).
+        return det == null || det == _sub;
+      }).toList();
+    }
+
     var banners = BookIntelligenceService.extractSeriesBanners(
       enriched,
       query: q,
       subcategory: _effectiveSub,
     );
+    if (_sub != null) {
+      banners = banners.where((b) {
+        final det = b.detectedSubcategory ??
+            BookSeriesNormalizer.detectSubcategory(seriesName: b.name);
+        return det == null || det == _sub;
+      }).toList();
+    }
     banners = [
       for (final b in banners)
         SeriesBannerCandidate(
           name: b.name,
           volumeCount: () {
+            final det = b.detectedSubcategory ??
+                BookSeriesNormalizer.detectSubcategory(seriesName: b.name) ??
+                _effectiveSub;
             final dict =
-                BookSeriesNormalizer.expectedCount(b.name, _effectiveSub) ?? 0;
+                BookSeriesNormalizer.expectedCount(b.name, det) ?? 0;
             return dict > b.volumeCount ? dict : b.volumeCount;
           }(),
           coversByVolume: b.coversByVolume,
+          detectedSubcategory: b.detectedSubcategory ??
+              BookSeriesNormalizer.detectSubcategory(seriesName: b.name),
         ),
     ];
 
@@ -152,9 +178,10 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
   }
 
   Future<void> _addSeries(SeriesBannerCandidate banner) async {
-    final preferred =
+    final preferred = banner.detectedSubcategory ??
+        BookSeriesNormalizer.detectSubcategory(seriesName: banner.name) ??
         BookSeriesNormalizer.preferredSubcategory(banner.name) ??
-            _effectiveSub;
+        _effectiveSub;
     final key = BookSeriesNormalizer.normalizeKey(banner.name);
     if (_addedSeriesKeys.contains(key)) return;
 
@@ -192,15 +219,56 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
 
   void _select(EnrichedBookHit hit) {
     final callback = widget.onBookSelected;
-    final sub = BookSeriesNormalizer.preferredSubcategory(
+    final sub = hit.detectedSubcategory ??
+        BookSeriesNormalizer.detectSubcategory(
+          seriesName: hit.parsed.seriesName,
+          title: hit.displayTitle,
+          publisher: hit.publisher,
+        ) ??
+        BookSeriesNormalizer.preferredSubcategory(
           hit.parsed.seriesName ?? hit.displayTitle,
         ) ??
         _effectiveSub;
+    // Injecte estimated_volumes + covers pour l'upsert série (Kingdom → 73).
+    final raw = Map<String, String>.from(hit.raw);
+    final seriesKey = BookSeriesNormalizer.mergeKey(
+      hit.parsed.seriesName ?? hit.displayTitle,
+    );
+    SeriesBannerCandidate? banner;
+    for (final b in _banners) {
+      if (BookSeriesNormalizer.mergeKey(b.name) == seriesKey) {
+        banner = b;
+        break;
+      }
+    }
+    final estimated = hit.estimatedTotalVolumes ?? banner?.volumeCount;
+    if (estimated != null && estimated > 0) {
+      raw['estimated_volumes'] = '$estimated';
+    }
+    final covers = banner?.coversByVolume;
+    if (covers != null && covers.isNotEmpty) {
+      raw['volume_covers_json'] =
+          covers.entries.map((e) => '${e.key}:${e.value}').join('|');
+      if ((raw['image_url'] ?? '').isEmpty && covers[1] != null) {
+        raw['image_url'] = covers[1]!;
+      }
+    }
     if (callback != null) {
-      callback(hit.raw, sub);
+      callback(raw, sub);
       return;
     }
-    Navigator.pop(context, (hit.raw, sub));
+    Navigator.pop(context, (raw, sub));
+  }
+
+  String _subBadge(BookSubcategory? sub) {
+    if (sub == null) return '';
+    return switch (sub) {
+      BookSubcategory.manga => '⛩️ Manga',
+      BookSubcategory.comic => '💬 BD',
+      BookSubcategory.comics => '🦸 Comics',
+      BookSubcategory.novel => '📖 Roman',
+      _ => sub.label,
+    };
   }
 
   Widget _filterChip({
@@ -375,8 +443,14 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
                         ),
                       ),
                       Text(
-                        '${banner.volumeCount} tomes parus — '
-                        '${added ? 'Déjà dans ta collection' : 'Ajouter la série'}',
+                        [
+                          if (banner.detectedSubcategory != null)
+                            _subBadge(banner.detectedSubcategory),
+                          '${banner.volumeCount} tomes parus',
+                          added
+                              ? 'Déjà dans ta collection'
+                              : 'Ajouter la série',
+                        ].where((s) => s.isNotEmpty).join(' — '),
                         style: TextStyle(
                           fontSize: 12,
                           color: Colors.grey.shade400,
@@ -456,16 +530,18 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
                 delegate: SliverChildBuilderDelegate(
                   (context, index) {
                     final hit = _hits[index];
+                    final det = hit.detectedSubcategory;
                     return CatalogItemTile(
                       name: hit.displayTitle,
                       subtitle: [
+                        if (_sub == null && det != null) _subBadge(det),
                         if (hit.author != null && hit.author!.isNotEmpty)
                           hit.author!,
                         if (hit.parsed.volumeNumber != null)
                           'Tome ${hit.parsed.volumeNumber!.round()}',
-                      ].join(' · '),
+                      ].where((s) => s.isNotEmpty).join(' · '),
                       imageUrl: hit.imageUrl,
-                      accent: _effectiveSub.color,
+                      accent: (det ?? _effectiveSub).color,
                       aspectRatio: 0.62,
                       highQualityImage: true,
                       placeholderIcon: Icons.menu_book_outlined,

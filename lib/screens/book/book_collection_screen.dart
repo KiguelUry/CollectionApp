@@ -17,6 +17,7 @@ import '../../utils/collection_grid_layout.dart';
 import '../../widgets/app_app_bar.dart';
 import '../../widgets/author_avatar.dart';
 import '../../widgets/book_series_tile.dart';
+import '../../widgets/collection_cover_image.dart';
 import '../../widgets/collection_filter_bar.dart' show GroupFilterOption;
 import '../../widgets/collection_item_tile.dart';
 import '../../widgets/focus_filter_button.dart';
@@ -26,12 +27,23 @@ import '../item_detail_screen.dart';
 
 enum _BookCollectionViewMode { bySeries, allBooks, byAuthor }
 
+enum _BookLayoutMode { grid, list }
+
+enum _BookSeriesSort { alpha, progress, rating, recent }
+
 /// Collection Livres regroupée par série / œuvre.
 class BookCollectionScreen extends StatefulWidget {
   /// `true` quand embarqué dans [BooksCollectionScreen] (sans AppBar propre).
   final bool embedded;
 
-  const BookCollectionScreen({super.key, this.embedded = false});
+  /// Mode wishlist : n'affiche que les séries / tomes en wishlist.
+  final bool wishlistOnly;
+
+  const BookCollectionScreen({
+    super.key,
+    this.embedded = false,
+    this.wishlistOnly = false,
+  });
 
   @override
   State<BookCollectionScreen> createState() => _BookCollectionScreenState();
@@ -44,6 +56,8 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
   bool _loading = true;
   BookSubcategory? _filterSub;
   _BookCollectionViewMode _viewMode = _BookCollectionViewMode.bySeries;
+  _BookLayoutMode _layout = _BookLayoutMode.grid;
+  _BookSeriesSort _sort = _BookSeriesSort.alpha;
   CollectionListFilters _focusFilters = CollectionListFilters();
   Map<String, String> _groupNamesById = {};
   List<_SeriesEntry> _entries = [];
@@ -231,7 +245,12 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
 
   List<_SeriesEntry> get _visible {
     final q = _search.text.trim().toLowerCase();
-    return _entries.where((e) {
+    final list = _entries.where((e) {
+      if (widget.wishlistOnly) {
+        final hasWish = e.items.any((i) => i.isWishlist) ||
+            e.series.wishlistEntireSeries;
+        if (!hasWish) return false;
+      }
       if (_filterSub != null && e.series.subcategory != _filterSub) {
         return false;
       }
@@ -241,6 +260,28 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
       if (q.isEmpty) return true;
       return e.series.name.toLowerCase().contains(q);
     }).toList();
+    list.sort((a, b) {
+      switch (_sort) {
+        case _BookSeriesSort.alpha:
+          return a.series.name
+              .toLowerCase()
+              .compareTo(b.series.name.toLowerCase());
+        case _BookSeriesSort.progress:
+          return b.stats.ownedProgress.compareTo(a.stats.ownedProgress);
+        case _BookSeriesSort.rating:
+          final ar = a.stats.displayRating ?? -1;
+          final br = b.stats.displayRating ?? -1;
+          return br.compareTo(ar);
+        case _BookSeriesSort.recent:
+          final at = a.series.updatedAt ?? a.series.createdAt;
+          final bt = b.series.updatedAt ?? b.series.createdAt;
+          if (at == null && bt == null) return 0;
+          if (at == null) return 1;
+          if (bt == null) return -1;
+          return bt.compareTo(at);
+      }
+    });
+    return list;
   }
 
   List<CollectionItem> get _visibleBooks {
@@ -319,6 +360,50 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
       );
       _load();
     }
+  }
+
+  Widget _layoutToggle() {
+    return IconButton(
+      tooltip: _layout == _BookLayoutMode.grid ? 'Vue liste' : 'Vue grille',
+      icon: Icon(
+        _layout == _BookLayoutMode.grid
+            ? Icons.view_list_outlined
+            : Icons.grid_view_outlined,
+      ),
+      onPressed: () => setState(() {
+        _layout = _layout == _BookLayoutMode.grid
+            ? _BookLayoutMode.list
+            : _BookLayoutMode.grid;
+        _viewMode = _BookCollectionViewMode.bySeries;
+      }),
+    );
+  }
+
+  Widget _sortMenu() {
+    return PopupMenuButton<_BookSeriesSort>(
+      icon: const Icon(Icons.sort, size: 22),
+      tooltip: 'Trier',
+      initialValue: _sort,
+      onSelected: (s) => setState(() => _sort = s),
+      itemBuilder: (_) => const [
+        PopupMenuItem(
+          value: _BookSeriesSort.alpha,
+          child: Text('Alphabétique'),
+        ),
+        PopupMenuItem(
+          value: _BookSeriesSort.progress,
+          child: Text('Progression'),
+        ),
+        PopupMenuItem(
+          value: _BookSeriesSort.rating,
+          child: Text('Note'),
+        ),
+        PopupMenuItem(
+          value: _BookSeriesSort.recent,
+          child: Text('Récemment modifié'),
+        ),
+      ],
+    );
   }
 
   Widget _viewModeMenu() {
@@ -402,6 +487,9 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
                       activeColor: BookAccent.primary,
                       onChanged: (f) => setState(() => _focusFilters = f),
                     ),
+                    if (_viewMode == _BookCollectionViewMode.bySeries)
+                      _sortMenu(),
+                    _layoutToggle(),
                     if (widget.embedded) _viewModeMenu(),
                   ],
                 ),
@@ -493,6 +581,37 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
         ),
       );
     }
+    Future<void> openSeries(_SeriesEntry entry) async {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (ctx) => BookSeriesDetailScreen(
+            seriesId: entry.series.id,
+          ),
+        ),
+      );
+      if (mounted) _load();
+    }
+
+    if (_layout == _BookLayoutMode.list) {
+      return SliverPadding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 24),
+        sliver: SliverList.separated(
+          itemCount: visible.length,
+          separatorBuilder: (_, _) => const SizedBox(height: 6),
+          itemBuilder: (context, index) {
+            final entry = visible[index];
+            final stats = _displayStats(entry);
+            return _BookSeriesCompactRow(
+              series: entry.series,
+              stats: stats,
+              onTap: () => openSeries(entry),
+            );
+          },
+        ),
+      );
+    }
+
     return SliverPadding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
       sliver: SliverGrid(
@@ -510,17 +629,7 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
               stats: _displayStats(entry),
               accent: BookAccent.primary,
               onDelete: () => _confirmDeleteSeries(entry.series),
-              onTap: () async {
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (ctx) => BookSeriesDetailScreen(
-                      seriesId: entry.series.id,
-                    ),
-                  ),
-                );
-                if (mounted) _load();
-              },
+              onTap: () => openSeries(entry),
             );
           },
           childCount: visible.length,
@@ -728,4 +837,129 @@ class _SeriesEntry {
     required this.stats,
     required this.items,
   });
+}
+
+/// Ligne compacte série (~76 px) pour mode liste mobile.
+class _BookSeriesCompactRow extends StatelessWidget {
+  final BookSeries series;
+  final BookSeriesStats stats;
+  final VoidCallback onTap;
+
+  const _BookSeriesCompactRow({
+    required this.series,
+    required this.stats,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final sub = series.isStandalone
+        ? '${series.subcategory.label} · Œuvre unique'
+        : '${series.subcategory.label} · ${stats.totalSlots} tomes';
+    return Material(
+      color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: SizedBox(
+          height: 76,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+            child: Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: SizedBox(
+                    width: 46,
+                    height: 66,
+                    child: series.coverUrl != null &&
+                            series.coverUrl!.trim().isNotEmpty
+                        ? CollectionCoverImage(
+                            url: series.coverUrl!,
+                            bookCover: true,
+                            fit: BoxFit.cover,
+                          )
+                        : CoverImagePlaceholder(bookCover: true),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        series.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14,
+                        ),
+                      ),
+                      Text(
+                        sub,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: scheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      if (!series.isStandalone && stats.totalSlots > 0) ...[
+                        const SizedBox(height: 4),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(3),
+                          child: LinearProgressIndicator(
+                            value: stats.ownedProgress,
+                            minHeight: 3,
+                            backgroundColor: scheme.surfaceContainerHighest,
+                            color: stats.isComplete
+                                ? Colors.green.shade600
+                                : const Color(0xFF26A69A),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      '📚 ${stats.ownedLabel}',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      '👁️ ${stats.readLabel}',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      stats.ratingLabel ?? '★ —',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.amber.shade800,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

@@ -39,10 +39,11 @@ class BookItemAddCoordinator {
       initialSub: subcategory, // null = Tous
       initialQuery: initialQuery,
       onBookSelected: (book, sub) {
+        // Toujours la catégorie détectée (Manga/BD/…), jamais la pilule seule.
         _prepareAdd(
           title: book['title']!,
           imageUrl: book['image_url']!.isEmpty ? null : book['image_url'],
-          subcategory: subcategory ?? sub,
+          subcategory: sub,
           metadata: BookCatalogService.metadataFromLookup(book),
         );
       },
@@ -100,60 +101,61 @@ class BookItemAddCoordinator {
     );
 
     try {
-      final resolved = await _seriesService.resolveSeriesFromTitle(
-        title: name,
+      // Upsert : crée la série si absente (jamais « série introuvable »).
+      final cleanName = BookSeriesNormalizer.displaySeriesName(name);
+      var series = await _seriesService.findOrCreateSeries(
+        name: cleanName,
         subcategory: preferred,
-        estimatedTotalVolumes: total,
-        coverUrl: coverUrl,
+        expectedVolumeCount: total,
+        coverUrl: coverUrl ?? coversByVolume?[1],
       );
-      if (resolved == null) throw Exception('Série introuvable');
+      await _seriesService.ensureVolumeSlots(series.id, total);
 
-      if (coverUrl != null && coverUrl.isNotEmpty) {
+      final seriesCover = coverUrl ?? coversByVolume?[1];
+      if (seriesCover != null && seriesCover.isNotEmpty) {
         await _seriesService.ensureSeriesCoverFromItem(
-          seriesId: resolved.seriesId,
-          imageUrl: coverUrl,
+          seriesId: series.id,
+          imageUrl: seriesCover,
         );
       }
       if (coversByVolume != null && coversByVolume.isNotEmpty) {
         await _seriesService.applyVolumeCoversFromMap(
-          seriesId: resolved.seriesId,
+          seriesId: series.id,
           coverByVolume: coversByVolume,
         );
       }
 
-      final series = await _seriesService.fetchSeriesById(resolved.seriesId);
-      if (series != null) {
-        if (range.choice == BookOwnedRangeChoice.all) {
-          await _seriesService.markVolumesOwned(
-            series: series,
-            fromVolume: 1,
-            toVolume: total,
-          );
-        } else if (range.choice == BookOwnedRangeChoice.range &&
-            range.from != null &&
-            range.to != null) {
-          await _seriesService.markVolumesOwned(
-            series: series,
-            fromVolume: range.from!,
-            toVolume: range.to!,
-          );
-        }
-
-        final volumes = await _seriesService.fetchVolumes(series.id);
-        final items = await _seriesService.fetchSeriesItems(series.id);
-        final stats = _seriesService.computeStats(
+      series = (await _seriesService.fetchSeriesById(series.id)) ?? series;
+      if (range.choice == BookOwnedRangeChoice.all) {
+        await _seriesService.markVolumesOwned(
           series: series,
-          volumes: volumes,
-          items: items,
+          fromVolume: 1,
+          toVolume: total,
         );
-        BooksCollectionCache.instance.updateSeries(
-          seriesId: series.id,
+      } else if (range.choice == BookOwnedRangeChoice.range &&
+          range.from != null &&
+          range.to != null) {
+        await _seriesService.markVolumesOwned(
           series: series,
-          volumes: volumes,
-          items: items,
-          stats: stats,
+          fromVolume: range.from!,
+          toVolume: range.to!,
         );
       }
+
+      final volumes = await _seriesService.fetchVolumes(series.id);
+      final items = await _seriesService.fetchSeriesItems(series.id);
+      final stats = _seriesService.computeStats(
+        series: series,
+        volumes: volumes,
+        items: items,
+      );
+      BooksCollectionCache.instance.updateSeries(
+        seriesId: series.id,
+        series: series,
+        volumes: volumes,
+        items: items,
+        stats: stats,
+      );
 
       if (context.mounted) {
         Navigator.pop(context); // loading
@@ -683,6 +685,8 @@ class BookItemAddCoordinator {
       context: context,
       builder: (dialogContext) => AddItemOptionsDialog(
         itemTitle: title,
+        itemImageUrl: imageUrl,
+        bookCover: true,
         onConfirm: (options) => _save(
           dialogContext: dialogContext,
           title: title,

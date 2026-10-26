@@ -10,11 +10,13 @@ class SeriesBannerCandidate {
   final String name;
   final int volumeCount;
   final Map<int, String> coversByVolume;
+  final BookSubcategory? detectedSubcategory;
 
   const SeriesBannerCandidate({
     required this.name,
     required this.volumeCount,
     this.coversByVolume = const {},
+    this.detectedSubcategory,
   });
 }
 
@@ -55,6 +57,8 @@ class EnrichedBookHit {
   final String? publisher;
   final int? estimatedTotalVolumes;
   final double score;
+  /// Catégorie déduite (éditeur / série), indépendante de la pilule UI.
+  final BookSubcategory? detectedSubcategory;
 
   const EnrichedBookHit({
     required this.raw,
@@ -64,6 +68,7 @@ class EnrichedBookHit {
     this.publisher,
     this.estimatedTotalVolumes,
     required this.score,
+    this.detectedSubcategory,
   });
 
   String? get imageUrl {
@@ -193,14 +198,18 @@ abstract final class BookIntelligenceService {
   }) {
     final groups = <String, _SeriesAgg>{};
     for (final h in hits) {
-      final name = (h.parsed.seriesName ?? '').trim();
+      final rawName = (h.parsed.seriesName ?? '').trim();
+      if (rawName.length < 2) continue;
+      // AVANT regroupement : « Kingdom - Tome » → « Kingdom » (1 seule bannière).
+      final name = BookSeriesNormalizer.displaySeriesName(rawName);
       if (name.length < 2) continue;
-      final key = BookSeriesNormalizer.normalizeKey(name);
+      final key = BookSeriesNormalizer.mergeKey(name);
       final agg = groups.putIfAbsent(
         key,
         () => _SeriesAgg(displayName: name),
       );
-      if (name.length > agg.displayName.length) agg.displayName = name;
+      // Préfère le nom le plus court / propre (« Kingdom » > « Kingdom - Tome »).
+      if (name.length < agg.displayName.length) agg.displayName = name;
       final n = h.parsed.volumeNumber?.round();
       if (n != null && n > 0) {
         if (n > agg.maxVol) agg.maxVol = n;
@@ -244,11 +253,15 @@ abstract final class BookIntelligenceService {
           0;
       final count = [agg.maxVol, dict].reduce((a, b) => a > b ? a : b);
       if (count < 1 && agg.covers.isEmpty) continue;
+      final detected = BookSeriesNormalizer.detectSubcategory(
+        seriesName: agg.displayName,
+      );
       banners.add(
         SeriesBannerCandidate(
           name: agg.displayName,
           volumeCount: count < 1 ? 1 : count,
           coversByVolume: Map<int, String>.from(agg.covers),
+          detectedSubcategory: detected,
         ),
       );
     }
@@ -278,7 +291,7 @@ abstract final class BookIntelligenceService {
 
   /// Requête catalogue pour un tome (ex. « Kagurabachi Tome 3 »).
   static String volumeSearchQuery(String seriesName, double volumeNumber) {
-    final name = seriesName.trim();
+    final name = BookSeriesNormalizer.coverSearchSeriesName(seriesName);
     final vol = volumeNumber == volumeNumber.roundToDouble()
         ? volumeNumber.toInt().toString()
         : volumeNumber.toString();
@@ -290,11 +303,22 @@ abstract final class BookIntelligenceService {
     String seriesName,
     double volumeNumber,
   ) {
-    final name = seriesName.trim();
+    final name = BookSeriesNormalizer.coverSearchSeriesName(seriesName);
     final vol = volumeNumber == volumeNumber.roundToDouble()
         ? volumeNumber.toInt().toString()
         : volumeNumber.toString();
     return '$name T$vol';
+  }
+
+  /// Variante Glénat avec zéro : « One Piece T01 » / « Tome 01 ».
+  static String volumeSearchQueryPadded(
+    String seriesName,
+    double volumeNumber,
+  ) {
+    final name = BookSeriesNormalizer.coverSearchSeriesName(seriesName);
+    final n = volumeNumber.round();
+    final padded = n.toString().padLeft(2, '0');
+    return '$name T$padded';
   }
 
   /// Hit catalogue dont le n° de tome matche [target] de façon stricte.
@@ -319,9 +343,10 @@ abstract final class BookIntelligenceService {
     }
 
     final compact = volumeSearchQueryCompact(seriesName, volumeNumber);
+    final padded = volumeSearchQueryPadded(seriesName, volumeNumber);
     final merged = <Map<String, String>>[];
     final seen = <String>{};
-    // FR « Tome N » + « TN » (Kana/Fnac), puis sans filtre langue.
+    // FR « Tome N » + « TN » + « T0N » (Glénat), puis sans filtre langue.
     for (final list in [
       await GoogleBooksService.search(query, maxResults: 16, langRestrict: 'fr'),
       await GoogleBooksService.search(
@@ -329,8 +354,15 @@ abstract final class BookIntelligenceService {
         maxResults: 12,
         langRestrict: 'fr',
       ),
+      if (padded != compact)
+        await GoogleBooksService.search(
+          padded,
+          maxResults: 10,
+          langRestrict: 'fr',
+        ),
       await ItunesBooksService.search(query),
       await ItunesBooksService.search(compact),
+      if (padded != compact) await ItunesBooksService.search(padded),
       await GoogleBooksService.search(query, maxResults: 16),
       await OpenLibraryService.searchBooks(query, subcategory: subcategory),
     ]) {
@@ -455,6 +487,24 @@ abstract final class BookIntelligenceService {
     final authorBonus = (author != null && author.isNotEmpty) ? 2.0 : 0.0;
     final canonicalBonus = _canonicalEditionBonus(title, author);
 
+    final detected = BookSeriesNormalizer.detectSubcategory(
+      seriesName: seriesName,
+      title: title,
+      publisher: publisher,
+      subjects: hit['subjects'] ?? hit['categories'],
+    );
+
+    // Prefer dictionnaire série pour le total (Kingdom → 73, pas tome 2).
+    if (seriesName != null) {
+      final dict = BookSeriesNormalizer.expectedCount(
+        seriesName,
+        detected ?? subcategory,
+      );
+      if (dict != null && (estimated == null || estimated < dict)) {
+        estimated = dict;
+      }
+    }
+
     return EnrichedBookHit(
       raw: hit,
       parsed: normalizedParsed,
@@ -463,6 +513,7 @@ abstract final class BookIntelligenceService {
       publisher: publisher,
       estimatedTotalVolumes: estimated,
       score: popularity + seriesBonus + coverBonus + authorBonus + canonicalBonus,
+      detectedSubcategory: detected,
     );
   }
 

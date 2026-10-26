@@ -146,6 +146,46 @@ void main() {
         BookSeriesNormalizer.displaySeriesName('Thorgal - Tome'),
         'Thorgal',
       );
+      expect(
+        BookSeriesNormalizer.mergeKey('Kingdom - Tome'),
+        BookSeriesNormalizer.mergeKey('Kingdom'),
+      );
+    });
+
+    test('detectSubcategory depuis éditeur / série connue', () {
+      expect(
+        BookSeriesNormalizer.detectSubcategory(seriesName: 'Kingdom'),
+        BookSubcategory.manga,
+      );
+      expect(
+        BookSeriesNormalizer.detectSubcategory(seriesName: 'Thorgal'),
+        BookSubcategory.comic,
+      );
+      expect(
+        BookSeriesNormalizer.detectSubcategory(publisher: 'Kana'),
+        BookSubcategory.manga,
+      );
+      expect(
+        BookSeriesNormalizer.detectSubcategory(publisher: 'Le Lombard'),
+        BookSubcategory.comic,
+      );
+      expect(
+        BookSeriesNormalizer.detectSubcategory(publisher: 'Urban Comics'),
+        BookSubcategory.comics,
+      );
+      expect(
+        BookSeriesNormalizer.coverSearchSeriesName(
+          'One Piece - Édition originale',
+        ),
+        'One Piece',
+      );
+    });
+
+    test('Kingdom a un compteur connu', () {
+      expect(
+        BookSeriesNormalizer.expectedCount('Kingdom', BookSubcategory.manga),
+        73,
+      );
     });
 
     test('namesMatch ignore casse et tirets', () {

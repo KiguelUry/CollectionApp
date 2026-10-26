@@ -17,4 +17,11 @@ void main() {
     expect(personalRatingOnFive(9.0), 4.5);
     expect(formatPersonalRatingLabel(3.5), '3.5');
   });
+
+  test('formatPlayerCount n\'affiche jamais 1–1 joueurs', () {
+    expect(formatPlayerCount(1, 1), '1 joueur');
+    expect(formatPlayerCount(4, 4), '4 joueurs');
+    expect(formatPlayerCount(1, 4), '1–4 joueurs');
+    expect(formatPlayerCount(2, null), '2 joueurs');
+  });
 }
