@@ -48,13 +48,14 @@ class BookItemAddCoordinator {
           metadata: BookCatalogService.metadataFromLookup(book),
         );
       },
-      onAddSeries: (name, sub, {volumeCount, coversByVolume}) async {
+      onAddSeries: (name, sub, {volumeCount, coversByVolume, author}) async {
         await _addSeriesFromSearch(
           name: name,
           subcategory: subcategory ?? sub,
           volumeCount: volumeCount,
           coversByVolume: coversByVolume,
           coverUrl: coversByVolume?[1],
+          author: author,
         );
       },
     );
@@ -67,6 +68,7 @@ class BookItemAddCoordinator {
     int? volumeCount,
     Map<int, String>? coversByVolume,
     String? coverUrl,
+    String? author,
   }) async {
     final preferred =
         BookSeriesNormalizer.preferredSubcategory(name) ?? subcategory;
@@ -109,6 +111,7 @@ class BookItemAddCoordinator {
         subcategory: preferred,
         expectedVolumeCount: total,
         coverUrl: coverUrl ?? coversByVolume?[1],
+        author: author,
       );
       await _seriesService.ensureVolumeSlots(series.id, total);
 
@@ -584,11 +587,13 @@ class BookItemAddCoordinator {
       if (!context.mounted) return;
       Navigator.pop(context);
 
+      final authorFromMeta = metadata?['author']?.toString();
       final resolved = await _seriesService.resolveSeriesFromTitle(
         title: parsed.hasVolume ? title : parsed.seriesName!,
         subcategory: subcategory,
         estimatedTotalVolumes: estimated,
         coverUrl: imageUrl,
+        author: authorFromMeta,
       );
       if (resolved != null) {
         seriesId = resolved.seriesId;
@@ -599,6 +604,12 @@ class BookItemAddCoordinator {
             seriesId: resolved.seriesId,
             imageUrl: imageUrl,
           );
+        }
+        if (authorFromMeta != null && authorFromMeta.trim().isNotEmpty) {
+          final s = await _seriesService.fetchSeriesById(resolved.seriesId);
+          if (s != null) {
+            await _seriesService.ensureSeriesAuthor(s, authorFromMeta);
+          }
         }
         // Couvertures par tome découvertes à la recherche.
         final coversRaw = metadata?['volume_covers_json']?.toString();

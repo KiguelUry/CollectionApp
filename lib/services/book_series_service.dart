@@ -59,8 +59,13 @@ class BookSeriesService {
     String? parentSeriesId,
     int? expectedVolumeCount,
     String? coverUrl,
+    String? author,
   }) async {
     await ProfileService().ensureCurrentUserProfile();
+
+    final meta = <String, dynamic>{};
+    final a = author?.trim();
+    if (a != null && a.isNotEmpty) meta['author'] = a;
 
     final row = await _client
         .from('book_series')
@@ -71,6 +76,7 @@ class BookSeriesService {
           'parent_series_id': parentSeriesId,
           'expected_volume_count': expectedVolumeCount,
           'cover_url': coverUrl,
+          if (meta.isNotEmpty) 'metadata': meta,
         })
         .select()
         .single();
@@ -80,6 +86,22 @@ class BookSeriesService {
       await ensureVolumeSlots(series.id, expectedVolumeCount);
     }
     return series;
+  }
+
+  /// Persiste l’auteur API sur la série si manquant.
+  Future<BookSeries> ensureSeriesAuthor(
+    BookSeries series,
+    String? author,
+  ) async {
+    final a = author?.trim();
+    if (a == null || a.isEmpty) return series;
+    if (series.author != null && series.author!.isNotEmpty) {
+      // Complète seulement si vide ; sinon conserve l’auteur déjà choisi.
+      return series;
+    }
+    final updated = series.withAuthor(a);
+    await updateSeries(updated);
+    return updated;
   }
 
   Future<void> updateSeries(BookSeries series) async {
@@ -760,6 +782,41 @@ class BookSeriesService {
         .eq('id', volumeId);
   }
 
+  /// Infère l’auteur dominant parmi les hits strictement rattachés à la série.
+  Future<String?> _inferAuthorFromCatalog(BookSeries series) async {
+    try {
+      final name = BookSeriesNormalizer.coverSearchSeriesName(series.name);
+      final raw = await BookCatalogService.searchBooks(
+        name,
+        subcategory: series.subcategory,
+        filters: BookSearchFilters(titleQuery: name),
+      );
+      final votes = <String, int>{};
+      final labels = <String, String>{};
+      for (final h in raw) {
+        final title = h['title'] ?? '';
+        if (!BookSeriesNormalizer.hitBelongsToSeries(title, name)) continue;
+        final author = h['author']?.trim();
+        if (author == null || author.isEmpty) continue;
+        final key = BookSeriesNormalizer.normalizeAuthorKey(author);
+        votes[key] = (votes[key] ?? 0) + 1;
+        labels.putIfAbsent(key, () => author);
+      }
+      if (votes.isEmpty) return null;
+      var best = votes.keys.first;
+      var bestN = votes[best] ?? 0;
+      for (final e in votes.entries) {
+        if (e.value > bestN) {
+          best = e.key;
+          bestN = e.value;
+        }
+      }
+      return labels[best];
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Couvertures manquantes + réparation des mauvaises attributions (T1≠T16).
   Future<int> enrichMissingVolumeCovers({
     required BookSeries series,
@@ -770,7 +827,18 @@ class BookSeriesService {
     var updated = 0;
     var lookups = 0;
 
-    // Batch « Série Tome » + « Série T » (VF Kana/Fnac) — match STRICT.
+    // Auteur dynamique (metadata) ; bootstrap si manquant via hits stricts.
+    var working = series;
+    var seriesAuthor = working.author;
+    if (seriesAuthor == null || seriesAuthor.isEmpty) {
+      seriesAuthor = await _inferAuthorFromCatalog(working);
+      if (seriesAuthor != null) {
+        working = await ensureSeriesAuthor(working, seriesAuthor);
+        seriesAuthor = working.author;
+      }
+    }
+
+    // Batch « Série Tome » + auteur dynamique — match STRICT.
     final batchCovers = <int, String>{};
     final batchPub = <int, String>{};
     final batchVf = <int, bool>{};
@@ -778,13 +846,19 @@ class BookSeriesService {
       try {
         final batch = await BookCatalogService.searchBooks(
           q,
-          subcategory: series.subcategory,
-          filters: BookSearchFilters(titleQuery: series.name),
+          subcategory: working.subcategory,
+          filters: BookSearchFilters(
+            titleQuery: working.name,
+            authorQuery: seriesAuthor ?? '',
+          ),
         );
         final ranked = BookIntelligenceService.enrichAndRank(
           batch,
-          subcategory: series.subcategory,
-          filters: BookSearchFilters(titleQuery: series.name),
+          subcategory: working.subcategory,
+          filters: BookSearchFilters(
+            titleQuery: working.name,
+            authorQuery: seriesAuthor ?? '',
+          ),
         );
         for (final h in ranked) {
           final img = h.imageUrl;
@@ -793,13 +867,13 @@ class BookSeriesService {
               '${h.raw['title'] ?? ''} ${h.raw['subtitle'] ?? ''}';
           if (!BookSeriesNormalizer.hitBelongsToSeries(
             combined,
-            series.name,
+            working.name,
           )) {
             continue;
           }
-          if (!BookSeriesNormalizer.authorMatchesSeries(
+          if (!BookSeriesNormalizer.authorMatchesExpected(
             h.author,
-            series.name,
+            seriesAuthor,
           )) {
             continue;
           }
@@ -821,11 +895,19 @@ class BookSeriesService {
     }
 
     final coverName =
-        BookSeriesNormalizer.coverSearchSeriesName(series.name);
-    await ingestBatch('$coverName Tome');
-    await ingestBatch('$coverName T');
-    // Glénat / One Piece : « T01 »…
-    await ingestBatch('$coverName T0');
+        BookSeriesNormalizer.coverSearchSeriesName(working.name);
+    final authorSuffix =
+        seriesAuthor != null && seriesAuthor.isNotEmpty ? ' $seriesAuthor' : '';
+    // Google Books : intitle + inauthor dynamiques.
+    await ingestBatch(
+      BookSeriesNormalizer.googleBooksCoverQuery(
+        seriesTitle: coverName,
+        author: seriesAuthor,
+      ),
+    );
+    await ingestBatch('$coverName Tome$authorSuffix');
+    await ingestBatch('$coverName T$authorSuffix');
+    await ingestBatch('$coverName T0$authorSuffix');
 
     // Priorité absolue aux premiers tomes (T1→T20) avant les suivants.
     final ordered = List<BookVolume>.from(volumes)
@@ -859,9 +941,10 @@ class BookSeriesService {
       var upcoming = false;
       if (url == null) {
         final meta = await BookIntelligenceService.lookupVolumeCoverMeta(
-          seriesName: series.name,
+          seriesName: working.name,
           volumeNumber: vol.volumeNumber,
-          subcategory: series.subcategory,
+          subcategory: working.subcategory,
+          authorHint: seriesAuthor,
         );
         url = meta.coverUrl;
         pub = meta.publishedDate;
@@ -1328,6 +1411,7 @@ class BookSeriesService {
     required BookSubcategory subcategory,
     int? expectedVolumeCount,
     String? coverUrl,
+    String? author,
   }) async {
     final preferred =
         BookSeriesNormalizer.preferredSubcategory(name) ?? subcategory;
@@ -1349,6 +1433,12 @@ class BookSeriesService {
       if (preferred != existing.subcategory) {
         updated = updated.copyWith(subcategory: preferred);
       }
+      // Auteur dynamique depuis la recherche (si pas encore stocké).
+      if (author != null &&
+          author.trim().isNotEmpty &&
+          (updated.author == null || updated.author!.isEmpty)) {
+        updated = updated.withAuthor(author);
+      }
       // Retire le flag standalone si multi-tomes.
       final exp = updated.expectedVolumeCount ?? expectedVolumeCount ?? 0;
       if (exp > 1 && existing.metadata['is_standalone'] == true) {
@@ -1365,6 +1455,7 @@ class BookSeriesService {
       expectedVolumeCount: expectedVolumeCount ??
           BookSeriesNormalizer.expectedCount(name, preferred),
       coverUrl: coverUrl,
+      author: author,
     );
   }
 
@@ -1399,6 +1490,7 @@ class BookSeriesService {
     required BookSubcategory subcategory,
     int? estimatedTotalVolumes,
     String? coverUrl,
+    String? author,
   }) async {
     var parsed = BookSeriesNormalizer.parse(title);
     // Titre nu (« Kingdom », « Thorgal ») → dossier série si multi-tomes connu
@@ -1465,6 +1557,7 @@ class BookSeriesService {
       subcategory: subcategory,
       expectedVolumeCount: total,
       coverUrl: coverUrl,
+      author: author,
     );
 
     if (total != null && total > 0) {

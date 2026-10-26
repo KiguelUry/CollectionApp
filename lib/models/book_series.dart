@@ -61,6 +61,13 @@ class BookSeries {
     return r > 5.0 ? r / 2 : r;
   }
 
+  /// Auteur de la série (stocké dynamiquement dans metadata à l’ajout).
+  String? get author {
+    final a = metadata['author']?.toString().trim();
+    if (a == null || a.isEmpty) return null;
+    return a;
+  }
+
   static double? _parseDouble(dynamic v) {
     if (v == null) return null;
     if (v is num) return v.toDouble();
@@ -142,6 +149,16 @@ class BookSeries {
       createdAt: createdAt,
       updatedAt: updatedAt,
     );
+  }
+
+  /// Copie avec auteur persisté dans metadata (sans écraser si [author] vide).
+  BookSeries withAuthor(String? author) {
+    final a = author?.trim();
+    if (a == null || a.isEmpty) return this;
+    if (this.author == a) return this;
+    final meta = Map<String, dynamic>.from(metadata);
+    meta['author'] = a;
+    return copyWith(metadata: meta);
   }
 }
 

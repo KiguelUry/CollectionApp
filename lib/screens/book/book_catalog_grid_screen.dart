@@ -23,6 +23,7 @@ class BookCatalogGridScreen extends StatefulWidget {
     BookSubcategory sub, {
     int? volumeCount,
     Map<int, String>? coversByVolume,
+    String? author,
   })? onAddSeries;
 
   const BookCatalogGridScreen({
@@ -227,15 +228,32 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
         final t = h['title']?.toLowerCase() ?? '';
         if (t.isNotEmpty && seen.add(t)) raw.add(h);
       }
-      // Filet iTunes / auteur connu.
-      final authors = BookSeriesNormalizer.knownAuthorsFor(seriesQ);
-      if (authors != null && authors.isNotEmpty) {
+      // Filet dynamique : auteur déjà saisi, sinon auteur dominant des hits.
+      var authorQ = filters.authorQuery.trim();
+      if (authorQ.isEmpty) {
+        for (final h in raw) {
+          final title = h['title'] ?? '';
+          if (!BookSeriesNormalizer.hitBelongsToSeries(title, seriesQ)) {
+            continue;
+          }
+          final a = h['author']?.trim();
+          if (a != null && a.isNotEmpty) {
+            authorQ = a;
+            break;
+          }
+        }
+      }
+      if (authorQ.isNotEmpty) {
         final withAuthor = await BookCatalogService.searchBooks(
-          '$seriesQ Tome $volumeHint ${authors.first}',
+          BookSeriesNormalizer.googleBooksCoverQuery(
+            seriesTitle: seriesQ,
+            volumeNumber: volumeHint,
+            author: authorQ,
+          ),
           subcategory: _effectiveSub,
           filters: BookSearchFilters(
             titleQuery: seriesQ,
-            authorQuery: authors.first,
+            authorQuery: authorQ,
             publisherQuery: filters.publisherQuery,
           ),
         );
@@ -377,6 +395,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
           coversByVolume: b.coversByVolume,
           detectedSubcategory: b.detectedSubcategory ??
               BookSeriesNormalizer.detectSubcategory(seriesName: b.name),
+          author: b.author,
         ),
     ];
 
@@ -393,7 +412,10 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
         BookSeriesNormalizer.detectSubcategory(seriesName: banner.name) ??
         BookSeriesNormalizer.preferredSubcategory(banner.name) ??
         _effectiveSub;
-    final key = BookSeriesNormalizer.normalizeKey(banner.name);
+    final key = BookSeriesNormalizer.seriesAuthorKey(
+      banner.name,
+      banner.author,
+    );
     if (_addedSeriesKeys.contains(key)) return;
 
     final cb = widget.onAddSeries;
@@ -403,6 +425,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
         preferred,
         volumeCount: banner.volumeCount,
         coversByVolume: banner.coversByVolume,
+        author: banner.author,
       );
       if (!mounted) return;
       setState(() => _addedSeriesKeys.add(key));
@@ -415,6 +438,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
           'title': banner.name,
           'series_title': banner.name,
           'estimated_volumes': '${banner.volumeCount}',
+          if (banner.author != null) 'author': banner.author!,
           if (banner.coversByVolume[1] != null)
             'image_url': banner.coversByVolume[1]!,
           'volume_covers_json': banner.coversByVolume.entries
@@ -425,6 +449,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
         displayTitle: banner.name,
         score: 999,
         estimatedTotalVolumes: banner.volumeCount,
+        author: banner.author,
       ),
     );
   }
@@ -700,7 +725,10 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
   }
 
   Widget _buildBanner(SeriesBannerCandidate banner) {
-    final key = BookSeriesNormalizer.normalizeKey(banner.name);
+    final key = BookSeriesNormalizer.seriesAuthorKey(
+      banner.name,
+      banner.author,
+    );
     final added = _addedSeriesKeys.contains(key);
     final owned = _ownedFor(banner.name);
     final inCollection = owned != null && owned.owned > 0;
@@ -733,6 +761,9 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
                         [
                           if (banner.detectedSubcategory != null)
                             _subBadge(banner.detectedSubcategory),
+                          if (banner.author != null &&
+                              banner.author!.trim().isNotEmpty)
+                            banner.author!,
                           '${banner.volumeCount} tomes parus',
                           if (inCollection)
                             '✓ Dans ma collection (${owned.owned}/${owned.total})'

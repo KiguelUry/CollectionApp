@@ -11,12 +11,15 @@ class SeriesBannerCandidate {
   final int volumeCount;
   final Map<int, String> coversByVolume;
   final BookSubcategory? detectedSubcategory;
+  /// Auteur dominant détecté dynamiquement dans les hits API.
+  final String? author;
 
   const SeriesBannerCandidate({
     required this.name,
     required this.volumeCount,
     this.coversByVolume = const {},
     this.detectedSubcategory,
+    this.author,
   });
 }
 
@@ -190,7 +193,7 @@ abstract final class BookIntelligenceService {
     return a.score >= b.score;
   }
 
-  /// Regroupe les hits en bannières multi-séries (Boruto / Thorgal…).
+  /// Regroupe les hits en bannières uniques par (série nettoyée, auteur).
   static List<SeriesBannerCandidate> extractSeriesBanners(
     List<EnrichedBookHit> hits, {
     required String query,
@@ -200,16 +203,27 @@ abstract final class BookIntelligenceService {
     for (final h in hits) {
       final rawName = (h.parsed.seriesName ?? '').trim();
       if (rawName.length < 2) continue;
-      // AVANT regroupement : « Kingdom - Tome » → « Kingdom » (1 seule bannière).
+      // AVANT regroupement : « Kingdom - Tome » → « Kingdom ».
       final name = BookSeriesNormalizer.displaySeriesName(rawName);
       if (name.length < 2) continue;
-      final key = BookSeriesNormalizer.mergeKey(name);
+      final author = h.author?.trim();
+      final key = BookSeriesNormalizer.seriesAuthorKey(name, author);
       final agg = groups.putIfAbsent(
         key,
-        () => _SeriesAgg(displayName: name),
+        () => _SeriesAgg(displayName: name, author: author),
       );
-      // Préfère le nom le plus court / propre (« Kingdom » > « Kingdom - Tome »).
       if (name.length < agg.displayName.length) agg.displayName = name;
+      if ((agg.author == null || agg.author!.isEmpty) &&
+          author != null &&
+          author.isNotEmpty) {
+        agg.author = author;
+      }
+      // Compte les auteurs pour privilégier le plus fréquent.
+      if (author != null && author.isNotEmpty) {
+        final aKey = BookSeriesNormalizer.normalizeAuthorKey(author);
+        agg.authorVotes[aKey] = (agg.authorVotes[aKey] ?? 0) + 1;
+        agg.authorLabels.putIfAbsent(aKey, () => author);
+      }
       final n = h.parsed.volumeNumber?.round();
       if (n != null && n > 0) {
         if (n > agg.maxVol) agg.maxVol = n;
@@ -222,8 +236,7 @@ abstract final class BookIntelligenceService {
       if (est != null && est > agg.maxVol) agg.maxVol = est;
     }
 
-    // Si aucun groupe mais query utile → une bannière depuis le dictionnaire.
-    // « kingdom 1 » → série « Kingdom » (pas « kingdom 1 »).
+    // Si aucun groupe mais query utile → bannière depuis la requête nettoyée.
     final parsedQuery = BookSeriesNormalizer.parseCatalogSearchQuery(query);
     final bannerSeed = parsedQuery.seriesQuery.trim().isNotEmpty
         ? parsedQuery.seriesQuery.trim()
@@ -237,11 +250,19 @@ abstract final class BookIntelligenceService {
         dict ?? 0,
         maxFromHits,
       ].reduce((a, b) => a > b ? a : b);
+      String? seedAuthor;
+      for (final h in hits) {
+        if (h.author != null && h.author!.trim().isNotEmpty) {
+          seedAuthor = h.author!.trim();
+          break;
+        }
+      }
       if (count > 0 || hits.isNotEmpty) {
         return [
           SeriesBannerCandidate(
             name: BookSeriesNormalizer.displaySeriesName(bannerSeed),
             volumeCount: count > 0 ? count : (dict ?? 1),
+            author: seedAuthor,
           ),
         ];
       }
@@ -267,6 +288,7 @@ abstract final class BookIntelligenceService {
           volumeCount: count < 1 ? 1 : count,
           coversByVolume: Map<int, String>.from(agg.covers),
           detectedSubcategory: detected,
+          author: agg.dominantAuthor,
         ),
       );
     }
@@ -276,7 +298,6 @@ abstract final class BookIntelligenceService {
       if (aq != bq) return aq ? -1 : 1;
       return b.volumeCount.compareTo(a.volumeCount);
     });
-    // Garde les séries pertinentes (nom lié à la requête) + top.
     final relevant = banners.where((b) {
       final k = BookSeriesNormalizer.normalizeKey(b.name);
       return qKey.isEmpty ||
@@ -285,7 +306,7 @@ abstract final class BookIntelligenceService {
           k.split(' ').any((p) => p.length >= 4 && qKey.contains(p));
     }).toList();
     final use = relevant.isNotEmpty ? relevant : banners;
-    return use.take(6).toList();
+    return use.take(8).toList();
   }
 
   static EnrichedBookHit enrichSingle(
@@ -344,14 +365,19 @@ abstract final class BookIntelligenceService {
   }) async {
     final target = volumeNumber.round();
     final cleanName = BookSeriesNormalizer.coverSearchSeriesName(seriesName);
-    final authors = BookSeriesNormalizer.knownAuthorsFor(cleanName);
-    final authorQ = authorHint?.trim().isNotEmpty == true
-        ? authorHint!.trim()
-        : (authors != null && authors.isNotEmpty ? authors.first : null);
+    final authorQ =
+        authorHint != null && authorHint.trim().isNotEmpty
+            ? authorHint.trim()
+            : null;
 
-    var query = volumeSearchQuery(cleanName, volumeNumber);
-    if (authorQ != null) query = '$query $authorQ';
-    if (query.trim().length < 3) {
+    final gbQuery = BookSeriesNormalizer.googleBooksCoverQuery(
+      seriesTitle: cleanName,
+      volumeNumber: target,
+      author: authorQ,
+    );
+    var plainQuery = volumeSearchQuery(cleanName, volumeNumber);
+    if (authorQ != null) plainQuery = '$plainQuery $authorQ';
+    if (plainQuery.trim().length < 3 && gbQuery.trim().length < 3) {
       return (coverUrl: null, publishedDate: null, upcoming: false);
     }
 
@@ -360,23 +386,36 @@ abstract final class BookIntelligenceService {
     final merged = <Map<String, String>>[];
     final seen = <String>{};
     for (final list in [
-      await GoogleBooksService.search(query, maxResults: 16, langRestrict: 'fr'),
+      // Priorité : Google Books intitle + inauthor dynamiques.
+      await GoogleBooksService.search(
+        gbQuery,
+        maxResults: 16,
+        langRestrict: 'fr',
+      ),
+      await GoogleBooksService.search(gbQuery, maxResults: 16),
+      await GoogleBooksService.search(
+        plainQuery,
+        maxResults: 12,
+        langRestrict: 'fr',
+      ),
       await GoogleBooksService.search(
         compact,
-        maxResults: 12,
+        maxResults: 10,
         langRestrict: 'fr',
       ),
       if (padded != compact)
         await GoogleBooksService.search(
           padded,
-          maxResults: 10,
+          maxResults: 8,
           langRestrict: 'fr',
         ),
-      await ItunesBooksService.search(query),
+      await ItunesBooksService.search(plainQuery),
       await ItunesBooksService.search(compact),
       if (padded != compact) await ItunesBooksService.search(padded),
-      await GoogleBooksService.search(query, maxResults: 16),
-      await OpenLibraryService.searchBooks(query, subcategory: subcategory),
+      await OpenLibraryService.searchBooks(
+        plainQuery,
+        subcategory: subcategory,
+      ),
     ]) {
       for (final hit in list) {
         final title = hit['title']?.trim().toLowerCase() ?? '';
@@ -388,7 +427,10 @@ abstract final class BookIntelligenceService {
     final ranked = enrichAndRank(
       merged,
       subcategory: subcategory,
-      filters: BookSearchFilters(titleQuery: cleanName),
+      filters: BookSearchFilters(
+        titleQuery: cleanName,
+        authorQuery: authorQ ?? '',
+      ),
     );
 
     EnrichedBookHit? best;
@@ -400,7 +442,7 @@ abstract final class BookIntelligenceService {
       if (!BookSeriesNormalizer.hitBelongsToSeries(title, cleanName)) {
         continue;
       }
-      if (!BookSeriesNormalizer.authorMatchesSeries(hit.author, cleanName)) {
+      if (!BookSeriesNormalizer.authorMatchesExpected(hit.author, authorQ)) {
         continue;
       }
       if (best == null || _preferHit(hit, best)) best = hit;
@@ -589,8 +631,24 @@ abstract final class BookIntelligenceService {
 
 class _SeriesAgg {
   String displayName;
+  String? author;
   int maxVol = 0;
   final Map<int, String> covers = {};
+  final Map<String, int> authorVotes = {};
+  final Map<String, String> authorLabels = {};
 
-  _SeriesAgg({required this.displayName});
+  _SeriesAgg({required this.displayName, this.author});
+
+  String? get dominantAuthor {
+    if (authorVotes.isEmpty) return author;
+    var bestKey = authorVotes.keys.first;
+    var bestVotes = authorVotes[bestKey] ?? 0;
+    for (final e in authorVotes.entries) {
+      if (e.value > bestVotes) {
+        bestKey = e.key;
+        bestVotes = e.value;
+      }
+    }
+    return authorLabels[bestKey] ?? author;
+  }
 }

@@ -230,30 +230,6 @@ abstract final class BookSeriesNormalizer {
     return null;
   }
 
-  /// Auteurs canoniques (filtrage strict des couvertures hors-sujet).
-  static const knownSeriesAuthors = <String, List<String>>{
-    'kingdom': ['yasuhisa hara', 'hara'],
-    'one piece': ['eiichiro oda', 'oda'],
-    'naruto': ['masashi kishimoto', 'kishimoto'],
-    'thorgal': ['van hamme', 'rosinski', 'jean van hamme'],
-    'asterix': ['goscinny', 'uderzo'],
-    'astérix': ['goscinny', 'uderzo'],
-    'berserk': ['kentaro miura', 'miura'],
-    'kagurabachi': ['takeru hokazono', 'hokazono'],
-  };
-
-  static List<String>? knownAuthorsFor(String seriesName) {
-    final key = normalizeKey(
-      stripEditionSuffix(stripOrphanVolumeSuffix(seriesName)),
-    );
-    for (final e in knownSeriesAuthors.entries) {
-      if (key == e.key || key.startsWith(e.key) || e.key.startsWith(key)) {
-        return e.value;
-      }
-    }
-    return null;
-  }
-
   /// Vrai si le titre du hit appartient strictement à la série [seriesName].
   /// Rejette « Fallen Kingdom », « Realist Hero Rebuilt the Kingdom », etc.
   static bool hitBelongsToSeries(String hitTitle, String seriesName) {
@@ -270,12 +246,46 @@ abstract final class BookSeriesNormalizer {
     return extracted == want;
   }
 
-  static bool authorMatchesSeries(String? author, String seriesName) {
-    final known = knownAuthorsFor(seriesName);
-    if (known == null || known.isEmpty) return true; // pas de filtre
-    if (author == null || author.trim().isEmpty) return false;
-    final a = author.toLowerCase().trim();
-    return known.any((k) => a.contains(k) || k.contains(a));
+  /// Normalise un nom d’auteur pour comparaison dynamique (pas de liste fixe).
+  static String normalizeAuthorKey(String raw) {
+    return raw
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^\w\sàâäéèêëïîôùûüç]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  /// Compare deux auteurs dynamiquement (égalité, inclusion, nom de famille).
+  static bool authorsMatch(String? a, String? b) {
+    final na = normalizeAuthorKey(a ?? '');
+    final nb = normalizeAuthorKey(b ?? '');
+    if (na.isEmpty || nb.isEmpty) return false;
+    if (na == nb) return true;
+    if (na.contains(nb) || nb.contains(na)) return true;
+    final ta = na.split(' ').where((t) => t.isNotEmpty).toList();
+    final tb = nb.split(' ').where((t) => t.isNotEmpty).toList();
+    if (ta.isNotEmpty &&
+        tb.isNotEmpty &&
+        ta.last == tb.last &&
+        ta.last.length >= 3) {
+      return true;
+    }
+    final sa = ta.where((t) => t.length >= 4).toSet();
+    final sb = tb.where((t) => t.length >= 4).toSet();
+    return sa.intersection(sb).isNotEmpty;
+  }
+
+  /// Si [expectedAuthor] est connu, le hit doit matcher ; sinon pas de filtre.
+  static bool authorMatchesExpected(String? hitAuthor, String? expectedAuthor) {
+    if (expectedAuthor == null || expectedAuthor.trim().isEmpty) return true;
+    return authorsMatch(hitAuthor, expectedAuthor);
+  }
+
+  /// Clé de regroupement bannière : (série nettoyée, auteur).
+  static String seriesAuthorKey(String seriesName, String? author) {
+    final s = mergeKey(seriesName);
+    final a = normalizeAuthorKey(author ?? '');
+    return a.isEmpty ? s : '$s|$a';
   }
 
   /// Titre d’affichage canonique (sans « - Tome N » / « Édition originale »).
@@ -288,13 +298,12 @@ abstract final class BookSeriesNormalizer {
     return stripEditionSuffix(name);
   }
 
-  /// Retire « - Tome », « - Vol », « Tome », « Volume » sans numéro en fin.
+  /// Retire suffixes volume orphelins via Regex universelle (aucune série hardcodée).
   static String stripOrphanVolumeSuffix(String name) {
-    var s = name.trim();
-    s = s.replaceAll(RegExp(r'[–—−]'), '-');
+    var s = name.trim().replaceAll(RegExp(r'[–—−]'), '-');
     s = s.replaceAll(
       RegExp(
-        r'[\s\-–—]*\b(?:tome|tomes|vol\.?|volume|volumes)\s*$',
+        r'\s*(?:-|–|—)?\s*(?:tome|tomes|vol\.?|volume|volumes|t\.?)\s*\d*\s*$',
         caseSensitive: false,
       ),
       '',
@@ -303,33 +312,50 @@ abstract final class BookSeriesNormalizer {
     return s.isEmpty ? name.trim() : s;
   }
 
-  /// Retire « - Édition originale », omnibus, coffret…
+  /// Retire « Édition originale », omnibus, coffret… via Regex universelle.
   static String stripEditionSuffix(String name) {
     var s = name.trim().replaceAll(RegExp(r'[–—−]'), '-');
-    final dashParts = s.split(RegExp(r'\s+-\s+'));
-    if (dashParts.length > 1) {
-      final kept = <String>[];
-      for (final part in dashParts) {
-        final low = part.toLowerCase();
-        if (low.contains('édition') ||
-            low.contains('edition') ||
-            low.contains('omnibus') ||
-            low.contains('coffret') ||
-            low.contains('box set')) {
-          break;
-        }
-        kept.add(part);
-      }
-      if (kept.isNotEmpty) s = kept.join(' - ');
-    }
     s = s.replaceAll(
       RegExp(
-        r'\s+(édition|edition)\s+\S+.*$',
+        r'\s*(?:-|–|—)?\s*(?:édition|edition)\s+'
+        r'(?:originale|original|collector|spéciale|speciale|intégrale|integrale)\b.*$',
+        caseSensitive: false,
+      ),
+      '',
+    );
+    s = s.replaceAll(
+      RegExp(
+        r'\s*(?:-|–|—)?\s*(?:édition|edition)\s+\S+.*$',
+        caseSensitive: false,
+      ),
+      '',
+    );
+    s = s.replaceAll(
+      RegExp(
+        r'\s*(?:-|–|—)?\s*(?:omnibus|coffret|box\s*set)\b.*$',
         caseSensitive: false,
       ),
       '',
     );
     return s.replaceAll(RegExp(r'[\s,;:\-]+$'), '').trim();
+  }
+
+  /// Requête Google Books ciblée : intitle + inauthor dynamiques.
+  static String googleBooksCoverQuery({
+    required String seriesTitle,
+    int? volumeNumber,
+    String? author,
+  }) {
+    final title = coverSearchSeriesName(seriesTitle);
+    final parts = <String>[
+      if (volumeNumber != null && volumeNumber > 0)
+        'intitle:"$title" intitle:"Tome $volumeNumber"'
+      else
+        'intitle:"$title"',
+      if (author != null && author.trim().isNotEmpty)
+        'inauthor:"${author.trim()}"',
+    ];
+    return parts.join(' ');
   }
 
   /// Alias pour requêtes de couverture (= displaySeriesName).

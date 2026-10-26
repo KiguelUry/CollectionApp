@@ -234,15 +234,46 @@ void main() {
       );
     });
 
-    test('authorMatchesSeries filtre Frazier pour Kingdom', () {
+    test('authorsMatch compare dynamiquement sans dictionnaire', () {
       expect(
-        BookSeriesNormalizer.authorMatchesSeries('Yasuhisa Hara', 'Kingdom'),
+        BookSeriesNormalizer.authorsMatch('Yasuhisa Hara', 'Hara'),
         isTrue,
       );
       expect(
-        BookSeriesNormalizer.authorMatchesSeries('T.M. Frazier', 'Kingdom'),
+        BookSeriesNormalizer.authorsMatch('Yasuhisa Hara', 'T.M. Frazier'),
         isFalse,
       );
+      expect(
+        BookSeriesNormalizer.authorMatchesExpected(
+          'T.M. Frazier',
+          'Yasuhisa Hara',
+        ),
+        isFalse,
+      );
+      expect(
+        BookSeriesNormalizer.authorMatchesExpected('T.M. Frazier', null),
+        isTrue, // pas d'auteur attendu → pas de filtre
+      );
+    });
+
+    test('seriesAuthorKey différencie les homonymes', () {
+      expect(
+        BookSeriesNormalizer.seriesAuthorKey('Kingdom', 'Yasuhisa Hara'),
+        isNot(
+          BookSeriesNormalizer.seriesAuthorKey('Kingdom', 'T.M. Frazier'),
+        ),
+      );
+    });
+
+    test('googleBooksCoverQuery injecte intitle et inauthor', () {
+      final q = BookSeriesNormalizer.googleBooksCoverQuery(
+        seriesTitle: 'Kingdom',
+        volumeNumber: 2,
+        author: 'Yasuhisa Hara',
+      );
+      expect(q, contains('intitle:"Kingdom"'));
+      expect(q, contains('intitle:"Tome 2"'));
+      expect(q, contains('inauthor:"Yasuhisa Hara"'));
     });
 
     test('parseCatalogSearchQuery sépare titre + tome', () {
