@@ -226,14 +226,30 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
               const SizedBox(height: 16),
               PrecisionStarRatingBar(
                 rating: rating.clamp(0.0, 5.0),
-                onChanged: (v) async {
-                  await _service.updateSeries(
-                    entry.series.copyWith(
-                      userRating: v <= 0 ? null : v,
-                      clearUserRating: v <= 0,
-                    ),
+                onChanged: (v) {
+                  // Optimistic : UI déjà à jour via _localRating ; persist silencieuse.
+                  final updated = entry.series.copyWith(
+                    userRating: v <= 0 ? null : v,
+                    clearUserRating: v <= 0,
                   );
-                  if (mounted) _load(silent: true);
+                  final idx = _entries.indexWhere(
+                    (e) => e.series.id == entry.series.id,
+                  );
+                  if (idx >= 0) {
+                    setState(() {
+                      _entries[idx] = _SeriesEntry(
+                        series: updated,
+                        volumes: entry.volumes,
+                        stats: entry.stats.copyWith(
+                          displayRating: v <= 0 ? null : v,
+                          clearDisplayRating: v <= 0,
+                        ),
+                        items: entry.items,
+                      );
+                    });
+                  }
+                  // ignore: unawaited_futures
+                  _service.updateSeries(updated);
                 },
               ),
               const SizedBox(height: 12),

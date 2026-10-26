@@ -102,10 +102,9 @@ class _BoardgameTileRatingSheetState extends State<_BoardgameTileRatingSheet> {
   Future<void> _saveRating(double value) async {
     if (widget.readOnly || _saving) return;
     final clamped = double.parse(value.clamp(0.0, 5.0).toStringAsFixed(1));
-    setState(() {
-      _rating = clamped;
-      _saving = true;
-    });
+    // Optimistic UI : note locale immédiate, pas de barre de chargement.
+    setState(() => _rating = clamped);
+    _saving = true;
     try {
       final meta = Map<String, dynamic>.from(widget.item.metadata ?? {});
       meta['rating_scale'] = '5';
@@ -121,7 +120,7 @@ class _BoardgameTileRatingSheetState extends State<_BoardgameTileRatingSheet> {
         );
       }
     } finally {
-      if (mounted) setState(() => _saving = false);
+      _saving = false;
     }
   }
 
@@ -205,10 +204,6 @@ class _BoardgameTileRatingSheetState extends State<_BoardgameTileRatingSheet> {
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
-            ],
-            if (_saving) ...[
-              const SizedBox(height: 12),
-              const LinearProgressIndicator(minHeight: 2),
             ],
           ],
         ),

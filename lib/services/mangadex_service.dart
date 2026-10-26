@@ -13,6 +13,12 @@ abstract final class MangaDexService {
   static const _base = 'https://api.mangadex.org';
   static const _uploads = 'https://uploads.mangadex.org';
 
+  /// Tags MangaDex à exclure (fan-colored, doujinshi).
+  static const _excludedTagIds = [
+    '7b2ce280-79ef-4c09-9b5a-a839f0764984', // Fan Colored
+    'b13b2a48-c720-44a9-9c77-39c9905739b0', // Doujinshi
+  ];
+
   static Future<MangaDexSeriesMeta?> lookupManga(
     String query, {
     String? authorHint,
@@ -29,14 +35,24 @@ abstract final class MangaDexService {
     final q = query.trim();
     if (q.length < 2) return const [];
     try {
-      final withIncludes = Uri.parse(
+      // Récupère un peu plus pour filtrer/trier côté client.
+      final fetchLimit = (limit.clamp(1, 10) * 3).clamp(5, 15);
+      final params = StringBuffer(
         '$_base/manga?title=${Uri.encodeQueryComponent(q)}'
-        '&limit=${limit.clamp(1, 10)}'
+        '&limit=$fetchLimit'
+        '&order[followedCount]=desc'
         '&order[relevance]=desc'
+        '&originalLanguage[]=ja'
+        '&contentRating[]=safe'
+        '&contentRating[]=suggestive'
         '&includes[]=author'
         '&includes[]=cover_art'
         '&includes[]=artist',
       );
+      for (final tagId in _excludedTagIds) {
+        params.write('&excludedTags[]=$tagId');
+      }
+      final withIncludes = Uri.parse(params.toString());
       final searchRes = await http
           .get(
             proxiedCatalogUri(withIncludes),
@@ -46,17 +62,82 @@ abstract final class MangaDexService {
       if (searchRes.statusCode != 200) return const [];
       final body = jsonDecode(searchRes.body) as Map<String, dynamic>;
       final data = body['data'] as List<dynamic>? ?? const [];
-      final out = <MangaDexSeriesMeta>[];
+
+      final scored = <({MangaDexSeriesMeta meta, double score})>[];
       for (final raw in data) {
         if (raw is! Map<String, dynamic>) continue;
+        if (_isParasiteEntry(raw)) continue;
         final meta = await _mapManga(raw, q, authorHint);
-        if (meta != null) out.add(meta);
+        if (meta == null) continue;
+        scored.add((meta: meta, score: _rankScore(raw, meta, q)));
       }
-      return out;
+      scored.sort((a, b) => b.score.compareTo(a.score));
+      return scored.take(limit.clamp(1, 10)).map((e) => e.meta).toList();
     } catch (e) {
       if (kDebugMode) debugPrint('MangaDex search: $e');
       return const [];
     }
+  }
+
+  /// Fan-colored / bonus / anthologies parasites.
+  static bool _isParasiteEntry(Map<String, dynamic> manga) {
+    final attrs = manga['attributes'] as Map<String, dynamic>? ?? {};
+    final titles = attrs['title'] as Map<String, dynamic>? ?? {};
+    final altTitles = attrs['altTitles'] as List<dynamic>? ?? const [];
+    final blobs = <String>[
+      ...titles.values.map((v) => v?.toString() ?? ''),
+      for (final alt in altTitles)
+        if (alt is Map)
+          for (final v in alt.values) v?.toString() ?? '',
+    ];
+    final joined = blobs.join(' ').toLowerCase();
+    if (RegExp(
+      r'fan\s*colou?red|bonus\s*chapter|one[\s-]?shot\s*bonus|'
+      r'colored\s*version|colour\s*version|\(colored\)|\(fan',
+      caseSensitive: false,
+    ).hasMatch(joined)) {
+      return true;
+    }
+    final tags = attrs['tags'] as List<dynamic>? ?? const [];
+    for (final t in tags) {
+      if (t is! Map) continue;
+      final id = t['id']?.toString() ?? '';
+      if (_excludedTagIds.contains(id)) return true;
+      final name = (t['attributes'] as Map?)?['name'];
+      if (name is Map) {
+        final en = (name['en'] ?? '').toString().toLowerCase();
+        if (en.contains('fan colored') || en == 'doujinshi') return true;
+      }
+    }
+    return false;
+  }
+
+  /// Exact match ≫ startsWith ≫ contains ; bonus followers.
+  static double _rankScore(
+    Map<String, dynamic> raw,
+    MangaDexSeriesMeta meta,
+    String query,
+  ) {
+    final qKey = BookSeriesNormalizer.normalizeKey(query);
+    final tKey = BookSeriesNormalizer.normalizeKey(meta.title);
+    var score = 0.0;
+    if (tKey == qKey) {
+      score += 1000;
+    } else if (tKey.startsWith(qKey) || qKey.startsWith(tKey)) {
+      score += 500;
+    } else if (tKey.contains(qKey) || qKey.contains(tKey)) {
+      score += 200;
+    }
+    final attrs = raw['attributes'] as Map<String, dynamic>? ?? {};
+    // Préfère l'œuvre « ongoing/completed » principale.
+    final status = (attrs['status'] ?? '').toString();
+    if (status == 'ongoing' || status == 'completed') score += 50;
+    final year = attrs['year'];
+    if (year is int && year >= 2000) score += 10;
+    final vols = meta.volumesPublished ?? 0;
+    score += vols.clamp(0, 200).toDouble();
+    score += meta.coverByVolume.length.clamp(0, 100).toDouble();
+    return score;
   }
 
   static Future<MangaDexSeriesMeta?> _mapManga(

@@ -7,9 +7,11 @@ import '../constants/rating_colors.dart';
 
 /// 5 étoiles au clic : 1er clic = N.0, 2e = N−0.5, 3e = effacer.
 /// Note personnelle = bleu métallique (jamais or communauté).
-/// Valeur locale synchrone + debounce 350 ms vers le parent (évite le retour en arrière).
+/// Optimistic UI : `_localRating` synchrone au tap ; debounce 350 ms vers le parent
+/// (le parent ne doit PAS afficher de spinner / barre de chargement).
 class PrecisionStarRatingBar extends StatefulWidget {
   final double rating;
+  /// Appelé après debounce — doit être non-bloquant (pas de loader UI).
   final ValueChanged<double> onChanged;
   final bool readOnly;
   final double starSize;

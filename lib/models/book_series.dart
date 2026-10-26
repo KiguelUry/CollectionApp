@@ -212,4 +212,28 @@ class BookSeriesStats {
     if (v <= 0) return null;
     return '~${v.round()} €';
   }
+
+  BookSeriesStats copyWith({
+    int? ownedCount,
+    int? readCount,
+    int? wishlistVolumeCount,
+    int? totalSlots,
+    double? displayRating,
+    double? communityRating,
+    double? totalNewValue,
+    double? totalUsedValue,
+    bool clearDisplayRating = false,
+  }) {
+    return BookSeriesStats(
+      ownedCount: ownedCount ?? this.ownedCount,
+      readCount: readCount ?? this.readCount,
+      wishlistVolumeCount: wishlistVolumeCount ?? this.wishlistVolumeCount,
+      totalSlots: totalSlots ?? this.totalSlots,
+      displayRating:
+          clearDisplayRating ? null : (displayRating ?? this.displayRating),
+      communityRating: communityRating ?? this.communityRating,
+      totalNewValue: totalNewValue ?? this.totalNewValue,
+      totalUsedValue: totalUsedValue ?? this.totalUsedValue,
+    );
+  }
 }

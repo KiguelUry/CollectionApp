@@ -403,19 +403,33 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
     }
 
     // Officiel (AniList/MangaDex) en tête ; jamais « Aucun résultat » si bannière.
+    // MangaDex/AniList → toujours Manga (jamais badge « Autre »).
+    final officialMergeKeys = {
+      for (final o in officialBanners) BookSeriesNormalizer.mergeKey(o.name),
+    };
     final mergedBanners = <SeriesBannerCandidate>[];
     final seenKeys = <String>{};
     for (final b in [...officialBanners, ...banners]) {
-      final det = b.detectedSubcategory ??
-          BookSeriesNormalizer.detectSubcategory(seriesName: b.name);
-      final key = BookSeriesNormalizer.seriesSubcategoryKey(b.name, det);
+      final mergeKey = BookSeriesNormalizer.mergeKey(b.name);
+      final fromOfficial = b.fromAnilist || officialMergeKeys.contains(mergeKey);
+      // Zéro exception : source officielle manga → BookSubcategory.manga.
+      final det = fromOfficial
+          ? BookSubcategory.manga
+          : (b.detectedSubcategory ??
+              BookSeriesNormalizer.detectSubcategory(seriesName: b.name) ??
+              BookSubcategory.manga);
+      // Une seule bannière par série : l'officielle Manga gagne sur « Autre ».
+      final key = fromOfficial
+          ? 'official|$mergeKey'
+          : BookSeriesNormalizer.seriesSubcategoryKey(b.name, det);
+      if (fromOfficial && seenKeys.contains('official|$mergeKey')) continue;
+      if (!fromOfficial && officialMergeKeys.contains(mergeKey)) continue;
       if (!seenKeys.add(key)) continue;
       if (!b.fromAnilist && b.volumeCount < 1) continue;
       var count = b.volumeCount;
       // Enrichit avec max MangaDex / AniList déjà fusionné.
       for (final o in officialBanners) {
-        if (BookSeriesNormalizer.mergeKey(o.name) ==
-            BookSeriesNormalizer.mergeKey(b.name)) {
+        if (BookSeriesNormalizer.mergeKey(o.name) == mergeKey) {
           if (o.volumeCount > count) count = o.volumeCount;
         }
       }
@@ -425,10 +439,10 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
           name: BookSeriesNormalizer.displaySeriesName(b.name),
           volumeCount: count,
           coversByVolume: b.coversByVolume,
-          detectedSubcategory: det ?? BookSubcategory.manga,
+          detectedSubcategory: det,
           author: b.author,
           coverUrl: b.coverUrl ?? b.coversByVolume[1],
-          fromAnilist: b.fromAnilist,
+          fromAnilist: fromOfficial,
         ),
       );
     }
@@ -442,9 +456,12 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
   }
 
   Future<void> _addSeries(SeriesBannerCandidate banner) async {
-    final preferred = banner.detectedSubcategory ??
-        BookSeriesNormalizer.detectSubcategory(seriesName: banner.name) ??
-        _effectiveSub;
+    // AniList / MangaDex → toujours Manga.
+    final preferred = banner.fromAnilist
+        ? BookSubcategory.manga
+        : (banner.detectedSubcategory ??
+            BookSeriesNormalizer.detectSubcategory(seriesName: banner.name) ??
+            _effectiveSub);
     final key = BookSeriesNormalizer.seriesSubcategoryKey(
       banner.name,
       preferred,

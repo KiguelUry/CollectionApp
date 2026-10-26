@@ -259,6 +259,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     bool? read,
     bool? wishlist,
     BookVolumeEdition? edition,
+    double? rating,
   }) {
     final idx = _slots.indexWhere((s) => s.volume.id == slot.volume.id);
     if (idx < 0) return;
@@ -276,16 +277,27 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     }
 
     CollectionItem? nextItem;
-    if (!nextOwned && !nextWish) {
+    if (!nextOwned && !nextWish && rating == null) {
       // Lu sans possession : flag volume uniquement.
       nextItem = null;
     } else {
       nextItem = _fakeItem(cur, wishlist: nextWish, read: nextRead);
+      if (rating != null) {
+        final base = nextItem ?? cur.item;
+        if (base != null) {
+          nextItem = base.copyWith(
+            rating: rating <= 0 ? null : rating,
+            clearRating: rating <= 0,
+          );
+        }
+      }
     }
 
     final status = nextWish
         ? BookVolumeStatus.wishlist
-        : (nextOwned ? BookVolumeStatus.owned : BookVolumeStatus.missing);
+        : (nextOwned || (rating != null && nextItem != null)
+            ? BookVolumeStatus.owned
+            : BookVolumeStatus.missing);
 
     setState(() {
       _slots = List.of(_slots);
@@ -521,18 +533,22 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   }
 
   Future<void> _setVolumeRating(BookVolumeSlot slot, double rating) async {
-    final item = slot.item;
-    if (item == null || item.id.startsWith('local-')) {
-      await _toggleOwned(slot);
-    }
-    final items = await _service.fetchSeriesItems(_series!.id);
-    final real = items.cast<CollectionItem?>().firstWhere(
-          (i) => i?.volumeId == slot.volume.id && !(i?.isWishlist ?? true),
-          orElse: () => null,
-        );
-    if (real == null) return;
-    await _service.setItemRating(real.id, rating);
-    await _load(silent: true);
+    // Optimistic : patch local immédiat, persist en arrière-plan.
+    _patchSlotLocal(slot, rating: rating);
+    // ignore: unawaited_futures
+    () async {
+      var item = slot.item;
+      if (item == null || item.id.startsWith('local-')) {
+        await _toggleOwned(slot);
+      }
+      final items = await _service.fetchSeriesItems(_series!.id);
+      final real = items.cast<CollectionItem?>().firstWhere(
+            (i) => i?.volumeId == slot.volume.id && !(i?.isWishlist ?? true),
+            orElse: () => null,
+          );
+      if (real == null) return;
+      await _service.setItemRating(real.id, rating);
+    }();
   }
 
   @override

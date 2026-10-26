@@ -508,12 +508,24 @@ abstract final class BookIntelligenceService {
     if (year != null && year >= 2015) yearBonus = 3;
     if (year != null && year >= 2000 && year < 2015) yearBonus = 1;
 
-    final detected = BookSeriesNormalizer.detectSubcategory(
-      seriesName: seriesName,
-      title: title,
-      publisher: publisher,
-      subjects: hit['subjects'] ?? hit['categories'],
-    );
+    final source = (hit['source'] ?? hit['catalog_source'] ?? '')
+        .toLowerCase()
+        .trim();
+    // MangaDex / AniList → toujours Manga (jamais « Autre »).
+    final BookSubcategory? detected;
+    if (source == 'mangadex' ||
+        source == 'anilist' ||
+        source.contains('mangadex') ||
+        source.contains('anilist')) {
+      detected = BookSubcategory.manga;
+    } else {
+      detected = BookSeriesNormalizer.detectSubcategory(
+        seriesName: seriesName,
+        title: title,
+        publisher: publisher,
+        subjects: hit['subjects'] ?? hit['categories'],
+      );
+    }
 
     return EnrichedBookHit(
       raw: hit,
