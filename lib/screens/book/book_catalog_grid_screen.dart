@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../constants/book_accent.dart';
 import '../../models/book_subcategory.dart';
+import '../../services/anilist_manga_service.dart';
 import '../../services/book_catalog_service.dart';
 import '../../services/book_intelligence_service.dart';
 import '../../services/book_search_history.dart';
@@ -328,10 +329,14 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
         return b.score.compareTo(a.score);
       });
 
-      // Si le tome ciblé est absent, injecte un hit synthétique via lookup cover.
+      // Si le tome ciblé est absent pour le couple (série, auteur AniList/hits),
+      // synthétise la carte du tome plutôt que d'afficher des romans hors-sujet.
       final hasTarget = enriched.any(
         (h) =>
             h.parsed.volumeNumber?.round() == volumeHint &&
+            !BookSeriesNormalizer.looksLikeChapterOrScan(
+              h.raw['title'] ?? h.displayTitle,
+            ) &&
             BookSeriesNormalizer.hitBelongsToSeries(
               h.raw['title'] ?? h.displayTitle,
               seriesQ,
@@ -339,10 +344,25 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       );
       if (!hasTarget) {
         try {
+          String? authorHint = filters.authorQuery.trim();
+          if (authorHint.isEmpty) {
+            for (final h in enriched) {
+              if (BookSeriesNormalizer.hitBelongsToSeries(
+                    h.raw['title'] ?? h.displayTitle,
+                    seriesQ,
+                  ) &&
+                  h.author != null &&
+                  h.author!.isNotEmpty) {
+                authorHint = h.author;
+                break;
+              }
+            }
+          }
           final meta = await BookIntelligenceService.lookupVolumeCoverMeta(
             seriesName: seriesQ,
             volumeNumber: volumeHint.toDouble(),
             subcategory: _effectiveSub,
+            authorHint: authorHint,
           );
           enriched.insert(
             0,
@@ -351,21 +371,101 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
                 'title': '$seriesQ - Tome $volumeHint',
                 'series_title': seriesQ,
                 'series_volume': '$volumeHint',
+                if (authorHint != null && authorHint.isNotEmpty)
+                  'author': authorHint,
                 if (meta.coverUrl != null) 'image_url': meta.coverUrl!,
               },
               parsed: BookSeriesNormalizer.parse(
                 '$seriesQ - Tome $volumeHint',
               ),
               displayTitle: '$seriesQ - Tome $volumeHint',
+              author: authorHint,
               score: 10_000,
-              estimatedTotalVolumes:
-                  BookSeriesNormalizer.expectedCount(seriesQ, _effectiveSub),
-              detectedSubcategory:
-                  BookSeriesNormalizer.detectSubcategory(seriesName: seriesQ),
+              detectedSubcategory: BookSeriesNormalizer.detectSubcategory(
+                seriesName: seriesQ,
+              ),
             ),
           );
         } catch (_) {}
       }
+    }
+
+    // AniList en parallèle : bannière manga officielle en tête.
+    final anilistBanners = <SeriesBannerCandidate>[];
+    if (seriesQ.length >= 2 &&
+        (_sub == null || _sub == BookSubcategory.manga)) {
+      try {
+        final aniResults =
+            await AnilistMangaService.searchManga(seriesQ, limit: 3);
+        for (final ani in aniResults) {
+          final volCount = [
+            ani.volumes ?? 0,
+            BookSeriesNormalizer.maxVolumeAmongHits(
+              hits: enriched.map(
+                (h) => (
+                  title: h.raw['title'] ?? h.displayTitle,
+                  author: h.author,
+                  volume: h.parsed.volumeNumber?.round(),
+                ),
+              ),
+              seriesName: ani.title,
+              author: ani.author,
+            ),
+          ].reduce((a, b) => a > b ? a : b);
+          // Bannière AniList même sans hits GB (Kingdom Tome 2 manquant).
+          anilistBanners.add(
+            SeriesBannerCandidate(
+              name: ani.title,
+              volumeCount: volCount > 0 ? volCount : (ani.volumes ?? 1),
+              coversByVolume: {
+                if (ani.coverUrl != null && ani.coverUrl!.isNotEmpty) 1: ani.coverUrl!,
+              },
+              detectedSubcategory: BookSubcategory.manga,
+              author: ani.author,
+              coverUrl: ani.coverUrl,
+              fromAnilist: true,
+            ),
+          );
+
+          // Si tome ciblé toujours absent pour cet auteur AniList → carte synthétique.
+          if (volumeHint != null) {
+            final hasAniTome = enriched.any(
+              (h) =>
+                  h.parsed.volumeNumber?.round() == volumeHint &&
+                  BookSeriesNormalizer.hitBelongsToSeries(
+                    h.raw['title'] ?? h.displayTitle,
+                    ani.title,
+                  ) &&
+                  BookSeriesNormalizer.authorMatchesExpected(
+                    h.author,
+                    ani.author,
+                  ),
+            );
+            if (!hasAniTome) {
+              enriched.insert(
+                0,
+                EnrichedBookHit(
+                  raw: {
+                    'title': '${ani.title} - Tome $volumeHint',
+                    'series_title': ani.title,
+                    'series_volume': '$volumeHint',
+                    if (ani.author != null) 'author': ani.author!,
+                    if (ani.coverUrl != null) 'image_url': ani.coverUrl!,
+                  },
+                  parsed: BookSeriesNormalizer.parse(
+                    '${ani.title} - Tome $volumeHint',
+                  ),
+                  displayTitle: '${ani.title} - Tome $volumeHint',
+                  author: ani.author,
+                  score: 20_000,
+                  estimatedTotalVolumes: ani.volumes,
+                  detectedSubcategory: BookSubcategory.manga,
+                ),
+              );
+            }
+          }
+        }
+      } catch (_) {}
     }
 
     var banners = BookIntelligenceService.extractSeriesBanners(
@@ -380,29 +480,33 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
         return det == null || det == _sub;
       }).toList();
     }
-    banners = [
-      for (final b in banners)
+
+    // Fusionne AniList en tête, déduplique par (série, auteur).
+    final mergedBanners = <SeriesBannerCandidate>[];
+    final seenKeys = <String>{};
+    for (final b in [...anilistBanners, ...banners]) {
+      final key = BookSeriesNormalizer.seriesAuthorKey(b.name, b.author);
+      if (!seenKeys.add(key)) continue;
+      // Hors AniList : exige ≥1 tome numéroté (déjà filtré dans extract).
+      if (!b.fromAnilist && b.volumeCount < 1) continue;
+      mergedBanners.add(
         SeriesBannerCandidate(
           name: BookSeriesNormalizer.displaySeriesName(b.name),
-          volumeCount: () {
-            final det = b.detectedSubcategory ??
-                BookSeriesNormalizer.detectSubcategory(seriesName: b.name) ??
-                _effectiveSub;
-            final dict =
-                BookSeriesNormalizer.expectedCount(b.name, det) ?? 0;
-            return dict > b.volumeCount ? dict : b.volumeCount;
-          }(),
+          volumeCount: b.volumeCount,
           coversByVolume: b.coversByVolume,
           detectedSubcategory: b.detectedSubcategory ??
               BookSeriesNormalizer.detectSubcategory(seriesName: b.name),
           author: b.author,
+          coverUrl: b.coverUrl,
+          fromAnilist: b.fromAnilist,
         ),
-    ];
+      );
+    }
 
     if (!mounted) return;
     setState(() {
       _hits = enriched;
-      _banners = banners;
+      _banners = mergedBanners;
       _loading = false;
     });
   }
@@ -410,7 +514,6 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
   Future<void> _addSeries(SeriesBannerCandidate banner) async {
     final preferred = banner.detectedSubcategory ??
         BookSeriesNormalizer.detectSubcategory(seriesName: banner.name) ??
-        BookSeriesNormalizer.preferredSubcategory(banner.name) ??
         _effectiveSub;
     final key = BookSeriesNormalizer.seriesAuthorKey(
       banner.name,
@@ -461,9 +564,6 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
           seriesName: hit.parsed.seriesName,
           title: hit.displayTitle,
           publisher: hit.publisher,
-        ) ??
-        BookSeriesNormalizer.preferredSubcategory(
-          hit.parsed.seriesName ?? hit.displayTitle,
         ) ??
         _effectiveSub;
     final raw = Map<String, String>.from(hit.raw);
@@ -598,129 +698,286 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
   }
 
   Widget _buildFilters() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                _filterChip(
-                  label: 'Tous',
-                  selected: _sub == null,
-                  onTap: () {
-                    setState(() => _sub = null);
-                    if (_searched) _search();
-                  },
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 920),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    _filterChip(
+                      label: 'Tous',
+                      selected: _sub == null,
+                      onTap: () {
+                        setState(() => _sub = null);
+                        if (_searched) _search();
+                      },
+                    ),
+                    for (final s in BookSubcategory.filterChips)
+                      _filterChip(
+                        label: s.label,
+                        emoji: s.filterEmoji,
+                        selected: _sub == s,
+                        onTap: () {
+                          setState(() => _sub = s);
+                          if (_searched) _search();
+                        },
+                      ),
+                  ],
                 ),
-                for (final s in BookSubcategory.filterChips)
-                  _filterChip(
-                    label: s.label,
-                    emoji: s.filterEmoji,
-                    selected: _sub == s,
-                    onTap: () {
-                      setState(() => _sub = s);
-                      if (_searched) _search();
-                    },
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _titleController,
+                      focusNode: _titleFocus,
+                      textInputAction: TextInputAction.search,
+                      onChanged: (v) {
+                        if (v.trim().isEmpty) {
+                          setState(() => _showRecent = true);
+                        }
+                      },
+                      onSubmitted: (_) => _search(),
+                      decoration: const InputDecoration(
+                        hintText: 'Rechercher un titre, une série...',
+                        isDense: true,
+                        prefixIcon: Icon(Icons.menu_book_outlined, size: 20),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton.filled(
+                    onPressed: _loading ? null : _search,
+                    icon: _loading
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.search),
+                  ),
+                ],
+              ),
+            ),
+            _buildRecentPills(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _authorController,
+                      decoration: const InputDecoration(
+                        hintText: 'Auteur',
+                        isDense: true,
+                        prefixIcon: Icon(Icons.person_outline, size: 20),
+                      ),
+                      onSubmitted: (_) => _search(),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: _publisherController,
+                      decoration: const InputDecoration(
+                        hintText: 'Éditeur',
+                        isDense: true,
+                        prefixIcon: Icon(Icons.business_outlined, size: 20),
+                      ),
+                      onSubmitted: (_) => _search(),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 140,
+                    child: TextField(
+                      controller: _volumeController,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                      ],
+                      decoration: const InputDecoration(
+                        hintText: 'N° de tome',
+                        isDense: true,
+                        prefixIcon: Icon(Icons.tag, size: 20),
+                      ),
+                      onSubmitted: (_) => _search(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
+              child: Text(
+                'Google Books + iTunes + AniList · couvertures HD',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildHitSections() {
+    final volumes = <EnrichedBookHit>[];
+    final chapters = <EnrichedBookHit>[];
+    for (final h in _hits) {
+      final title = h.raw['title'] ?? h.displayTitle;
+      if (BookSeriesNormalizer.looksLikeChapterOrScan(title)) {
+        chapters.add(h);
+      } else {
+        volumes.add(h);
+      }
+    }
+    return [
+      if (volumes.isNotEmpty) ...[
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: Text(
+              'Tomes reliés (${volumes.length})',
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 13,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ),
+        _hitsGrid(volumes, chapterBadge: false),
+      ],
+      if (chapters.isNotEmpty) ...[
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Text(
+              'Chapitres / scans (${chapters.length})',
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 13,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ),
+        _hitsGrid(chapters, chapterBadge: true),
+      ],
+      const SliverToBoxAdapter(child: SizedBox(height: 24)),
+    ];
+  }
+
+  Widget _hitsGrid(List<EnrichedBookHit> hits, {required bool chapterBadge}) {
+    return SliverPadding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
+      sliver: SliverGrid(
+        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+          maxCrossAxisExtent: 150,
+          childAspectRatio: 0.62,
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 10,
+        ),
+        delegate: SliverChildBuilderDelegate(
+          (context, index) {
+            final hit = hits[index];
+            final det = hit.detectedSubcategory;
+            final seriesName = hit.parsed.seriesName ?? hit.displayTitle;
+            final owned = _ownedFor(seriesName);
+            final vol = hit.parsed.volumeNumber?.round();
+            final alreadyOwned = !chapterBadge &&
+                owned != null &&
+                vol != null &&
+                owned.ownedVolumes.contains(vol);
+            return Stack(
+              children: [
+                CatalogItemTile(
+                  name: hit.displayTitle,
+                  subtitle: [
+                    if (chapterBadge) '📄 Scan',
+                    if (_sub == null && det != null) _subBadge(det),
+                    if (hit.author != null && hit.author!.isNotEmpty)
+                      hit.author!,
+                    if (!chapterBadge && vol != null) 'Tome $vol',
+                  ].where((s) => s.isNotEmpty).join(' · '),
+                  imageUrl: hit.imageUrl,
+                  accent: chapterBadge
+                      ? Colors.blueGrey
+                      : (det ?? _effectiveSub).color,
+                  aspectRatio: 0.62,
+                  highQualityImage: true,
+                  placeholderIcon: chapterBadge
+                      ? Icons.article_outlined
+                      : Icons.menu_book_outlined,
+                  onTap: () => _select(hit),
+                ),
+                if (chapterBadge)
+                  Positioned(
+                    top: 4,
+                    left: 4,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.blueGrey.shade700,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text(
+                        'Chapitre',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ),
+                if (alreadyOwned)
+                  Positioned(
+                    top: 4,
+                    left: 4,
+                    right: 4,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF26A69A),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text(
+                        '✓ Dans ma collection',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
                   ),
               ],
-            ),
-          ),
+            );
+          },
+          childCount: hits.length,
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _titleController,
-                  focusNode: _titleFocus,
-                  textInputAction: TextInputAction.search,
-                  onChanged: (v) {
-                    if (v.trim().isEmpty) {
-                      setState(() => _showRecent = true);
-                    }
-                  },
-                  onSubmitted: (_) => _search(),
-                  decoration: const InputDecoration(
-                    hintText: 'Titre (ex. kingdom 2)',
-                    isDense: true,
-                    prefixIcon: Icon(Icons.menu_book_outlined, size: 20),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              IconButton.filled(
-                onPressed: _loading ? null : _search,
-                icon: _loading
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.search),
-              ),
-            ],
-          ),
-        ),
-        _buildRecentPills(),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _authorController,
-                  decoration: const InputDecoration(
-                    hintText: 'Auteur',
-                    isDense: true,
-                    prefixIcon: Icon(Icons.person_outline, size: 20),
-                  ),
-                  onSubmitted: (_) => _search(),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: TextField(
-                  controller: _publisherController,
-                  decoration: const InputDecoration(
-                    hintText: 'Éditeur',
-                    isDense: true,
-                    prefixIcon: Icon(Icons.business_outlined, size: 20),
-                  ),
-                  onSubmitted: (_) => _search(),
-                ),
-              ),
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 88,
-                child: TextField(
-                  controller: _volumeController,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: const InputDecoration(
-                    hintText: 'Tome n°',
-                    isDense: true,
-                  ),
-                  onSubmitted: (_) => _search(),
-                ),
-              ),
-            ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
-          child: Text(
-            'Google Books + iTunes · couvertures HD',
-            style: TextStyle(
-              fontSize: 11,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
@@ -841,82 +1098,20 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
           else ...[
             if (_banners.isNotEmpty)
               SliverToBoxAdapter(
-                child: Column(
-                  children: [
-                    for (final b in _banners) _buildBanner(b),
-                    const SizedBox(height: 4),
-                  ],
-                ),
-              ),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 24),
-              sliver: SliverGrid(
-                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 150,
-                  childAspectRatio: 0.62,
-                  mainAxisSpacing: 10,
-                  crossAxisSpacing: 10,
-                ),
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final hit = _hits[index];
-                    final det = hit.detectedSubcategory;
-                    final seriesName =
-                        hit.parsed.seriesName ?? hit.displayTitle;
-                    final owned = _ownedFor(seriesName);
-                    final vol = hit.parsed.volumeNumber?.round();
-                    final alreadyOwned = owned != null &&
-                        vol != null &&
-                        owned.ownedVolumes.contains(vol);
-                    return Stack(
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 920),
+                    child: Column(
                       children: [
-                        CatalogItemTile(
-                          name: hit.displayTitle,
-                          subtitle: [
-                            if (_sub == null && det != null) _subBadge(det),
-                            if (hit.author != null && hit.author!.isNotEmpty)
-                              hit.author!,
-                            if (vol != null) 'Tome $vol',
-                          ].where((s) => s.isNotEmpty).join(' · '),
-                          imageUrl: hit.imageUrl,
-                          accent: (det ?? _effectiveSub).color,
-                          aspectRatio: 0.62,
-                          highQualityImage: true,
-                          placeholderIcon: Icons.menu_book_outlined,
-                          onTap: () => _select(hit),
-                        ),
-                        if (alreadyOwned)
-                          Positioned(
-                            top: 4,
-                            left: 4,
-                            right: 4,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF26A69A),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: const Text(
-                                '✓ Dans ma collection',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ),
-                          ),
+                        for (final b in _banners) _buildBanner(b),
+                        const SizedBox(height: 4),
                       ],
-                    );
-                  },
-                  childCount: _hits.length,
+                    ),
+                  ),
                 ),
               ),
-            ),
+            ..._buildHitSections(),
           ],
         ],
       ),

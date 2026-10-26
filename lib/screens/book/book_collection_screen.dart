@@ -6,6 +6,7 @@ import '../../models/book_series.dart';
 import '../../models/book_subcategory.dart';
 import '../../models/book_volume.dart';
 import '../../models/collection_category.dart';
+import '../../models/collection_group.dart';
 import '../../models/collection_item.dart';
 import '../../models/collection_list_filters.dart';
 import '../../services/book_series_service.dart';
@@ -18,12 +19,15 @@ import '../../utils/collection_grid_layout.dart';
 import '../../utils/tile_rating_display.dart';
 import '../../widgets/app_app_bar.dart';
 import '../../widgets/author_avatar.dart';
+import '../../widgets/boardgame_tile_sheets.dart';
+import '../../widgets/book_owned_range_dialog.dart';
 import '../../widgets/book_series_tile.dart';
 import '../../widgets/collection_cover_image.dart';
 import '../../widgets/collection_filter_bar.dart' show GroupFilterOption;
 import '../../widgets/collection_item_tile.dart';
 import '../../widgets/focus_filter_button.dart';
 import '../../widgets/item_title_text.dart';
+import '../../widgets/precision_star_rating_bar.dart';
 import '../book_author_detail_screen.dart';
 import '../book_series_detail_screen.dart';
 import '../item_detail_screen.dart';
@@ -65,6 +69,7 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
   CollectionListFilters _focusFilters = CollectionListFilters();
   Map<String, String> _groupNamesById = {};
   List<_SeriesEntry> _entries = [];
+  List<CollectionGroup> _groups = [];
 
   @override
   void initState() {
@@ -107,10 +112,157 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
       final groups = await GroupService().fetchMyGroups();
       if (mounted) {
         setState(() {
+          _groups = groups;
           _groupNamesById = {for (final g in groups) g.id: g.name};
         });
       }
     } catch (_) {}
+  }
+
+  Future<void> _onOwnedChip(_SeriesEntry entry) async {
+    final total = entry.series.expectedVolumeCount ?? entry.stats.totalSlots;
+    final range = await showBookOwnedRangeDialog(
+      context,
+      seriesName: entry.series.name,
+      totalVolumes: total > 0 ? total : 1,
+    );
+    if (range == null || !mounted) return;
+    if (range.choice == BookOwnedRangeChoice.none) return;
+    if (range.choice == BookOwnedRangeChoice.all) {
+      await _service.markVolumesOwned(
+        series: entry.series,
+        fromVolume: 1,
+        toVolume: total > 0 ? total : 1,
+      );
+    } else if (range.choice == BookOwnedRangeChoice.range) {
+      await _service.markVolumesOwned(
+        series: entry.series,
+        fromVolume: range.from ?? 1,
+        toVolume: range.to ?? range.from ?? 1,
+      );
+    }
+    if (mounted) _load(silent: true);
+  }
+
+  Future<void> _onReadChip(_SeriesEntry entry) async {
+    // Marque le prochain tome non lu comme lu, ou ouvre la série.
+    final owned = entry.items
+        .where((i) => !i.isWishlist && !i.isSold)
+        .toList()
+      ..sort((a, b) {
+        final av = a.volumeId ?? '';
+        final bv = b.volumeId ?? '';
+        return av.compareTo(bv);
+      });
+    CollectionItem? nextUnread;
+    for (final item in owned) {
+      if (!item.isRead) {
+        nextUnread = item;
+        break;
+      }
+    }
+    if (nextUnread == null) {
+      if (!mounted) return;
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (ctx) => BookSeriesDetailScreen(seriesId: entry.series.id),
+        ),
+      );
+      if (mounted) _load(silent: true);
+      return;
+    }
+    final target = nextUnread;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Marquer comme lu ?'),
+        content: Text('« ${target.title} »'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Ouvrir la série'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Marquer lu'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (ok == true) {
+      await _service.setItemRead(target.id, true);
+      if (mounted) _load(silent: true);
+      return;
+    }
+    if (ok == false) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (ctx) => BookSeriesDetailScreen(seriesId: entry.series.id),
+        ),
+      );
+      if (mounted) _load(silent: true);
+    }
+  }
+
+  Future<void> _onRatingChip(_SeriesEntry entry) async {
+    var rating = entry.series.userRating ?? entry.stats.displayRating ?? 0.0;
+    if (rating > 5) rating = rating / 2;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Note · ${entry.series.name}',
+                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+              ),
+              const SizedBox(height: 16),
+              PrecisionStarRatingBar(
+                rating: rating.clamp(0.0, 5.0),
+                onChanged: (v) async {
+                  await _service.updateSeries(
+                    entry.series.copyWith(
+                      userRating: v <= 0 ? null : v,
+                      clearUserRating: v <= 0,
+                    ),
+                  );
+                  if (mounted) _load(silent: true);
+                },
+              ),
+              const SizedBox(height: 12),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _onLocationChip(_SeriesEntry entry) async {
+    final owned = entry.items
+        .where((i) => !i.isWishlist && !i.isSold)
+        .toList();
+    if (owned.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Ajoute d\'abord un tome pour définir un lieu.'),
+        ),
+      );
+      return;
+    }
+    await showBoardgameTileLocationSheet(
+      context,
+      item: owned.first,
+      groups: _groups,
+    );
+    if (mounted) _load(silent: true);
   }
 
   Future<void> _load({bool silent = false}) async {
@@ -125,7 +277,9 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
 
       final bundle = await _service.fetchCollectionBundle();
       final entries = <_SeriesEntry>[];
-      for (final series in bundle.series) {
+      for (var series in bundle.series) {
+        // Persiste le nom nettoyé (« One Piece - Édition originale » → « One Piece »).
+        series = await _service.sanitizeSeriesName(series);
         final volumes = bundle.volumesBySeries[series.id] ?? const [];
         final items = bundle.itemsBySeries[series.id] ?? const [];
         final stats = _service.computeStats(
@@ -181,8 +335,7 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
                   (e.series.expectedVolumeCount ?? e.stats.totalSlots) <= 1 &&
                   (e.series.subcategory == BookSubcategory.manga ||
                       e.series.subcategory == BookSubcategory.comic ||
-                      e.series.subcategory == BookSubcategory.comics ||
-                      e.series.name.toLowerCase().contains('dungeon crawler')),
+                      e.series.subcategory == BookSubcategory.comics),
             )
             .take(4)
             .toList();
@@ -657,11 +810,8 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
       return SliverPadding(
         padding: const EdgeInsets.fromLTRB(12, 0, 12, 24),
         sliver: SliverGrid(
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: CollectionGridLayout.crossAxisCount(
-              context,
-              mobile: 3,
-            ),
+          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: 150,
             mainAxisSpacing: 8,
             crossAxisSpacing: 8,
             childAspectRatio: 0.62,
@@ -684,11 +834,8 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
     return SliverPadding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
       sliver: SliverGrid(
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: CollectionGridLayout.crossAxisCount(
-            context,
-            mobile: 2,
-          ),
+        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+          maxCrossAxisExtent: 210,
           mainAxisSpacing: 10,
           crossAxisSpacing: 10,
           childAspectRatio: 0.58,
@@ -702,6 +849,10 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
               accent: BookAccent.primary,
               onDelete: () => _confirmDeleteSeries(entry.series),
               onTap: () => openSeries(entry),
+              onOwnedTap: () => _onOwnedChip(entry),
+              onReadTap: () => _onReadChip(entry),
+              onRatingTap: () => _onRatingChip(entry),
+              onLocationTap: () => _onLocationChip(entry),
             );
           },
           childCount: visible.length,

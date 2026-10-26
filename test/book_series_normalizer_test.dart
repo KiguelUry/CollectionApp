@@ -77,42 +77,26 @@ void main() {
   });
 
   group('BookSeriesNormalizer', () {
-    test('compteurs connus', () {
+    test('expectedCount / preferredSubcategory toujours null (plus de dicos)', () {
       expect(
         BookSeriesNormalizer.expectedCount('Thorgal', BookSubcategory.comic),
-        42,
+        isNull,
       );
       expect(
         BookSeriesNormalizer.expectedCount('Naruto', BookSubcategory.manga),
-        72,
+        isNull,
       );
       expect(
         BookSeriesNormalizer.expectedCount('One Piece', BookSubcategory.manga),
-        110,
+        isNull,
       );
       expect(
-        BookSeriesNormalizer.expectedCount('Kagurabachi', BookSubcategory.manga),
-        11,
+        BookSeriesNormalizer.expectedCount('Kingdom', BookSubcategory.manga),
+        isNull,
       );
-    });
-
-    test('Thorgal / Astérix → catégorie BD', () {
-      expect(
-        BookSeriesNormalizer.preferredSubcategory('Thorgal'),
-        BookSubcategory.comic,
-      );
-      expect(
-        BookSeriesNormalizer.preferredSubcategory('Les Mondes de Thorgal'),
-        BookSubcategory.comic,
-      );
-      expect(
-        BookSeriesNormalizer.preferredSubcategory('Astérix'),
-        BookSubcategory.comic,
-      );
-      expect(
-        BookSeriesNormalizer.preferredSubcategory('Naruto'),
-        BookSubcategory.manga,
-      );
+      expect(BookSeriesNormalizer.preferredSubcategory('Thorgal'), isNull);
+      expect(BookSeriesNormalizer.preferredSubcategory('Naruto'), isNull);
+      expect(BookSeriesNormalizer.preferredSubcategory('Astérix'), isNull);
     });
 
     test('mergeKey ignore le tome', () {
@@ -152,17 +136,25 @@ void main() {
       );
     });
 
-    test('detectSubcategory depuis éditeur / série connue', () {
+    test('detectSubcategory depuis éditeur / subjects uniquement', () {
       expect(
         BookSeriesNormalizer.detectSubcategory(seriesName: 'Kingdom'),
-        BookSubcategory.manga,
+        isNull, // plus de liste de titres
       );
       expect(
         BookSeriesNormalizer.detectSubcategory(seriesName: 'Thorgal'),
-        BookSubcategory.comic,
+        isNull,
       );
       expect(
         BookSeriesNormalizer.detectSubcategory(publisher: 'Kana'),
+        BookSubcategory.manga,
+      );
+      expect(
+        BookSeriesNormalizer.detectSubcategory(publisher: 'Meian'),
+        BookSubcategory.manga,
+      );
+      expect(
+        BookSeriesNormalizer.detectSubcategory(publisher: 'Ototo'),
         BookSubcategory.manga,
       );
       expect(
@@ -170,8 +162,22 @@ void main() {
         BookSubcategory.comic,
       );
       expect(
+        BookSeriesNormalizer.detectSubcategory(publisher: 'Bamboo'),
+        BookSubcategory.comic,
+      );
+      expect(
         BookSeriesNormalizer.detectSubcategory(publisher: 'Urban Comics'),
         BookSubcategory.comics,
+      );
+      expect(
+        BookSeriesNormalizer.detectSubcategory(publisher: 'Panini Comics'),
+        BookSubcategory.comics,
+      );
+      expect(
+        BookSeriesNormalizer.detectSubcategory(
+          subjects: 'Comics & Graphic Novels / Manga',
+        ),
+        BookSubcategory.manga,
       );
       expect(
         BookSeriesNormalizer.coverSearchSeriesName(
@@ -181,11 +187,39 @@ void main() {
       );
     });
 
-    test('Kingdom a un compteur connu', () {
+    test('looksLikeChapterOrScan distingue chapitres et tomes', () {
       expect(
-        BookSeriesNormalizer.expectedCount('Kingdom', BookSubcategory.manga),
-        73,
+        BookSeriesNormalizer.looksLikeChapterOrScan(
+          'One Piece édition originale - Chapitre 1114',
+        ),
+        isTrue,
       );
+      expect(
+        BookSeriesNormalizer.looksLikeChapterOrScan('One Piece - Tome 2'),
+        isFalse,
+      );
+      expect(
+        BookSeriesNormalizer.looksLikeChapterOrScan('One Piece Chapter 500'),
+        isTrue,
+      );
+    });
+
+    test('maxVolumeAmongHits respecte (série, auteur)', () {
+      final max = BookSeriesNormalizer.maxVolumeAmongHits(
+        hits: [
+          (title: 'Kingdom - Tome 2', author: 'Yasuhisa Hara', volume: 2),
+          (title: 'Kingdom - Tome 10', author: 'Yasuhisa Hara', volume: 10),
+          (title: 'TYRAN', author: 'T.M. Frazier', volume: 2),
+          (
+            title: 'Kingdom - Chapitre 50',
+            author: 'Yasuhisa Hara',
+            volume: 50,
+          ),
+        ],
+        seriesName: 'Kingdom',
+        author: 'Yasuhisa Hara',
+      );
+      expect(max, 10);
     });
 
     test('namesMatch ignore casse et tirets', () {

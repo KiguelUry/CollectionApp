@@ -15,6 +15,10 @@ class BookSeriesTile extends StatelessWidget {
   final VoidCallback? onDelete;
   final bool isFavorite;
   final VoidCallback? onToggleFavorite;
+  final VoidCallback? onOwnedTap;
+  final VoidCallback? onReadTap;
+  final VoidCallback? onRatingTap;
+  final VoidCallback? onLocationTap;
 
   const BookSeriesTile({
     super.key,
@@ -25,12 +29,15 @@ class BookSeriesTile extends StatelessWidget {
     this.onDelete,
     this.isFavorite = false,
     this.onToggleFavorite,
+    this.onOwnedTap,
+    this.onReadTap,
+    this.onRatingTap,
+    this.onLocationTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    // Manga/BD/Comics ne sont jamais « Œuvre unique » (voir BookSeries.isStandalone).
     final isOneShot = series.isStandalone;
     final subLabel = isOneShot
         ? '${series.subcategory.label} · Œuvre unique'
@@ -162,6 +169,7 @@ class BookSeriesTile extends StatelessWidget {
                       color: stats.ownedCount > 0
                           ? Colors.green.shade700
                           : Colors.grey,
+                      onTap: onOwnedTap,
                     ),
                     _MetaChip(
                       icon: Icons.visibility_outlined,
@@ -169,6 +177,7 @@ class BookSeriesTile extends StatelessWidget {
                       color: stats.readCount > 0
                           ? Colors.amber.shade800
                           : Colors.blueGrey,
+                      onTap: onReadTap,
                     ),
                   ],
                 )
@@ -179,11 +188,13 @@ class BookSeriesTile extends StatelessWidget {
                       icon: Icons.menu_book_outlined,
                       label: stats.ownedLabel,
                       color: ownedColor,
+                      onTap: onOwnedTap,
                     ),
                     _MetaChip(
                       icon: Icons.visibility_outlined,
                       label: stats.readLabel,
                       color: Colors.amber.shade800,
+                      onTap: onReadTap,
                     ),
                   ],
                 ),
@@ -200,13 +211,13 @@ class BookSeriesTile extends StatelessWidget {
                           icon: Icons.star_rounded,
                           label: chip.label.replaceFirst('★ ', ''),
                           color: chip.color,
+                          onTap: onRatingTap,
                         ),
                         _MetaChip(
-                          icon: stats.valueLabel != null
-                              ? Icons.payments_outlined
-                              : Icons.place_outlined,
+                          icon: Icons.place_outlined,
                           label: stats.valueLabel ?? '—',
                           color: Colors.teal.shade600,
+                          onTap: onLocationTap,
                         ),
                       ],
                     );
@@ -246,16 +257,18 @@ class _MetaChip extends StatelessWidget {
   final IconData icon;
   final String label;
   final Color color;
+  final VoidCallback? onTap;
 
   const _MetaChip({
     required this.icon,
     required this.label,
     required this.color,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final child = Container(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
@@ -280,6 +293,15 @@ class _MetaChip extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+    if (onTap == null) return child;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(5),
+        child: child,
       ),
     );
   }

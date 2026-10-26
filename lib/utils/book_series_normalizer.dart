@@ -1,63 +1,9 @@
 import '../models/book_subcategory.dart';
 import 'book_title_parser.dart';
 
-/// Normalise titres livres → (série, tome) + compteurs connus.
+/// Normalise titres livres → (série, tome). Catégorie / compteurs = API + éditeurs.
 abstract final class BookSeriesNormalizer {
-  /// Grandes séries FR / manga (ajustable ensuite via `expected_volume_count`).
-  static const knownExpectedVolumes = <String, int>{
-    'thorgal': 42,
-    'asterix': 40,
-    'astérix': 40,
-    'tintin': 24,
-    'naruto': 72,
-    'one piece': 110,
-    'dragon ball': 42,
-    'gannibal': 13,
-    'dungeon crawler carl': 7,
-    'kagurabachi': 11,
-    'boruto': 20,
-    'boruto - two blue vortex': 5,
-    'boruto: two blue vortex': 5,
-    'blake et mortimer': 30,
-    'lucky luke': 80,
-    'spirou': 55,
-    'boule et bill': 40,
-    'XIII': 28,
-    'xiii': 28,
-    'lanfeust de troy': 8,
-    'largo winch': 22,
-    'gaston': 19,
-    'berserk': 42,
-    'attack on titan': 34,
-    'l\'attaque des titans': 34,
-    'death note': 12,
-    'demon slayer': 23,
-    'jujutsu kaisen': 26,
-    'hunter x hunter': 38,
-    'bleach': 74,
-    'fullmetal alchemist': 27,
-    'vinland saga': 28,
-    'vagabond': 37,
-    'kingdom': 73,
-  };
-
-  /// Séries franco-belges → toujours BD (jamais Roman / Manga).
-  static const knownBdSeries = <String>{
-    'thorgal',
-    'asterix',
-    'astérix',
-    'tintin',
-    'blake et mortimer',
-    'lucky luke',
-    'spirou',
-    'boule et bill',
-    'xiii',
-    'lanfeust de troy',
-    'largo winch',
-    'gaston',
-  };
-
-  /// Éditeurs manga FR / US.
+  /// Éditeurs manga FR / US (heuristique éditeur, jamais titre de série).
   static const mangaPublishers = <String>{
     'meian',
     'kana',
@@ -66,22 +12,28 @@ abstract final class BookSeriesNormalizer {
     'kurokawa',
     'pika',
     'panini manga',
-    'panini',
     'crunchyroll',
     'kazé',
     'kaze',
     'glénat manga',
     'glenat manga',
     'delcourt/tonkam',
+    'delcourt tonkam',
     'tonkam',
     'soleil manga',
     'akata',
+    'ototo',
+    'taifu',
+    'mangetsu',
+    'noeve',
+    'noeve grafx',
     'vega',
     'viz',
     'viz media',
     'shonen jump',
     'kodansha',
     'shueisha',
+    'ankama',
   };
 
   /// Éditeurs BD franco-belge.
@@ -101,6 +53,7 @@ abstract final class BookSeriesNormalizer {
     'rue de sevres',
     'futuropolis',
     'dupuis / marsu',
+    'ankama',
   };
 
   /// Éditeurs comics US.
@@ -116,37 +69,37 @@ abstract final class BookSeriesNormalizer {
     'panini comics',
   };
 
-  /// Déduit Manga / BD / Comics depuis éditeur + titre (jamais la pilule UI).
+  /// Déduit Manga / BD / Comics depuis éditeur + subjects API (jamais une liste de titres).
   static BookSubcategory? detectSubcategory({
     String? seriesName,
     String? title,
     String? publisher,
     String? subjects,
   }) {
-    final preferred = seriesName != null && seriesName.isNotEmpty
-        ? preferredSubcategory(seriesName)
-        : null;
-    if (preferred != null) return preferred;
-    if (title != null && title.isNotEmpty) {
-      final fromTitle = preferredSubcategory(title);
-      if (fromTitle != null) return fromTitle;
-    }
-
     final pub = (publisher ?? '').toLowerCase().trim();
     if (pub.isNotEmpty) {
+      // « Glénat Manga » / « Soleil Manga » avant « Glénat » / « Soleil » seuls.
       if (mangaPublishers.any((p) => pub.contains(p))) {
         return BookSubcategory.manga;
       }
       if (comicsPublishers.any((p) => pub.contains(p))) {
         return BookSubcategory.comics;
       }
-      // « Glénat » seul = souvent BD ; « Glénat Manga » déjà couvert plus haut.
       if (bdPublishers.any((p) => pub.contains(p))) {
         return BookSubcategory.comic;
       }
     }
 
     final subj = (subjects ?? '').toLowerCase();
+    final blob = '$subj ${title ?? ''} ${seriesName ?? ''}'.toLowerCase();
+    if (subj.contains('manga') ||
+        subj.contains('anime') ||
+        RegExp(r'\bmanga\b').hasMatch(blob) &&
+            pub.contains('manga')) {
+      if (subj.contains('manga') || subj.contains('anime')) {
+        return BookSubcategory.manga;
+      }
+    }
     if (subj.contains('manga') || subj.contains('anime')) {
       return BookSubcategory.manga;
     }
@@ -162,40 +115,12 @@ abstract final class BookSeriesNormalizer {
     return null;
   }
 
-  /// Catégorie préférée pour une série connue (fusion multi-dossiers).
-  static BookSubcategory? preferredSubcategory(String seriesName) {
-    final key = normalizeKey(seriesName);
-    // Toute série « Thorgal » (Mondes de Thorgal, etc.) → BD.
-    if (key.contains('thorgal')) return BookSubcategory.comic;
-    if (knownBdSeries.contains(key) ||
-        knownBdSeries.any((k) => key.startsWith(k) || k.startsWith(key))) {
-      return BookSubcategory.comic;
-    }
-    const manga = {
-      'naruto',
-      'one piece',
-      'dragon ball',
-      'gannibal',
-      'kagurabachi',
-      'kingdom',
-      'boruto',
-      'berserk',
-      'bleach',
-      'demon slayer',
-      'jujutsu kaisen',
-      'death note',
-      'vinland saga',
-      'vagabond',
-      'fullmetal alchemist',
-      'hunter x hunter',
-      'attack on titan',
-      'l\'attaque des titans',
-    };
-    if (manga.any((k) => key == k || key.startsWith(k) || k.startsWith(key))) {
-      return BookSubcategory.manga;
-    }
-    return null;
-  }
+  /// @Deprecated — plus de liste de titres. Toujours null (catégorie = éditeur/API).
+  static BookSubcategory? preferredSubcategory(String seriesName) => null;
+
+  /// @Deprecated — plus de dictionnaire de tomes. Toujours null (AniList / max hits).
+  static int? expectedCount(String seriesName, [BookSubcategory? subcategory]) =>
+      null;
 
   /// Clé de fusion (ignore « - Tome N »).
   static String mergeKey(String rawName) {
@@ -219,19 +144,7 @@ abstract final class BookSeriesNormalizer {
       BookTitleParser.seriesNamesMatch(normalizeKey(a), normalizeKey(b)) ||
       BookTitleParser.seriesNamesMatch(a, b);
 
-  /// Nombre de tomes attendus (dictionnaire, sinon null).
-  static int? expectedCount(String seriesName, [BookSubcategory? subcategory]) {
-    final key = normalizeKey(seriesName);
-    final direct = knownExpectedVolumes[key];
-    if (direct != null) return direct;
-    for (final e in knownExpectedVolumes.entries) {
-      if (key.startsWith(e.key) || e.key.startsWith(key)) return e.value;
-    }
-    return null;
-  }
-
   /// Vrai si le titre du hit appartient strictement à la série [seriesName].
-  /// Rejette « Fallen Kingdom », « Realist Hero Rebuilt the Kingdom », etc.
   static bool hitBelongsToSeries(String hitTitle, String seriesName) {
     final want = normalizeKey(
       stripEditionSuffix(stripOrphanVolumeSuffix(seriesName)),
@@ -242,11 +155,30 @@ abstract final class BookSeriesNormalizer {
         ? normalizeKey(stripEditionSuffix(parsed.seriesName!))
         : normalizeKey(stripEditionSuffix(stripOrphanVolumeSuffix(hitTitle)));
     if (extracted.isEmpty) return false;
-    // Égalité stricte (pas contains : évite « kingdom » ⊂ « fallen kingdom »).
     return extracted == want;
   }
 
-  /// Normalise un nom d’auteur pour comparaison dynamique (pas de liste fixe).
+  /// Titre qui ressemble à un chapitre / scan unitaire (pas un tome relié).
+  static bool looksLikeChapterOrScan(String title) {
+    final t = title.toLowerCase();
+    if (RegExp(
+      r'\b(?:chapitre|chapter|chap\.?|ch\.?)\s*\d+',
+      caseSensitive: false,
+    ).hasMatch(t)) {
+      // « Tome » + « Chapitre » dans le même titre = souvent un omnibus / faux positif.
+      if (RegExp(r'\b(?:tome|vol\.?|volume)\s*\d+', caseSensitive: false)
+          .hasMatch(t)) {
+        return false;
+      }
+      return true;
+    }
+    if (RegExp(r'\b(?:scan|scanlation|webtoon)\b', caseSensitive: false)
+        .hasMatch(t)) {
+      return true;
+    }
+    return false;
+  }
+
   static String normalizeAuthorKey(String raw) {
     return raw
         .toLowerCase()
@@ -255,7 +187,6 @@ abstract final class BookSeriesNormalizer {
         .trim();
   }
 
-  /// Compare deux auteurs dynamiquement (égalité, inclusion, nom de famille).
   static bool authorsMatch(String? a, String? b) {
     final na = normalizeAuthorKey(a ?? '');
     final nb = normalizeAuthorKey(b ?? '');
@@ -275,20 +206,17 @@ abstract final class BookSeriesNormalizer {
     return sa.intersection(sb).isNotEmpty;
   }
 
-  /// Si [expectedAuthor] est connu, le hit doit matcher ; sinon pas de filtre.
   static bool authorMatchesExpected(String? hitAuthor, String? expectedAuthor) {
     if (expectedAuthor == null || expectedAuthor.trim().isEmpty) return true;
     return authorsMatch(hitAuthor, expectedAuthor);
   }
 
-  /// Clé de regroupement bannière : (série nettoyée, auteur).
   static String seriesAuthorKey(String seriesName, String? author) {
     final s = mergeKey(seriesName);
     final a = normalizeAuthorKey(author ?? '');
     return a.isEmpty ? s : '$s|$a';
   }
 
-  /// Titre d’affichage canonique (sans « - Tome N » / « Édition originale »).
   static String displaySeriesName(String rawTitle) {
     final parsed = parse(rawTitle);
     var name = parsed.hasSeries
@@ -298,7 +226,6 @@ abstract final class BookSeriesNormalizer {
     return stripEditionSuffix(name);
   }
 
-  /// Retire suffixes volume orphelins via Regex universelle (aucune série hardcodée).
   static String stripOrphanVolumeSuffix(String name) {
     var s = name.trim().replaceAll(RegExp(r'[–—−]'), '-');
     s = s.replaceAll(
@@ -312,7 +239,6 @@ abstract final class BookSeriesNormalizer {
     return s.isEmpty ? name.trim() : s;
   }
 
-  /// Retire « Édition originale », omnibus, coffret… via Regex universelle.
   static String stripEditionSuffix(String name) {
     var s = name.trim().replaceAll(RegExp(r'[–—−]'), '-');
     s = s.replaceAll(
@@ -340,7 +266,6 @@ abstract final class BookSeriesNormalizer {
     return s.replaceAll(RegExp(r'[\s,;:\-]+$'), '').trim();
   }
 
-  /// Requête Google Books ciblée : intitle + inauthor dynamiques.
   static String googleBooksCoverQuery({
     required String seriesTitle,
     int? volumeNumber,
@@ -358,10 +283,8 @@ abstract final class BookSeriesNormalizer {
     return parts.join(' ');
   }
 
-  /// Alias pour requêtes de couverture (= displaySeriesName).
   static String coverSearchSeriesName(String raw) => displaySeriesName(raw);
 
-  /// Décompose « kingdom 2 » / « one piece 15 » → série + n° tome.
   static ({String seriesQuery, int? volumeNumber}) parseCatalogSearchQuery(
     String raw,
   ) {
@@ -375,5 +298,22 @@ abstract final class BookSeriesNormalizer {
       );
     }
     return (seriesQuery: displaySeriesName(t), volumeNumber: null);
+  }
+
+  /// Max des n° de tome parmi des hits appartenant au couple (série, auteur).
+  static int maxVolumeAmongHits({
+    required Iterable<({String title, String? author, int? volume})> hits,
+    required String seriesName,
+    String? author,
+  }) {
+    var max = 0;
+    for (final h in hits) {
+      if (!hitBelongsToSeries(h.title, seriesName)) continue;
+      if (!authorMatchesExpected(h.author, author)) continue;
+      if (looksLikeChapterOrScan(h.title)) continue;
+      final n = h.volume ?? 0;
+      if (n > max) max = n;
+    }
+    return max;
   }
 }

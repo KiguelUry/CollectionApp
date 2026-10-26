@@ -244,13 +244,16 @@ class BookSeriesService {
     );
     final covers = <int, String>{};
     var maxVol = series.expectedVolumeCount ?? 0;
-    final dict = BookSeriesNormalizer.expectedCount(
-          series.name,
-          series.subcategory,
-        ) ??
-        0;
-    if (dict > maxVol) maxVol = dict;
+    final seriesAuthor = series.author;
     for (final h in hits) {
+      final title = h.raw['title'] ?? h.displayTitle;
+      if (BookSeriesNormalizer.looksLikeChapterOrScan(title)) continue;
+      if (!BookSeriesNormalizer.hitBelongsToSeries(title, series.name)) {
+        continue;
+      }
+      if (!BookSeriesNormalizer.authorMatchesExpected(h.author, seriesAuthor)) {
+        continue;
+      }
       final n = h.parsed.volumeNumber?.round();
       if (n != null && n > 0) {
         if (n > maxVol) maxVol = n;
@@ -259,18 +262,28 @@ class BookSeriesService {
           covers.putIfAbsent(n, () => img);
         }
       }
-      final est = h.estimatedTotalVolumes;
-      if (est != null && est > maxVol) maxVol = est;
     }
-    var updated = series;
-    if (maxVol > (series.expectedVolumeCount ?? 0)) {
-      updated = (await bumpExpectedCountIfHigher(series, maxVol)) ?? series;
+    // Manga : AniList volumes (dynamique).
+    var workingSeries = series;
+    if (workingSeries.subcategory == BookSubcategory.manga) {
+      final ani = await AnilistMangaService.lookupManga(workingSeries.name);
+      if (ani != null) {
+        if (ani.volumes != null && ani.volumes! > maxVol) {
+          maxVol = ani.volumes!;
+        }
+        if ((seriesAuthor == null || seriesAuthor.isEmpty) &&
+            ani.author != null &&
+            ani.author!.isNotEmpty) {
+          workingSeries =
+              await ensureSeriesAuthor(workingSeries, ani.author!);
+        }
+      }
     }
-    // Force Thorgal → BD.
-    final preferred = BookSeriesNormalizer.preferredSubcategory(updated.name);
-    if (preferred != null && preferred != updated.subcategory) {
-      updated = updated.copyWith(subcategory: preferred);
-      await updateSeries(updated);
+    var updated = workingSeries;
+    if (maxVol > (workingSeries.expectedVolumeCount ?? 0)) {
+      updated =
+          (await bumpExpectedCountIfHigher(workingSeries, maxVol)) ??
+              workingSeries;
     }
     if (covers.isNotEmpty) {
       await applyVolumeCoversFromMap(
@@ -281,21 +294,14 @@ class BookSeriesService {
     return (await fetchSeriesById(updated.id)) ?? updated;
   }
 
-  /// Si manga/BD/comics (ou roman multi) a ≤1 tome déclaré, sonde le catalogue.
+  /// Si manga/BD/comics a ≤1 tome déclaré, sonde le catalogue / AniList.
   Future<BookSeries> ensureRealisticVolumeCount(BookSeries series) async {
-    final preferred = BookSeriesNormalizer.preferredSubcategory(series.name);
-    var cur = series;
-    if (preferred != null && preferred != cur.subcategory) {
-      cur = cur.copyWith(subcategory: preferred);
-      await updateSeries(cur);
-    }
-    final isSerial = cur.subcategory == BookSubcategory.manga ||
-        cur.subcategory == BookSubcategory.comic ||
-        cur.subcategory == BookSubcategory.comics ||
-        BookSeriesNormalizer.expectedCount(cur.name, cur.subcategory) != null;
-    if (!isSerial) return cur;
-    if ((cur.expectedVolumeCount ?? 0) > 1) return cur;
-    return refreshPublications(cur);
+    final isSerial = series.subcategory == BookSubcategory.manga ||
+        series.subcategory == BookSubcategory.comic ||
+        series.subcategory == BookSubcategory.comics;
+    if (!isSerial) return series;
+    if ((series.expectedVolumeCount ?? 0) > 1) return series;
+    return refreshPublications(series);
   }
 
   Future<void> ensureVolumeSlots(String seriesId, int count) async {
@@ -435,12 +441,10 @@ class BookSeriesService {
         final parsed = BookSeriesNormalizer.parse(series.name);
         if (!parsed.hasSeries || !parsed.hasVolume) continue;
 
-        final known = BookSeriesNormalizer.expectedCount(parsed.seriesName!, sub);
         final volCeil = parsed.volumeNumber!.ceil();
-        final expected = known ??
-            ((series.expectedVolumeCount ?? 0) > volCeil
-                ? series.expectedVolumeCount
-                : volCeil);
+        final expected = (series.expectedVolumeCount ?? 0) > volCeil
+            ? series.expectedVolumeCount
+            : volCeil;
 
         final canonical = await findOrCreateSeries(
           name: parsed.seriesName!,
@@ -818,14 +822,18 @@ class BookSeriesService {
   }
 
   /// Couvertures manquantes + réparation des mauvaises attributions (T1≠T16).
+  /// [onProgress] est appelé tous les [progressEvery] tomes trouvés (UI live).
   Future<int> enrichMissingVolumeCovers({
     required BookSeries series,
     required List<BookVolume> volumes,
     int maxLookups = 40,
     bool repairUnverified = true,
+    void Function(int foundSinceStart)? onProgress,
+    int progressEvery = 5,
   }) async {
     var updated = 0;
     var lookups = 0;
+    var sinceProgress = 0;
 
     // Auteur dynamique (metadata) ; bootstrap si manquant via hits stricts.
     var working = series;
@@ -962,6 +970,12 @@ class BookSeriesService {
           upcoming: upcoming,
         );
         updated++;
+        sinceProgress++;
+        if (onProgress != null &&
+            progressEvery > 0 &&
+            sinceProgress % progressEvery == 0) {
+          onProgress(updated);
+        }
       } else {
         // Pas de hit strict → efface les fausses couvertures (Tyran, Realist Hero…).
         if (hasCover && (needsRepair || forceCheck || preferVf)) {
@@ -1224,11 +1238,7 @@ class BookSeriesService {
         return bScore.compareTo(aScore);
       });
       final canonical = list.first;
-      final preferredSub =
-          BookSeriesNormalizer.preferredSubcategory(canonical.name) ??
-              canonical.subcategory;
-      final known = BookSeriesNormalizer.expectedCount(canonical.name);
-      var expected = known ?? canonical.expectedVolumeCount ?? 0;
+      var expected = canonical.expectedVolumeCount ?? 0;
       for (final s in list) {
         final e = s.expectedVolumeCount ?? 0;
         if (e > expected) expected = e;
@@ -1239,7 +1249,7 @@ class BookSeriesService {
       await updateSeries(
         canonical.copyWith(
           name: canonName,
-          subcategory: preferredSub,
+          subcategory: canonical.subcategory,
           expectedVolumeCount: expected,
           metadata: {
             ...canonical.metadata,
@@ -1288,11 +1298,10 @@ class BookSeriesService {
       }
 
       await dedupeVolumeItems(canonical.id);
-      // Corrige sous-catégorie BD connue même sans doublon.
-      if (list.length == 1 && preferredSub != list.first.subcategory) {
+      // Persiste le nom nettoyé même sans doublon.
+      if (list.length == 1 && list.first.name.trim() != canonName) {
         await updateSeries(
           (await fetchSeriesById(canonical.id))!.copyWith(
-            subcategory: preferredSub,
             name: canonName,
             expectedVolumeCount: expected,
           ),
@@ -1307,8 +1316,6 @@ class BookSeriesService {
     if (!s.isStandalone) score += 100;
     score += (s.expectedVolumeCount ?? 0);
     if (s.coverUrl != null && s.coverUrl!.isNotEmpty) score += 20;
-    final pref = BookSeriesNormalizer.preferredSubcategory(s.name);
-    if (pref != null && s.subcategory == pref) score += 50;
     if (s.subcategory == BookSubcategory.novel) score -= 30;
     return score;
   }
@@ -1413,10 +1420,8 @@ class BookSeriesService {
     String? coverUrl,
     String? author,
   }) async {
-    final preferred =
-        BookSeriesNormalizer.preferredSubcategory(name) ?? subcategory;
-    // Évite Thorgal BD + Thorgal Roman en doublon.
-    var existing = await findSeriesByName(name, preferred);
+    // Évite doublons cross-sous-catégorie (même nom normalisé).
+    var existing = await findSeriesByName(name, subcategory);
     existing ??= await findSeriesByNameAnySub(name);
     if (existing != null) {
       var updated = existing;
@@ -1429,9 +1434,6 @@ class BookSeriesService {
           coverUrl.isNotEmpty &&
           (existing.coverUrl == null || existing.coverUrl!.isEmpty)) {
         updated = updated.copyWith(coverUrl: coverUrl);
-      }
-      if (preferred != existing.subcategory) {
-        updated = updated.copyWith(subcategory: preferred);
       }
       // Auteur dynamique depuis la recherche (si pas encore stocké).
       if (author != null &&
@@ -1446,14 +1448,18 @@ class BookSeriesService {
         meta['is_standalone'] = false;
         updated = updated.copyWith(metadata: meta);
       }
+      // Persiste le nom nettoyé (« One Piece - Édition originale » → « One Piece »).
+      final clean = BookSeriesNormalizer.displaySeriesName(updated.name);
+      if (clean != updated.name.trim()) {
+        updated = updated.copyWith(name: clean);
+      }
       if (updated != existing) await updateSeries(updated);
       return (await fetchSeriesById(updated.id)) ?? updated;
     }
     return createSeries(
       name: BookSeriesNormalizer.displaySeriesName(name),
-      subcategory: preferred,
-      expectedVolumeCount: expectedVolumeCount ??
-          BookSeriesNormalizer.expectedCount(name, preferred),
+      subcategory: subcategory,
+      expectedVolumeCount: expectedVolumeCount,
       coverUrl: coverUrl,
       author: author,
     );
@@ -1493,15 +1499,12 @@ class BookSeriesService {
     String? author,
   }) async {
     var parsed = BookSeriesNormalizer.parse(title);
-    // Titre nu (« Kingdom », « Thorgal ») → dossier série si multi-tomes connu
-    // ou si un total estimé est fourni (bannière recherche).
+    // Titre nu (« Kingdom ») → dossier série si estimate fourni ou nom utile.
     if (!parsed.hasSeries) {
       final clean = BookSeriesNormalizer.displaySeriesName(title);
-      final known =
-          BookSeriesNormalizer.expectedCount(clean, subcategory);
       final hasEstimate =
           estimatedTotalVolumes != null && estimatedTotalVolumes > 1;
-      if ((known != null && known > 1) || hasEstimate || clean.length >= 2) {
+      if (hasEstimate || clean.length >= 2) {
         parsed = ParsedBookTitle(
           rawTitle: title,
           seriesName: clean.isNotEmpty ? clean : title.trim(),
@@ -1510,7 +1513,6 @@ class BookSeriesService {
         return null;
       }
     } else {
-      // Nettoie « Kingdom - Tome » → « Kingdom ».
       parsed = ParsedBookTitle(
         rawTitle: parsed.rawTitle,
         seriesName: BookSeriesNormalizer.displaySeriesName(parsed.seriesName!),
@@ -1520,11 +1522,6 @@ class BookSeriesService {
 
     var total = estimatedTotalVolumes;
     final volCeil = parsed.volumeNumber?.ceil() ?? 0;
-    final known =
-        BookSeriesNormalizer.expectedCount(parsed.seriesName!, subcategory);
-    if (known != null && (total == null || total < known)) {
-      total = known;
-    }
     if (total == null || total < volCeil) {
       if (subcategory == BookSubcategory.manga) {
         final fromDex =

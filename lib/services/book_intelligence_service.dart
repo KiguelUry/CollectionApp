@@ -13,6 +13,10 @@ class SeriesBannerCandidate {
   final BookSubcategory? detectedSubcategory;
   /// Auteur dominant détecté dynamiquement dans les hits API.
   final String? author;
+  /// Couverture série (ex. AniList) si pas encore de tome 1.
+  final String? coverUrl;
+  /// Provenance AniList (bannière officielle manga).
+  final bool fromAnilist;
 
   const SeriesBannerCandidate({
     required this.name,
@@ -20,6 +24,8 @@ class SeriesBannerCandidate {
     this.coversByVolume = const {},
     this.detectedSubcategory,
     this.author,
+    this.coverUrl,
+    this.fromAnilist = false,
   });
 }
 
@@ -194,6 +200,7 @@ abstract final class BookIntelligenceService {
   }
 
   /// Regroupe les hits en bannières uniques par (série nettoyée, auteur).
+  /// Une bannière n'apparaît que s'il existe ≥1 tome numéroté réel (pas scan).
   static List<SeriesBannerCandidate> extractSeriesBanners(
     List<EnrichedBookHit> hits, {
     required String query,
@@ -201,9 +208,10 @@ abstract final class BookIntelligenceService {
   }) {
     final groups = <String, _SeriesAgg>{};
     for (final h in hits) {
+      final title = h.raw['title'] ?? h.displayTitle;
+      if (BookSeriesNormalizer.looksLikeChapterOrScan(title)) continue;
       final rawName = (h.parsed.seriesName ?? '').trim();
       if (rawName.length < 2) continue;
-      // AVANT regroupement : « Kingdom - Tome » → « Kingdom ».
       final name = BookSeriesNormalizer.displaySeriesName(rawName);
       if (name.length < 2) continue;
       final author = h.author?.trim();
@@ -218,7 +226,6 @@ abstract final class BookIntelligenceService {
           author.isNotEmpty) {
         agg.author = author;
       }
-      // Compte les auteurs pour privilégier le plus fréquent.
       if (author != null && author.isNotEmpty) {
         final aKey = BookSeriesNormalizer.normalizeAuthorKey(author);
         agg.authorVotes[aKey] = (agg.authorVotes[aKey] ?? 0) + 1;
@@ -226,66 +233,35 @@ abstract final class BookIntelligenceService {
       }
       final n = h.parsed.volumeNumber?.round();
       if (n != null && n > 0) {
+        agg.numberedVolumes++;
         if (n > agg.maxVol) agg.maxVol = n;
         final img = h.imageUrl;
         if (img != null && img.isNotEmpty) {
           agg.covers.putIfAbsent(n, () => img);
         }
       }
-      final est = h.estimatedTotalVolumes;
-      if (est != null && est > agg.maxVol) agg.maxVol = est;
+      // Ne gonfle jamais avec estimatedTotalVolumes d'un autre auteur / hit.
     }
 
-    // Si aucun groupe mais query utile → bannière depuis la requête nettoyée.
     final parsedQuery = BookSeriesNormalizer.parseCatalogSearchQuery(query);
     final bannerSeed = parsedQuery.seriesQuery.trim().isNotEmpty
         ? parsedQuery.seriesQuery.trim()
         : query.trim();
-    if (groups.isEmpty && bannerSeed.length >= 2) {
-      final dict = BookSeriesNormalizer.expectedCount(bannerSeed, subcategory);
-      final maxFromHits = hits
-          .map((h) => h.parsed.volumeNumber?.round() ?? 0)
-          .fold<int>(0, (a, b) => a > b ? a : b);
-      final count = [
-        dict ?? 0,
-        maxFromHits,
-      ].reduce((a, b) => a > b ? a : b);
-      String? seedAuthor;
-      for (final h in hits) {
-        if (h.author != null && h.author!.trim().isNotEmpty) {
-          seedAuthor = h.author!.trim();
-          break;
-        }
-      }
-      if (count > 0 || hits.isNotEmpty) {
-        return [
-          SeriesBannerCandidate(
-            name: BookSeriesNormalizer.displaySeriesName(bannerSeed),
-            volumeCount: count > 0 ? count : (dict ?? 1),
-            author: seedAuthor,
-          ),
-        ];
-      }
-      return const [];
-    }
 
     final qKey = BookSeriesNormalizer.normalizeKey(bannerSeed);
     final banners = <SeriesBannerCandidate>[];
     for (final agg in groups.values) {
-      final dict = BookSeriesNormalizer.expectedCount(
-            agg.displayName,
-            subcategory,
-          ) ??
-          0;
-      final count = [agg.maxVol, dict].reduce((a, b) => a > b ? a : b);
-      if (count < 1 && agg.covers.isEmpty) continue;
+      // Exige au moins un tome numéroté réel pour ce couple (série, auteur).
+      if (agg.numberedVolumes < 1) continue;
+      final count = agg.maxVol < 1 ? 1 : agg.maxVol;
       final detected = BookSeriesNormalizer.detectSubcategory(
         seriesName: agg.displayName,
+        publisher: null,
       );
       banners.add(
         SeriesBannerCandidate(
           name: agg.displayName,
-          volumeCount: count < 1 ? 1 : count,
+          volumeCount: count,
           coversByVolume: Map<int, String>.from(agg.covers),
           detectedSubcategory: detected,
           author: agg.dominantAuthor,
@@ -544,7 +520,13 @@ abstract final class BookIntelligenceService {
     final coverBonus =
         (hit['image_url'] ?? '').isNotEmpty ? 4.0 : 0.0;
     final authorBonus = (author != null && author.isNotEmpty) ? 2.0 : 0.0;
-    final canonicalBonus = _canonicalEditionBonus(title, author);
+    // Bonus léger pour éditions récentes (année dans le titre), sans auteurs hardcodés.
+    var yearBonus = 0.0;
+    final year = int.tryParse(
+      RegExp(r'\b(19|20)\d{2}\b').firstMatch(title)?.group(0) ?? '',
+    );
+    if (year != null && year >= 2015) yearBonus = 3;
+    if (year != null && year >= 2000 && year < 2015) yearBonus = 1;
 
     final detected = BookSeriesNormalizer.detectSubcategory(
       seriesName: seriesName,
@@ -553,17 +535,6 @@ abstract final class BookIntelligenceService {
       subjects: hit['subjects'] ?? hit['categories'],
     );
 
-    // Prefer dictionnaire série pour le total (Kingdom → 73, pas tome 2).
-    if (seriesName != null) {
-      final dict = BookSeriesNormalizer.expectedCount(
-        seriesName,
-        detected ?? subcategory,
-      );
-      if (dict != null && (estimated == null || estimated < dict)) {
-        estimated = dict;
-      }
-    }
-
     return EnrichedBookHit(
       raw: hit,
       parsed: normalizedParsed,
@@ -571,32 +542,9 @@ abstract final class BookIntelligenceService {
       author: author,
       publisher: publisher,
       estimatedTotalVolumes: estimated,
-      score: popularity + seriesBonus + coverBonus + authorBonus + canonicalBonus,
+      score: popularity + seriesBonus + coverBonus + authorBonus + yearBonus,
       detectedSubcategory: detected,
     );
-  }
-
-  /// Éditions majeures / récentes (ex. Dune — Frank Herbert).
-  static double _canonicalEditionBonus(String title, String? author) {
-    var bonus = 0.0;
-    final t = title.toLowerCase();
-    final a = author?.toLowerCase() ?? '';
-
-    if (t == 'dune' || t.startsWith('dune ')) {
-      bonus += 40;
-      if (a.contains('herbert')) bonus += 30;
-    }
-    if (a.contains('tolkien') && t.contains('seigneur')) bonus += 25;
-    if (a.contains('rowling') && t.contains('harry')) bonus += 25;
-    if (a.contains('martin') && t.contains('game of thrones')) bonus += 20;
-
-    final year = int.tryParse(
-      RegExp(r'\b(19|20)\d{2}\b').firstMatch(title)?.group(0) ?? '',
-    );
-    if (year != null && year >= 2015) bonus += 3;
-    if (year != null && year >= 2000 && year < 2015) bonus += 1;
-
-    return bonus;
   }
 
   static double _popularityScore(Map<String, String> hit) {
@@ -633,6 +581,7 @@ class _SeriesAgg {
   String displayName;
   String? author;
   int maxVol = 0;
+  int numberedVolumes = 0;
   final Map<int, String> covers = {};
   final Map<String, int> authorVotes = {};
   final Map<String, String> authorLabels = {};

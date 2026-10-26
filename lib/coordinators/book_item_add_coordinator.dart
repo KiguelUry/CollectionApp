@@ -70,11 +70,8 @@ class BookItemAddCoordinator {
     String? coverUrl,
     String? author,
   }) async {
-    final preferred =
-        BookSeriesNormalizer.preferredSubcategory(name) ?? subcategory;
-    final total = volumeCount ??
-        BookSeriesNormalizer.expectedCount(name, preferred) ??
-        1;
+    final preferred = subcategory;
+    final total = volumeCount ?? 1;
 
     // Popup 0 ms — aucun réseau avant.
     if (!context.mounted) return;
@@ -522,22 +519,22 @@ class BookItemAddCoordinator {
     var parsed = _resolveParsed(title, metadata);
     // Titre nu d'une série connue (ex. « Thorgal », « Naruto ») → dossier série.
     if (!parsed.hasSeries) {
-      final known = BookSeriesNormalizer.expectedCount(title.trim(), subcategory);
       final metaSeries = metadata?['series_title']?.toString().trim();
-      if (known != null && known > 1) {
+      final estimated = int.tryParse(
+        metadata?['estimated_volumes']?.toString() ?? '',
+      );
+      if (metaSeries != null &&
+          metaSeries.length >= 2 &&
+          (estimated == null || estimated > 1)) {
+        parsed = ParsedBookTitle(
+          rawTitle: title,
+          seriesName: metaSeries,
+        );
+      } else if (estimated != null && estimated > 1) {
         parsed = ParsedBookTitle(
           rawTitle: title,
           seriesName: title.trim(),
         );
-      } else if (metaSeries != null && metaSeries.length >= 2) {
-        final metaKnown =
-            BookSeriesNormalizer.expectedCount(metaSeries, subcategory);
-        if (metaKnown != null && metaKnown > 1) {
-          parsed = ParsedBookTitle(
-            rawTitle: title,
-            seriesName: metaSeries,
-          );
-        }
       }
     }
 
@@ -577,8 +574,7 @@ class BookItemAddCoordinator {
       var estimated = int.tryParse(
             metadata?['estimated_volumes']?.toString() ?? '',
           ) ??
-          enriched.estimatedTotalVolumes ??
-          BookSeriesNormalizer.expectedCount(parsed.seriesName!, subcategory);
+          enriched.estimatedTotalVolumes;
       estimated ??= await OpenLibraryService.estimateSeriesVolumeCount(
         parsed.seriesName!,
         subcategory,
