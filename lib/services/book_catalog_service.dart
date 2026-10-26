@@ -98,8 +98,9 @@ class BookCatalogService {
       if (kDebugMode) debugPrint('iTunes books search: $e');
     }
 
+    // Open Library dès que GB/iTunes sont maigres (romans / BD sans « Tome N »).
     List<Map<String, String>> ol = [];
-    if (google.isEmpty && itunes.isEmpty) {
+    if (google.length < 5) {
       try {
         ol = await OpenLibraryService.searchBooks(
           query,
@@ -157,7 +158,7 @@ class BookCatalogService {
     final lang = (hit['language'] ?? hit['lang'] ?? '').toLowerCase();
     if (lang.isEmpty) return true;
     if (lang.contains('fr') || lang == 'fre' || lang == 'french') return true;
-    // Garde les éditions EN si pas de signal FR clair (ex. Kagurabachi).
+    // Langue absente / und → garder (romans, métadonnées incomplètes).
     return true;
   }
 

@@ -163,13 +163,8 @@ class GoogleBooksService {
       for (final raw in items) {
         final mapped = _mapVolume(raw as Map<String, dynamic>, isbnFallback);
         if (mapped == null) continue;
-        if (!BookVfEdition.isFrenchEdition(
-          title: mapped['title'] ?? '',
-          language: mapped['language'],
-          source: mapped['source'],
-        )) {
-          continue;
-        }
+        // Anti-US : uniquement « Vol. N » (déjà dans _mapVolume).
+        // Ne jette PAS language=en ici — le catalogue préfère FR plus haut.
         out.add(mapped);
       }
       return out;
@@ -232,7 +227,8 @@ class GoogleBooksService {
         return [];
       }
       final hits = _parseItems(response.body);
-      await _writeCache(key, hits);
+      // Ne pas cacher une liste vide (429→[] / filtre trop strict) 24h.
+      if (hits.isNotEmpty) await _writeCache(key, hits);
       return hits;
     } catch (e) {
       if (kDebugMode) debugPrint('Google Books search: $e');
@@ -293,11 +289,7 @@ class GoogleBooksService {
     final language = langRaw is List
         ? langRaw.map((e) => e.toString()).join(',')
         : langRaw?.toString();
-    if (language != null &&
-        language.isNotEmpty &&
-        !BookVfEdition.isFrenchLanguage(language)) {
-      return null;
-    }
+    // Garde language=null/und/en : seuls les titres « Vol. N » sont exclus.
 
     final authors = (info['authors'] as List<dynamic>?)
         ?.map((a) => a.toString())

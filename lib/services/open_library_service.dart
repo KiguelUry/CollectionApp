@@ -8,11 +8,19 @@ import '../models/series_search_hit.dart';
 import '../utils/book_title_parser.dart';
 import '../utils/cover_image_url.dart';
 import '../utils/search_relevance.dart';
+import '../utils/web_catalog_proxy.dart';
 
 /// API gratuite Open Library — équivalent « catalogue » pour les livres.
 /// https://openlibrary.org/developers/api
 class OpenLibraryService {
   static final _authorPhotoCache = <String, String?>{};
+
+  static Future<http.Response> _get(Uri url) {
+    final uri = proxiedCatalogUri(url);
+    return http
+        .get(uri, headers: proxiedCatalogHeaders())
+        .timeout(const Duration(seconds: 20));
+  }
 
   static Future<List<Map<String, String>>> searchBooks(
     String query, {
@@ -31,7 +39,7 @@ class OpenLibraryService {
       };
       if (frenchOnly) params['language'] = 'fre';
       final url = Uri.https('openlibrary.org', '/search.json', params);
-      final response = await http.get(url);
+      final response = await _get(url);
 
       if (response.statusCode != 200) return [];
 
@@ -223,7 +231,7 @@ class OpenLibraryService {
         'format': 'json',
         'jscmd': 'data',
       });
-      final response = await http.get(url);
+      final response = await _get(url);
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         for (final variant in variants) {
@@ -241,7 +249,7 @@ class OpenLibraryService {
         'fields':
             'key,title,author_name,first_publish_year,cover_i,subject,isbn',
       });
-      final searchRes = await http.get(searchUrl);
+      final searchRes = await _get(searchUrl);
       if (searchRes.statusCode == 200) {
         final data = jsonDecode(searchRes.body) as Map<String, dynamic>;
         final docs = data['docs'] as List<dynamic>? ?? [];
@@ -279,7 +287,7 @@ class OpenLibraryService {
             'key,title,author_name,first_publish_year,cover_i,subject',
       };
       final url = Uri.https('openlibrary.org', '/search.json', params);
-      final response = await http.get(url);
+      final response = await _get(url);
       if (response.statusCode != 200) return [];
 
       final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -369,7 +377,7 @@ class OpenLibraryService {
         'fields': 'title',
       };
       final url = Uri.https('openlibrary.org', '/search.json', params);
-      final response = await http.get(url);
+      final response = await _get(url);
       if (response.statusCode != 200) return null;
 
       final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -451,7 +459,7 @@ class OpenLibraryService {
         'q': authorName.trim(),
         'limit': '5',
       });
-      final response = await http.get(url);
+      final response = await _get(url);
       if (response.statusCode != 200) {
         _authorPhotoCache[key] = null;
         return null;

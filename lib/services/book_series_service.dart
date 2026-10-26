@@ -270,37 +270,6 @@ class BookSeriesService {
         .eq('id', volumeId);
   }
 
-  /// Plafonne la série au max VF : retire les tomes JP orphelins (ex. T12).
-  Future<BookSeries> trimToVfMax(BookSeries series, int vfMax) async {
-    if (vfMax < 1) return series;
-    final cur = series.expectedVolumeCount ?? 0;
-    if (cur < vfMax) {
-      await ensureVolumeSlots(series.id, vfMax);
-      final updated = series.copyWith(expectedVolumeCount: vfMax);
-      await updateSeries(updated);
-      return updated;
-    }
-    if (cur <= vfMax) return series;
-
-    final volumes = await fetchVolumes(series.id);
-    final items = await fetchSeriesItems(series.id);
-    final linked = items
-        .map((i) => i.volumeId)
-        .whereType<String>()
-        .toSet();
-    for (final v in volumes) {
-      final n = v.volumeNumber.round();
-      if (n > vfMax && !linked.contains(v.id) && !v.isHorsSerie) {
-        try {
-          await _client.from('book_volumes').delete().eq('id', v.id);
-        } catch (_) {}
-      }
-    }
-    final updated = series.copyWith(expectedVolumeCount: vfMax);
-    await updateSeries(updated);
-    return updated;
-  }
-
   /// Met à jour expected_volume_count si de nouveaux tomes sont détectés.
   Future<BookSeries?> bumpExpectedCountIfHigher(
     BookSeries series,
@@ -351,15 +320,12 @@ class BookSeriesService {
         }
       }
     }
-    // Manga : hits catalogue VF d'abord ; MangaDex comble les trous ≤ max VF.
-    final vfMaxFromHits = maxVol;
+    // Manga : covers VF d'abord ; MangaDex complète (y compris suite JP).
     var workingSeries = series;
     if (workingSeries.subcategory == BookSubcategory.manga) {
       final ani = await AnilistMangaService.lookupManga(workingSeries.name);
       if (ani != null) {
-        if (vfMaxFromHits < 1 &&
-            ani.volumes != null &&
-            ani.volumes! > maxVol) {
+        if (ani.volumes != null && ani.volumes! > maxVol) {
           maxVol = ani.volumes!;
         }
         if ((seriesAuthor == null || seriesAuthor.isEmpty) &&
@@ -375,9 +341,9 @@ class BookSeriesService {
       );
       if (md != null) {
         final mdVols = md.volumesPublished ?? 0;
-        if (vfMaxFromHits < 1 && mdVols > maxVol) maxVol = mdVols;
+        if (mdVols > maxVol) maxVol = mdVols;
         for (final e in md.coverByVolume.entries) {
-          if (vfMaxFromHits >= 1 && e.key > vfMaxFromHits) continue;
+          // VF (hits) déjà dans covers → putIfAbsent garde la VF.
           covers.putIfAbsent(e.key, () => e.value);
         }
         if ((workingSeries.author == null || workingSeries.author!.isEmpty) &&
@@ -969,7 +935,7 @@ class BookSeriesService {
       }
     } catch (_) {}
 
-    // 2) MangaDex comble uniquement les trous ≤ max VF (jamais un T12 JP).
+    // 2) MangaDex comble les trous + suite JP au-delà du max VF.
     if (working.subcategory == BookSubcategory.manga) {
       try {
         final md = await MangaDexService.lookupManga(
@@ -978,19 +944,24 @@ class BookSeriesService {
         );
         if (md != null) {
           for (final e in md.coverByVolume.entries) {
-            if (vfMax >= 1 && e.key > vfMax) continue;
             batch.putIfAbsent(
               e.key,
               () => (coverUrl: e.value, publishedDate: null),
             );
           }
-          if (vfMax < 1) {
-            final mdVols = md.volumesPublished;
-            if (mdVols != null &&
-                mdVols > (working.expectedVolumeCount ?? 0)) {
-              working = (await bumpExpectedCountIfHigher(working, mdVols)) ??
-                  working;
-            }
+          final mdVols = md.volumesPublished;
+          final batchMax = batch.isEmpty
+              ? 0
+              : batch.keys.reduce((a, b) => a > b ? a : b);
+          final target = [
+            working.expectedVolumeCount ?? 0,
+            vfMax,
+            mdVols ?? 0,
+            batchMax,
+          ].reduce((a, b) => a > b ? a : b);
+          if (target > (working.expectedVolumeCount ?? 0)) {
+            working =
+                (await bumpExpectedCountIfHigher(working, target)) ?? working;
           }
           if ((seriesAuthor == null || seriesAuthor.isEmpty) &&
               md.author != null &&
@@ -1000,10 +971,8 @@ class BookSeriesService {
           }
         }
       } catch (_) {}
-    }
-
-    if (vfMax >= 1) {
-      working = await trimToVfMax(working, vfMax);
+    } else if (vfMax > (working.expectedVolumeCount ?? 0)) {
+      working = (await bumpExpectedCountIfHigher(working, vfMax)) ?? working;
     }
 
     final ordered = List<BookVolume>.from(await fetchVolumes(working.id))
@@ -1012,7 +981,6 @@ class BookSeriesService {
     for (final vol in ordered) {
       if (vol.isHorsSerie) continue;
       final n = vol.volumeNumber.round();
-      if (vfMax >= 1 && n > vfMax) continue;
       final hit = batch[n];
       final verified = vol.metadata['cover_volume_verified'];
       final hasCover = vol.coverUrl != null && vol.coverUrl!.isNotEmpty;
@@ -1646,34 +1614,35 @@ class BookSeriesService {
       } catch (_) {}
     }
 
-    // MangaDex / AniList seulement si pas d'estimat VF solide.
-    if (!solidVfEstimate && (total == null || total < volCeil)) {
-      if (subcategory == BookSubcategory.manga) {
+    // Hybrid : max(VF, MangaDex JP) pour garder la suite VO (ex. T12).
+    if (subcategory == BookSubcategory.manga) {
+      try {
         final fromDex =
             await MangaDexService.lookupManga(parsed.seriesName!);
         final dexVols = fromDex?.volumesPublished;
-        if (dexVols != null && dexVols > 1) total = dexVols;
-        if (total == null || total < volCeil) {
-          final fromAni = await AnilistMangaService.estimateVolumeCount(
-            parsed.seriesName!,
-          );
-          if (fromAni != null && fromAni > 1) total = fromAni;
-        }
-      }
+        if (dexVols != null && dexVols > (total ?? 0)) total = dexVols;
+      } catch (_) {}
       if (total == null || total < volCeil) {
-        final fromOl = await OpenLibraryService.estimateSeriesVolumeCount(
+        final fromAni = await AnilistMangaService.estimateVolumeCount(
           parsed.seriesName!,
-          subcategory,
         );
-        if (fromOl != null) {
-          total = fromOl;
-        } else if (volCeil > 0) {
-          total = volCeil;
-        }
+        if (fromAni != null && fromAni > (total ?? 0)) total = fromAni;
       }
-    } else if (solidVfEstimate) {
-      // Garde le max VF (ex. 11) — n'infle PAS avec le T12 JP MangaDex.
-      total = estimatedTotalVolumes;
+    }
+    if (total == null || total < volCeil) {
+      final fromOl = await OpenLibraryService.estimateSeriesVolumeCount(
+        parsed.seriesName!,
+        subcategory,
+      );
+      if (fromOl != null && fromOl > (total ?? 0)) {
+        total = fromOl;
+      } else if (volCeil > 0 && (total == null || total < volCeil)) {
+        total = volCeil;
+      }
+    }
+    final vfEst = estimatedTotalVolumes;
+    if (vfEst != null && vfEst > (total ?? 0)) {
+      total = vfEst;
     }
     if (total != null && volCeil > total) total = volCeil;
 

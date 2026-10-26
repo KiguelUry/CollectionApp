@@ -1,4 +1,5 @@
-/// Filtres éditions françaises (VF) — rejette pollution US VIZ (`Vol. N`).
+/// Filtres éditions — anti-pollution US VIZ (`Vol. N`) uniquement.
+/// Ne rejette PAS MangaDex/AniList (métadonnées EN/romaji normales).
 abstract final class BookVfEdition {
   /// Titres US du type « Kagurabachi, Vol. 10 ».
   static final usVolTitleRe = RegExp(
@@ -8,28 +9,64 @@ abstract final class BookVfEdition {
 
   static bool isUsVolTitle(String title) => usVolTitleRe.hasMatch(title);
 
-  /// Langue française (code ISO style `fr`, `fr-FR`).
+  /// Langue française (code ISO style `fr`, `fr-FR`, `fre`).
   static bool isFrenchLanguage(String? language) {
     if (language == null || language.trim().isEmpty) return false;
     final l = language.toLowerCase().trim();
-    return l == 'fr' || l.startsWith('fr-') || l.startsWith('fre');
+    return l == 'fr' ||
+        l.startsWith('fr-') ||
+        l.startsWith('fre') ||
+        l == 'french';
   }
 
-  /// Hit catalogue acceptable pour une collection VF.
-  /// Rejette `Vol. N` ; exige `fr` si une langue est déclarée.
+  /// Anglais explicite (pas `null` / `und`).
+  static bool isExplicitEnglish(String? language) {
+    if (language == null || language.trim().isEmpty) return false;
+    final l = language.toLowerCase().trim();
+    if (l == 'und' || l == 'zxx') return false;
+    return l == 'en' || l.startsWith('en-') || l == 'eng' || l == 'english';
+  }
+
+  static bool isCatalogSource(String? source) {
+    final s = (source ?? '').toLowerCase();
+    return s.contains('google') || s.contains('itunes') || s == 'open_library';
+  }
+
+  static bool isOfficialMangaSource(String? source) {
+    final s = (source ?? '').toLowerCase();
+    return s.contains('mangadex') || s.contains('anilist');
+  }
+
+  /// Hit acceptable dans la grille.
+  /// Rejette UNIQUEMENT `\bVol\.\s*\d+` (VIZ). Langue null/und = OK.
+  /// MangaDex / AniList : jamais rejetés pour la langue.
   static bool isFrenchEdition({
     required String title,
     String? language,
     String? source,
   }) {
     if (isUsVolTitle(title)) return false;
-    if (language != null &&
-        language.trim().isNotEmpty &&
-        !isFrenchLanguage(language)) {
+    if (isOfficialMangaSource(source)) return true;
+    // null / und / vide → garder (romans, BD sans code langue).
+    if (language == null || language.trim().isEmpty) return true;
+    final l = language.toLowerCase().trim();
+    if (l == 'und' || l == 'zxx') return true;
+    return true;
+  }
+
+  /// Après enrichissement : si des hits FR existent, retire les EN purs GB/iTunes.
+  static bool keepInSearchResults({
+    required String title,
+    String? language,
+    String? source,
+    required bool frenchResultsPresent,
+  }) {
+    if (isUsVolTitle(title)) return false;
+    if (isOfficialMangaSource(source)) return true;
+    if (!frenchResultsPresent) return true;
+    if (isCatalogSource(source) && isExplicitEnglish(language)) {
       return false;
     }
-    // iTunes US souvent sans language mais titre « Vol. » — déjà filtré.
-    // Source mangadex seule (couverture JP) : OK pour fill cover, pas pour dates.
     return true;
   }
 
@@ -43,18 +80,20 @@ abstract final class BookVfEdition {
     if (publishedDate == null || publishedDate.isEmpty) return false;
     if (isUsVolTitle(title)) return false;
     final src = (source ?? '').toLowerCase();
-    if (src.contains('mangadex') && !src.contains('google') && !src.contains('itunes')) {
-      // MangaDex seul = édition JP → pas de badge À paraître VF.
+    if (src.contains('mangadex') &&
+        !src.contains('google') &&
+        !src.contains('itunes')) {
       return false;
     }
     if (language != null &&
         language.trim().isNotEmpty &&
-        !isFrenchLanguage(language)) {
+        isExplicitEnglish(language)) {
       return false;
     }
-    // Préfère titres « Tome N » ou source google/itunes FR.
-    final hasTome = RegExp(r'\btome\s*\d+', caseSensitive: false).hasMatch(title);
-    final frSource = src.contains('google') || src == 'itunes' || src.contains('itunes');
+    final hasTome =
+        RegExp(r'\btome\s*\d+', caseSensitive: false).hasMatch(title);
+    final frSource =
+        src.contains('google') || src == 'itunes' || src.contains('itunes');
     if (!hasTome && !frSource && !isFrenchLanguage(language)) return false;
     return true;
   }

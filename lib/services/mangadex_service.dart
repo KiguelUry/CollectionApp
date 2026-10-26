@@ -182,21 +182,24 @@ abstract final class MangaDexService {
             (titles.isEmpty ? null : titles.values.first) ??
             query)
         .toString();
-    // Préfère un altTitle FR / matching query.
+    // altTitles : FR d'abord, sinon titre qui matche la requête.
+    String? frAlt;
+    String? queryAlt;
     for (final alt in altTitles) {
       if (alt is! Map<String, dynamic>) continue;
+      final fr = (alt['fr']?.toString() ?? '').trim();
+      if (fr.isNotEmpty) frAlt ??= fr;
       for (final e in alt.entries) {
-        final t = e.value?.toString() ?? '';
+        final t = e.value?.toString().trim() ?? '';
         if (t.isEmpty) continue;
         if (BookSeriesNormalizer.hitBelongsToSeries(t, query) ||
             BookSeriesNormalizer.normalizeKey(t) ==
                 BookSeriesNormalizer.normalizeKey(query)) {
-          title = t;
-          break;
+          queryAlt ??= t;
         }
       }
     }
-    title = BookSeriesNormalizer.displaySeriesName(title);
+    title = BookSeriesNormalizer.displaySeriesName(frAlt ?? queryAlt ?? title);
 
     // Filtre homonymes trop éloignés.
     final qKey = BookSeriesNormalizer.normalizeKey(query);

@@ -14,6 +14,8 @@ const ALLOWED_HOSTS = new Set([
   "itunes.apple.com",
   "www.googleapis.com",
   "uploads.mangadex.org",
+  "openlibrary.org",
+  "covers.openlibrary.org",
 ]);
 
 Deno.serve(async (req) => {

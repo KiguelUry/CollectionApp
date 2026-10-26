@@ -337,24 +337,28 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       }).toList();
     }
 
-    // Purge pollution US « Vol. N » (VIZ) — collection 100 % VF.
+    // Anti-US : « Vol. N » toujours ; EN GB/iTunes seulement si des FR existent.
+    final hasFrHit = enriched.any(
+      (h) => BookVfEdition.isFrenchLanguage(h.raw['language']),
+    );
     enriched = enriched.where((h) {
       final title = h.raw['title'] ?? h.displayTitle;
-      return BookVfEdition.isFrenchEdition(
+      return BookVfEdition.keepInSearchResults(
         title: title,
         language: h.raw['language'],
         source: h.raw['source'],
+        frenchResultsPresent: hasFrHit,
       );
     }).toList();
 
-    // MangaDex = fill covers SEULEMENT sur tomes VF déjà connus (GB FR).
-    // Ne crée JAMAIS de faux tomes JP (ex. T12) ni de faux « À paraître ».
+    // MangaDex : fill covers VF manquantes + conserve la suite JP (ex. T12).
     if (primaryMangaDex != null) {
       final md = primaryMangaDex;
       final frVols = <int>{
         for (final h in enriched)
           if (h.parsed.volumeNumber != null) h.parsed.volumeNumber!.round(),
       };
+      final maxFr = frVols.isEmpty ? 0 : frVols.reduce((a, b) => a > b ? a : b);
 
       // iTunes FR uniquement pour trous de cover/date sur volumes VF existants.
       final needItunes = <int>[
@@ -421,7 +425,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
         }
       }
 
-      // N'injecte un tome manquant QUE s'il a une fiche iTunes FR « Tome N ».
+      // iTunes FR pour un tome demandé manquant.
       if (volumeHint != null && !frVols.contains(volumeHint)) {
         final it = itunesByVol[volumeHint] ??
             await ItunesBooksService.lookupFrenchVolume(md.title, volumeHint);
@@ -458,7 +462,42 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
               detectedSubcategory: BookSubcategory.manga,
             ),
           );
+          frVols.add(volumeHint);
         }
+      }
+
+      // Suite japonaise MangaDex au-delà du dernier tome VF (ex. T12).
+      final present = <int>{
+        for (final h in enriched)
+          if (h.parsed.volumeNumber != null) h.parsed.volumeNumber!.round(),
+      };
+      final mdMax = md.volumesPublished ??
+          (md.coverByVolume.isEmpty
+              ? 0
+              : md.coverByVolume.keys.reduce((a, b) => a > b ? a : b));
+      final suiteStart = maxFr >= 1 ? maxFr + 1 : 1;
+      for (var n = suiteStart; n <= mdMax; n++) {
+        if (present.contains(n)) continue;
+        final mdCover = md.coverByVolume[n];
+        if (mdCover == null || mdCover.trim().isEmpty) continue;
+        enriched.add(
+          EnrichedBookHit(
+            raw: {
+              'title': '${md.title} - Tome $n',
+              'series_title': md.title,
+              'series_volume': '$n',
+              if (md.author != null) 'author': md.author!,
+              'image_url': coverUrlForWeb(mdCover),
+              'source': 'mangadex',
+            },
+            parsed: BookSeriesNormalizer.parse('${md.title} - Tome $n'),
+            displayTitle: '${md.title} - Tome $n',
+            author: md.author,
+            score: 5000.0 - n,
+            estimatedTotalVolumes: mdMax,
+            detectedSubcategory: BookSubcategory.manga,
+          ),
+        );
       }
 
       enriched.sort((a, b) {
@@ -527,16 +566,17 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       final dates = Map<int, String>.from(b.publishedDatesByVolume);
 
       if (vf.maxVol >= 1) {
-        // Ne laisse PAS MangaDex ajouter un T12 JP si VF s'arrête à 11.
-        count = vf.maxVol;
+        // VF écrase 1..maxVF ; conserve la suite JP MangaDex au-delà.
         for (final e in vf.covers.entries) {
           covers[e.key] = e.value;
         }
-        covers.removeWhere((k, _) => k > vf.maxVol);
         for (final e in vf.dates.entries) {
           dates[e.key] = e.value;
         }
-        dates.removeWhere((k, _) => k > vf.maxVol);
+        final coverMax = covers.isEmpty
+            ? vf.maxVol
+            : covers.keys.reduce((a, b) => a > b ? a : b);
+        count = [vf.maxVol, count, coverMax].reduce((a, b) => a > b ? a : b);
       } else {
         for (final o in officialBanners) {
           if (BookSeriesNormalizer.mergeKey(o.name) == mergeKey) {

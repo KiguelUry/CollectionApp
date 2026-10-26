@@ -11,6 +11,8 @@ Uri proxiedCatalogUri(Uri target) {
     'api.mangadex.org',
     'itunes.apple.com',
     'www.googleapis.com',
+    'openlibrary.org',
+    'covers.openlibrary.org',
   };
   if (!allowed.contains(host)) return target;
 
