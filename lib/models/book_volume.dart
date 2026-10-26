@@ -36,6 +36,29 @@ class BookVolume {
 
   bool get isHorsSerie => metadata['is_hors_serie'] == true;
 
+  /// Chapitre / scan unitaire (pas un tome relié physique).
+  bool get isChapterOrScan {
+    if (metadata['is_chapter'] == true || metadata['is_scan'] == true) {
+      return true;
+    }
+    final blob =
+        '${label ?? ''} ${volumeTitle ?? ''} ${metadata['source_title'] ?? ''} '
+        '${metadata['raw_title'] ?? ''}';
+    final t = blob.toLowerCase();
+    if (RegExp(
+      r'\b(?:chapitre|chapter|chap\.?|ch\.?|épisode|episode|ep\.)\s*\d+',
+      caseSensitive: false,
+    ).hasMatch(t)) {
+      if (RegExp(r'\b(?:tome|vol\.?|volume)\s*\d+', caseSensitive: false)
+          .hasMatch(t)) {
+        return false;
+      }
+      return true;
+    }
+    return RegExp(r'\b(?:scan|scanlation|webtoon)\b', caseSensitive: false)
+        .hasMatch(t);
+  }
+
   /// Date de parution catalogue (ISO / YYYY-MM-DD / YYYY).
   DateTime? get publishedDate {
     final raw = metadata['published_date']?.toString().trim();

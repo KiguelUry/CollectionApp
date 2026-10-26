@@ -36,6 +36,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   List<BookVolumeSlot> _slots = [];
   _VolumeFilter _filter = _VolumeFilter.all;
   bool _friseExpanded = false;
+  bool _chaptersExpanded = false;
   bool _refreshingPubs = false;
 
   @override
@@ -227,6 +228,14 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
       ..sort((a, b) => a.volume.sortIndex.compareTo(b.volume.sortIndex));
     return copy;
   }
+
+  /// Tomes reliés physiques (frise + grille principale).
+  List<BookVolumeSlot> get _physicalSlots =>
+      _displaySlots.where((s) => !s.volume.isChapterOrScan).toList();
+
+  /// Chapitres / scans en ligne (section séparée).
+  List<BookVolumeSlot> get _chapterSlots =>
+      _displaySlots.where((s) => s.volume.isChapterOrScan).toList();
 
   int _countFilter(_VolumeFilter f) {
     return _slots.where((slot) {
@@ -542,7 +551,8 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     final series = _series!;
     final stats = _stats!;
     final accent = BookAccent.primary;
-    final display = _displaySlots;
+    final physical = _physicalSlots;
+    final chapters = _chapterSlots;
 
     return Scaffold(
       appBar: AppAppBar(
@@ -621,13 +631,73 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
           children: [
             _buildHero(series, stats, accent),
             _buildFilterMenu(accent),
-            _buildHybridFrise(display, accent),
+            _buildHybridFrise(physical, accent),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-              child: _buildCoverGrid(display, accent),
+              child: _buildCoverGrid(physical, accent),
             ),
+            if (chapters.isNotEmpty) _buildChaptersSection(chapters, accent),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildChaptersSection(List<BookVolumeSlot> chapters, Color accent) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 16, 12, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Material(
+            color: Colors.red.shade900.withValues(alpha: 0.35),
+            borderRadius: BorderRadius.circular(12),
+            child: InkWell(
+              onTap: () =>
+                  setState(() => _chaptersExpanded = !_chaptersExpanded),
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                child: Row(
+                  children: [
+                    const Text('🌐', style: TextStyle(fontSize: 18)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Chapitres / Scans en ligne (${chapters.length})',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                    Icon(
+                      _chaptersExpanded
+                          ? Icons.expand_less
+                          : Icons.expand_more,
+                      color: Colors.red.shade200,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (_chaptersExpanded) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Ces entrées ne comptent pas dans la numérotation des tomes reliés.',
+              style: TextStyle(
+                fontSize: 11,
+                color: Colors.grey.shade500,
+              ),
+            ),
+            const SizedBox(height: 8),
+            _buildCoverGrid(chapters, accent, chapterBadge: true),
+          ],
+        ],
       ),
     );
   }
@@ -886,7 +956,11 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     return 'T${slot.volume.displayNumber}';
   }
 
-  Widget _buildCoverGrid(List<BookVolumeSlot> slots, Color accent) {
+  Widget _buildCoverGrid(
+    List<BookVolumeSlot> slots,
+    Color accent, {
+    bool chapterBadge = false,
+  }) {
     if (slots.isEmpty) {
       return Padding(
         padding: const EdgeInsets.all(24),
@@ -918,6 +992,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
             : (rating > 5.0 ? rating / 2 : rating);
         final key = _slotKeys.putIfAbsent(slot.volume.id, GlobalKey.new);
         final coverUrl = slot.volume.coverUrl ?? slot.item?.imageUrl;
+        final isChapter = chapterBadge || slot.volume.isChapterOrScan;
 
         final editionBadge = slot.volume.editionBadge;
 
@@ -932,10 +1007,12 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
-                    color: owned
-                        ? const Color(0xFF26A69A)
-                        : Colors.transparent,
-                    width: owned ? 2 : 0,
+                    color: isChapter
+                        ? Colors.red.shade400
+                        : owned
+                            ? const Color(0xFF26A69A)
+                            : Colors.transparent,
+                    width: (owned || isChapter) ? 2 : 0,
                   ),
                 ),
                 clipBehavior: Clip.antiAlias,
@@ -954,7 +1031,9 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                               color: Colors.grey.shade800,
                               child: Center(
                                 child: Text(
-                                  'T${slot.volume.displayNumber}',
+                                  isChapter
+                                      ? 'Ch.${slot.volume.displayNumber}'
+                                      : 'T${slot.volume.displayNumber}',
                                   style: const TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 18,
@@ -963,6 +1042,29 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                               ),
                             ),
                     ),
+                    if (isChapter)
+                      Positioned(
+                        top: 6,
+                        right: 6,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade700,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text(
+                            'SCAN',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                      ),
                     if (slot.volume.isUpcoming)
                       Positioned(
                         top: 6,

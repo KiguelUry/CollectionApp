@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../constants/book_accent.dart';
 import '../models/book_series.dart';
+import '../utils/book_series_normalizer.dart';
 import '../utils/tile_rating_display.dart';
 import 'collection_cover_image.dart';
 import 'item_title_text.dart';
@@ -127,7 +128,7 @@ class BookSeriesTile extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               ItemTitleText(
-                title: series.name,
+                title: BookSeriesNormalizer.displaySeriesName(series.name),
                 maxLines: 1,
                 style: const TextStyle(
                   fontWeight: FontWeight.w800,

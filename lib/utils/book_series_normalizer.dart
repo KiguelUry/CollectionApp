@@ -162,7 +162,7 @@ abstract final class BookSeriesNormalizer {
   static bool looksLikeChapterOrScan(String title) {
     final t = title.toLowerCase();
     if (RegExp(
-      r'\b(?:chapitre|chapter|chap\.?|ch\.?)\s*\d+',
+      r'\b(?:chapitre|chapter|chap\.?|ch\.?|épisode|episode|ep\.)\s*\d+',
       caseSensitive: false,
     ).hasMatch(t)) {
       // « Tome » + « Chapitre » dans le même titre = souvent un omnibus / faux positif.
@@ -251,25 +251,28 @@ abstract final class BookSeriesNormalizer {
   }
 
   static String stripEditionSuffix(String name) {
-    var s = name.trim().replaceAll(RegExp(r'[–—−]'), '-');
-    s = s.replaceAll(
-      RegExp(
-        r'\s*(?:-|–|—)?\s*(?:édition|edition)\s+'
-        r'(?:originale|original|collector|spéciale|speciale|intégrale|integrale)\b.*$',
+    var s = name.trim().replaceAll(RegExp(r'[–—−‐‑‒]'), '-');
+    // Normalise accents pour matcher « Édition » / « edition ».
+    final lower = s.toLowerCase();
+    final editionMatch = RegExp(
+      r'\s*-?\s*(édition|edition)\s+'
+      r'(originale|original|collector|spéciale|speciale|intégrale|integrale)\b.*$',
+      caseSensitive: false,
+    ).firstMatch(lower);
+    if (editionMatch != null) {
+      s = s.substring(0, editionMatch.start);
+    } else {
+      final anyEd = RegExp(
+        r'\s*-?\s*(édition|edition)\s+\S+.*$',
         caseSensitive: false,
-      ),
-      '',
-    );
+      ).firstMatch(lower);
+      if (anyEd != null) {
+        s = s.substring(0, anyEd.start);
+      }
+    }
     s = s.replaceAll(
       RegExp(
-        r'\s*(?:-|–|—)?\s*(?:édition|edition)\s+\S+.*$',
-        caseSensitive: false,
-      ),
-      '',
-    );
-    s = s.replaceAll(
-      RegExp(
-        r'\s*(?:-|–|—)?\s*(?:omnibus|coffret|box\s*set)\b.*$',
+        r'\s*-?\s*(omnibus|coffret|box\s*set)\b.*$',
         caseSensitive: false,
       ),
       '',

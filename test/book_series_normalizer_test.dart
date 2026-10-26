@@ -348,5 +348,35 @@ void main() {
       expect(c.seriesQuery, 'One Piece');
       expect(c.volumeNumber, isNull);
     });
+
+    test('stripEditionSuffix → One Piece sans édition originale', () {
+      expect(
+        BookSeriesNormalizer.displaySeriesName('One Piece - Édition originale'),
+        'One Piece',
+      );
+      expect(
+        BookSeriesNormalizer.stripEditionSuffix(
+          'One Piece – Édition originale',
+        ),
+        'One Piece',
+      );
+    });
+
+    test('looksLikeChapterOrScan détecte épisode / chapitre', () {
+      expect(
+        BookSeriesNormalizer.looksLikeChapterOrScan(
+          'One Piece - Chapitre 1114',
+        ),
+        isTrue,
+      );
+      expect(
+        BookSeriesNormalizer.looksLikeChapterOrScan('One Piece Episode 100'),
+        isTrue,
+      );
+      expect(
+        BookSeriesNormalizer.looksLikeChapterOrScan('One Piece - Tome 5'),
+        isFalse,
+      );
+    });
   });
 }

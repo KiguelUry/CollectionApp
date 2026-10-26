@@ -6,13 +6,12 @@ import 'package:http/http.dart' as http;
 import '../utils/catalog_http.dart';
 
 /// Recherche livres / mangas / BD — API iTunes (couvertures HD).
-/// Sur le web : désactivé (CORS bloqué ; corsproxy.io renvoie 403).
+/// Sur le web : proxy CORS `api.allorigins.win` (corsproxy.io renvoie 403).
 class ItunesBooksService {
   static Future<List<Map<String, String>>> search(
     String query, {
     int limit = 25,
   }) async {
-    if (kIsWeb) return const [];
     final q = query.trim();
     if (q.length < 2) return [];
 
@@ -33,12 +32,18 @@ class ItunesBooksService {
   }
 
   static Future<Map<String, String>?> lookupByIsbn(String isbn) async {
-    if (kIsWeb) return null;
     final cleaned = isbn.replaceAll(RegExp(r'[^0-9Xx]'), '');
     if (cleaned.length < 10) return null;
     final hits = await search(cleaned, limit: 5);
     if (hits.isEmpty) return null;
     return hits.first;
+  }
+
+  static Uri _requestUri(Uri itunesUri) {
+    if (!kIsWeb) return itunesUri;
+    return Uri.parse(
+      'https://api.allorigins.win/raw?url=${Uri.encodeComponent(itunesUri.toString())}',
+    );
   }
 
   static Future<List<Map<String, String>>> _searchEntity(
@@ -47,7 +52,7 @@ class ItunesBooksService {
     required int limit,
   }) async {
     try {
-      final uri = Uri.https('itunes.apple.com', '/search', {
+      final itunesUri = Uri.https('itunes.apple.com', '/search', {
         'term': query,
         'media': 'ebook',
         'entity': entity,
@@ -55,7 +60,9 @@ class ItunesBooksService {
         'country': 'FR',
         'lang': 'fr_fr',
       });
-      final response = await http.get(uri, headers: catalogHttpHeaders);
+      final response = await http
+          .get(_requestUri(itunesUri), headers: catalogHttpHeaders)
+          .timeout(const Duration(seconds: 12));
       if (response.statusCode != 200) {
         if (kDebugMode) {
           debugPrint('iTunes books ${response.statusCode}: ${response.body}');

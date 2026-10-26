@@ -1338,12 +1338,29 @@ class BookSeriesService {
     });
   }
 
-  /// Nettoie le nom série (« Thorgal - Tome » → « Thorgal ») si besoin.
+  /// Nettoie le nom série (« One Piece - Édition originale » → « One Piece »)
+  /// et persiste immédiatement en base si différent.
   Future<BookSeries> sanitizeSeriesName(BookSeries series) async {
-    final clean = BookSeriesNormalizer.displaySeriesName(series.name);
-    if (clean == series.name.trim()) return series;
+    final raw = series.name.trim();
+    var clean = BookSeriesNormalizer.displaySeriesName(raw);
+    if (clean.isEmpty) clean = BookSeriesNormalizer.stripEditionSuffix(raw);
+    if (clean.isEmpty) clean = raw;
+    if (clean == raw) return series;
     final updated = series.copyWith(name: clean);
-    await updateSeries(updated);
+    try {
+      await updateSeries(updated);
+    } catch (_) {
+      // Retry minimal : update name seul.
+      try {
+        await _client
+            .from('book_series')
+            .update({'name': clean})
+            .eq('id', series.id)
+            .eq('owner_id', _userId);
+      } catch (_) {
+        return series;
+      }
+    }
     return updated;
   }
 

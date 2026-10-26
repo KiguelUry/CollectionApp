@@ -65,7 +65,7 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
     });
   }
 
-  void _onStarTap(int starIndex) {
+  void _onStarPointer(int starIndex) {
     if (widget.readOnly) return;
     final n = (starIndex + 1).toDouble();
     final full = n;
@@ -79,6 +79,7 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
       next = full;
     }
     next = double.parse(next.clamp(0.0, 5.0).toStringAsFixed(1));
+    // Mise à jour locale synchrone immédiate (avant le round-trip Supabase).
     setState(() => _localRating = next);
     _commitDebounced(next);
   }
@@ -166,7 +167,10 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    onTap: widget.readOnly ? null : () => _onStarTap(i),
+                    // onTapDown = réponse synchrone au 1er contact (évite 2.5→3.0).
+                    onTapDown: widget.readOnly
+                        ? null
+                        : (_) => _onStarPointer(i),
                     customBorder: const CircleBorder(),
                     child: Icon(
                       _iconFor(i),
