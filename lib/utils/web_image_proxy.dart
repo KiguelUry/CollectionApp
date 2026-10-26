@@ -11,6 +11,9 @@ const _directWebImageHosts = {
   'cards.lorcast.io',
   'cdn.riftscribe.gg',
   'www.optcgapi.com',
+  // AniList CDN : CORS OK en <img>, wsrv renvoie souvent 400.
+  's4.anilist.co',
+  'anilist.co',
 };
 
 const _proxiedHosts = {

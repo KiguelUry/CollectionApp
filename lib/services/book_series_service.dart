@@ -821,7 +821,7 @@ class BookSeriesService {
     }
   }
 
-  /// Couvertures manquantes + réparation des mauvaises attributions (T1≠T16).
+  /// Couvertures manquantes via BATCH Google Books (1–3 pages), jamais 1 req/tome.
   /// [onProgress] est appelé tous les [progressEvery] tomes trouvés (UI live).
   Future<int> enrichMissingVolumeCovers({
     required BookSeries series,
@@ -832,10 +832,8 @@ class BookSeriesService {
     int progressEvery = 5,
   }) async {
     var updated = 0;
-    var lookups = 0;
     var sinceProgress = 0;
 
-    // Auteur dynamique (metadata) ; bootstrap si manquant via hits stricts.
     var working = series;
     var seriesAuthor = working.author;
     if (seriesAuthor == null || seriesAuthor.isEmpty) {
@@ -846,151 +844,63 @@ class BookSeriesService {
       }
     }
 
-    // Batch « Série Tome » + auteur dynamique — match STRICT.
-    final batchCovers = <int, String>{};
-    final batchPub = <int, String>{};
-    final batchVf = <int, bool>{};
-    Future<void> ingestBatch(String q) async {
-      try {
-        final batch = await BookCatalogService.searchBooks(
-          q,
-          subcategory: working.subcategory,
-          filters: BookSearchFilters(
-            titleQuery: working.name,
-            authorQuery: seriesAuthor ?? '',
-          ),
-        );
-        final ranked = BookIntelligenceService.enrichAndRank(
-          batch,
-          subcategory: working.subcategory,
-          filters: BookSearchFilters(
-            titleQuery: working.name,
-            authorQuery: seriesAuthor ?? '',
-          ),
-        );
-        for (final h in ranked) {
-          final img = h.imageUrl;
-          if (img == null || img.isEmpty) continue;
-          final combined =
-              '${h.raw['title'] ?? ''} ${h.raw['subtitle'] ?? ''}';
-          if (!BookSeriesNormalizer.hitBelongsToSeries(
-            combined,
-            working.name,
-          )) {
-            continue;
-          }
-          if (!BookSeriesNormalizer.authorMatchesExpected(
-            h.author,
-            seriesAuthor,
-          )) {
-            continue;
-          }
-          final vn = BookTitleParser.extractVolumeNumberStrict(combined);
-          if (vn == null || vn < 1) continue;
-          if (!BookIntelligenceService.hitMatchesVolumeExactly(h, vn)) continue;
-          final isVf = BookIntelligenceService.looksVfTitle(combined);
-          final existingVf = batchVf[vn] == true;
-          if (!batchCovers.containsKey(vn) || (isVf && !existingVf)) {
-            batchCovers[vn] = img;
-            batchVf[vn] = isVf;
-          }
-          final pub = h.raw['published_date'] ?? h.raw['year'];
-          if (pub != null && pub.isNotEmpty) {
-            batchPub.putIfAbsent(vn, () => pub);
-          }
-        }
-      } catch (_) {}
-    }
-
-    final coverName =
-        BookSeriesNormalizer.coverSearchSeriesName(working.name);
-    final authorSuffix =
-        seriesAuthor != null && seriesAuthor.isNotEmpty ? ' $seriesAuthor' : '';
-    // Google Books : intitle + inauthor dynamiques.
-    await ingestBatch(
-      BookSeriesNormalizer.googleBooksCoverQuery(
-        seriesTitle: coverName,
-        author: seriesAuthor,
-      ),
+    // UNE seule passe batch (pages séquentielles + délai) — zéro boucle HTTP/tome.
+    final batch = await BookIntelligenceService.batchFetchSeriesCovers(
+      seriesName: working.name,
+      subcategory: working.subcategory,
+      authorHint: seriesAuthor,
+      maxPages: 3,
     );
-    await ingestBatch('$coverName Tome$authorSuffix');
-    await ingestBatch('$coverName T$authorSuffix');
-    await ingestBatch('$coverName T0$authorSuffix');
 
-    // Priorité absolue aux premiers tomes (T1→T20) avant les suivants.
     final ordered = List<BookVolume>.from(volumes)
       ..sort((a, b) => a.volumeNumber.compareTo(b.volumeNumber));
 
     for (final vol in ordered) {
-      if (lookups >= maxLookups) break;
       if (vol.isHorsSerie) continue;
       final n = vol.volumeNumber.round();
+      final hit = batch[n];
       final verified = vol.metadata['cover_volume_verified'];
       final hasCover = vol.coverUrl != null && vol.coverUrl!.isNotEmpty;
       final needsRepair = repairUnverified &&
           hasCover &&
           (verified == null || verified != n);
-      // Priorise fortement T1–T20 (souvent manquants : T01 Glénat).
-      final forceCheck =
-          n <= 20 && (needsRepair || !hasCover || verified != n);
-      // Remplace une fiche EN « Vol. X » dès qu'une couverture VF existe.
-      final titleHint =
-          '${vol.volumeTitle ?? ''} ${vol.label ?? ''} ${vol.metadata['source_title'] ?? ''}'
-              .toLowerCase();
-      final looksEnVol = titleHint.contains('vol.') ||
-          titleHint.contains('volume ') ||
-          RegExp(r',\s*vol\.?\s*\d').hasMatch(titleHint);
-      final preferVf = looksEnVol && batchVf[n] == true;
-      if (hasCover && !needsRepair && !forceCheck && !preferVf) continue;
 
-      lookups++;
-      String? url = batchCovers[n];
-      String? pub = batchPub[n];
-      var upcoming = false;
-      if (url == null) {
-        final meta = await BookIntelligenceService.lookupVolumeCoverMeta(
-          seriesName: working.name,
-          volumeNumber: vol.volumeNumber,
-          subcategory: working.subcategory,
-          authorHint: seriesAuthor,
-        );
-        url = meta.coverUrl;
-        pub = meta.publishedDate;
-        upcoming = meta.upcoming;
-      } else {
-        upcoming = BookIntelligenceService.isFuturePublishedDate(pub);
-      }
-
-      if (url != null && url.isNotEmpty) {
-        await setVolumeCoverUrl(
-          vol.id,
-          url,
-          verifiedVolume: n,
-          publishedDate: pub,
-          upcoming: upcoming,
-        );
-        updated++;
-        sinceProgress++;
-        if (onProgress != null &&
-            progressEvery > 0 &&
-            sinceProgress % progressEvery == 0) {
-          onProgress(updated);
-        }
-      } else {
-        // Pas de hit strict → efface les fausses couvertures (Tyran, Realist Hero…).
-        if (hasCover && (needsRepair || forceCheck || preferVf)) {
+      if (hit == null) {
+        // Pas de spam individuel : on laisse le placeholder.
+        if (hasCover && needsRepair) {
           await clearVolumeCover(vol.id);
           updated++;
-        } else if (pub != null) {
-          await patchVolumeMetadata(vol.id, {
-            'published_date': pub,
-            'is_upcoming': upcoming,
-          });
         }
+        continue;
+      }
+
+      final url = hit.coverUrl;
+      final pub = hit.publishedDate;
+      final upcoming = BookIntelligenceService.isFuturePublishedDate(pub);
+      if (hasCover &&
+          !needsRepair &&
+          verified == n &&
+          vol.coverUrl == url) {
+        continue;
+      }
+
+      await setVolumeCoverUrl(
+        vol.id,
+        url,
+        verifiedVolume: n,
+        publishedDate: pub,
+        upcoming: upcoming,
+      );
+      updated++;
+      sinceProgress++;
+      if (onProgress != null &&
+          progressEvery > 0 &&
+          sinceProgress % progressEvery == 0) {
+        onProgress(updated);
       }
     }
 
-    // Couverture série = Tome 1 vérifié (jamais un autre tome).
+    // Couverture série = Tome 1 vérifié.
     final fresh = await fetchSeriesById(series.id);
     final refreshed = await fetchVolumes(series.id);
     String? tome1;
@@ -998,21 +908,9 @@ class BookSeriesService {
       if (v.volumeNumber >= 0.99 &&
           v.volumeNumber < 1.01 &&
           v.coverUrl != null &&
-          v.coverUrl!.isNotEmpty &&
-          v.metadata['cover_volume_verified'] == 1) {
+          v.coverUrl!.isNotEmpty) {
         tome1 = v.coverUrl;
         break;
-      }
-    }
-    if (tome1 == null) {
-      for (final v in refreshed) {
-        if (v.volumeNumber >= 0.99 &&
-            v.volumeNumber < 1.01 &&
-            v.coverUrl != null &&
-            v.coverUrl!.isNotEmpty) {
-          tome1 = v.coverUrl;
-          break;
-        }
       }
     }
     if (fresh != null &&
@@ -1802,12 +1700,16 @@ class BookSeriesService {
     final placeholders = volumes.where((v) => v.isManualPlaceholder).toList();
     if (placeholders.isEmpty) return null;
 
+    final batch = await BookIntelligenceService.batchFetchSeriesCovers(
+      seriesName: series.name,
+      subcategory: series.subcategory,
+      authorHint: series.author,
+      maxPages: 2,
+    );
+
     for (final ph in placeholders) {
-      final cover = await BookIntelligenceService.lookupVolumeCover(
-        seriesName: series.name,
-        volumeNumber: ph.volumeNumber,
-        subcategory: series.subcategory,
-      );
+      final hit = batch[ph.volumeNumber.round()];
+      final cover = hit?.coverUrl;
       if (cover == null || cover.isEmpty) continue;
 
       final meta = Map<String, dynamic>.from(ph.metadata);

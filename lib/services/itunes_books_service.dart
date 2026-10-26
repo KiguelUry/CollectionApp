@@ -19,7 +19,10 @@ class ItunesBooksService {
 
     final merged = <Map<String, String>>[];
     final seen = <String>{};
-    for (final hit in [...ebook, ...await _searchEntity(q, entity: 'audiobook', limit: 12)]) {
+    for (final hit in [
+      ...ebook,
+      ...await _searchEntity(q, entity: 'audiobook', limit: 12),
+    ]) {
       final key = (hit['title'] ?? '').toLowerCase();
       if (key.isEmpty || !seen.add(key)) continue;
       merged.add(hit);
@@ -49,7 +52,11 @@ class ItunesBooksService {
         'country': 'FR',
         'lang': 'fr_fr',
       });
-      final response = await http.get(uri, headers: catalogHttpHeaders);
+      // Web : proxy CORS obligatoire (itunes.apple.com bloque Origin).
+      final response = await http.get(
+        catalogProxiedUri(uri),
+        headers: catalogHttpHeaders,
+      );
       if (response.statusCode != 200) {
         if (kDebugMode) {
           debugPrint('iTunes books ${response.statusCode}: ${response.body}');
@@ -71,21 +78,19 @@ class ItunesBooksService {
   }
 
   static Map<String, String>? _mapBook(Map<String, dynamic> m) {
-    final title = m['trackName']?.toString() ??
-        m['collectionName']?.toString();
+    final title =
+        m['trackName']?.toString() ?? m['collectionName']?.toString();
     if (title == null || title.isEmpty) return null;
 
     final author = m['artistName']?.toString() ?? '';
     final series = m['collectionName']?.toString();
     final imageUrl = _hdArtwork(
-      m['artworkUrl600']?.toString() ??
-          m['artworkUrl100']?.toString() ??
-          '',
+      m['artworkUrl600']?.toString() ?? m['artworkUrl100']?.toString() ?? '',
     );
 
     final release = m['releaseDate']?.toString();
-    final year = release;
-    final yearStr = year != null && year.length >= 4 ? year.substring(0, 4) : '';
+    final yearStr =
+        release != null && release.length >= 4 ? release.substring(0, 4) : '';
 
     final result = <String, String>{
       'title': title,

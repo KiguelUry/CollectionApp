@@ -299,6 +299,31 @@ void main() {
       );
     });
 
+    test('seriesSubcategoryKey fusionne auteurs, sépare Manga/Roman', () {
+      expect(
+        BookSeriesNormalizer.seriesSubcategoryKey(
+          'Boruto - Naruto next generations',
+          BookSubcategory.manga,
+        ),
+        BookSeriesNormalizer.seriesSubcategoryKey(
+          'Boruto - Naruto next generations',
+          BookSubcategory.manga,
+        ),
+      );
+      expect(
+        BookSeriesNormalizer.seriesSubcategoryKey(
+          'Kingdom',
+          BookSubcategory.manga,
+        ),
+        isNot(
+          BookSeriesNormalizer.seriesSubcategoryKey(
+            'Kingdom',
+            BookSubcategory.novel,
+          ),
+        ),
+      );
+    });
+
     test('googleBooksCoverQuery injecte intitle et inauthor', () {
       final q = BookSeriesNormalizer.googleBooksCoverQuery(
         seriesTitle: 'Kingdom',

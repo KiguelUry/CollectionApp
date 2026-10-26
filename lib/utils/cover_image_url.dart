@@ -50,7 +50,9 @@ String gridThumbnailUrl(
   final host = uri.host.toLowerCase();
   if (host == kThumbnailCdnHost ||
       host == 'localhost' ||
-      host.startsWith('127.')) {
+      host.startsWith('127.') ||
+      // wsrv renvoie 400 sur le CDN AniList.
+      host.contains('anilist.co')) {
     return src;
   }
   // Stockage Supabase : seules les URLs publiques sont stables.

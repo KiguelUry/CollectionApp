@@ -85,8 +85,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         _slots = slots;
         _loading = false;
       });
-      // Couvertures manquantes / erronées + note communauté (arrière-plan).
-      // Rafraîchit l'UI tous les 5 tomes trouvés, enchaîne les lots.
+      // Couvertures : 1 seul batch Google Books (pas de boucle 1 req/tome).
       final seriesForBg = series;
       Future(() async {
         var any = false;
@@ -95,37 +94,16 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
               await _service.hydrateCommunityRating(seriesForBg);
           if (hydrated.communityRating != null) any = true;
         }
-        var remainingLookups = 120;
-        while (remainingLookups > 0 && mounted) {
-          final batch = remainingLookups.clamp(1, 40);
-          final freshVols = await _service.fetchVolumes(seriesForBg.id);
-          final stillMissing = freshVols.any(
-            (v) =>
-                !v.isHorsSerie &&
-                (v.coverUrl == null ||
-                    v.coverUrl!.isEmpty ||
-                    v.metadata['cover_volume_verified'] !=
-                        v.volumeNumber.round()),
-          );
-          if (!stillMissing) break;
-          final n = await _service.enrichMissingVolumeCovers(
-            series: seriesForBg,
-            volumes: freshVols,
-            maxLookups: batch,
-            repairUnverified: true,
-            progressEvery: 5,
-            onProgress: (_) {
-              if (mounted) _load(silent: true);
-            },
-          );
-          remainingLookups -= batch;
-          if (n > 0) {
-            any = true;
+        final n = await _service.enrichMissingVolumeCovers(
+          series: seriesForBg,
+          volumes: volumes,
+          repairUnverified: true,
+          progressEvery: 5,
+          onProgress: (_) {
             if (mounted) _load(silent: true);
-          } else {
-            break;
-          }
-        }
+          },
+        );
+        if (n > 0) any = true;
         if (any && mounted) _load(silent: true);
       });
     } catch (e) {

@@ -43,6 +43,7 @@ class GoogleBooksService {
   static Future<List<Map<String, String>>> search(
     String query, {
     int maxResults = 20,
+    int startIndex = 0,
     String? langRestrict = 'fr',
   }) async {
     final q = query.trim();
@@ -51,7 +52,8 @@ class GoogleBooksService {
     try {
       final params = <String, String>{
         'q': q,
-        'maxResults': '$maxResults',
+        'maxResults': '${maxResults.clamp(1, 40)}',
+        'startIndex': '${startIndex.clamp(0, 200)}',
         'orderBy': 'relevance',
       };
       if (langRestrict != null && langRestrict.isNotEmpty) {
@@ -59,6 +61,10 @@ class GoogleBooksService {
       }
       final url = _volumesUri(params);
       final response = await http.get(url);
+      if (response.statusCode == 429) {
+        if (kDebugMode) debugPrint('Google Books 429 — rate limit');
+        return [];
+      }
       if (response.statusCode != 200) return [];
 
       final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -73,6 +79,42 @@ class GoogleBooksService {
       if (kDebugMode) debugPrint('Google Books search: $e');
       return [];
     }
+  }
+
+  /// 1–3 pages séquentielles (jamais en parallèle) pour une série entière.
+  /// Évite le DDoS « 1 requête par tome ».
+  static Future<List<Map<String, String>>> searchSeriesBatched(
+    String seriesTitle, {
+    String? author,
+    int maxPages = 3,
+    Duration pageDelay = const Duration(milliseconds: 600),
+    String? langRestrict = 'fr',
+  }) async {
+    final name = seriesTitle.trim();
+    if (name.length < 2) return [];
+    final q = author != null && author.trim().isNotEmpty
+        ? 'intitle:"$name" inauthor:"${author.trim()}"'
+        : 'intitle:"$name"';
+    final out = <Map<String, String>>[];
+    final seen = <String>{};
+    final pages = maxPages.clamp(1, 3);
+    for (var page = 0; page < pages; page++) {
+      if (page > 0) await Future<void>.delayed(pageDelay);
+      final batch = await search(
+        q,
+        maxResults: 40,
+        startIndex: page * 40,
+        langRestrict: langRestrict,
+      );
+      if (batch.isEmpty) break;
+      for (final hit in batch) {
+        final title = hit['title']?.trim().toLowerCase() ?? '';
+        if (title.isEmpty || !seen.add(title)) continue;
+        out.add(hit);
+      }
+      if (batch.length < 40) break;
+    }
+    return out;
   }
 
   static Map<String, String>? _mapVolume(

@@ -217,6 +217,17 @@ abstract final class BookSeriesNormalizer {
     return a.isEmpty ? s : '$s|$a';
   }
 
+  /// Clé de regroupement bannières : (série normalisée, sous-catégorie).
+  /// Sépare Kingdom Manga vs Kingdom Roman sans fragmenter Boruto par auteur.
+  static String seriesSubcategoryKey(
+    String seriesName,
+    BookSubcategory? subcategory,
+  ) {
+    final s = mergeKey(seriesName);
+    final sub = subcategory?.dbValue ?? 'any';
+    return '$s|$sub';
+  }
+
   static String displaySeriesName(String rawTitle) {
     final parsed = parse(rawTitle);
     var name = parsed.hasSeries
