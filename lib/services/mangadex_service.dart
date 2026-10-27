@@ -246,7 +246,15 @@ abstract final class MangaDexService {
 
     final covers = await fetchAllCovers(mangaId);
     final volumes = covers.keys.where((k) => k > 0).toList()..sort();
-    final lastVol = volumes.isEmpty ? null : volumes.last;
+    final coverMax = volumes.isEmpty ? 0 : volumes.last;
+    // AniList HIATUS → volumes null ; MangaDex lastVolume = vrai compte (ex. 37).
+    final lastVolumeAttr = int.tryParse(
+      (attrs['lastVolume'] ?? attrs['last_volume'] ?? '').toString(),
+    );
+    final lastVol = [
+      if (coverMax > 0) coverMax,
+      if (lastVolumeAttr != null && lastVolumeAttr > 0) lastVolumeAttr,
+    ].fold<int>(0, (a, b) => a > b ? a : b);
     final coverUrl = covers[1] ??
         (volumes.isNotEmpty ? covers[volumes.first] : null) ??
         _coverFromRelationships(manga, mangaId);
@@ -255,7 +263,7 @@ abstract final class MangaDexService {
       id: mangaId,
       title: title,
       author: author,
-      volumesPublished: lastVol,
+      volumesPublished: lastVol > 0 ? lastVol : null,
       coverByVolume: covers,
       seriesCoverUrl: coverUrl,
     );

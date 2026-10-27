@@ -358,14 +358,28 @@ abstract final class BookIntelligenceService {
       );
     }
     banners.sort((a, b) {
-      final aq = BookSeriesNormalizer.normalizeKey(a.name).contains(qKey);
-      final bq = BookSeriesNormalizer.normalizeKey(b.name).contains(qKey);
+      final ak = BookSeriesNormalizer.normalizeKey(a.name);
+      final bk = BookSeriesNormalizer.normalizeKey(b.name);
+      // Exact match query → toujours 1er (Berserk > Berserk de la Gourmandise).
+      final aExact = qKey.isNotEmpty && ak == qKey;
+      final bExact = qKey.isNotEmpty && bk == qKey;
+      if (aExact != bExact) return aExact ? -1 : 1;
+      final aStarts = qKey.isNotEmpty && ak.startsWith(qKey);
+      final bStarts = qKey.isNotEmpty && bk.startsWith(qKey);
+      if (aStarts != bStarts) return aStarts ? -1 : 1;
+      final aq = ak.contains(qKey);
+      final bq = bk.contains(qKey);
       if (aq != bq) return aq ? -1 : 1;
+      // Titre plus court = plus exact (Berserk avant Berserk de la Gourmandise).
+      if (ak.length != bk.length && (aq || bq)) {
+        return ak.length.compareTo(bk.length);
+      }
       return b.volumeCount.compareTo(a.volumeCount);
     });
     final relevant = banners.where((b) {
       final k = BookSeriesNormalizer.normalizeKey(b.name);
       return qKey.isEmpty ||
+          k == qKey ||
           k.contains(qKey) ||
           qKey.contains(k) ||
           k.split(' ').any((p) => p.length >= 4 && qKey.contains(p));
@@ -374,8 +388,44 @@ abstract final class BookIntelligenceService {
     return use.take(8).toList();
   }
 
+  /// Force Manga sur tout hit dont la série est confirmée AniList/MangaDex.
+  static List<EnrichedBookHit> forceMangaForOfficialSeries(
+    List<EnrichedBookHit> hits,
+    Set<String> officialMergeKeys,
+  ) {
+    if (officialMergeKeys.isEmpty) return hits;
+    return hits.map((h) {
+      final sn = h.parsed.seriesName ?? h.raw['series_title'] ?? h.displayTitle;
+      final key = BookSeriesNormalizer.mergeKey(sn);
+      if (!officialMergeKeys.contains(key)) return h;
+      if (h.detectedSubcategory == BookSubcategory.manga) return h;
+      return EnrichedBookHit(
+        raw: h.raw,
+        parsed: h.parsed,
+        displayTitle: h.displayTitle,
+        author: h.author,
+        publisher: h.publisher,
+        estimatedTotalVolumes: h.estimatedTotalVolumes,
+        score: h.score,
+        detectedSubcategory: BookSubcategory.manga,
+      );
+    }).toList();
+  }
+
+  /// Score de pertinence série exacte pour tri grille (0 = exact).
+  static int exactSeriesRank(EnrichedBookHit h, String queryKey) {
+    if (queryKey.isEmpty) return 1;
+    final sn = BookSeriesNormalizer.normalizeKey(
+      h.parsed.seriesName ?? h.displayTitle,
+    );
+    if (sn == queryKey) return 0;
+    if (sn.startsWith(queryKey)) return 1;
+    if (sn.contains(queryKey)) return 2;
+    return 3;
+  }
+
   /// Batch unique Google Books (1–3 pages séquentielles) → map tome → cover.
-  /// JAMAIS une requête par tome.
+  /// JAMAIS une requête par tome. [maxPages] jusqu'à 3 (= 120 items).
   static Future<Map<int, ({String coverUrl, String? publishedDate})>>
       batchFetchSeriesCovers({
     required String seriesName,
@@ -386,18 +436,21 @@ abstract final class BookIntelligenceService {
     final cleanName = BookSeriesNormalizer.coverSearchSeriesName(seriesName);
     if (cleanName.length < 2) return {};
 
+    final pages = maxPages.clamp(1, 3);
     var hits = await GoogleBooksService.searchSeriesBatched(
       cleanName,
       author: authorHint,
-      maxPages: maxPages,
+      maxPages: pages,
       langRestrict: 'fr',
+      preferTomeQuery: subcategory == BookSubcategory.manga,
     );
     if (hits.isEmpty) {
       hits = await GoogleBooksService.searchSeriesBatched(
         cleanName,
         author: authorHint,
-        maxPages: 2,
+        maxPages: pages,
         langRestrict: null,
+        preferTomeQuery: subcategory == BookSubcategory.manga,
       );
     }
 

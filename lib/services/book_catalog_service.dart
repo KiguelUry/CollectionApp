@@ -80,36 +80,31 @@ class BookCatalogService {
   }) async {
     final enhanced = _searchQueryForSubcategory(query, subcategory, frenchOnly);
 
+    const t = Duration(seconds: 4);
+    final googleF = GoogleBooksService.search(
+      enhanced,
+      maxResults: 25,
+      langRestrict: frenchOnly ? _defaultLang : null,
+    ).timeout(t, onTimeout: () => <Map<String, String>>[]);
+    final itunesF = ItunesBooksService.search(enhanced)
+        .timeout(t, onTimeout: () => <Map<String, String>>[]);
+    final olF = OpenLibraryService.searchBooks(
+      query,
+      subcategory: subcategory,
+      frenchOnly: frenchOnly,
+    ).timeout(t, onTimeout: () => <Map<String, String>>[]);
+
     List<Map<String, String>> google = [];
-    try {
-      google = await GoogleBooksService.search(
-        enhanced,
-        maxResults: 25,
-        langRestrict: frenchOnly ? _defaultLang : null,
-      );
-    } catch (e) {
-      if (kDebugMode) debugPrint('Google Books search: $e');
-    }
-
     List<Map<String, String>> itunes = [];
-    try {
-      itunes = await ItunesBooksService.search(enhanced);
-    } catch (e) {
-      if (kDebugMode) debugPrint('iTunes books search: $e');
-    }
-
-    // Open Library dès que GB/iTunes sont maigres (romans / BD sans « Tome N »).
     List<Map<String, String>> ol = [];
-    if (google.length < 5) {
-      try {
-        ol = await OpenLibraryService.searchBooks(
-          query,
-          subcategory: subcategory,
-          frenchOnly: frenchOnly,
-        );
-      } catch (e) {
-        if (kDebugMode) debugPrint('Open Library search: $e');
-      }
+    try {
+      final parts = await Future.wait([googleF, itunesF, olF]);
+      google = parts[0];
+      itunes = parts[1];
+      // OL toujours fusionné (romans / BD sans « Tome N »), pas seulement si GB vide.
+      ol = parts[2];
+    } catch (e) {
+      if (kDebugMode) debugPrint('BookCatalog parallel search: $e');
     }
 
     final seen = <String>{};

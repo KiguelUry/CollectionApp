@@ -10,15 +10,23 @@ import '../utils/web_catalog_proxy.dart';
 import 'open_library_service.dart';
 
 /// Google Books API — source prioritaire VF (`langRestrict=fr`).
-/// Sur 429/403 avec clé : retry **sans** `&key=`, puis via `catalog-proxy`.
+/// Sur 429/403/5xx : retry sans `orderBy` / sans `&key=` / via `catalog-proxy`.
 /// Cache mémoire + SharedPreferences (TTL 24h) par requête `q`.
 class GoogleBooksService {
   static String? get _apiKey => AppEnv.googleBooksApiKey;
 
   static bool get hasApiKey => _apiKey != null && _apiKey!.isNotEmpty;
 
-  /// Après un 429/403 sur la clé, on saute `&key=` pour le reste de la session.
+  /// Après un 429/403/5xx sur la clé, on saute `&key=` pour le reste de la session.
   static bool _preferKeyless = false;
+
+  static bool _isRetryableStatus(int? code) =>
+      code == 429 ||
+      code == 403 ||
+      code == 500 ||
+      code == 502 ||
+      code == 503 ||
+      code == 504;
 
   static final Map<String, _CacheEntry> _memCache = {};
   static const _prefsPrefix = 'gb_cache_v1:';
@@ -83,22 +91,63 @@ class GoogleBooksService {
   }
 
   /// GET volumes : clé → sans clé → catalog-proxy.
+  /// Sur 429/403/5xx : retire `orderBy` puis force keyless + proxy.
   static Future<http.Response?> _fetchVolumes(Map<String, String> params) async {
     Future<http.Response> get(Uri uri) =>
-        http.get(uri).timeout(const Duration(seconds: 15));
+        http.get(uri).timeout(const Duration(seconds: 8));
+
+    Future<http.Response?> viaProxy(Map<String, String> p) async {
+      try {
+        final target = _volumesUri(p, withKey: false);
+        final proxied = proxiedCatalogUri(target);
+        final uri = kIsWeb
+            ? proxied
+            : Uri.parse(
+                '${AppEnv.supabaseUrl.replaceAll(RegExp(r'/+$'), '')}'
+                '/functions/v1/catalog-proxy'
+                '?url=${Uri.encodeComponent(target.toString())}'
+                '&apikey=${Uri.encodeComponent(AppEnv.supabaseAnonKey)}',
+              );
+        return await http
+            .get(
+              uri,
+              headers: {
+                'Accept': 'application/json',
+                'apikey': AppEnv.supabaseAnonKey,
+                'Authorization': 'Bearer ${AppEnv.supabaseAnonKey}',
+              },
+            )
+            .timeout(const Duration(seconds: 12));
+      } catch (e) {
+        if (kDebugMode) debugPrint('Google Books proxy: $e');
+        return null;
+      }
+    }
+
+    Map<String, String> simplified(Map<String, String> p) {
+      final out = Map<String, String>.from(p);
+      out.remove('orderBy');
+      return out;
+    }
 
     // 1) Avec clé (si dispo et pas encore brûlée).
     if (!_preferKeyless && hasApiKey) {
       try {
         final res = await get(_volumesUri(params, withKey: true));
         if (res.statusCode == 200) return res;
-        if (res.statusCode == 429 || res.statusCode == 403) {
+        if (_isRetryableStatus(res.statusCode)) {
           _preferKeyless = true;
           if (kDebugMode) {
             debugPrint(
-              'Google Books ${res.statusCode} avec clé → retry sans key',
+              'Google Books ${res.statusCode} avec clé → retry sans key/orderBy',
             );
           }
+          // Retry immédiat simplifié (sans orderBy, toujours avec clé une fois).
+          final simple = simplified(params);
+          try {
+            final retry = await get(_volumesUri(simple, withKey: false));
+            if (retry.statusCode == 200) return retry;
+          } catch (_) {}
         } else {
           return res;
         }
@@ -107,49 +156,22 @@ class GoogleBooksService {
       }
     }
 
-    // 2) Sans clé (quota anonyme / IP).
-    try {
-      final res = await get(_volumesUri(params, withKey: false));
-      if (res.statusCode == 200) return res;
-      if (res.statusCode == 429 || res.statusCode == 403) {
+    // 2) Sans clé (quota anonyme / IP) — d'abord avec orderBy, puis sans.
+    for (final p in [params, simplified(params)]) {
+      try {
+        final res = await get(_volumesUri(p, withKey: false));
+        if (res.statusCode == 200) return res;
+        if (!_isRetryableStatus(res.statusCode)) return res;
         if (kDebugMode) {
-          debugPrint('Google Books ${res.statusCode} keyless → catalog-proxy');
+          debugPrint('Google Books ${res.statusCode} keyless → suite');
         }
-      } else {
-        return res;
+      } catch (e) {
+        if (kDebugMode) debugPrint('Google Books keyless: $e');
       }
-    } catch (e) {
-      if (kDebugMode) debugPrint('Google Books keyless: $e');
     }
 
-    // 3) Edge proxy (CORS + contournement navigateur).
-    try {
-      final target = _volumesUri(params, withKey: false);
-      final proxied = proxiedCatalogUri(target);
-      // Force proxy même hors web pour le retry serveur.
-      final uri = kIsWeb
-          ? proxied
-          : Uri.parse(
-              '${AppEnv.supabaseUrl.replaceAll(RegExp(r'/+$'), '')}'
-              '/functions/v1/catalog-proxy'
-              '?url=${Uri.encodeComponent(target.toString())}'
-              '&apikey=${Uri.encodeComponent(AppEnv.supabaseAnonKey)}',
-            );
-      final res = await http
-          .get(
-            uri,
-            headers: {
-              'Accept': 'application/json',
-              'apikey': AppEnv.supabaseAnonKey,
-              'Authorization': 'Bearer ${AppEnv.supabaseAnonKey}',
-            },
-          )
-          .timeout(const Duration(seconds: 20));
-      return res;
-    } catch (e) {
-      if (kDebugMode) debugPrint('Google Books proxy: $e');
-      return null;
-    }
+    // 3) Edge proxy (CORS + contournement navigateur), sans orderBy.
+    return viaProxy(simplified(params));
   }
 
   static List<Map<String, String>> _parseItems(
@@ -237,36 +259,52 @@ class GoogleBooksService {
   }
 
   /// 1–3 pages séquentielles (jamais en parallèle) pour une série entière.
+  /// Préfère `intitle:"Name" Tome` pour les mangas VF (évite romans homonymes).
   static Future<List<Map<String, String>>> searchSeriesBatched(
     String seriesTitle, {
     String? author,
     int maxPages = 3,
-    Duration pageDelay = const Duration(milliseconds: 600),
+    Duration pageDelay = const Duration(milliseconds: 400),
     String? langRestrict = 'fr',
+    bool preferTomeQuery = true,
   }) async {
     final name = seriesTitle.trim();
     if (name.length < 2) return [];
-    final q = author != null && author.trim().isNotEmpty
-        ? 'intitle:"$name" inauthor:"${author.trim()}"'
-        : 'intitle:"$name"';
+    final authorLast = author != null && author.trim().isNotEmpty
+        ? author.trim().split(RegExp(r'\s+')).last
+        : null;
+    final queries = <String>[
+      if (preferTomeQuery) 'intitle:"$name" Tome',
+      if (authorLast != null && authorLast.length >= 2)
+        'intitle:"$name" inauthor:"$authorLast"',
+      'intitle:"$name"',
+    ];
     final out = <Map<String, String>>[];
     final seen = <String>{};
     final pages = maxPages.clamp(1, 3);
-    for (var page = 0; page < pages; page++) {
-      if (page > 0) await Future<void>.delayed(pageDelay);
-      final batch = await search(
-        q,
-        maxResults: 40,
-        startIndex: page * 40,
-        langRestrict: langRestrict,
-      );
-      if (batch.isEmpty) break;
-      for (final hit in batch) {
-        final title = hit['title']?.trim().toLowerCase() ?? '';
-        if (title.isEmpty || !seen.add(title)) continue;
-        out.add(hit);
+    for (final q in queries) {
+      for (var page = 0; page < pages; page++) {
+        if (out.isNotEmpty && page > 0) {
+          await Future<void>.delayed(pageDelay);
+        } else if (page > 0) {
+          await Future<void>.delayed(pageDelay);
+        }
+        final batch = await search(
+          q,
+          maxResults: 40,
+          startIndex: page * 40,
+          langRestrict: langRestrict,
+        );
+        if (batch.isEmpty) break;
+        for (final hit in batch) {
+          final title = hit['title']?.trim().toLowerCase() ?? '';
+          if (title.isEmpty || !seen.add(title)) continue;
+          out.add(hit);
+        }
+        if (batch.length < 40) break;
       }
-      if (batch.length < 40) break;
+      // Assez de pages remplies sur la 1ʳᵉ requête → skip variantes.
+      if (out.length >= 40) break;
     }
     return out;
   }

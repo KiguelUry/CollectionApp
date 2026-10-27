@@ -8,7 +8,7 @@ import '../../services/book_catalog_service.dart';
 import '../../services/book_intelligence_service.dart';
 import '../../services/book_search_history.dart';
 import '../../services/book_series_service.dart';
-import '../../services/itunes_books_service.dart';
+import '../../services/google_books_service.dart';
 import '../../services/mangadex_service.dart';
 import '../../utils/book_series_normalizer.dart';
 import '../../utils/book_vf_edition.dart';
@@ -208,98 +208,152 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       publisherQuery: filters.publisherQuery,
     );
 
-    // AniList + MangaDex EN PREMIER (volumes réels + covers, même si GB 429).
-    final officialBanners = <SeriesBannerCandidate>[];
+    const srcTimeout = Duration(seconds: 4);
+    final wantMangaOfficial =
+        seriesQ.length >= 2 && (_sub == null || _sub == BookSubcategory.manga);
+
+    // AniList + MangaDex + Google Books EN PARALLÈLE (≤4s / source).
+    final mdFuture = wantMangaOfficial
+        ? MangaDexService.searchManga(
+            seriesQ,
+            authorHint: filters.authorQuery.trim().isEmpty
+                ? null
+                : filters.authorQuery.trim(),
+            limit: 3,
+          ).timeout(srcTimeout, onTimeout: () => <MangaDexSeriesMeta>[])
+        : Future.value(<MangaDexSeriesMeta>[]);
+    final aniFuture = wantMangaOfficial
+        ? AnilistMangaService.searchManga(seriesQ, limit: 3).timeout(
+            srcTimeout,
+            onTimeout: () => <AnilistMangaMeta>[],
+          )
+        : Future.value(<AnilistMangaMeta>[]);
+    final gbQuery = apiQuery.length >= 2 ? apiQuery : filters.publisherQuery;
+    final gbFuture = BookCatalogService.searchBooks(
+      gbQuery,
+      subcategory: _effectiveSub,
+      filters: searchFilters,
+    ).timeout(srcTimeout, onTimeout: () => <Map<String, String>>[]);
+
+    final mdList = await mdFuture;
+    final aniResults = await aniFuture;
+    var raw = await gbFuture;
+    // Les 3 futures tournent déjà en parallèle via démarrage avant await.
+
     MangaDexSeriesMeta? primaryMangaDex;
-    if (seriesQ.length >= 2 &&
-        (_sub == null || _sub == BookSubcategory.manga)) {
+    if (mdList.isNotEmpty) {
+      // Exact title match en tête (Vagabond, pas Shinigami Boy Kim).
+      final qKey = BookSeriesNormalizer.mergeKey(seriesQ);
+      mdList.sort((a, b) {
+        final ae = BookSeriesNormalizer.mergeKey(a.title) == qKey;
+        final be = BookSeriesNormalizer.mergeKey(b.title) == qKey;
+        if (ae != be) return ae ? -1 : 1;
+        return (b.volumesPublished ?? 0).compareTo(a.volumesPublished ?? 0);
+      });
+      primaryMangaDex = mdList.first;
+    }
+
+    // Requête GB ciblée manga : intitle:"Vagabond" Tome (évite romans homonymes).
+    if (primaryMangaDex != null && seriesQ.length >= 2) {
+      final authorParts = (primaryMangaDex.author ?? '').trim().split(RegExp(r'\s+'));
+      final authorLast =
+          authorParts.isNotEmpty ? authorParts.last : '';
+      final targeted = authorLast.length >= 2
+          ? 'intitle:"$seriesQ" inauthor:"$authorLast"'
+          : 'intitle:"$seriesQ" Tome';
       try {
-        final mdList = await MangaDexService.searchManga(
-          seriesQ,
-          authorHint: filters.authorQuery.trim().isEmpty
-              ? null
-              : filters.authorQuery.trim(),
-          limit: 3,
-        );
-        if (mdList.isNotEmpty) primaryMangaDex = mdList.first;
-
-        final aniResults =
-            await AnilistMangaService.searchManga(seriesQ, limit: 3);
-
-        // Fusionne AniList + MangaDex par titre normalisé.
-        final byKey = <String, SeriesBannerCandidate>{};
-        for (final md in mdList) {
-          final key = BookSeriesNormalizer.mergeKey(md.title);
-          final vols = md.volumesPublished ?? 0;
-          byKey[key] = SeriesBannerCandidate(
-            name: md.title,
-            volumeCount: vols > 0 ? vols : 1,
-            coversByVolume: Map<int, String>.from(md.coverByVolume),
-            detectedSubcategory: BookSubcategory.manga,
-            author: md.author,
-            coverUrl: md.seriesCoverUrl ?? md.coverByVolume[1],
-            fromAnilist: true,
-          );
-        }
-        for (final ani in aniResults) {
-          final key = BookSeriesNormalizer.mergeKey(ani.title);
-          final existing = byKey[key];
-          final mdVols = existing?.volumeCount ?? 0;
-          final aniVols = ani.volumes ?? 0;
-          final count = [aniVols, mdVols].reduce((a, b) => a > b ? a : b);
-          final covers = <int, String>{
-            ...?existing?.coversByVolume,
-            if (ani.coverUrl != null && ani.coverUrl!.isNotEmpty)
-              1: existing?.coversByVolume[1] ?? ani.coverUrl!,
-          };
-          byKey[key] = SeriesBannerCandidate(
-            name: existing?.name ?? ani.title,
-            volumeCount: count > 0 ? count : (existing?.volumeCount ?? 0),
-            coversByVolume: covers,
-            detectedSubcategory: BookSubcategory.manga,
-            author: existing?.author ?? ani.author,
-            coverUrl: existing?.coverUrl ?? ani.coverUrl ?? covers[1],
-            fromAnilist: true,
-          );
-        }
-        // Ne jamais afficher « 1 tomes » si on n'a aucune info réelle.
-        for (final e in byKey.values) {
-          if (e.volumeCount < 1 && e.coversByVolume.isEmpty) continue;
-          officialBanners.add(
-            SeriesBannerCandidate(
-              name: e.name,
-              volumeCount: e.volumeCount > 0
-                  ? e.volumeCount
-                  : (e.coversByVolume.keys.isEmpty
-                      ? 0
-                      : e.coversByVolume.keys.reduce((a, b) => a > b ? a : b)),
-              coversByVolume: e.coversByVolume,
-              detectedSubcategory: BookSubcategory.manga,
-              author: e.author,
-              coverUrl: e.coverUrl,
-              fromAnilist: true,
-            ),
-          );
+        final extra = await GoogleBooksService.search(
+          targeted,
+          maxResults: 40,
+          langRestrict: 'fr',
+        ).timeout(srcTimeout, onTimeout: () => <Map<String, String>>[]);
+        if (extra.isNotEmpty) {
+          final seen = {for (final r in raw) (r['title'] ?? '').toLowerCase()};
+          for (final h in extra) {
+            final t = (h['title'] ?? '').toLowerCase();
+            if (t.isEmpty || seen.contains(t)) continue;
+            seen.add(t);
+            raw.add(h);
+          }
         }
       } catch (_) {}
     }
 
-    // Google Books (+ iTunes natif seulement) — 1 requête (+ filet si vide).
-    var raw = await BookCatalogService.searchBooks(
-      apiQuery.length >= 2 ? apiQuery : filters.publisherQuery,
-      subcategory: _effectiveSub,
-      filters: searchFilters,
-    );
-    if (raw.isEmpty && seriesQ.length >= 2 && officialBanners.isEmpty) {
-      await Future<void>.delayed(const Duration(milliseconds: 600));
-      raw = await BookCatalogService.searchBooks(
-        volumeHint != null ? '$seriesQ Tome $volumeHint' : seriesQ,
-        subcategory: _effectiveSub,
-        filters: searchFilters,
+    // Fusionne AniList + MangaDex → bannières officielles Manga.
+    final officialBanners = <SeriesBannerCandidate>[];
+    final byKey = <String, SeriesBannerCandidate>{};
+    for (final md in mdList) {
+      final key = BookSeriesNormalizer.mergeKey(md.title);
+      final vols = md.volumesPublished ?? 0;
+      final coverMax = md.coverByVolume.isEmpty
+          ? 0
+          : md.coverByVolume.keys.reduce((a, b) => a > b ? a : b);
+      final count = [vols, coverMax].reduce((a, b) => a > b ? a : b);
+      byKey[key] = SeriesBannerCandidate(
+        name: md.title,
+        volumeCount: count > 0 ? count : 0,
+        coversByVolume: Map<int, String>.from(md.coverByVolume),
+        detectedSubcategory: BookSubcategory.manga,
+        author: md.author,
+        coverUrl: md.seriesCoverUrl ?? md.coverByVolume[1],
+        fromAnilist: true,
+      );
+    }
+    for (final ani in aniResults) {
+      final key = BookSeriesNormalizer.mergeKey(ani.title);
+      final existing = byKey[key];
+      final mdVols = existing?.volumeCount ?? 0;
+      final aniVols = ani.volumes ?? 0;
+      final coverMax = existing == null || existing.coversByVolume.isEmpty
+          ? 0
+          : existing.coversByVolume.keys.reduce((a, b) => a > b ? a : b);
+      final count =
+          [aniVols, mdVols, coverMax].reduce((a, b) => a > b ? a : b);
+      final covers = <int, String>{
+        ...?existing?.coversByVolume,
+        if (ani.coverUrl != null && ani.coverUrl!.isNotEmpty)
+          1: existing?.coversByVolume[1] ?? ani.coverUrl!,
+      };
+      byKey[key] = SeriesBannerCandidate(
+        name: existing?.name ?? ani.title,
+        volumeCount: count,
+        coversByVolume: covers,
+        detectedSubcategory: BookSubcategory.manga,
+        author: existing?.author ?? ani.author,
+        coverUrl: existing?.coverUrl ?? ani.coverUrl ?? covers[1],
+        fromAnilist: true,
+      );
+    }
+    // Exact match query en tête des bannières officielles.
+    final qBannerKey = BookSeriesNormalizer.mergeKey(seriesQ);
+    final officialSorted = byKey.values.toList()
+      ..sort((a, b) {
+        final ae = BookSeriesNormalizer.mergeKey(a.name) == qBannerKey;
+        final be = BookSeriesNormalizer.mergeKey(b.name) == qBannerKey;
+        if (ae != be) return ae ? -1 : 1;
+        return b.volumeCount.compareTo(a.volumeCount);
+      });
+    for (final e in officialSorted) {
+      if (e.volumeCount < 1 && e.coversByVolume.isEmpty) continue;
+      officialBanners.add(
+        SeriesBannerCandidate(
+          name: e.name,
+          volumeCount: e.volumeCount > 0
+              ? e.volumeCount
+              : (e.coversByVolume.keys.isEmpty
+                  ? 0
+                  : e.coversByVolume.keys.reduce((a, b) => a > b ? a : b)),
+          coversByVolume: e.coversByVolume,
+          detectedSubcategory: BookSubcategory.manga,
+          author: e.author,
+          coverUrl: e.coverUrl,
+          fromAnilist: true,
+        ),
       );
     }
 
-    final withPhotos = await BookCatalogService.enrichAuthorPhotos(raw);
+    final withPhotos = await BookCatalogService.enrichAuthorPhotos(raw)
+        .timeout(srcTimeout, onTimeout: () => raw);
     var enriched = BookIntelligenceService.enrichAndRank(
       withPhotos,
       subcategory: _effectiveSub,
@@ -316,6 +370,15 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
         ),
       );
     }
+
+    // RÉCONCILIATION : hits GB Glénat (Berserk) → Manga si AniList/MD match.
+    final officialMergeKeysEarly = {
+      for (final o in officialBanners) BookSeriesNormalizer.mergeKey(o.name),
+    };
+    enriched = BookIntelligenceService.forceMangaForOfficialSeries(
+      enriched,
+      officialMergeKeysEarly,
+    );
 
     // Série officielle exacte → filtre strict « Tomes reliés » (pas Crooked Kingdom).
     final primarySeries = officialBanners.isNotEmpty
@@ -351,72 +414,48 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       );
     }).toList();
 
-    // MangaDex : fill covers VF manquantes + conserve la suite JP (ex. T12).
+    // MangaDex : fill covers manquantes + suite JP — SANS iTunes tome-par-tome.
     if (primaryMangaDex != null) {
       final md = primaryMangaDex;
       final frVols = <int>{
         for (final h in enriched)
-          if (h.parsed.volumeNumber != null) h.parsed.volumeNumber!.round(),
+          if (h.parsed.volumeNumber != null &&
+              BookSeriesNormalizer.mergeKey(
+                    h.parsed.seriesName ?? h.displayTitle,
+                  ) ==
+                  BookSeriesNormalizer.mergeKey(md.title))
+            h.parsed.volumeNumber!.round(),
       };
       final maxFr = frVols.isEmpty ? 0 : frVols.reduce((a, b) => a > b ? a : b);
-
-      // iTunes FR uniquement pour trous de cover/date sur volumes VF existants.
-      final needItunes = <int>[
-        for (final h in enriched)
-          if (h.parsed.volumeNumber != null &&
-              ((h.imageUrl == null || h.imageUrl!.isEmpty) ||
-                  h.publishedDate == null))
-            h.parsed.volumeNumber!.round(),
-      ];
-      final itunesByVol = needItunes.isEmpty
-          ? const <int, Map<String, String>>{}
-          : await ItunesBooksService.lookupFrenchVolumesBatch(
-              md.title,
-              needItunes,
-            );
 
       for (var i = 0; i < enriched.length; i++) {
         final h = enriched[i];
         final n = h.parsed.volumeNumber?.round();
-        if (n == null || !frVols.contains(n)) continue;
-        final it = itunesByVol[n];
+        if (n == null) continue;
+        final seriesKey = BookSeriesNormalizer.mergeKey(
+          h.parsed.seriesName ?? h.displayTitle,
+        );
+        if (seriesKey != BookSeriesNormalizer.mergeKey(md.title)) continue;
         final mdCover = md.coverByVolume[n];
-        // Priorité : cover GB déjà présente → iTunes FR → MangaDex (proxy).
         String? cover = h.imageUrl;
         var source = h.raw['source'] ?? 'google_books';
-        if (cover == null || cover.isEmpty) {
-          if (it != null && (it['image_url'] ?? '').isNotEmpty) {
-            cover = it['image_url'];
-            source = 'itunes';
-          } else if (mdCover != null && mdCover.trim().isNotEmpty) {
-            cover = coverUrlForWeb(mdCover);
-            source = 'mangadex';
-          }
+        if ((cover == null || cover.isEmpty) &&
+            mdCover != null &&
+            mdCover.trim().isNotEmpty) {
+          cover = coverUrlForWeb(mdCover);
+          source = 'mangadex';
         }
-        // Date VF : GB > iTunes FR (jamais date US / MD).
-        final pub = h.publishedDate ??
-            (it != null &&
-                    BookVfEdition.isFrenchEdition(
-                      title: it['title'] ?? '',
-                      language: it['language'],
-                      source: 'itunes',
-                    )
-                ? it['published_date']
-                : null);
-        if ((cover != null && cover.isNotEmpty && h.imageUrl != cover) ||
-            (pub != null && pub.isNotEmpty && h.publishedDate != pub)) {
-          final raw = Map<String, String>.from(h.raw);
-          if (cover != null && cover.isNotEmpty) raw['image_url'] = cover;
-          if (pub != null && pub.isNotEmpty) {
-            raw['published_date'] = pub;
-            raw['language'] = raw['language'] ?? 'fr';
-          }
-          raw['source'] = source;
+        if (cover != null &&
+            cover.isNotEmpty &&
+            (h.imageUrl == null || h.imageUrl!.isEmpty || h.imageUrl != cover)) {
+          final rawHit = Map<String, String>.from(h.raw);
+          rawHit['image_url'] = cover;
+          rawHit['source'] = source;
           enriched[i] = EnrichedBookHit(
-            raw: raw,
+            raw: rawHit,
             parsed: h.parsed,
             displayTitle: h.displayTitle,
-            author: h.author ?? it?['author'] ?? md.author,
+            author: h.author ?? md.author,
             publisher: h.publisher,
             estimatedTotalVolumes: h.estimatedTotalVolumes,
             score: h.score,
@@ -425,58 +464,22 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
         }
       }
 
-      // iTunes FR pour un tome demandé manquant.
-      if (volumeHint != null && !frVols.contains(volumeHint)) {
-        final it = itunesByVol[volumeHint] ??
-            await ItunesBooksService.lookupFrenchVolume(md.title, volumeHint);
-        if (it != null &&
-            BookVfEdition.isFrenchEdition(
-              title: it['title'] ?? '',
-              language: it['language'],
-              source: 'itunes',
-            ) &&
-            RegExp(r'\btome\s*\d+', caseSensitive: false)
-                .hasMatch(it['title'] ?? '')) {
-          enriched.add(
-            EnrichedBookHit(
-              raw: {
-                'title': it['title'] ?? '${md.title} - Tome $volumeHint',
-                'series_title': md.title,
-                'series_volume': '$volumeHint',
-                if (md.author != null) 'author': md.author!,
-                if ((it['image_url'] ?? '').isNotEmpty)
-                  'image_url': it['image_url']!,
-                if ((it['published_date'] ?? '').isNotEmpty)
-                  'published_date': it['published_date']!,
-                'source': 'itunes',
-                'language': 'fr',
-              },
-              parsed: BookSeriesNormalizer.parse(
-                it['title'] ?? '${md.title} - Tome $volumeHint',
-              ),
-              displayTitle:
-                  it['title'] ?? '${md.title} - Tome $volumeHint',
-              author: md.author ?? it['author'],
-              score: 15000.0 - volumeHint,
-              estimatedTotalVolumes: frVols.length,
-              detectedSubcategory: BookSubcategory.manga,
-            ),
-          );
-          frVols.add(volumeHint);
-        }
-      }
-
-      // Suite japonaise MangaDex au-delà du dernier tome VF (ex. T12).
+      // Suite japonaise MangaDex au-delà du dernier tome VF (ex. T12 / T37).
       final present = <int>{
         for (final h in enriched)
-          if (h.parsed.volumeNumber != null) h.parsed.volumeNumber!.round(),
+          if (h.parsed.volumeNumber != null &&
+              BookSeriesNormalizer.mergeKey(
+                    h.parsed.seriesName ?? h.displayTitle,
+                  ) ==
+                  BookSeriesNormalizer.mergeKey(md.title))
+            h.parsed.volumeNumber!.round(),
       };
       final mdMax = md.volumesPublished ??
           (md.coverByVolume.isEmpty
               ? 0
               : md.coverByVolume.keys.reduce((a, b) => a > b ? a : b));
-      final suiteStart = maxFr >= 1 ? maxFr + 1 : 1;
-      for (var n = suiteStart; n <= mdMax; n++) {
+      // Remplit aussi les trous VF manquants (covers MD) pour 1..maxFr.
+      for (var n = 1; n <= mdMax; n++) {
         if (present.contains(n)) continue;
         final mdCover = md.coverByVolume[n];
         if (mdCover == null || mdCover.trim().isEmpty) continue;
@@ -493,14 +496,48 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
             parsed: BookSeriesNormalizer.parse('${md.title} - Tome $n'),
             displayTitle: '${md.title} - Tome $n',
             author: md.author,
-            score: 5000.0 - n,
+            score: (maxFr >= 1 && n <= maxFr) ? 12000.0 - n : 5000.0 - n,
             estimatedTotalVolumes: mdMax,
             detectedSubcategory: BookSubcategory.manga,
           ),
         );
+        present.add(n);
       }
 
+      // Met à jour le compte bannière officielle avec max VF + MD.
+      final vfHitsMax = present.isEmpty
+          ? 0
+          : present.reduce((a, b) => a > b ? a : b);
+      for (var i = 0; i < officialBanners.length; i++) {
+        final b = officialBanners[i];
+        if (BookSeriesNormalizer.mergeKey(b.name) !=
+            BookSeriesNormalizer.mergeKey(md.title)) {
+          continue;
+        }
+        final count = [
+          b.volumeCount,
+          mdMax,
+          vfHitsMax,
+        ].reduce((a, b) => a > b ? a : b);
+        if (count > b.volumeCount) {
+          officialBanners[i] = SeriesBannerCandidate(
+            name: b.name,
+            volumeCount: count,
+            coversByVolume: b.coversByVolume,
+            publishedDatesByVolume: b.publishedDatesByVolume,
+            detectedSubcategory: BookSubcategory.manga,
+            author: b.author,
+            coverUrl: b.coverUrl,
+            fromAnilist: true,
+          );
+        }
+      }
+
+      final qKey = BookSeriesNormalizer.normalizeKey(seriesQ);
       enriched.sort((a, b) {
+        final ar = BookIntelligenceService.exactSeriesRank(a, qKey);
+        final br = BookIntelligenceService.exactSeriesRank(b, qKey);
+        if (ar != br) return ar.compareTo(br);
         final av = a.parsed.volumeNumber?.round() ?? 9999;
         final bv = b.parsed.volumeNumber?.round() ?? 9999;
         if (volumeHint != null) {
@@ -607,6 +644,18 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
         ),
       );
     }
+
+    // Exact match query toujours en 1re bannière.
+    final qSort = BookSeriesNormalizer.normalizeKey(seriesQ);
+    mergedBanners.sort((a, b) {
+      final ak = BookSeriesNormalizer.normalizeKey(a.name);
+      final bk = BookSeriesNormalizer.normalizeKey(b.name);
+      final aExact = qSort.isNotEmpty && ak == qSort;
+      final bExact = qSort.isNotEmpty && bk == qSort;
+      if (aExact != bExact) return aExact ? -1 : 1;
+      if (a.fromAnilist != b.fromAnilist) return a.fromAnilist ? -1 : 1;
+      return b.volumeCount.compareTo(a.volumeCount);
+    });
 
     if (!mounted) return;
     setState(() {

@@ -378,6 +378,61 @@ class BookSeriesService {
     return refreshPublications(series);
   }
 
+  /// AniList/MangaDex confirme un manga → reclasse BD/Autre → Manga.
+  Future<BookSeries> reclassifyAsMangaIfConfirmed(BookSeries series) async {
+    if (series.subcategory == BookSubcategory.manga) return series;
+    if (series.subcategory != BookSubcategory.comic &&
+        series.subcategory != BookSubcategory.other &&
+        series.subcategory != BookSubcategory.novel) {
+      return series;
+    }
+    try {
+      final md = await MangaDexService.lookupManga(
+        series.name,
+        authorHint: series.author,
+      );
+      final ani = await AnilistMangaService.lookupManga(series.name);
+      final confirmed = md != null || ani != null;
+      if (!confirmed) return series;
+      // Auteur : si AniList/MD a un auteur et la série aussi, exiger match faible.
+      final officialAuthor = md?.author ?? ani?.author;
+      if (series.author != null &&
+          series.author!.trim().isNotEmpty &&
+          officialAuthor != null &&
+          officialAuthor.trim().isNotEmpty &&
+          !BookSeriesNormalizer.authorsMatch(series.author!, officialAuthor)) {
+        // Titre exact quand même → reclasse (Berserk / Glénat).
+        final q = BookSeriesNormalizer.mergeKey(series.name);
+        final t = BookSeriesNormalizer.mergeKey(md?.title ?? ani?.title ?? '');
+        if (q != t) return series;
+      }
+      final vols = [
+        series.expectedVolumeCount ?? 0,
+        md?.volumesPublished ?? 0,
+        ani?.volumes ?? 0,
+      ].reduce((a, b) => a > b ? a : b);
+      var updated = series.copyWith(
+        subcategory: BookSubcategory.manga,
+        expectedVolumeCount: vols > 0 ? vols : series.expectedVolumeCount,
+      );
+      await updateSeries(updated);
+      if (vols > 1) {
+        await ensureVolumeSlots(updated.id, vols);
+      }
+      // Items liés : subcategory manga.
+      try {
+        await _client
+            .from('collection_items')
+            .update({'subcategory': BookSubcategory.manga.dbValue})
+            .eq('series_id', series.id)
+            .eq('category', 'book');
+      } catch (_) {}
+      return (await fetchSeriesById(series.id)) ?? updated;
+    } catch (_) {
+      return series;
+    }
+  }
+
   Future<void> ensureVolumeSlots(String seriesId, int count) async {
     if (count < 1) return;
     final existing = await fetchVolumes(seriesId);
@@ -922,12 +977,15 @@ class BookSeriesService {
     var vfMax = 0;
 
     // 1) Google Books FR = source de vérité VF (covers + dates + max tome).
+    // Jusqu'à 3×40 = 120 items pour couvrir Berserk (43+) malgré 503 partiels.
     try {
+      final expected = working.expectedVolumeCount ?? volumes.length;
+      final pagesNeeded = expected > 40 ? 3 : (expected > 20 ? 2 : 2);
       final gb = await BookIntelligenceService.batchFetchSeriesCovers(
         seriesName: working.name,
         subcategory: working.subcategory,
         authorHint: seriesAuthor,
-        maxPages: working.subcategory == BookSubcategory.manga ? 2 : 3,
+        maxPages: pagesNeeded.clamp(1, 3),
       );
       for (final e in gb.entries) {
         batch[e.key] = e.value;
@@ -935,7 +993,7 @@ class BookSeriesService {
       }
     } catch (_) {}
 
-    // 2) MangaDex comble les trous + suite JP au-delà du max VF.
+    // 2) MangaDex comble TOUS les trous restants (T25, T28, T31-39…).
     if (working.subcategory == BookSubcategory.manga) {
       try {
         final md = await MangaDexService.lookupManga(

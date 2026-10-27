@@ -37,6 +37,8 @@ abstract final class BookSeriesNormalizer {
   };
 
   /// Éditeurs BD franco-belge.
+  /// Pas de « glénat » / « glenat » seuls : Glénat publie aussi du manga
+  /// (Berserk, etc.) — la réconciliation AniList/MangaDex force Manga.
   static const bdPublishers = <String>{
     'le lombard',
     'lombard',
@@ -46,14 +48,11 @@ abstract final class BookSeriesNormalizer {
     'delcourt',
     'soleil',
     'fluide glacial',
-    'glénat',
-    'glenat',
     'bamboo',
     'rue de sèvres',
     'rue de sevres',
     'futuropolis',
     'dupuis / marsu',
-    'ankama',
   };
 
   /// Éditeurs comics US.

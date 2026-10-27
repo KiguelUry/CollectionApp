@@ -58,7 +58,8 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
       if (series == null) throw Exception('Série introuvable');
       series = await _service.sanitizeSeriesName(series);
       await _service.dedupeVolumeItems(series.id);
-      // Force Thorgal → BD + compte réaliste si sous-estimé.
+      // Berserk/Glénat classé BD → Manga si AniList/MangaDex confirme.
+      series = await _service.reclassifyAsMangaIfConfirmed(series);
       series = await _service.ensureRealisticVolumeCount(series);
       final volumes = await _service.fetchVolumes(series.id);
       final items = await _service.fetchSeriesItems(series.id);
