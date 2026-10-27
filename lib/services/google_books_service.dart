@@ -10,14 +10,14 @@ import '../utils/web_catalog_proxy.dart';
 import 'open_library_service.dart';
 
 /// Google Books API — source prioritaire VF (`langRestrict=fr`).
-/// Sur 429/403/5xx : retry sans `orderBy` / sans `&key=` / via `catalog-proxy`.
-/// Circuit breaker 60s + cache négatif pour stopper le spam 429.
+/// Pas de `orderBy` (provoque des 503). Clé conservée sur retry 503.
+/// Keyless uniquement après 429/403. Circuit breaker 60s + cache négatif.
 class GoogleBooksService {
   static String? get _apiKey => AppEnv.googleBooksApiKey;
 
   static bool get hasApiKey => _apiKey != null && _apiKey!.isNotEmpty;
 
-  /// Après un 429/403/5xx sur la clé, on saute `&key=` pour le reste de la session.
+  /// Uniquement après un vrai 429/403 avec clé — jamais après un 503.
   static bool _preferKeyless = false;
 
   /// Coupe-circuit : aucun HTTP tant que `now < lockedUntil`.
@@ -30,7 +30,6 @@ class GoogleBooksService {
 
   static void _tripBreaker([String reason = '']) {
     _googleBooksLockedUntil = DateTime.now().add(_lockDuration);
-    _preferKeyless = true;
     if (kDebugMode) {
       debugPrint(
         'Google Books circuit OPEN 60s'
@@ -39,22 +38,20 @@ class GoogleBooksService {
     }
   }
 
-  static bool _isRetryableStatus(int? code) =>
-      code == 429 ||
-      code == 403 ||
-      code == 500 ||
-      code == 502 ||
-      code == 503 ||
-      code == 504;
+  static bool _isServerError(int? code) =>
+      code == 500 || code == 502 || code == 503 || code == 504;
+
+  static bool _isQuotaError(int? code) => code == 429 || code == 403;
 
   static final Map<String, _CacheEntry> _memCache = {};
   static const _prefsPrefix = 'gb_cache_v1:';
   static const _ttl = Duration(hours: 24);
-  /// Cache négatif court : même `q` en échec / vide → pas de re-frappe.
   static const _negativeTtl = Duration(minutes: 10);
 
   static Uri _volumesUri(Map<String, String> query, {required bool withKey}) {
     final params = Map<String, String>.from(query);
+    // Jamais orderBy — Google trie déjà par pertinence ; orderBy→503.
+    params.remove('orderBy');
     if (withKey) {
       final key = _apiKey;
       if (key != null && key.isNotEmpty) params['key'] = key;
@@ -63,8 +60,9 @@ class GoogleBooksService {
   }
 
   static String _cacheKey(Map<String, String> params) {
-    final keys = params.keys.toList()..sort();
-    return keys.map((k) => '$k=${params[k]}').join('&');
+    final clean = Map<String, String>.from(params)..remove('orderBy');
+    final keys = clean.keys.toList()..sort();
+    return keys.map((k) => '$k=${clean[k]}').join('&');
   }
 
   static Future<List<Map<String, String>>?> _readCache(String key) async {
@@ -120,70 +118,78 @@ class GoogleBooksService {
     } catch (_) {}
   }
 
-  /// GET volumes : clé → sans clé → catalog-proxy.
-  /// Sur 429/403/5xx : retire `orderBy` puis force keyless + proxy.
-  /// Chaîne épuisée → trip circuit breaker 60s.
+  static Future<http.Response?> _viaProxy(Map<String, String> p) async {
+    try {
+      // Proxy avec clé si dispo (évite 429 anonymes côté serveur).
+      final withKey = hasApiKey && !_preferKeyless;
+      final target = _volumesUri(p, withKey: withKey);
+      final proxied = proxiedCatalogUri(target);
+      final uri = kIsWeb
+          ? proxied
+          : Uri.parse(
+              '${AppEnv.supabaseUrl.replaceAll(RegExp(r'/+$'), '')}'
+              '/functions/v1/catalog-proxy'
+              '?url=${Uri.encodeComponent(target.toString())}'
+              '&apikey=${Uri.encodeComponent(AppEnv.supabaseAnonKey)}',
+            );
+      return await http
+          .get(
+            uri,
+            headers: {
+              'Accept': 'application/json',
+              'apikey': AppEnv.supabaseAnonKey,
+              'Authorization': 'Bearer ${AppEnv.supabaseAnonKey}',
+            },
+          )
+          .timeout(const Duration(seconds: 10));
+    } catch (e) {
+      if (kDebugMode) debugPrint('Google Books proxy: $e');
+      return null;
+    }
+  }
+
+  /// GET volumes :
+  /// - 503/5xx → retry **avec clé**, sans langRestrict, maxResults=20 → trip
+  /// - 429/403 → seulement là keyless + proxy → trip
   static Future<http.Response?> _fetchVolumes(Map<String, String> params) async {
     if (_isLocked) return null;
 
     Future<http.Response> get(Uri uri) =>
-        http.get(uri).timeout(const Duration(seconds: 8));
+        http.get(uri).timeout(const Duration(seconds: 6));
 
-    Future<http.Response?> viaProxy(Map<String, String> p) async {
-      try {
-        final target = _volumesUri(p, withKey: false);
-        final proxied = proxiedCatalogUri(target);
-        final uri = kIsWeb
-            ? proxied
-            : Uri.parse(
-                '${AppEnv.supabaseUrl.replaceAll(RegExp(r'/+$'), '')}'
-                '/functions/v1/catalog-proxy'
-                '?url=${Uri.encodeComponent(target.toString())}'
-                '&apikey=${Uri.encodeComponent(AppEnv.supabaseAnonKey)}',
-              );
-        return await http
-            .get(
-              uri,
-              headers: {
-                'Accept': 'application/json',
-                'apikey': AppEnv.supabaseAnonKey,
-                'Authorization': 'Bearer ${AppEnv.supabaseAnonKey}',
-              },
-            )
-            .timeout(const Duration(seconds: 12));
-      } catch (e) {
-        if (kDebugMode) debugPrint('Google Books proxy: $e');
-        return null;
-      }
-    }
+    final base = Map<String, String>.from(params)..remove('orderBy');
 
-    Map<String, String> simplified(Map<String, String> p) {
-      final out = Map<String, String>.from(p);
-      out.remove('orderBy');
-      return out;
-    }
-
-    var sawRetryable = false;
-
-    // 1) Avec clé (si dispo et pas encore brûlée).
+    // ——— Avec clé ———
     if (!_preferKeyless && hasApiKey) {
       try {
-        final res = await get(_volumesUri(params, withKey: true));
+        final res = await get(_volumesUri(base, withKey: true));
         if (res.statusCode == 200) return res;
-        if (_isRetryableStatus(res.statusCode)) {
-          sawRetryable = true;
-          _preferKeyless = true;
+
+        // 503/5xx : retry AVEC clé, requête allégée (jamais keyless).
+        if (_isServerError(res.statusCode)) {
+          if (_isLocked) return null;
+          final light = Map<String, String>.from(base)
+            ..remove('langRestrict')
+            ..['maxResults'] = '20';
           if (kDebugMode) {
             debugPrint(
-              'Google Books ${res.statusCode} avec clé → retry sans key/orderBy',
+              'Google Books ${res.statusCode} → retry keyed light (no langRestrict)',
             );
           }
-          final simple = simplified(params);
           try {
-            final retry = await get(_volumesUri(simple, withKey: false));
+            final retry = await get(_volumesUri(light, withKey: true));
             if (retry.statusCode == 200) return retry;
-            if (_isRetryableStatus(retry.statusCode)) sawRetryable = true;
           } catch (_) {}
+          _tripBreaker('server ${res.statusCode}');
+          return null;
+        }
+
+        // 429/403 : autorise keyless pour la suite de la session.
+        if (_isQuotaError(res.statusCode)) {
+          _preferKeyless = true;
+          if (kDebugMode) {
+            debugPrint('Google Books ${res.statusCode} keyed → keyless OK');
+          }
         } else {
           return res;
         }
@@ -192,35 +198,35 @@ class GoogleBooksService {
       }
     }
 
-    // 2) Sans clé (quota anonyme / IP) — d'abord avec orderBy, puis sans.
-    for (final p in [params, simplified(params)]) {
-      if (_isLocked) return null;
+    if (_isLocked) return null;
+
+    // ——— Keyless UNIQUEMENT après 429/403 ———
+    if (_preferKeyless || !hasApiKey) {
       try {
-        final res = await get(_volumesUri(p, withKey: false));
+        final res = await get(_volumesUri(base, withKey: false));
         if (res.statusCode == 200) return res;
-        if (!_isRetryableStatus(res.statusCode)) return res;
-        sawRetryable = true;
-        if (kDebugMode) {
-          debugPrint('Google Books ${res.statusCode} keyless → suite');
+        if (_isLocked) return null;
+        if (_isQuotaError(res.statusCode) || _isServerError(res.statusCode)) {
+          final proxyRes = await _viaProxy(base);
+          if (proxyRes != null && proxyRes.statusCode == 200) return proxyRes;
+          _tripBreaker(
+            'keyless/proxy ${proxyRes?.statusCode ?? res.statusCode}',
+          );
+          return null;
         }
+        return res;
       } catch (e) {
         if (kDebugMode) debugPrint('Google Books keyless: $e');
+        if (!_isLocked) {
+          final proxyRes = await _viaProxy(base);
+          if (proxyRes != null && proxyRes.statusCode == 200) return proxyRes;
+          _tripBreaker('keyless exception');
+        }
+        return null;
       }
     }
 
-    // 3) Edge proxy (CORS + contournement navigateur), sans orderBy.
-    if (_isLocked) return null;
-    final proxyRes = await viaProxy(simplified(params));
-    if (proxyRes != null && proxyRes.statusCode == 200) return proxyRes;
-
-    if (sawRetryable ||
-        proxyRes == null ||
-        _isRetryableStatus(proxyRes.statusCode)) {
-      _tripBreaker(
-        'chain fail ${proxyRes?.statusCode ?? 'null'}',
-      );
-    }
-    return proxyRes;
+    return null;
   }
 
   static List<Map<String, String>> _parseItems(
@@ -234,8 +240,6 @@ class GoogleBooksService {
       for (final raw in items) {
         final mapped = _mapVolume(raw as Map<String, dynamic>, isbnFallback);
         if (mapped == null) continue;
-        // Anti-US : uniquement « Vol. N » (déjà dans _mapVolume).
-        // Ne jette PAS language=en ici — le catalogue préfère FR plus haut.
         out.add(mapped);
       }
       return out;
@@ -244,7 +248,6 @@ class GoogleBooksService {
     }
   }
 
-  /// Résultat normalisé (même forme qu'Open Library + champs série).
   static Future<Map<String, String>?> lookupByIsbn(String isbn) async {
     if (_isLocked) return null;
     for (final variant in OpenLibraryService.isbnLookupVariants(isbn)) {
@@ -287,23 +290,17 @@ class GoogleBooksService {
         'q': q,
         'maxResults': '${maxResults.clamp(1, 40)}',
         'startIndex': '${startIndex.clamp(0, 200)}',
-        'orderBy': 'relevance',
+        // Pas de orderBy=relevance (→ 503 fréquents).
       };
       if (langRestrict != null && langRestrict.isNotEmpty) {
         params['langRestrict'] = langRestrict;
       }
       final key = _cacheKey(params);
       final cached = await _readCache(key);
-      // Cache hit y compris cache négatif (liste vide).
       if (cached != null) return cached;
 
       final response = await _fetchVolumes(params);
       if (response == null || response.statusCode != 200) {
-        if (kDebugMode && !_isLocked) {
-          debugPrint(
-            'Google Books search ${response?.statusCode ?? 'null'} — []',
-          );
-        }
         await _writeCache(key, const [], negative: true);
         return [];
       }
@@ -316,8 +313,7 @@ class GoogleBooksService {
     }
   }
 
-  /// 1–3 pages séquentielles (jamais en parallèle) pour une série entière.
-  /// Préfère `intitle:"Name" Tome` pour les mangas VF (évite romans homonymes).
+  /// 1–3 pages séquentielles. Stop immédiat si circuit ouvert.
   static Future<List<Map<String, String>>> searchSeriesBatched(
     String seriesTitle, {
     String? author,
@@ -345,11 +341,7 @@ class GoogleBooksService {
       if (_isLocked) break;
       for (var page = 0; page < pages; page++) {
         if (_isLocked) break;
-        if (out.isNotEmpty && page > 0) {
-          await Future<void>.delayed(pageDelay);
-        } else if (page > 0) {
-          await Future<void>.delayed(pageDelay);
-        }
+        if (page > 0) await Future<void>.delayed(pageDelay);
         final batch = await search(
           q,
           maxResults: 40,
@@ -364,7 +356,6 @@ class GoogleBooksService {
         }
         if (batch.length < 40) break;
       }
-      // Assez de pages remplies sur la 1ʳᵉ requête → skip variantes.
       if (out.length >= 40) break;
     }
     return out;
@@ -379,7 +370,6 @@ class GoogleBooksService {
 
     final title = info['title'] as String?;
     if (title == null || title.isEmpty) return null;
-    // Rejet strict éditions US « Vol. N ».
     if (BookVfEdition.isUsVolTitle(title)) return null;
     final subtitle = info['subtitle'] as String?;
     if (subtitle != null && BookVfEdition.isUsVolTitle(subtitle)) return null;
@@ -388,7 +378,6 @@ class GoogleBooksService {
     final language = langRaw is List
         ? langRaw.map((e) => e.toString()).join(',')
         : langRaw?.toString();
-    // Garde language=null/und/en : seuls les titres « Vol. N » sont exclus.
 
     final authors = (info['authors'] as List<dynamic>?)
         ?.map((a) => a.toString())

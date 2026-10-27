@@ -37,14 +37,15 @@ abstract final class MangaDexService {
     try {
       // Récupère un peu plus pour filtrer/trier côté client.
       final fetchLimit = (limit.clamp(1, 10) * 3).clamp(5, 15);
+      // erotica inclus (Berserk) ; followedCount pour le vrai titre vs spin-offs.
       final params = StringBuffer(
         '$_base/manga?title=${Uri.encodeQueryComponent(q)}'
-        '&limit=$fetchLimit'
+        '&limit=${fetchLimit.clamp(1, 10)}'
         '&order[followedCount]=desc'
-        '&order[relevance]=desc'
         '&originalLanguage[]=ja'
         '&contentRating[]=safe'
         '&contentRating[]=suggestive'
+        '&contentRating[]=erotica'
         '&includes[]=author'
         '&includes[]=cover_art'
         '&includes[]=artist',
@@ -63,24 +64,36 @@ abstract final class MangaDexService {
       final body = jsonDecode(searchRes.body) as Map<String, dynamic>;
       final data = body['data'] as List<dynamic>? ?? const [];
 
-      final scored = <({MangaDexSeriesMeta meta, double score})>[];
+      final scored =
+          <({MangaDexSeriesMeta meta, double score, Map<String, dynamic> raw})>[];
       for (final raw in data) {
         if (raw is! Map<String, dynamic>) continue;
-        // Filtrage local STRICT (l'API ignore souvent excludedTags).
         if (isParasiteMangaEntry(raw)) continue;
-        final meta = await _mapManga(raw, q, authorHint);
+        // Map léger SANS /cover (évite N× pagination pendant le ranking).
+        final meta = await _mapManga(raw, q, authorHint, fetchCovers: false);
         if (meta == null) continue;
         if (looksLikeParasiteTitle(meta.title)) continue;
-        scored.add((meta: meta, score: _rankScore(raw, meta, q)));
+        scored.add((meta: meta, score: _rankScore(raw, meta, q), raw: raw));
       }
-      // Exact match (insensible à la casse) toujours en tête absolue.
       scored.sort((a, b) {
         final aExact = _hasExactTitleMatch(a.meta, q);
         final bExact = _hasExactTitleMatch(b.meta, q);
         if (aExact != bExact) return aExact ? -1 : 1;
         return b.score.compareTo(a.score);
       });
-      return scored.take(limit.clamp(1, 10)).map((e) => e.meta).toList();
+      final top = scored.take(limit.clamp(1, 10)).toList();
+      // Enrichit UNIQUEMENT le top (exact match + populaires) avec /cover.
+      final enriched = <MangaDexSeriesMeta>[];
+      for (final e in top) {
+        final full = await _mapManga(
+          e.raw,
+          q,
+          authorHint,
+          fetchCovers: true,
+        );
+        enriched.add(full ?? e.meta);
+      }
+      return enriched;
     } catch (e) {
       if (kDebugMode) debugPrint('MangaDex search: $e');
       return const [];
@@ -168,8 +181,9 @@ abstract final class MangaDexService {
   static Future<MangaDexSeriesMeta?> _mapManga(
     Map<String, dynamic> manga,
     String query,
-    String? authorHint,
-  ) async {
+    String? authorHint, {
+    bool fetchCovers = true,
+  }) async {
     final mangaId = manga['id']?.toString();
     if (mangaId == null) return null;
 
@@ -244,15 +258,32 @@ abstract final class MangaDexService {
       if (tKey != qKey) return null;
     }
 
-    final covers = await fetchAllCovers(mangaId);
+    // lastVolume est souvent "" pour les séries en cours/hiatus (Vagabond).
+    final lastVolumeRaw =
+        (attrs['lastVolume'] ?? attrs['last_volume'] ?? '').toString().trim();
+    final lastVolumeAttr =
+        lastVolumeRaw.isEmpty ? null : int.tryParse(lastVolumeRaw);
+
+    // Volumes depuis cover_art inclus dans la recherche (fallback rapide).
+    var relCoverMax = 0;
+    for (final r in rels) {
+      if (r is! Map<String, dynamic>) continue;
+      if (r['type'] != 'cover_art') continue;
+      final a = r['attributes'] as Map<String, dynamic>?;
+      final vol = int.tryParse((a?['volume'] ?? '').toString());
+      if (vol != null && vol > relCoverMax) relCoverMax = vol;
+    }
+
+    var covers = <int, String>{};
+    if (fetchCovers) {
+      // Source de vérité volumes : /cover paginé (1..37 Vagabond, 1..42 Berserk).
+      covers = await fetchAllCovers(mangaId);
+    }
     final volumes = covers.keys.where((k) => k > 0).toList()..sort();
     final coverMax = volumes.isEmpty ? 0 : volumes.last;
-    // AniList HIATUS → volumes null ; MangaDex lastVolume = vrai compte (ex. 37).
-    final lastVolumeAttr = int.tryParse(
-      (attrs['lastVolume'] ?? attrs['last_volume'] ?? '').toString(),
-    );
     final lastVol = [
-      if (coverMax > 0) coverMax,
+      coverMax,
+      relCoverMax,
       if (lastVolumeAttr != null && lastVolumeAttr > 0) lastVolumeAttr,
     ].fold<int>(0, (a, b) => a > b ? a : b);
     final coverUrl = covers[1] ??

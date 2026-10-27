@@ -240,24 +240,42 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
     var raw = await gbFuture;
     // Les 3 futures tournent déjà en parallèle via démarrage avant await.
 
-    MangaDexSeriesMeta? primaryMangaDex;
+    final qKey = BookSeriesNormalizer.mergeKey(seriesQ);
+    // Exact match AniList/MangaDex UNIQUEMENT (jamais Shinigami Boy Kim pour « vagabond »).
+    MangaDexSeriesMeta? exactMd;
+    String? exactAuthor;
+    for (final md in mdList) {
+      if (BookSeriesNormalizer.mergeKey(md.title) == qKey) {
+        exactMd = md;
+        exactAuthor = md.author;
+        break;
+      }
+    }
+    for (final ani in aniResults) {
+      if (BookSeriesNormalizer.mergeKey(ani.title) == qKey) {
+        exactAuthor ??= ani.author;
+        break;
+      }
+    }
     if (mdList.isNotEmpty) {
-      // Exact title match en tête (Vagabond, pas Shinigami Boy Kim).
-      final qKey = BookSeriesNormalizer.mergeKey(seriesQ);
       mdList.sort((a, b) {
         final ae = BookSeriesNormalizer.mergeKey(a.title) == qKey;
         final be = BookSeriesNormalizer.mergeKey(b.title) == qKey;
         if (ae != be) return ae ? -1 : 1;
         return (b.volumesPublished ?? 0).compareTo(a.volumesPublished ?? 0);
       });
-      primaryMangaDex = mdList.first;
     }
+    // Série principale = exact match, sinon 1er MD trié.
+    final MangaDexSeriesMeta? primaryMangaDex = exactMd ??
+        (mdList.isNotEmpty ? mdList.first : null);
 
-    // Requête GB ciblée manga : intitle:"Vagabond" Tome (évite romans homonymes).
-    if (primaryMangaDex != null && seriesQ.length >= 2) {
-      final authorParts = (primaryMangaDex.author ?? '').trim().split(RegExp(r'\s+'));
-      final authorLast =
-          authorParts.isNotEmpty ? authorParts.last : '';
+    // GB ciblée : auteur de la bannière exacte (Inoue), jamais un bruit de fond.
+    if (seriesQ.length >= 2 &&
+        (exactMd != null ||
+            (exactAuthor != null && exactAuthor.trim().isNotEmpty))) {
+      final authorParts =
+          (exactAuthor ?? exactMd?.author ?? '').trim().split(RegExp(r'\s+'));
+      final authorLast = authorParts.isNotEmpty ? authorParts.last : '';
       final targeted = authorLast.length >= 2
           ? 'intitle:"$seriesQ" inauthor:"$authorLast"'
           : 'intitle:"$seriesQ" Tome';

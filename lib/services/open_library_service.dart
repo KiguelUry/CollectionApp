@@ -448,7 +448,7 @@ class OpenLibraryService {
     return null;
   }
 
-  /// Photo auteur Open Library (cache mémoire).
+  /// Photo auteur Open Library (cache mémoire). Timeout 3s, silence console.
   static Future<String?> lookupAuthorPhotoUrl(String authorName) async {
     final key = authorName.trim().toLowerCase();
     if (key.length < 2) return null;
@@ -459,7 +459,7 @@ class OpenLibraryService {
         'q': authorName.trim(),
         'limit': '5',
       });
-      final response = await _get(url);
+      final response = await _get(url).timeout(const Duration(seconds: 3));
       if (response.statusCode != 200) {
         _authorPhotoCache[key] = null;
         return null;
@@ -480,8 +480,8 @@ class OpenLibraryService {
         _authorPhotoCache[key] = photo;
         return photo;
       }
-    } catch (e) {
-      debugPrint('lookupAuthorPhotoUrl: $e');
+    } catch (_) {
+      // Timeout / réseau : silencieux (ne pollue pas la console).
     }
     _authorPhotoCache[key] = null;
     return null;
