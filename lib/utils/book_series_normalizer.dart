@@ -111,7 +111,29 @@ abstract final class BookSeriesNormalizer {
         subj.contains('comics & graphic novels - european')) {
       return BookSubcategory.comic;
     }
-    return null;
+    const novelHints = [
+      'fiction',
+      'roman',
+      'novel',
+      'literature',
+      'fantasy',
+      'litrpg',
+      'lit-rpg',
+      'thriller',
+      'romance',
+      'science fiction',
+      'sci-fi',
+      'science-fiction',
+      'mystery',
+      'horror',
+      'young adult',
+      'historical fiction',
+    ];
+    if (novelHints.any((h) => subj.contains(h) || blob.contains(h))) {
+      return BookSubcategory.novel;
+    }
+    // Ni Manga / BD / Comics → Roman (évite le badge « Autre »).
+    return BookSubcategory.novel;
   }
 
   /// @Deprecated — plus de liste de titres. Toujours null (catégorie = éditeur/API).

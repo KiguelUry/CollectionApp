@@ -208,7 +208,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       publisherQuery: filters.publisherQuery,
     );
 
-    const srcTimeout = Duration(seconds: 4);
+    const srcTimeout = Duration(seconds: 8);
     final wantMangaOfficial =
         seriesQ.length >= 2 && (_sub == null || _sub == BookSubcategory.manga);
 
@@ -266,26 +266,65 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       });
     }
     // Série principale = exact match, sinon 1er MD trié.
-    final MangaDexSeriesMeta? primaryMangaDex = exactMd ??
-        (mdList.isNotEmpty ? mdList.first : null);
+    MangaDexSeriesMeta? primaryMangaDex =
+        exactMd ?? (mdList.isNotEmpty ? mdList.first : null);
 
-    // GB ciblée : auteur de la bannière exacte (Inoue), jamais un bruit de fond.
+    // Force /cover pour la série exacte si encore pauvre (timeout parallèle).
+    if (primaryMangaDex != null &&
+        BookSeriesNormalizer.mergeKey(primaryMangaDex.title) == qKey &&
+        primaryMangaDex.coverByVolume.length < 5) {
+      try {
+        final covers = await MangaDexService.fetchAllCovers(primaryMangaDex.id)
+            .timeout(
+          const Duration(seconds: 8),
+          onTimeout: () => primaryMangaDex!.coverByVolume,
+        );
+        if (covers.isNotEmpty) {
+          final coverMax =
+              covers.keys.reduce((a, b) => a > b ? a : b);
+          final vols = [
+            primaryMangaDex.volumesPublished ?? 0,
+            coverMax,
+          ].reduce((a, b) => a > b ? a : b);
+          primaryMangaDex = MangaDexSeriesMeta(
+            id: primaryMangaDex.id,
+            title: primaryMangaDex.title,
+            author: primaryMangaDex.author ?? exactAuthor,
+            volumesPublished: vols > 0 ? vols : null,
+            coverByVolume: covers,
+            seriesCoverUrl:
+                covers[1] ?? primaryMangaDex.seriesCoverUrl,
+          );
+          exactMd = primaryMangaDex;
+          // Remplace dans mdList pour les bannières.
+          final enrichedMd = primaryMangaDex;
+          final idx = mdList.indexWhere((m) => m.id == enrichedMd.id);
+          if (idx >= 0) mdList[idx] = enrichedMd;
+        }
+      } catch (_) {}
+    }
+
+    // GB ciblée : auteur exact (Inoue) ; fallback soft `"title" Tome` si vide.
     if (seriesQ.length >= 2 &&
         (exactMd != null ||
             (exactAuthor != null && exactAuthor.trim().isNotEmpty))) {
       final authorParts =
           (exactAuthor ?? exactMd?.author ?? '').trim().split(RegExp(r'\s+'));
       final authorLast = authorParts.isNotEmpty ? authorParts.last : '';
-      final targeted = authorLast.length >= 2
-          ? 'intitle:"$seriesQ" inauthor:"$authorLast"'
-          : 'intitle:"$seriesQ" Tome';
+      final targetedQueries = <String>[
+        if (authorLast.length >= 2)
+          'intitle:"$seriesQ" inauthor:"$authorLast"',
+        'intitle:"$seriesQ" Tome',
+        '"$seriesQ" Tome',
+      ];
       try {
-        final extra = await GoogleBooksService.search(
-          targeted,
-          maxResults: 40,
-          langRestrict: 'fr',
-        ).timeout(srcTimeout, onTimeout: () => <Map<String, String>>[]);
-        if (extra.isNotEmpty) {
+        for (final targeted in targetedQueries) {
+          final extra = await GoogleBooksService.search(
+            targeted,
+            maxResults: 25,
+            langRestrict: 'fr',
+          ).timeout(srcTimeout, onTimeout: () => <Map<String, String>>[]);
+          if (extra.isEmpty) continue;
           final seen = {for (final r in raw) (r['title'] ?? '').toLowerCase()};
           for (final h in extra) {
             final t = (h['title'] ?? '').toLowerCase();
@@ -293,6 +332,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
             seen.add(t);
             raw.add(h);
           }
+          break;
         }
       } catch (_) {}
     }
@@ -690,11 +730,11 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
         : (banner.detectedSubcategory ??
             BookSeriesNormalizer.detectSubcategory(seriesName: banner.name) ??
             _effectiveSub);
-    final key = BookSeriesNormalizer.seriesSubcategoryKey(
-      banner.name,
-      preferred,
-    );
-    if (_addedSeriesKeys.contains(key)) return;
+    // Clé = nom normalisé seul (pas auteur / sous-catégorie).
+    final key = BookSeriesNormalizer.mergeKey(banner.name);
+    if (_addedSeriesKeys.contains(key) || _ownedFor(banner.name) != null) {
+      return;
+    }
 
     final cb = widget.onAddSeries;
     if (cb != null) {
@@ -1191,13 +1231,11 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
   }
 
   Widget _buildBanner(SeriesBannerCandidate banner) {
-    final key = BookSeriesNormalizer.seriesSubcategoryKey(
-      banner.name,
-      banner.detectedSubcategory,
-    );
+    final key = BookSeriesNormalizer.mergeKey(banner.name);
     final added = _addedSeriesKeys.contains(key);
     final owned = _ownedFor(banner.name);
-    final inCollection = owned != null && owned.owned > 0;
+    // Présence = série en collection (nom normalisé), auteur ignoré.
+    final inCollection = owned != null;
     final rawCover = banner.coverUrl ?? banner.coversByVolume[1];
     final cover =
         rawCover != null && rawCover.isNotEmpty ? coverUrlForWeb(rawCover) : null;

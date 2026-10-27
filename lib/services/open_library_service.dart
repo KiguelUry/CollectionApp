@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/book_subcategory.dart';
@@ -8,18 +7,15 @@ import '../models/series_search_hit.dart';
 import '../utils/book_title_parser.dart';
 import '../utils/cover_image_url.dart';
 import '../utils/search_relevance.dart';
-import '../utils/web_catalog_proxy.dart';
 
-/// API gratuite Open Library — équivalent « catalogue » pour les livres.
+/// API gratuite Open Library — CORS natif (`Access-Control-Allow-Origin: *`).
+/// Appel **direct** (pas de catalog-proxy → plus de 502/504).
 /// https://openlibrary.org/developers/api
 class OpenLibraryService {
   static final _authorPhotoCache = <String, String?>{};
 
   static Future<http.Response> _get(Uri url) {
-    final uri = proxiedCatalogUri(url);
-    return http
-        .get(uri, headers: proxiedCatalogHeaders())
-        .timeout(const Duration(seconds: 20));
+    return http.get(url).timeout(const Duration(seconds: 5));
   }
 
   static Future<List<Map<String, String>>> searchBooks(
@@ -33,9 +29,9 @@ class OpenLibraryService {
     try {
       final params = {
         ...subcategory.openLibraryQueryParams(trimmed),
-        'limit': '40',
+        'limit': '20',
         'fields':
-            'key,title,author_name,first_publish_year,cover_i,ratings_average,ratings_count,subject,language',
+            'key,title,author_name,cover_i,first_publish_year,language,subject,ratings_average',
       };
       if (frenchOnly) params['language'] = 'fre';
       final url = Uri.https('openlibrary.org', '/search.json', params);
@@ -95,7 +91,7 @@ class OpenLibraryService {
 
       return results.take(20).toList();
     } catch (e) {
-      debugPrint('Erreur recherche Open Library: $e');
+      // Timeout / 5xx : silencieux (CORS direct, pas de spam console).
       return [];
     }
   }
@@ -266,7 +262,7 @@ class OpenLibraryService {
         }
       }
     } catch (e) {
-      debugPrint('ISBN lookup: $e');
+      // silencieux
     }
     return null;
   }
@@ -357,7 +353,6 @@ class OpenLibraryService {
       );
       return hits.take(15).toList();
     } catch (e) {
-      debugPrint('searchSeriesCandidates: $e');
       return [];
     }
   }
@@ -397,7 +392,6 @@ class OpenLibraryService {
       }
       return maxVol > 0 ? maxVol : null;
     } catch (e) {
-      debugPrint('estimateSeriesVolumeCount: $e');
       return null;
     }
   }

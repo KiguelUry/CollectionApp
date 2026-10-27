@@ -378,6 +378,21 @@ class BookSeriesService {
     return refreshPublications(series);
   }
 
+  /// Séries `other` qui sont des romans → `novel` (badge Roman).
+  Future<BookSeries> reclassifyOtherAsNovelIfLikely(BookSeries series) async {
+    if (series.subcategory != BookSubcategory.other) return series;
+    final updated = series.copyWith(subcategory: BookSubcategory.novel);
+    await updateSeries(updated);
+    try {
+      await _client
+          .from('collection_items')
+          .update({'subcategory': BookSubcategory.novel.dbValue})
+          .eq('series_id', series.id)
+          .eq('category', 'book');
+    } catch (_) {}
+    return (await fetchSeriesById(series.id)) ?? updated;
+  }
+
   /// AniList/MangaDex confirme un manga → reclasse BD/Autre → Manga.
   Future<BookSeries> reclassifyAsMangaIfConfirmed(BookSeries series) async {
     if (series.subcategory == BookSubcategory.manga) return series;

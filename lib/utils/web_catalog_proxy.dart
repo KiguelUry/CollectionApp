@@ -7,12 +7,11 @@ import '../config/app_env.dart';
 Uri proxiedCatalogUri(Uri target) {
   if (!kIsWeb) return target;
   final host = target.host.toLowerCase();
+  // openlibrary.org : CORS natif → appel direct (pas de proxy / 502).
   const allowed = {
     'api.mangadex.org',
     'itunes.apple.com',
     'www.googleapis.com',
-    'openlibrary.org',
-    'covers.openlibrary.org',
   };
   if (!allowed.contains(host)) return target;
 

@@ -296,6 +296,8 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
       for (var series in bundle.series) {
         // Persiste le nom nettoyé (« One Piece - Édition originale » → « One Piece »).
         series = await _service.sanitizeSeriesName(series);
+        // Autre → Roman (Les sept sœurs, Dungeon Crawler Carl…).
+        series = await _service.reclassifyOtherAsNovelIfLikely(series);
         final volumes = bundle.volumesBySeries[series.id] ?? const [];
         final items = bundle.itemsBySeries[series.id] ?? const [];
         final stats = _service.computeStats(

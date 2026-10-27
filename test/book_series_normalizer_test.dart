@@ -140,13 +140,20 @@ void main() {
     });
 
     test('detectSubcategory depuis éditeur / subjects uniquement', () {
+      // Sans éditeur manga/BD → Roman (plus de badge « Autre »).
       expect(
         BookSeriesNormalizer.detectSubcategory(seriesName: 'Kingdom'),
-        isNull, // plus de liste de titres
+        BookSubcategory.novel,
       );
       expect(
         BookSeriesNormalizer.detectSubcategory(seriesName: 'Thorgal'),
-        isNull,
+        BookSubcategory.novel,
+      );
+      expect(
+        BookSeriesNormalizer.detectSubcategory(
+          subjects: 'Fiction / Fantasy / LitRPG',
+        ),
+        BookSubcategory.novel,
       );
       expect(
         BookSeriesNormalizer.detectSubcategory(publisher: 'Kana'),

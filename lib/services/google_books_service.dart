@@ -286,11 +286,11 @@ class GoogleBooksService {
     if (_isLocked) return [];
 
     try {
+      // maxResults ≤ 25 : 40 + intitle: → 503 fréquents.
       final params = <String, String>{
         'q': q,
-        'maxResults': '${maxResults.clamp(1, 40)}',
+        'maxResults': '${maxResults.clamp(1, 25)}',
         'startIndex': '${startIndex.clamp(0, 200)}',
-        // Pas de orderBy=relevance (→ 503 fréquents).
       };
       if (langRestrict != null && langRestrict.isNotEmpty) {
         params['langRestrict'] = langRestrict;
@@ -314,6 +314,7 @@ class GoogleBooksService {
   }
 
   /// 1–3 pages séquentielles. Stop immédiat si circuit ouvert.
+  /// Fallback souple `"$name" Tome` si `intitle:` → 0 / 503.
   static Future<List<Map<String, String>>> searchSeriesBatched(
     String seriesTitle, {
     String? author,
@@ -332,7 +333,11 @@ class GoogleBooksService {
       if (preferTomeQuery) 'intitle:"$name" Tome',
       if (authorLast != null && authorLast.length >= 2)
         'intitle:"$name" inauthor:"$authorLast"',
+      // Fallback souple (évite totalItems:0 / 503 sur intitle: strict).
+      if (preferTomeQuery) '"$name" Tome',
+      if (authorLast != null && authorLast.length >= 2) '"$name" $authorLast',
       'intitle:"$name"',
+      '"$name"',
     ];
     final out = <Map<String, String>>[];
     final seen = <String>{};
@@ -344,8 +349,8 @@ class GoogleBooksService {
         if (page > 0) await Future<void>.delayed(pageDelay);
         final batch = await search(
           q,
-          maxResults: 40,
-          startIndex: page * 40,
+          maxResults: 25,
+          startIndex: page * 25,
           langRestrict: langRestrict,
         );
         if (batch.isEmpty) break;
@@ -354,9 +359,9 @@ class GoogleBooksService {
           if (title.isEmpty || !seen.add(title)) continue;
           out.add(hit);
         }
-        if (batch.length < 40) break;
+        if (batch.length < 25) break;
       }
-      if (out.length >= 40) break;
+      if (out.length >= 20) break;
     }
     return out;
   }
@@ -378,6 +383,19 @@ class GoogleBooksService {
     final language = langRaw is List
         ? langRaw.map((e) => e.toString()).join(',')
         : langRaw?.toString();
+    // FR + EN seulement — rejette it/es/de/pt/nl/ru (couvs italiennes etc.).
+    if (language != null && language.trim().isNotEmpty) {
+      final l = language.toLowerCase().trim();
+      final okFrEn = l == 'fr' ||
+          l.startsWith('fr-') ||
+          l == 'fre' ||
+          l == 'french' ||
+          l == 'en' ||
+          l.startsWith('en-') ||
+          l == 'eng' ||
+          l == 'english';
+      if (!okFrEn) return null;
+    }
 
     final authors = (info['authors'] as List<dynamic>?)
         ?.map((a) => a.toString())

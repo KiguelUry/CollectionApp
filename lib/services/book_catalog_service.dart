@@ -80,7 +80,7 @@ class BookCatalogService {
   }) async {
     final enhanced = _searchQueryForSubcategory(query, subcategory, frenchOnly);
 
-    const t = Duration(seconds: 4);
+    const t = Duration(seconds: 5);
     final googleF = GoogleBooksService.search(
       enhanced,
       maxResults: 25,
