@@ -11,7 +11,7 @@ import 'open_library_service.dart';
 
 /// Google Books API — source prioritaire VF (`langRestrict=fr`).
 /// Sur 429/403/5xx : retry sans `orderBy` / sans `&key=` / via `catalog-proxy`.
-/// Cache mémoire + SharedPreferences (TTL 24h) par requête `q`.
+/// Circuit breaker 60s + cache négatif pour stopper le spam 429.
 class GoogleBooksService {
   static String? get _apiKey => AppEnv.googleBooksApiKey;
 
@@ -19,6 +19,25 @@ class GoogleBooksService {
 
   /// Après un 429/403/5xx sur la clé, on saute `&key=` pour le reste de la session.
   static bool _preferKeyless = false;
+
+  /// Coupe-circuit : aucun HTTP tant que `now < lockedUntil`.
+  static DateTime _googleBooksLockedUntil =
+      DateTime.fromMillisecondsSinceEpoch(0);
+  static const _lockDuration = Duration(seconds: 60);
+
+  static bool get _isLocked =>
+      DateTime.now().isBefore(_googleBooksLockedUntil);
+
+  static void _tripBreaker([String reason = '']) {
+    _googleBooksLockedUntil = DateTime.now().add(_lockDuration);
+    _preferKeyless = true;
+    if (kDebugMode) {
+      debugPrint(
+        'Google Books circuit OPEN 60s'
+        '${reason.isEmpty ? '' : ' ($reason)'} — MangaDex/AniList only',
+      );
+    }
+  }
 
   static bool _isRetryableStatus(int? code) =>
       code == 429 ||
@@ -31,6 +50,8 @@ class GoogleBooksService {
   static final Map<String, _CacheEntry> _memCache = {};
   static const _prefsPrefix = 'gb_cache_v1:';
   static const _ttl = Duration(hours: 24);
+  /// Cache négatif court : même `q` en échec / vide → pas de re-frappe.
+  static const _negativeTtl = Duration(minutes: 10);
 
   static Uri _volumesUri(Map<String, String> query, {required bool withKey}) {
     final params = Map<String, String>.from(query);
@@ -49,13 +70,15 @@ class GoogleBooksService {
   static Future<List<Map<String, String>>?> _readCache(String key) async {
     final mem = _memCache[key];
     if (mem != null && !mem.isExpired) return mem.hits;
+    if (mem != null && mem.isExpired) _memCache.remove(key);
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString('$_prefsPrefix$key');
       if (raw == null || raw.isEmpty) return null;
       final decoded = jsonDecode(raw) as Map<String, dynamic>;
       final ts = decoded['ts'] as int? ?? 0;
-      if (DateTime.now().millisecondsSinceEpoch - ts > _ttl.inMilliseconds) {
+      final ttlMs = decoded['ttl_ms'] as int? ?? _ttl.inMilliseconds;
+      if (DateTime.now().millisecondsSinceEpoch - ts > ttlMs) {
         await prefs.remove('$_prefsPrefix$key');
         return null;
       }
@@ -65,7 +88,11 @@ class GoogleBooksService {
                 (e as Map).map((k, v) => MapEntry('$k', '$v')),
               ))
           .toList();
-      _memCache[key] = _CacheEntry(hits, DateTime.fromMillisecondsSinceEpoch(ts));
+      _memCache[key] = _CacheEntry(
+        hits,
+        DateTime.fromMillisecondsSinceEpoch(ts),
+        ttl: Duration(milliseconds: ttlMs),
+      );
       return hits;
     } catch (_) {
       return null;
@@ -74,16 +101,19 @@ class GoogleBooksService {
 
   static Future<void> _writeCache(
     String key,
-    List<Map<String, String>> hits,
-  ) async {
+    List<Map<String, String>> hits, {
+    bool negative = false,
+  }) async {
     final now = DateTime.now();
-    _memCache[key] = _CacheEntry(hits, now);
+    final ttl = negative ? _negativeTtl : _ttl;
+    _memCache[key] = _CacheEntry(hits, now, ttl: ttl);
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(
         '$_prefsPrefix$key',
         jsonEncode({
           'ts': now.millisecondsSinceEpoch,
+          'ttl_ms': ttl.inMilliseconds,
           'hits': hits,
         }),
       );
@@ -92,7 +122,10 @@ class GoogleBooksService {
 
   /// GET volumes : clé → sans clé → catalog-proxy.
   /// Sur 429/403/5xx : retire `orderBy` puis force keyless + proxy.
+  /// Chaîne épuisée → trip circuit breaker 60s.
   static Future<http.Response?> _fetchVolumes(Map<String, String> params) async {
+    if (_isLocked) return null;
+
     Future<http.Response> get(Uri uri) =>
         http.get(uri).timeout(const Duration(seconds: 8));
 
@@ -130,23 +163,26 @@ class GoogleBooksService {
       return out;
     }
 
+    var sawRetryable = false;
+
     // 1) Avec clé (si dispo et pas encore brûlée).
     if (!_preferKeyless && hasApiKey) {
       try {
         final res = await get(_volumesUri(params, withKey: true));
         if (res.statusCode == 200) return res;
         if (_isRetryableStatus(res.statusCode)) {
+          sawRetryable = true;
           _preferKeyless = true;
           if (kDebugMode) {
             debugPrint(
               'Google Books ${res.statusCode} avec clé → retry sans key/orderBy',
             );
           }
-          // Retry immédiat simplifié (sans orderBy, toujours avec clé une fois).
           final simple = simplified(params);
           try {
             final retry = await get(_volumesUri(simple, withKey: false));
             if (retry.statusCode == 200) return retry;
+            if (_isRetryableStatus(retry.statusCode)) sawRetryable = true;
           } catch (_) {}
         } else {
           return res;
@@ -158,10 +194,12 @@ class GoogleBooksService {
 
     // 2) Sans clé (quota anonyme / IP) — d'abord avec orderBy, puis sans.
     for (final p in [params, simplified(params)]) {
+      if (_isLocked) return null;
       try {
         final res = await get(_volumesUri(p, withKey: false));
         if (res.statusCode == 200) return res;
         if (!_isRetryableStatus(res.statusCode)) return res;
+        sawRetryable = true;
         if (kDebugMode) {
           debugPrint('Google Books ${res.statusCode} keyless → suite');
         }
@@ -171,7 +209,18 @@ class GoogleBooksService {
     }
 
     // 3) Edge proxy (CORS + contournement navigateur), sans orderBy.
-    return viaProxy(simplified(params));
+    if (_isLocked) return null;
+    final proxyRes = await viaProxy(simplified(params));
+    if (proxyRes != null && proxyRes.statusCode == 200) return proxyRes;
+
+    if (sawRetryable ||
+        proxyRes == null ||
+        _isRetryableStatus(proxyRes.statusCode)) {
+      _tripBreaker(
+        'chain fail ${proxyRes?.statusCode ?? 'null'}',
+      );
+    }
+    return proxyRes;
   }
 
   static List<Map<String, String>> _parseItems(
@@ -197,17 +246,24 @@ class GoogleBooksService {
 
   /// Résultat normalisé (même forme qu'Open Library + champs série).
   static Future<Map<String, String>?> lookupByIsbn(String isbn) async {
+    if (_isLocked) return null;
     for (final variant in OpenLibraryService.isbnLookupVariants(isbn)) {
+      if (_isLocked) return null;
       try {
         final params = {'q': 'isbn:$variant', 'maxResults': '3'};
         final key = _cacheKey(params);
         final cached = await _readCache(key);
-        if (cached != null && cached.isNotEmpty) return cached.first;
+        if (cached != null) {
+          return cached.isNotEmpty ? cached.first : null;
+        }
 
         final response = await _fetchVolumes(params);
-        if (response == null || response.statusCode != 200) continue;
+        if (response == null || response.statusCode != 200) {
+          await _writeCache(key, const [], negative: true);
+          continue;
+        }
         final hits = _parseItems(response.body, isbnFallback: variant);
-        await _writeCache(key, hits);
+        await _writeCache(key, hits, negative: hits.isEmpty);
         if (hits.isNotEmpty) return hits.first;
       } catch (e) {
         if (kDebugMode) debugPrint('Google Books ISBN: $e');
@@ -224,6 +280,7 @@ class GoogleBooksService {
   }) async {
     final q = query.trim();
     if (q.length < 2) return [];
+    if (_isLocked) return [];
 
     try {
       final params = <String, String>{
@@ -237,20 +294,21 @@ class GoogleBooksService {
       }
       final key = _cacheKey(params);
       final cached = await _readCache(key);
+      // Cache hit y compris cache négatif (liste vide).
       if (cached != null) return cached;
 
       final response = await _fetchVolumes(params);
       if (response == null || response.statusCode != 200) {
-        if (kDebugMode) {
+        if (kDebugMode && !_isLocked) {
           debugPrint(
             'Google Books search ${response?.statusCode ?? 'null'} — []',
           );
         }
+        await _writeCache(key, const [], negative: true);
         return [];
       }
       final hits = _parseItems(response.body);
-      // Ne pas cacher une liste vide (429→[] / filtre trop strict) 24h.
-      if (hits.isNotEmpty) await _writeCache(key, hits);
+      await _writeCache(key, hits, negative: hits.isEmpty);
       return hits;
     } catch (e) {
       if (kDebugMode) debugPrint('Google Books search: $e');
@@ -270,6 +328,7 @@ class GoogleBooksService {
   }) async {
     final name = seriesTitle.trim();
     if (name.length < 2) return [];
+    if (_isLocked) return [];
     final authorLast = author != null && author.trim().isNotEmpty
         ? author.trim().split(RegExp(r'\s+')).last
         : null;
@@ -283,7 +342,9 @@ class GoogleBooksService {
     final seen = <String>{};
     final pages = maxPages.clamp(1, 3);
     for (final q in queries) {
+      if (_isLocked) break;
       for (var page = 0; page < pages; page++) {
+        if (_isLocked) break;
         if (out.isNotEmpty && page > 0) {
           await Future<void>.delayed(pageDelay);
         } else if (page > 0) {
@@ -446,7 +507,7 @@ class GoogleBooksService {
 class _CacheEntry {
   final List<Map<String, String>> hits;
   final DateTime at;
-  _CacheEntry(this.hits, this.at);
-  bool get isExpired =>
-      DateTime.now().difference(at) > const Duration(hours: 24);
+  final Duration ttl;
+  _CacheEntry(this.hits, this.at, {this.ttl = const Duration(hours: 24)});
+  bool get isExpired => DateTime.now().difference(at) > ttl;
 }
