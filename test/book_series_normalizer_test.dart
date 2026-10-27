@@ -77,6 +77,54 @@ void main() {
         11,
       );
     });
+
+    test('Tome N au milieu + coupe au premier ":" (romans SEO)', () {
+      final t1 = BookTitleParser.parse(
+        'Dungeon Crawler Carl - Tome 1 : une aventure de LitRPG. '
+        'Saga de science-fiction… Livre nouveauté 2024 (version française)',
+      );
+      expect(t1.seriesName, 'Dungeon Crawler Carl');
+      expect(t1.volumeNumber?.round(), 1);
+
+      final t2 = BookTitleParser.parse(
+        "Dungeon Crawler Carl : L'Ogive du jugement dernier - Tome 2 : "
+        'une aventure de LitRPG… Livre nouveauté 2025',
+      );
+      expect(t2.seriesName, 'Dungeon Crawler Carl');
+      expect(t2.volumeNumber?.round(), 2);
+
+      final t4 = BookTitleParser.parse(
+        'Les sept sœurs - Tome 4 : La sœur à la perle',
+      );
+      expect(t4.seriesName, 'Les sept sœurs');
+      expect(t4.volumeNumber?.round(), 4);
+
+      // Année 2024 ne doit pas être prise pour un n° de tome.
+      expect(
+        BookTitleParser.extractVolumeNumberStrict(
+          'Dungeon Crawler Carl Livre nouveauté 2024',
+        ),
+        isNull,
+      );
+    });
+
+    test('rejette parasites / éditions étrangères', () {
+      expect(
+        BookVfEdition.isRejectedCatalogTitle(
+          'Dungeon Crawler Carl and Matt Dinniman (A Summary)',
+        ),
+        isTrue,
+      );
+      expect(
+        BookVfEdition.isRejectedCatalogTitle(
+          'Dungeon Crawler Carl (svensk utgåva)',
+        ),
+        isTrue,
+      );
+      expect(BookVfEdition.isFrOrEnLanguage('it'), isFalse);
+      expect(BookVfEdition.isFrOrEnLanguage('sv'), isFalse);
+      expect(BookVfEdition.isFrOrEnLanguage('fr'), isTrue);
+    });
   });
 
   group('BookSeriesNormalizer', () {

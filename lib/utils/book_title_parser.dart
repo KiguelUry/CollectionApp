@@ -28,13 +28,19 @@ class ParsedBookTitle {
 }
 
 abstract final class BookTitleParser {
-  /// « Kagurabachi T10 », « Naruto - Tome 16 », « One Piece Vol.12 ».
+  /// « Tome N » / « Vol. N » / « Book N » n'importe où (romans SEO, sous-titres).
+  static final _volumeAnywhere = RegExp(
+    r'(?:^|[\s,;:\-–—\[\(])(?:tome|volume|vol\.?|book|livre|t\.?)\s*(\d{1,4})\b',
+    caseSensitive: false,
+  );
+
+  /// Ancre fin de chaîne (manga classique).
   static final _volumePrefix = RegExp(
     r'^(.*?)[,\s:-]+(?:vol\.?|volume|tome|t\.?|#|n°|no\.?)\s*(\d+(?:[.,]\d+)?)\s*$',
     caseSensitive: false,
   );
 
-  /// Compact VF : « Kagurabachi T10 » / « Kagurabachi T.11 » (sans séparateur forcé).
+  /// Compact VF : « Kagurabachi T10 » / « Kagurabachi T.11 ».
   static final _compactTVolume = RegExp(
     r'^(.*?)\s+t\.?\s*(\d{1,3})\s*$',
     caseSensitive: false,
@@ -61,14 +67,19 @@ abstract final class BookTitleParser {
     }
     // Normalise tirets typographiques (– — −) → ASCII pour le parseur.
     t = t.replaceAll(RegExp(r'[–—−]'), '-');
+
+    // 1) Mid-string d'abord : « … - Tome 2 : SEO… », « … : Sous-titre - Tome 3 ».
+    final mid = _parseVolumeAnywhere(title, t);
+    if (mid != null) return mid;
+
     t = t.replaceAll(_stripSuffix, '').trim();
 
     for (final pattern in [_volumePrefix, _compactTVolume, _hashVolume]) {
       final m = pattern.firstMatch(t);
       if (m != null) {
-        final series = _cleanSeriesName(m.group(1)!);
+        final series = _canonicalSeriesName(m.group(1)!);
         final vol = _parseVolume(m.group(2)!);
-        if (series != null && vol != null) {
+        if (series != null && vol != null && _isPlausibleVolume(vol)) {
           return ParsedBookTitle(
             rawTitle: title,
             seriesName: series,
@@ -80,13 +91,12 @@ abstract final class BookTitleParser {
 
     final trail = _trailingNumber.firstMatch(t);
     if (trail != null) {
-      final series = _cleanSeriesName(trail.group(1)!);
+      final series = _canonicalSeriesName(trail.group(1)!);
       final vol = _parseVolume(trail.group(2)!);
       if (series != null &&
           vol != null &&
           series.length >= 3 &&
-          vol >= 1 &&
-          vol <= 200) {
+          _isPlausibleVolume(vol)) {
         return ParsedBookTitle(
           rawTitle: title,
           seriesName: series,
@@ -96,6 +106,36 @@ abstract final class BookTitleParser {
     }
 
     return ParsedBookTitle(rawTitle: title);
+  }
+
+  /// Trouve le premier `Tome|Vol|Book|Livre|T. N` avec N < 1900.
+  static ParsedBookTitle? _parseVolumeAnywhere(String rawTitle, String t) {
+    for (final m in _volumeAnywhere.allMatches(t)) {
+      final vol = _parseVolume(m.group(1)!);
+      if (vol == null || !_isPlausibleVolume(vol)) continue;
+      var before = t.substring(0, m.start).trim();
+      before = before.replaceAll(RegExp(r'[\s,;:\-\[\(]+$'), '').trim();
+      final series = _canonicalSeriesName(before);
+      if (series == null) continue;
+      return ParsedBookTitle(
+        rawTitle: rawTitle,
+        seriesName: series,
+        volumeNumber: vol,
+      );
+    }
+    return null;
+  }
+
+  /// Coupe au premier `:` si présent (« Dungeon Crawler Carl : L'Ogive… »).
+  static String? _canonicalSeriesName(String raw) {
+    var s = _cleanSeriesName(raw);
+    if (s == null) return null;
+    final colon = s.indexOf(':');
+    if (colon > 1) {
+      final head = _cleanSeriesName(s.substring(0, colon));
+      if (head != null && head.length >= 2) return head;
+    }
+    return s;
   }
 
   static String? _cleanSeriesName(String raw) {
@@ -115,22 +155,33 @@ abstract final class BookTitleParser {
     return n;
   }
 
+  /// Ignore les années (2024/2025…) prises pour un n° de tome.
+  static bool _isPlausibleVolume(double n) => n >= 1 && n < 1900 && n <= 500;
+
   /// Extrait le n° de tome avec borne stricte (1 ≠ 16 ; matche aussi `T10`).
   static int? extractVolumeNumberStrict(String title) {
+    final normalized = title.replaceAll(RegExp(r'[–—−]'), '-');
+    for (final m in _volumeAnywhere.allMatches(normalized)) {
+      final n = int.tryParse(m.group(1)!);
+      if (n == null || n < 1 || n >= 1900) continue;
+      return n;
+    }
     final m = RegExp(
       r'\b(?:tome|vol\.?|volume|t\.?)\s*0*(\d+)\b',
       caseSensitive: false,
-    ).firstMatch(title);
+    ).firstMatch(normalized);
     if (m == null) return null;
-    return int.tryParse(m.group(1)!);
+    final n = int.tryParse(m.group(1)!);
+    if (n == null || n >= 1900) return null;
+    return n;
   }
 
   /// Vrai seulement si le titre référence exactement [targetVolume]
   /// (`Tome 10`, `T10`, `T.10`, `Vol. 10` — pas `Tome 16` pour 1).
   static bool titleMatchesVolumeExactly(String title, int targetVolume) {
-    if (targetVolume < 0) return false;
+    if (targetVolume < 0 || targetVolume >= 1900) return false;
     final re = RegExp(
-      r'\b(?:tome|vol\.?|volume|t\.?)\s*0*'
+      r'\b(?:tome|vol\.?|volume|book|livre|t\.?)\s*0*'
       '${RegExp.escape('$targetVolume')}'
       r'(?!\d)\b',
       caseSensitive: false,

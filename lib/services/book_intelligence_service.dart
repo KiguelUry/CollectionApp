@@ -437,21 +437,32 @@ abstract final class BookIntelligenceService {
     if (cleanName.length < 2) return {};
 
     final pages = maxPages.clamp(1, 3);
+    final preferTome = subcategory == BookSubcategory.manga ||
+        subcategory == BookSubcategory.novel ||
+        subcategory == BookSubcategory.comic;
+    // VF d'abord (une seule chaîne sérialisée), puis EN pour combler les trous.
     var hits = await GoogleBooksService.searchSeriesBatched(
       cleanName,
       author: authorHint,
       maxPages: pages,
       langRestrict: 'fr',
-      preferTomeQuery: subcategory == BookSubcategory.manga,
+      preferTomeQuery: preferTome,
     );
-    if (hits.isEmpty) {
-      hits = await GoogleBooksService.searchSeriesBatched(
-        cleanName,
-        author: authorHint,
-        maxPages: pages,
-        langRestrict: null,
-        preferTomeQuery: subcategory == BookSubcategory.manga,
-      );
+    final enHits = await GoogleBooksService.searchSeriesBatched(
+      cleanName,
+      author: authorHint,
+      maxPages: subcategory == BookSubcategory.novel ? 2 : 1,
+      langRestrict: 'en',
+      preferTomeQuery: preferTome,
+    );
+    final seenTitles = {
+      for (final h in hits) (h['title'] ?? '').toLowerCase(),
+    };
+    for (final h in enHits) {
+      final t = (h['title'] ?? '').toLowerCase();
+      if (t.isEmpty || seenTitles.contains(t)) continue;
+      seenTitles.add(t);
+      hits.add(h);
     }
 
     final ranked = enrichAndRank(
@@ -469,12 +480,22 @@ abstract final class BookIntelligenceService {
       final img = h.imageUrl;
       if (img == null || img.isEmpty) continue;
       final title = h.raw['title'] ?? h.displayTitle;
+      if (BookVfEdition.isRejectedCatalogTitle(
+        title,
+        subtitle: h.raw['subtitle'],
+      )) {
+        continue;
+      }
       if (BookSeriesNormalizer.looksLikeChapterOrScan(title)) continue;
       if (!BookSeriesNormalizer.hitBelongsToSeries(title, cleanName)) continue;
+      if (!BookSeriesNormalizer.authorMatchesExpected(h.author, authorHint)) {
+        continue;
+      }
       final n = h.parsed.volumeNumber?.round();
       if (n == null || n < 1) continue;
       if (!hitMatchesVolumeExactly(h, n)) continue;
-      final isVf = looksVfTitle(title);
+      final isVf = looksVfTitle(title) ||
+          BookVfEdition.isFrenchLanguage(h.raw['language']);
       final pub = h.raw['published_date'] ?? h.raw['year'];
       if (!out.containsKey(n) || (isVf && vfPrefer[n] != true)) {
         out[n] = (coverUrl: img, publishedDate: pub);

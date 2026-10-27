@@ -11,6 +11,7 @@ import '../../services/book_series_service.dart';
 import '../../services/google_books_service.dart';
 import '../../services/mangadex_service.dart';
 import '../../utils/book_series_normalizer.dart';
+import '../../utils/book_title_parser.dart';
 import '../../utils/book_vf_edition.dart';
 import '../../utils/web_image_proxy.dart';
 import '../../widgets/app_app_bar.dart';
@@ -269,53 +270,82 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
     MangaDexSeriesMeta? primaryMangaDex =
         exactMd ?? (mdList.isNotEmpty ? mdList.first : null);
 
-    // Force /cover pour la série exacte si encore pauvre (timeout parallèle).
-    if (primaryMangaDex != null &&
-        BookSeriesNormalizer.mergeKey(primaryMangaDex.title) == qKey &&
-        primaryMangaDex.coverByVolume.length < 5) {
-      try {
-        final covers = await MangaDexService.fetchAllCovers(primaryMangaDex.id)
-            .timeout(
-          const Duration(seconds: 8),
-          onTimeout: () => primaryMangaDex!.coverByVolume,
-        );
-        if (covers.isNotEmpty) {
-          final coverMax =
-              covers.keys.reduce((a, b) => a > b ? a : b);
-          final vols = [
-            primaryMangaDex.volumesPublished ?? 0,
-            coverMax,
-          ].reduce((a, b) => a > b ? a : b);
-          primaryMangaDex = MangaDexSeriesMeta(
-            id: primaryMangaDex.id,
-            title: primaryMangaDex.title,
-            author: primaryMangaDex.author ?? exactAuthor,
-            volumesPublished: vols > 0 ? vols : null,
-            coverByVolume: covers,
-            seriesCoverUrl:
-                covers[1] ?? primaryMangaDex.seriesCoverUrl,
-          );
-          exactMd = primaryMangaDex;
-          // Remplace dans mdList pour les bannières.
-          final enrichedMd = primaryMangaDex;
-          final idx = mdList.indexWhere((m) => m.id == enrichedMd.id);
-          if (idx >= 0) mdList[idx] = enrichedMd;
-        }
-      } catch (_) {}
+    // Même méthode que book_series_service : lookupManga + /cover (Vagabond 37).
+    // Le timeout parallèle peut renvoyer une liste vide / pauvre → force ici.
+    if (wantMangaOfficial && seriesQ.length >= 2) {
+      final needForce = primaryMangaDex == null ||
+          BookSeriesNormalizer.mergeKey(primaryMangaDex.title) != qKey ||
+          (primaryMangaDex.coverByVolume.length < 5 &&
+              (primaryMangaDex.volumesPublished ?? 0) < 5);
+      if (needForce) {
+        try {
+          final looked = await MangaDexService.lookupManga(
+            seriesQ,
+            authorHint: filters.authorQuery.trim().isEmpty
+                ? exactAuthor
+                : filters.authorQuery.trim(),
+          ).timeout(const Duration(seconds: 12));
+          if (looked != null &&
+              BookSeriesNormalizer.mergeKey(looked.title) == qKey) {
+            primaryMangaDex = looked;
+            exactMd = looked;
+            exactAuthor ??= looked.author;
+            final idx = mdList.indexWhere((m) => m.id == looked.id);
+            if (idx >= 0) {
+              mdList[idx] = looked;
+            } else {
+              mdList.insert(0, looked);
+            }
+          } else if (primaryMangaDex != null &&
+              BookSeriesNormalizer.mergeKey(primaryMangaDex.title) == qKey &&
+              primaryMangaDex.coverByVolume.length < 5) {
+            final covers =
+                await MangaDexService.fetchAllCovers(primaryMangaDex.id)
+                    .timeout(
+              const Duration(seconds: 8),
+              onTimeout: () => primaryMangaDex!.coverByVolume,
+            );
+            if (covers.isNotEmpty) {
+              final coverMax = covers.keys.reduce((a, b) => a > b ? a : b);
+              final vols = [
+                primaryMangaDex.volumesPublished ?? 0,
+                coverMax,
+              ].reduce((a, b) => a > b ? a : b);
+              primaryMangaDex = MangaDexSeriesMeta(
+                id: primaryMangaDex.id,
+                title: primaryMangaDex.title,
+                author: primaryMangaDex.author ?? exactAuthor,
+                volumesPublished: vols > 0 ? vols : null,
+                coverByVolume: covers,
+                seriesCoverUrl: covers[1] ?? primaryMangaDex.seriesCoverUrl,
+              );
+              exactMd = primaryMangaDex;
+              final enrichedMd = primaryMangaDex;
+              final i = mdList.indexWhere((m) => m.id == enrichedMd.id);
+              if (i >= 0) mdList[i] = enrichedMd;
+            }
+          }
+        } catch (_) {}
+      }
     }
 
-    // GB ciblée : auteur exact (Inoue) ; fallback soft `"title" Tome` si vide.
-    if (seriesQ.length >= 2 &&
+    // GB ciblée séquentielle : seulement si la 1ʳᵉ passe n'a aucun tome de la série.
+    final hasSeriesTome = raw.any((h) {
+      final title = h['title'] ?? '';
+      return BookSeriesNormalizer.hitBelongsToSeries(title, seriesQ) &&
+          BookTitleParser.extractVolumeNumberStrict(title) != null;
+    });
+    if (!hasSeriesTome &&
+        seriesQ.length >= 2 &&
         (exactMd != null ||
             (exactAuthor != null && exactAuthor.trim().isNotEmpty))) {
       final authorParts =
           (exactAuthor ?? exactMd?.author ?? '').trim().split(RegExp(r'\s+'));
       final authorLast = authorParts.isNotEmpty ? authorParts.last : '';
       final targetedQueries = <String>[
-        if (authorLast.length >= 2)
-          'intitle:"$seriesQ" inauthor:"$authorLast"',
-        'intitle:"$seriesQ" Tome',
-        '"$seriesQ" Tome',
+        if (authorLast.length >= 2) '"$seriesQ" $authorLast',
+        if (wantMangaOfficial) '"$seriesQ" Tome',
+        '"$seriesQ"',
       ];
       try {
         for (final targeted in targetedQueries) {
@@ -678,6 +708,11 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
             if (o.volumeCount > count) count = o.volumeCount;
           }
         }
+      }
+      // Jamais « 1 tomes parus » à côté de « (0/37) » : max avec la collection.
+      final ownedInfo = _ownedByKey[mergeKey];
+      if (ownedInfo != null && ownedInfo.total > count) {
+        count = ownedInfo.total;
       }
       if (count < 1) continue;
 

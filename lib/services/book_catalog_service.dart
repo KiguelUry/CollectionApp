@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../models/book_subcategory.dart';
+import '../utils/book_vf_edition.dart';
 import 'book_intelligence_service.dart';
 import 'google_books_service.dart';
 import 'itunes_books_service.dart';
@@ -81,30 +82,30 @@ class BookCatalogService {
     final enhanced = _searchQueryForSubcategory(query, subcategory, frenchOnly);
 
     const t = Duration(seconds: 5);
-    final googleF = GoogleBooksService.search(
-      enhanced,
-      maxResults: 25,
-      langRestrict: frenchOnly ? _defaultLang : null,
-    ).timeout(t, onTimeout: () => <Map<String, String>>[]);
+    // GB d'abord (sérialisé), iTunes en parallèle ; OL seulement si GB vide.
     final itunesF = ItunesBooksService.search(enhanced)
         .timeout(t, onTimeout: () => <Map<String, String>>[]);
-    final olF = OpenLibraryService.searchBooks(
-      query,
-      subcategory: subcategory,
-      frenchOnly: frenchOnly,
-    ).timeout(t, onTimeout: () => <Map<String, String>>[]);
 
     List<Map<String, String>> google = [];
     List<Map<String, String>> itunes = [];
     List<Map<String, String>> ol = [];
     try {
-      final parts = await Future.wait([googleF, itunesF, olF]);
-      google = parts[0];
-      itunes = parts[1];
-      // OL toujours fusionné (romans / BD sans « Tome N »), pas seulement si GB vide.
-      ol = parts[2];
+      google = await GoogleBooksService.search(
+        enhanced,
+        maxResults: 25,
+        langRestrict: frenchOnly ? _defaultLang : null,
+      ).timeout(t, onTimeout: () => <Map<String, String>>[]);
+      itunes = await itunesF;
+      // OL souvent timeout/CORS sur le web — skip si GB a déjà répondu.
+      if (google.isEmpty) {
+        ol = await OpenLibraryService.searchBooks(
+          query,
+          subcategory: subcategory,
+          frenchOnly: frenchOnly,
+        ).timeout(const Duration(seconds: 3), onTimeout: () => []);
+      }
     } catch (e) {
-      if (kDebugMode) debugPrint('BookCatalog parallel search: $e');
+      if (kDebugMode) debugPrint('BookCatalog search: $e');
     }
 
     final seen = <String>{};
@@ -113,6 +114,12 @@ class BookCatalogService {
       for (final b in list) {
         final title = b['title']?.trim();
         if (title == null || title.isEmpty) continue;
+        if (BookVfEdition.isRejectedCatalogTitle(
+          title,
+          subtitle: b['subtitle'],
+        )) {
+          continue;
+        }
         if (frenchOnly && !_preferFrenchEdition(b)) continue;
         final key = title.toLowerCase();
         if (!seen.contains(key)) {
@@ -150,11 +157,11 @@ class BookCatalogService {
   }
 
   static bool _preferFrenchEdition(Map<String, String> hit) {
-    final lang = (hit['language'] ?? hit['lang'] ?? '').toLowerCase();
-    if (lang.isEmpty) return true;
-    if (lang.contains('fr') || lang == 'fre' || lang == 'french') return true;
-    // Langue absente / und → garder (romans, métadonnées incomplètes).
-    return true;
+    final lang = hit['language'] ?? hit['lang'];
+    if (!BookVfEdition.isFrOrEnLanguage(lang)) return false;
+    if (lang == null || lang.trim().isEmpty) return true;
+    // frenchOnly : FR seulement (EN via 2ᵉ passe sans filtre).
+    return BookVfEdition.isFrenchLanguage(lang);
   }
 
   static Map<String, String> _merge(

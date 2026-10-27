@@ -217,13 +217,14 @@ class BookSeriesService {
       final hasVerified = v.coverUrl != null &&
           v.coverUrl!.isNotEmpty &&
           v.metadata['cover_volume_verified'] == num;
-      final overwriteMd = hasVerified &&
-          isMangaDexCoverUrl(v.coverUrl) &&
-          url != null &&
+      // GB/iTunes VF écrase toujours MD **et** d'anciennes couvs IT sauvées.
+      final overwriteWithCatalog = url != null &&
           url.isNotEmpty &&
           !isMangaDexCoverUrl(url);
 
-      if (url != null && url.isNotEmpty && (!hasVerified || overwriteMd)) {
+      if (url != null &&
+          url.isNotEmpty &&
+          (!hasVerified || overwriteWithCatalog)) {
         await setVolumeCoverUrl(
           v.id,
           url,
@@ -368,8 +369,12 @@ class BookSeriesService {
     return (await fetchSeriesById(updated.id)) ?? updated;
   }
 
-  /// Si manga/BD/comics a ≤1 tome déclaré, sonde le catalogue / AniList.
+  /// Sonde le catalogue si le compte de tomes semble trop bas, ou roman (VF+EN).
   Future<BookSeries> ensureRealisticVolumeCount(BookSeries series) async {
+    // Romans : toujours resynchroniser (purge IT, tomes manquants).
+    if (series.subcategory == BookSubcategory.novel) {
+      return refreshPublications(series);
+    }
     final isSerial = series.subcategory == BookSubcategory.manga ||
         series.subcategory == BookSubcategory.comic ||
         series.subcategory == BookSubcategory.comics;
@@ -1072,9 +1077,8 @@ class BookSeriesService {
       final url = hit.coverUrl;
       final pub = hit.publishedDate;
       final upcoming = BookIntelligenceService.isFuturePublishedDate(pub);
-      final overwriteMd = hasCover &&
-          isMangaDexCoverUrl(vol.coverUrl) &&
-          !isMangaDexCoverUrl(url);
+      // GB VF remplace systématiquement MD / anciennes couvs IT.
+      final catalogCover = !isMangaDexCoverUrl(url);
       final sameCover = hasCover && vol.coverUrl == url;
       final dateMissing = pub != null &&
           pub.isNotEmpty &&
@@ -1085,7 +1089,7 @@ class BookSeriesService {
           !needsRepair &&
           verified == n &&
           sameCover &&
-          !overwriteMd) {
+          !catalogCover) {
         if (dateMissing) {
           await patchVolumePublishedDate(
             vol.id,
@@ -1097,12 +1101,12 @@ class BookSeriesService {
         continue;
       }
 
+      // Même tome déjà vérifié avec une autre URL non-catalogue → garder.
       if (hasCover &&
           !needsRepair &&
           verified == n &&
-          !overwriteMd &&
+          !catalogCover &&
           !sameCover) {
-        // Couverture VF déjà vérifiée différente → garder, sync date.
         if (dateMissing) {
           await patchVolumePublishedDate(
             vol.id,

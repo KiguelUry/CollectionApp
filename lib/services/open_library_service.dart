@@ -15,7 +15,8 @@ class OpenLibraryService {
   static final _authorPhotoCache = <String, String?>{};
 
   static Future<http.Response> _get(Uri url) {
-    return http.get(url).timeout(const Duration(seconds: 5));
+    // 3 s max : openlibrary.org est souvent injoignable depuis le navigateur.
+    return http.get(url).timeout(const Duration(seconds: 3));
   }
 
   static Future<List<Map<String, String>>> searchBooks(

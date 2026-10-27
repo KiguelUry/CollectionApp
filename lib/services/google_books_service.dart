@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_env.dart';
+import '../utils/book_title_parser.dart';
 import '../utils/book_vf_edition.dart';
 import '../utils/web_catalog_proxy.dart';
 import 'open_library_service.dart';
@@ -12,10 +13,23 @@ import 'open_library_service.dart';
 /// Google Books API — source prioritaire VF (`langRestrict=fr`).
 /// Pas de `orderBy` (provoque des 503). Clé conservée sur retry 503.
 /// Keyless uniquement après 429/403. Circuit breaker 60s + cache négatif.
+/// Toutes les requêtes sont **sérialisées** (évite 3× 503 concurrents).
 class GoogleBooksService {
   static String? get _apiKey => AppEnv.googleBooksApiKey;
 
   static bool get hasApiKey => _apiKey != null && _apiKey!.isNotEmpty;
+
+  /// File d'attente globale : 1 HTTP Google Books à la fois.
+  static Future<void> _gate = Future<void>.value();
+
+  static Future<T> _serialized<T>(Future<T> Function() run) {
+    late final Future<T> result;
+    _gate = _gate.then((_) {
+      result = run();
+      return result.then<void>((_) {}, onError: (_) {});
+    });
+    return _gate.then((_) => result);
+  }
 
   /// Uniquement après un vrai 429/403 avec clé — jamais après un 503.
   static bool _preferKeyless = false;
@@ -280,6 +294,20 @@ class GoogleBooksService {
     int maxResults = 20,
     int startIndex = 0,
     String? langRestrict = 'fr',
+  }) {
+    return _serialized(() => _searchImpl(
+          query,
+          maxResults: maxResults,
+          startIndex: startIndex,
+          langRestrict: langRestrict,
+        ));
+  }
+
+  static Future<List<Map<String, String>>> _searchImpl(
+    String query, {
+    int maxResults = 20,
+    int startIndex = 0,
+    String? langRestrict = 'fr',
   }) async {
     final q = query.trim();
     if (q.length < 2) return [];
@@ -313,7 +341,7 @@ class GoogleBooksService {
     }
   }
 
-  /// 1–3 pages séquentielles. Stop immédiat si circuit ouvert.
+  /// 1–3 pages **séquentielles**. Stop si la 1ʳᵉ requête renvoie déjà des tomes FR.
   /// Fallback souple `"$name" Tome` si `intitle:` → 0 / 503.
   static Future<List<Map<String, String>>> searchSeriesBatched(
     String seriesTitle, {
@@ -344,6 +372,7 @@ class GoogleBooksService {
     final pages = maxPages.clamp(1, 3);
     for (final q in queries) {
       if (_isLocked) break;
+      var gotBatch = false;
       for (var page = 0; page < pages; page++) {
         if (_isLocked) break;
         if (page > 0) await Future<void>.delayed(pageDelay);
@@ -354,6 +383,7 @@ class GoogleBooksService {
           langRestrict: langRestrict,
         );
         if (batch.isEmpty) break;
+        gotBatch = true;
         for (final hit in batch) {
           final title = hit['title']?.trim().toLowerCase() ?? '';
           if (title.isEmpty || !seen.add(title)) continue;
@@ -361,7 +391,15 @@ class GoogleBooksService {
         }
         if (batch.length < 25) break;
       }
-      if (out.length >= 20) break;
+      // Assez de tomes FR numérotés → ne pas enchaîner les autres requêtes (anti-503).
+      final frTomes = out.where((h) {
+        final title = h['title'] ?? '';
+        final lang = h['language'];
+        if (!BookVfEdition.isFrenchLanguage(lang)) return false;
+        return BookTitleParser.extractVolumeNumberStrict(title) != null;
+      }).length;
+      if (frTomes >= 3) break;
+      if (gotBatch && out.length >= 15) break;
     }
     return out;
   }
@@ -378,24 +416,16 @@ class GoogleBooksService {
     if (BookVfEdition.isUsVolTitle(title)) return null;
     final subtitle = info['subtitle'] as String?;
     if (subtitle != null && BookVfEdition.isUsVolTitle(subtitle)) return null;
+    if (BookVfEdition.isRejectedCatalogTitle(title, subtitle: subtitle)) {
+      return null;
+    }
 
     final langRaw = info['language'];
     final language = langRaw is List
         ? langRaw.map((e) => e.toString()).join(',')
         : langRaw?.toString();
-    // FR + EN seulement — rejette it/es/de/pt/nl/ru (couvs italiennes etc.).
-    if (language != null && language.trim().isNotEmpty) {
-      final l = language.toLowerCase().trim();
-      final okFrEn = l == 'fr' ||
-          l.startsWith('fr-') ||
-          l == 'fre' ||
-          l == 'french' ||
-          l == 'en' ||
-          l.startsWith('en-') ||
-          l == 'eng' ||
-          l == 'english';
-      if (!okFrEn) return null;
-    }
+    // FR + EN seulement — rejette it/es/sv/de/pt/nl/ru/da…
+    if (!BookVfEdition.isFrOrEnLanguage(language)) return null;
 
     final authors = (info['authors'] as List<dynamic>?)
         ?.map((a) => a.toString())
@@ -480,18 +510,11 @@ class GoogleBooksService {
   }
 
   static (String, String)? _parseSeriesFromTitle(String title) {
-    final patterns = [
-      RegExp(
-        r'^(.+?)\s*[,:\-–]\s*(?:tome|vol\.?|volume|#)\s*(\d+)',
-        caseSensitive: false,
-      ),
-      RegExp(r'^(.+?)\s+\((\d+)\)$'),
-    ];
-    for (final p in patterns) {
-      final m = p.firstMatch(title.trim());
-      if (m != null) {
-        return (m.group(1)!.trim(), m.group(2)!);
-      }
+    final parsed = BookTitleParser.parse(title);
+    if (parsed.hasSeries && parsed.hasVolume) {
+      final n = parsed.volumeNumber!;
+      final label = n == n.roundToDouble() ? '${n.toInt()}' : '$n';
+      return (parsed.seriesName!.trim(), label);
     }
     return null;
   }

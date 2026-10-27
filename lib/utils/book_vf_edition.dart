@@ -1,4 +1,4 @@
-/// Filtres éditions — anti-pollution US VIZ (`Vol. N`) uniquement.
+/// Filtres éditions — anti-pollution US VIZ (`Vol. N`) + langues + parasites.
 /// Ne rejette PAS MangaDex/AniList (métadonnées EN/romaji normales).
 abstract final class BookVfEdition {
   /// Titres US du type « Kagurabachi, Vol. 10 ».
@@ -7,7 +7,37 @@ abstract final class BookVfEdition {
     caseSensitive: false,
   );
 
+  /// Guides / IA / companions non officiels (Google Books spam).
+  static final parasiteTitleRe = RegExp(
+    r'\b(?:summary|study\s*guide|companion(?:\s+guide)?|after\s+reading|'
+    r'analysis|unauthorized|reflections\s+on)\b',
+    caseSensitive: false,
+  );
+
+  /// Éditions étrangères repérables dans le titre (même si language manquant).
+  static final foreignEditionTitleRe = RegExp(
+    r'svensk\s+utg[aå]va|il\s+giorno\s+del\s+giudizio|il\s+varco\s+degli|'
+    r'il\s+ricettario|edizione\s+italiana',
+    caseSensitive: false,
+  );
+
   static bool isUsVolTitle(String title) => usVolTitleRe.hasMatch(title);
+
+  /// Titre / sous-titre à exclure du catalogue (parasite ou édition IT/SV…).
+  static bool isRejectedCatalogTitle(String title, {String? subtitle}) {
+    final blob = '$title ${subtitle ?? ''}';
+    if (parasiteTitleRe.hasMatch(blob)) return true;
+    if (foreignEditionTitleRe.hasMatch(blob)) return true;
+    return false;
+  }
+
+  /// FR ou EN uniquement (codes ISO).
+  static bool isFrOrEnLanguage(String? language) {
+    if (language == null || language.trim().isEmpty) return true;
+    final l = language.toLowerCase().trim();
+    if (l == 'und' || l == 'zxx') return true;
+    return isFrenchLanguage(language) || isExplicitEnglish(language);
+  }
 
   /// Langue française (code ISO style `fr`, `fr-FR`, `fre`).
   static bool isFrenchLanguage(String? language) {
@@ -38,7 +68,7 @@ abstract final class BookVfEdition {
   }
 
   /// Hit acceptable dans la grille.
-  /// Rejette UNIQUEMENT `\bVol\.\s*\d+` (VIZ). Langue null/und = OK.
+  /// Rejette VIZ `Vol. N`, parasites, titres IT/SV, langues hors fr/en.
   /// MangaDex / AniList : jamais rejetés pour la langue.
   static bool isFrenchEdition({
     required String title,
@@ -46,15 +76,14 @@ abstract final class BookVfEdition {
     String? source,
   }) {
     if (isUsVolTitle(title)) return false;
+    if (isRejectedCatalogTitle(title)) return false;
     if (isOfficialMangaSource(source)) return true;
-    // null / und / vide → garder (romans, BD sans code langue).
-    if (language == null || language.trim().isEmpty) return true;
-    final l = language.toLowerCase().trim();
-    if (l == 'und' || l == 'zxx') return true;
+    if (!isFrOrEnLanguage(language)) return false;
     return true;
   }
 
-  /// Après enrichissement : si des hits FR existent, retire les EN purs GB/iTunes.
+  /// Après enrichissement : FR d'abord ; EN seulement si pas de FR pour combler.
+  /// Rejette toujours it/es/sv/… et les parasites.
   static bool keepInSearchResults({
     required String title,
     String? language,
@@ -62,7 +91,9 @@ abstract final class BookVfEdition {
     required bool frenchResultsPresent,
   }) {
     if (isUsVolTitle(title)) return false;
+    if (isRejectedCatalogTitle(title)) return false;
     if (isOfficialMangaSource(source)) return true;
+    if (isCatalogSource(source) && !isFrOrEnLanguage(language)) return false;
     if (!frenchResultsPresent) return true;
     if (isCatalogSource(source) && isExplicitEnglish(language)) {
       return false;
