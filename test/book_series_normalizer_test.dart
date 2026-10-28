@@ -108,6 +108,44 @@ void main() {
       );
     });
 
+    test('Harry Potter : seriesInfo + préfixe à/et', () {
+      final p = BookTitleParser.parse(
+        "Harry Potter à l'école des sorciers",
+        apiVolumeNumber: 1,
+        queryHint: 'Harry Potter',
+      );
+      expect(p.seriesName, 'Harry Potter');
+      expect(p.volumeNumber?.round(), 1);
+
+      final p2 = BookTitleParser.parse(
+        'Harry Potter et la Chambre des secrets',
+        apiVolumeNumber: 2,
+        queryHint: 'Harry Potter',
+      );
+      expect(p2.seriesName, 'Harry Potter');
+      expect(p2.volumeNumber?.round(), 2);
+    });
+
+    test('Intégrale numérotée reste une série distincte', () {
+      final p = BookTitleParser.parse('Walking Dead - Intégrale - Tome 25');
+      expect(p.seriesName, 'Walking Dead - Intégrale');
+      expect(p.volumeNumber?.round(), 25);
+      expect(
+        BookSeriesNormalizer.hitBelongsToSeries(
+          'Walking Dead - Intégrale - Tome 25',
+          'Walking Dead',
+        ),
+        isFalse,
+      );
+      expect(
+        BookSeriesNormalizer.hitBelongsToSeries(
+          'Walking Dead - Tome 10',
+          'Walking Dead',
+        ),
+        isTrue,
+      );
+    });
+
     test('rejette parasites / éditions étrangères', () {
       expect(
         BookVfEdition.isRejectedCatalogTitle(
@@ -229,6 +267,31 @@ void main() {
       );
       expect(
         BookSeriesNormalizer.detectSubcategory(publisher: 'Panini Comics'),
+        BookSubcategory.comics,
+      );
+      expect(
+        BookSeriesNormalizer.detectSubcategory(
+          seriesName: 'XIII',
+          publisher: 'Dargaud',
+          subjects: 'Fiction / Graphic novels',
+        ),
+        BookSubcategory.comic,
+      );
+      expect(
+        BookSeriesNormalizer.detectSubcategory(
+          seriesName: 'Walking Dead',
+          publisher: 'Delcourt',
+          subjects: 'Comics & Graphic Novels',
+          author: 'Robert Kirkman',
+        ),
+        BookSubcategory.comics,
+      );
+      expect(
+        BookSeriesNormalizer.detectSubcategory(
+          seriesName: 'Walking Dead',
+          comicsContent: true,
+          author: 'Robert Kirkman',
+        ),
         BookSubcategory.comics,
       );
       expect(

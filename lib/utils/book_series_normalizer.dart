@@ -39,13 +39,13 @@ abstract final class BookSeriesNormalizer {
   /// Éditeurs BD franco-belge.
   /// Pas de « glénat » / « glenat » seuls : Glénat publie aussi du manga
   /// (Berserk, etc.) — la réconciliation AniList/MangaDex force Manga.
+  /// Delcourt / Glénat : BD par défaut, Comics si subjects/auteur US.
   static const bdPublishers = <String>{
     'le lombard',
     'lombard',
     'dargaud',
     'dupuis',
     'casterman',
-    'delcourt',
     'soleil',
     'fluide glacial',
     'bamboo',
@@ -53,6 +53,19 @@ abstract final class BookSeriesNormalizer {
     'rue de sevres',
     'futuropolis',
     'dupuis / marsu',
+    'humanoïdes associés',
+    'humanoïdes associes',
+    'les humanoïdes',
+    'vents d\'ouest',
+    'vents d ouest',
+    'delsol',
+  };
+
+  /// Éditeurs ambigus (BD et comics).
+  static const mixedFrancoPublishers = <String>{
+    'delcourt',
+    'glénat',
+    'glenat',
   };
 
   /// Éditeurs comics US.
@@ -62,55 +75,89 @@ abstract final class BookSeriesNormalizer {
     'dc',
     'dc comics',
     'image comics',
+    'image',
     'dark horse',
+    'skybound',
+    'vault',
     'idw',
     'boom! studios',
     'panini comics',
+    'panini',
+  };
+
+  /// Auteurs comics US fréquents (Walking Dead, Sin City, Watchmen…).
+  static const comicsAuthors = <String>{
+    'kirkman',
+    'frank miller',
+    'alan moore',
+    'stan lee',
+    'jack kirby',
+    'todd mcfarlane',
+    'neil gaiman',
   };
 
   /// Déduit Manga / BD / Comics depuis éditeur + subjects API (jamais une liste de titres).
+  /// BD et Comics **avant** Roman (fiction/graphic novel ne doivent jamais
+  /// classer XIII ou Walking Dead en roman).
   static BookSubcategory? detectSubcategory({
     String? seriesName,
     String? title,
     String? publisher,
     String? subjects,
+    String? author,
+    bool comicsContent = false,
   }) {
     final pub = (publisher ?? '').toLowerCase().trim();
+    final subj = (subjects ?? '').toLowerCase();
+    final blob = '$subj ${title ?? ''} ${seriesName ?? ''}'.toLowerCase();
+    final authorKey = normalizeAuthorKey(author ?? '');
+
     if (pub.isNotEmpty) {
-      // « Glénat Manga » / « Soleil Manga » avant « Glénat » / « Soleil » seuls.
+      // « Glénat Manga » / « Soleil Manga » / « Panini Manga » avant le reste.
       if (mangaPublishers.any((p) => pub.contains(p))) {
         return BookSubcategory.manga;
       }
-      if (comicsPublishers.any((p) => pub.contains(p))) {
-        return BookSubcategory.comics;
-      }
-      if (bdPublishers.any((p) => pub.contains(p))) {
-        return BookSubcategory.comic;
-      }
     }
 
-    final subj = (subjects ?? '').toLowerCase();
-    final blob = '$subj ${title ?? ''} ${seriesName ?? ''}'.toLowerCase();
-    if (subj.contains('manga') ||
-        subj.contains('anime') ||
-        RegExp(r'\bmanga\b').hasMatch(blob) &&
-            pub.contains('manga')) {
-      if (subj.contains('manga') || subj.contains('anime')) {
-        return BookSubcategory.manga;
-      }
-    }
     if (subj.contains('manga') || subj.contains('anime')) {
       return BookSubcategory.manga;
     }
-    if (subj.contains('comic') || subj.contains('superhero')) {
-      return BookSubcategory.comics;
-    }
-    if (subj.contains('bande dessinée') ||
+
+    final looksComicsSubj = comicsContent ||
+        subj.contains('comics') ||
+        subj.contains('superhero') ||
+        subj.contains('super-hero') ||
+        subj.contains('graphic novel');
+    final looksBdSubj = subj.contains('bande dessinée') ||
         subj.contains('bande dessinee') ||
-        subj.contains('graphic novel') ||
-        subj.contains('comics & graphic novels - european')) {
+        RegExp(r'\bbd\b').hasMatch(subj) ||
+        subj.contains('european');
+    final usComicsAuthor = authorKey.isNotEmpty &&
+        comicsAuthors.any((a) => authorKey.contains(a));
+    final comicsPublisher = pub.isNotEmpty &&
+        comicsPublishers.any((p) => pub.contains(p)) &&
+        !pub.contains('manga');
+    final bdPublisher = pub.isNotEmpty &&
+        bdPublishers.any((p) => pub.contains(p));
+    final mixedPublisher = pub.isNotEmpty &&
+        mixedFrancoPublishers.any((p) => pub.contains(p));
+
+    // Comics / BD **avant** tout hint « fiction » / roman.
+    if (comicsPublisher) return BookSubcategory.comics;
+    if (usComicsAuthor) return BookSubcategory.comics;
+    if (mixedPublisher && looksComicsSubj) return BookSubcategory.comics;
+    if (bdPublisher) return BookSubcategory.comic;
+    if (looksBdSubj) return BookSubcategory.comic;
+    if (mixedPublisher) return BookSubcategory.comic;
+    if (looksComicsSubj) return BookSubcategory.comics;
+    if (blob.contains('bande dessinée') ||
+        blob.contains('bande dessinee') ||
+        RegExp(r'\bbd\b').hasMatch(blob) ||
+        blob.contains('graphic novel') ||
+        blob.contains('comics')) {
       return BookSubcategory.comic;
     }
+
     const novelHints = [
       'fiction',
       'roman',
@@ -149,7 +196,16 @@ abstract final class BookSeriesNormalizer {
     return normalizeKey(display);
   }
 
-  static ParsedBookTitle parse(String title) => BookTitleParser.parse(title);
+  static ParsedBookTitle parse(
+    String title, {
+    int? apiVolumeNumber,
+    String? queryHint,
+  }) =>
+      BookTitleParser.parse(
+        title,
+        apiVolumeNumber: apiVolumeNumber,
+        queryHint: queryHint,
+      );
 
   static String normalizeKey(String name) {
     var s = name.toLowerCase().trim();
@@ -166,15 +222,21 @@ abstract final class BookSeriesNormalizer {
       BookTitleParser.seriesNamesMatch(a, b);
 
   /// Vrai si le titre du hit appartient strictement à la série [seriesName].
+  /// Une « Intégrale » numérotée n'appartient pas à la série standard.
   static bool hitBelongsToSeries(String hitTitle, String seriesName) {
-    final want = normalizeKey(
-      stripEditionSuffix(stripOrphanVolumeSuffix(seriesName)),
-    );
+    final wantRaw = stripOrphanVolumeSuffix(seriesName);
+    final parsed = parse(hitTitle, queryHint: seriesName);
+    final extractedRaw = parsed.hasSeries
+        ? parsed.seriesName!.trim()
+        : (BookTitleParser.inferSeriesName(hitTitle, queryHint: seriesName) ??
+            stripOrphanVolumeSuffix(hitTitle));
+    final wantIntegrale = BookTitleParser.looksLikeIntegraleEdition(wantRaw);
+    final gotIntegrale =
+        BookTitleParser.looksLikeIntegraleEdition(extractedRaw);
+    if (wantIntegrale != gotIntegrale) return false;
+    final want = normalizeKey(stripEditionSuffix(wantRaw));
     if (want.isEmpty) return false;
-    final parsed = parse(hitTitle);
-    final extracted = parsed.hasSeries
-        ? normalizeKey(stripEditionSuffix(parsed.seriesName!))
-        : normalizeKey(stripEditionSuffix(stripOrphanVolumeSuffix(hitTitle)));
+    final extracted = normalizeKey(stripEditionSuffix(extractedRaw));
     if (extracted.isEmpty) return false;
     return extracted == want;
   }
@@ -291,13 +353,8 @@ abstract final class BookSeriesNormalizer {
         s = s.substring(0, anyEd.start);
       }
     }
-    s = s.replaceAll(
-      RegExp(
-        r'\s*-?\s*(omnibus|coffret|box\s*set)\b.*$',
-        caseSensitive: false,
-      ),
-      '',
-    );
+    // Ne PAS retirer « Intégrale / Omnibus / Coffret » : c'est une série distincte
+    // (« Walking Dead - Intégrale - Tome 25 » ≠ « Walking Dead »).
     return s.replaceAll(RegExp(r'[\s,;:\-]+$'), '').trim();
   }
 

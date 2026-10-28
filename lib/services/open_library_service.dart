@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/book_subcategory.dart';
@@ -444,7 +445,9 @@ class OpenLibraryService {
   }
 
   /// Photo auteur Open Library (cache mémoire). Timeout 3s, silence console.
+  /// Désactivé sur le Web : openlibrary.org/search/authors.json → ERR_CONNECTION_RESET.
   static Future<String?> lookupAuthorPhotoUrl(String authorName) async {
+    if (kIsWeb) return null;
     final key = authorName.trim().toLowerCase();
     if (key.length < 2) return null;
     if (_authorPhotoCache.containsKey(key)) return _authorPhotoCache[key];

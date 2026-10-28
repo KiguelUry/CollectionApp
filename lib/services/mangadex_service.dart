@@ -73,12 +73,21 @@ abstract final class MangaDexService {
         final meta = await _mapManga(raw, q, authorHint, fetchCovers: false);
         if (meta == null) continue;
         if (looksLikeParasiteTitle(meta.title)) continue;
-        scored.add((meta: meta, score: _rankScore(raw, meta, q), raw: raw));
+        scored.add((
+          meta: meta,
+          score: _rankScore(raw, meta, q, authorHint: authorHint),
+          raw: raw,
+        ));
       }
       scored.sort((a, b) {
         final aExact = _hasExactTitleMatch(a.meta, q);
         final bExact = _hasExactTitleMatch(b.meta, q);
         if (aExact != bExact) return aExact ? -1 : 1;
+        final aAuth = authorHint != null &&
+            BookSeriesNormalizer.authorsMatch(a.meta.author, authorHint);
+        final bAuth = authorHint != null &&
+            BookSeriesNormalizer.authorsMatch(b.meta.author, authorHint);
+        if (aAuth != bAuth) return aAuth ? -1 : 1;
         return b.score.compareTo(a.score);
       });
       final top = scored.take(limit.clamp(1, 10)).toList();
@@ -147,12 +156,13 @@ abstract final class MangaDexService {
     return BookSeriesNormalizer.normalizeKey(meta.title) == qKey;
   }
 
-  /// Exact match ≫ startsWith ≫ contains ; bonus volumes / covers.
+  /// Exact match ≫ startsWith ≫ contains ; bonus volumes / covers / auteur.
   static double _rankScore(
     Map<String, dynamic> raw,
     MangaDexSeriesMeta meta,
-    String query,
-  ) {
+    String query, {
+    String? authorHint,
+  }) {
     final qKey = BookSeriesNormalizer.normalizeKey(query);
     final tKey = BookSeriesNormalizer.normalizeKey(meta.title);
     var score = 0.0;
@@ -162,6 +172,12 @@ abstract final class MangaDexService {
       score += 500;
     } else if (tKey.contains(qKey) || qKey.contains(tKey)) {
       score += 200;
+    }
+    if (authorHint != null &&
+        authorHint.trim().isNotEmpty &&
+        meta.author != null &&
+        BookSeriesNormalizer.authorsMatch(meta.author, authorHint)) {
+      score += 4000;
     }
     // Pénalise les spin-offs / sous-titres longs même sans mot parasite.
     if (meta.title.contains(':') || meta.title.contains(' - ')) {
@@ -196,9 +212,10 @@ abstract final class MangaDexService {
             (titles.isEmpty ? null : titles.values.first) ??
             query)
         .toString();
-    // altTitles : FR d'abord, sinon titre qui matche la requête.
+    // Préfère le titre qui matche EXACTEMENT la requête (Monster ≠ Monstre
+    // trop tôt) ; FR seulement s'il matche aussi.
+    String? exactAlt;
     String? frAlt;
-    String? queryAlt;
     for (final alt in altTitles) {
       if (alt is! Map<String, dynamic>) continue;
       final fr = (alt['fr']?.toString() ?? '').trim();
@@ -206,17 +223,26 @@ abstract final class MangaDexService {
       for (final e in alt.entries) {
         final t = e.value?.toString().trim() ?? '';
         if (t.isEmpty) continue;
-        if (BookSeriesNormalizer.hitBelongsToSeries(t, query) ||
-            BookSeriesNormalizer.normalizeKey(t) ==
-                BookSeriesNormalizer.normalizeKey(query)) {
-          queryAlt ??= t;
+        if (BookSeriesNormalizer.normalizeKey(t) ==
+            BookSeriesNormalizer.normalizeKey(query)) {
+          exactAlt ??= t;
         }
       }
     }
-    title = BookSeriesNormalizer.displaySeriesName(frAlt ?? queryAlt ?? title);
+    final qKey = BookSeriesNormalizer.normalizeKey(query);
+    final enKey = BookSeriesNormalizer.normalizeKey(title);
+    if (enKey == qKey) {
+      // garde le titre EN exact (« Monster »)
+    } else if (exactAlt != null) {
+      title = exactAlt;
+    } else if (frAlt != null &&
+        BookSeriesNormalizer.normalizeKey(frAlt) == qKey) {
+      title = frAlt;
+    } else {
+      title = BookSeriesNormalizer.displaySeriesName(frAlt ?? title);
+    }
 
     // Filtre homonymes trop éloignés.
-    final qKey = BookSeriesNormalizer.normalizeKey(query);
     final tKey = BookSeriesNormalizer.normalizeKey(title);
     if (tKey != qKey &&
         !tKey.contains(qKey) &&

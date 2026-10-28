@@ -973,6 +973,42 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     return 'T${slot.volume.displayNumber}';
   }
 
+  ({int maxVf, int? firstUpcomingVf}) _vfExtent() {
+    var maxVf = 0;
+    int? firstUpcoming;
+    for (final s in _slots) {
+      if (s.volume.isHorsSerie || s.volume.isChapterOrScan) continue;
+      final n = s.volume.volumeNumber.round();
+      if (n < 1) continue;
+      final md = BookSeriesService.isMangaDexCoverUrl(s.volume.coverUrl);
+      if (s.volume.isUpcoming && !md) {
+        if (firstUpcoming == null || n < firstUpcoming) firstUpcoming = n;
+        continue;
+      }
+      if (!md && (s.volume.coverUrl != null || s.volume.publishedDate != null)) {
+        if (n > maxVf) maxVf = n;
+      }
+    }
+    if (firstUpcoming != null && firstUpcoming - 1 > maxVf) {
+      maxVf = firstUpcoming - 1;
+    }
+    return (maxVf: maxVf, firstUpcomingVf: firstUpcoming);
+  }
+
+  bool _slotIsJapaneseVo(
+    BookVolumeSlot slot, {
+    required int maxVf,
+    int? firstUpcomingVf,
+  }) {
+    if (slot.volume.isHorsSerie || slot.volume.isChapterOrScan) return false;
+    if (!BookSeriesService.isMangaDexCoverUrl(slot.volume.coverUrl)) {
+      return false;
+    }
+    final n = slot.volume.volumeNumber.round();
+    if (firstUpcomingVf != null && n > firstUpcomingVf) return true;
+    return n > maxVf;
+  }
+
   Widget _buildCoverGrid(
     List<BookVolumeSlot> slots,
     Color accent, {
@@ -989,6 +1025,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
       );
     }
 
+    final vf = _vfExtent();
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -1010,6 +1047,12 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         final key = _slotKeys.putIfAbsent(slot.volume.id, GlobalKey.new);
         final coverUrl = slot.volume.coverUrl ?? slot.item?.imageUrl;
         final isChapter = chapterBadge || slot.volume.isChapterOrScan;
+        final isJpVo = !isChapter &&
+            _slotIsJapaneseVo(
+              slot,
+              maxVf: vf.maxVf,
+              firstUpcomingVf: vf.firstUpcomingVf,
+            );
 
         final editionBadge = slot.volume.editionBadge;
 
@@ -1082,7 +1125,33 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                           ),
                         ),
                       ),
-                    if (slot.volume.isUpcoming)
+                    if (isJpVo)
+                      Positioned(
+                        top: 6,
+                        left: 6,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1B2838),
+                            borderRadius: BorderRadius.circular(6),
+                            boxShadow: const [
+                              BoxShadow(color: Colors.black45, blurRadius: 3),
+                            ],
+                          ),
+                          child: const Text(
+                            '🇯🇵 VO (Japon)',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFFE3EEF8),
+                            ),
+                          ),
+                        ),
+                      )
+                    else if (slot.volume.isUpcoming)
                       Positioned(
                         top: 6,
                         left: 6,
@@ -1110,7 +1179,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                       ),
                     if (editionBadge != null)
                       Positioned(
-                        top: slot.volume.isUpcoming ? 40 : 6,
+                        top: isJpVo || slot.volume.isUpcoming ? 40 : 6,
                         right: 6,
                         child: Container(
                           padding: const EdgeInsets.symmetric(
@@ -1293,6 +1362,12 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     final wish = _slotWish(slot);
     final edition = slot.volume.edition;
     final upcoming = slot.volume.upcomingLabel;
+    final vf = _vfExtent();
+    final isJpVo = _slotIsJapaneseVo(
+      slot,
+      maxVf: vf.maxVf,
+      firstUpcomingVf: vf.firstUpcomingVf,
+    );
     return Card(
       margin: inSheet
           ? EdgeInsets.zero
@@ -1337,7 +1412,17 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                       fontSize: 15,
                     ),
                   ),
-                  if (upcoming != null) ...[
+                  if (isJpVo) ...[
+                    const SizedBox(height: 4),
+                    const Text(
+                      '🇯🇵 VO (Japon)',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF90A4AE),
+                      ),
+                    ),
+                  ] else if (upcoming != null) ...[
                     const SizedBox(height: 4),
                     Text(
                       upcoming,

@@ -52,7 +52,13 @@ VfSeriesCatalog vfCatalogFromHits(
     if (BookSeriesNormalizer.mergeKey(sn) != want) continue;
     final n = h.parsed.volumeNumber?.round();
     if (n == null || n < 1) continue;
+    final src = (h.raw['source'] ?? '').toLowerCase();
+    if (src.contains('mangadex')) continue;
     final title = h.raw['title'] ?? h.displayTitle;
+    if (BookTitleParser.looksLikeIntegraleEdition(title) &&
+        !BookTitleParser.looksLikeIntegraleEdition(seriesName)) {
+      continue;
+    }
     if (!BookVfEdition.isFrenchEdition(
       title: title,
       language: h.raw['language'],
@@ -184,7 +190,16 @@ abstract final class BookIntelligenceService {
     required BookSubcategory subcategory,
     BookSearchFilters filters = const BookSearchFilters(),
   }) {
-    final enriched = hits.map((hit) => _enrich(hit, subcategory)).toList();
+    var enriched = hits
+        .map(
+          (hit) => _enrich(
+            hit,
+            subcategory,
+            queryHint: filters.titleQuery,
+          ),
+        )
+        .toList();
+    enriched = inferSharedPrefixSeries(enriched, queryHint: filters.titleQuery);
 
     final filtered = enriched.where((hit) {
       return _matchesFilters(hit, filters);
@@ -305,9 +320,16 @@ abstract final class BookIntelligenceService {
             title: title,
             publisher: h.publisher,
             subjects: h.raw['subjects'] ?? h.raw['categories'],
+            author: author,
+            comicsContent: h.raw['comics_content'] == 'true',
           ) ??
           subcategory;
-      final key = BookSeriesNormalizer.seriesSubcategoryKey(name, det);
+      // Homonymes : Monster Urasawa ≠ Monster Brittany Adams.
+      final authorPart = author != null && author.isNotEmpty
+          ? '|${BookSeriesNormalizer.normalizeAuthorKey(author)}'
+          : '';
+      final key =
+          '${BookSeriesNormalizer.seriesSubcategoryKey(name, det)}$authorPart';
       final agg = groups.putIfAbsent(
         key,
         () => _SeriesAgg(
@@ -628,10 +650,18 @@ abstract final class BookIntelligenceService {
 
   static EnrichedBookHit _enrich(
     Map<String, String> hit,
-    BookSubcategory subcategory,
-  ) {
+    BookSubcategory subcategory, {
+    String? queryHint,
+  }) {
     final title = hit['title']?.trim() ?? '';
-    final parsed = BookTitleParser.parse(title);
+    final subtitle = hit['subtitle']?.trim();
+    final apiVol = int.tryParse(hit['series_volume'] ?? '');
+    final parsed = BookTitleParser.parse(
+      [title, if (subtitle != null && subtitle.isNotEmpty) subtitle]
+          .join(' : '),
+      apiVolumeNumber: apiVol,
+      queryHint: queryHint,
+    );
     final seriesFromMeta = hit['series_title']?.trim();
     final seriesName = parsed.seriesName ??
         (seriesFromMeta != null && seriesFromMeta.length >= 2
@@ -641,7 +671,10 @@ abstract final class BookIntelligenceService {
     final normalizedParsed = ParsedBookTitle(
       rawTitle: title,
       seriesName: seriesName,
-      volumeNumber: parsed.volumeNumber,
+      volumeNumber: parsed.volumeNumber ??
+          (apiVol != null && apiVol >= 1 && apiVol < 1900
+              ? apiVol.toDouble()
+              : null),
     );
 
     final author = hit['author']?.trim();
@@ -684,6 +717,8 @@ abstract final class BookIntelligenceService {
         title: title,
         publisher: publisher,
         subjects: hit['subjects'] ?? hit['categories'],
+        author: author,
+        comicsContent: hit['comics_content'] == 'true',
       );
     }
 
@@ -726,6 +761,131 @@ abstract final class BookIntelligenceService {
   static int? _parseInt(String? raw) {
     if (raw == null || raw.isEmpty) return null;
     return int.tryParse(raw.replaceAll(RegExp(r'[^\d]'), ''));
+  }
+
+  /// Si ≥3 livres du même auteur partagent un préfixe (« Harry Potter … »),
+  /// rattache-les à ce nom de série.
+  static List<EnrichedBookHit> inferSharedPrefixSeries(
+    List<EnrichedBookHit> hits, {
+    String? queryHint,
+  }) {
+    if (hits.length < 3) return hits;
+    final byAuthor = <String, List<int>>{};
+    for (var i = 0; i < hits.length; i++) {
+      final a = BookSeriesNormalizer.normalizeAuthorKey(hits[i].author ?? '');
+      if (a.isEmpty) continue;
+      if (BookTitleParser.isCompanionOrStudyTitle(
+        hits[i].raw['title'] ?? hits[i].displayTitle,
+      )) {
+        continue;
+      }
+      byAuthor.putIfAbsent(a, () => []).add(i);
+    }
+    final out = List<EnrichedBookHit>.from(hits);
+    for (final idxs in byAuthor.values) {
+      if (idxs.length < 3) continue;
+      final prefixes = <String, int>{};
+      for (final i in idxs) {
+        final title = out[i].raw['title'] ?? out[i].displayTitle;
+        final inferred = BookTitleParser.inferSeriesName(
+              title,
+              queryHint: queryHint,
+            ) ??
+            _twoWordPrefix(title);
+        if (inferred == null) continue;
+        final k = BookSeriesNormalizer.normalizeKey(inferred);
+        prefixes[k] = (prefixes[k] ?? 0) + 1;
+      }
+      String? best;
+      var bestN = 0;
+      prefixes.forEach((k, n) {
+        if (n > bestN) {
+          best = k;
+          bestN = n;
+        }
+      });
+      if (best == null || bestN < 3) continue;
+      for (final i in idxs) {
+        final h = out[i];
+        if (h.parsed.hasSeries) continue;
+        final title = h.raw['title'] ?? h.displayTitle;
+        final inferred = BookTitleParser.inferSeriesName(
+              title,
+              queryHint: queryHint,
+            ) ??
+            _twoWordPrefix(title);
+        if (inferred == null) continue;
+        if (BookSeriesNormalizer.normalizeKey(inferred) != best) continue;
+        final apiVol = _parseInt(h.raw['series_volume']);
+        out[i] = EnrichedBookHit(
+          raw: h.raw,
+          parsed: ParsedBookTitle(
+            rawTitle: h.parsed.rawTitle,
+            seriesName: inferred,
+            volumeNumber: h.parsed.volumeNumber ?? apiVol?.toDouble(),
+          ),
+          displayTitle: h.parsed.hasVolume || apiVol != null
+              ? '$inferred - Tome ${h.parsed.volumeNumber?.round() ?? apiVol}'
+              : h.displayTitle,
+          author: h.author,
+          publisher: h.publisher,
+          estimatedTotalVolumes: h.estimatedTotalVolumes,
+          score: h.score + 20,
+          detectedSubcategory: h.detectedSubcategory,
+        );
+      }
+    }
+    return out;
+  }
+
+  static String? _twoWordPrefix(String title) {
+    final words = title.trim().split(RegExp(r'\s+'));
+    if (words.length < 4) return null;
+    return '${words[0]} ${words[1]}';
+  }
+
+  /// Étendue VF : max tome déjà paru en VF + premier « À paraître » VF.
+  static ({int maxVf, int? firstUpcomingVf}) vfExtentFromHits(
+    List<EnrichedBookHit> hits,
+    String seriesName,
+  ) {
+    final want = BookSeriesNormalizer.mergeKey(seriesName);
+    var maxVf = 0;
+    int? firstUpcoming;
+    for (final h in hits) {
+      final sn = h.parsed.seriesName ?? h.raw['series_title'] ?? '';
+      if (BookSeriesNormalizer.mergeKey(sn.isEmpty ? h.displayTitle : sn) !=
+          want) {
+        continue;
+      }
+      final n = h.parsed.volumeNumber?.round();
+      if (n == null || n < 1) continue;
+      final src = (h.raw['source'] ?? '').toLowerCase();
+      final fromMd = src.contains('mangadex');
+      if (fromMd) continue;
+      if (h.isUpcoming) {
+        if (firstUpcoming == null || n < firstUpcoming) firstUpcoming = n;
+        continue;
+      }
+      if (n > maxVf) maxVf = n;
+    }
+    if (firstUpcoming != null && firstUpcoming - 1 > maxVf) {
+      maxVf = firstUpcoming - 1;
+    }
+    return (maxVf: maxVf, firstUpcomingVf: firstUpcoming);
+  }
+
+  static bool hitIsJapaneseVo(
+    EnrichedBookHit hit, {
+    required int maxVf,
+    int? firstUpcomingVf,
+  }) {
+    final src = (hit.raw['source'] ?? '').toLowerCase();
+    if (!src.contains('mangadex')) return false;
+    final n = hit.parsed.volumeNumber?.round();
+    if (n == null) return false;
+    if (firstUpcomingVf != null && n > firstUpcomingVf) return true;
+    return n > maxVf;
   }
 }
 

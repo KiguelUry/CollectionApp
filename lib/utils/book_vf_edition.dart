@@ -10,7 +10,8 @@ abstract final class BookVfEdition {
   /// Guides / IA / companions non officiels (Google Books spam).
   static final parasiteTitleRe = RegExp(
     r'\b(?:summary|study\s*guide|companion(?:\s+guide)?|after\s+reading|'
-    r'analysis|unauthorized|reflections\s+on)\b',
+    r'analysis|unauthorized|reflections\s+on|quiz\s*book|'
+    r'fiche\s+de\s+lecture|collection\s+compl[eè]te)\b',
     caseSensitive: false,
   );
 

@@ -486,6 +486,15 @@ class GoogleBooksService {
           avgRating.toDouble().clamp(0, 5).toStringAsFixed(2);
     }
 
+    if (info['comicsContent'] == true) {
+      result['comics_content'] = 'true';
+    }
+    final categories = info['categories'] as List<dynamic>?;
+    if (categories != null && categories.isNotEmpty) {
+      result['categories'] =
+          categories.map((e) => e.toString()).join(', ');
+    }
+
     final seriesInfo = info['seriesInfo'] as Map<String, dynamic>?;
     if (seriesInfo != null) {
       final displayNum = seriesInfo['bookDisplayNumber']?.toString();
@@ -500,23 +509,20 @@ class GoogleBooksService {
       }
     }
 
-    final parsed = _parseSeriesFromTitle(title);
-    if (parsed != null) {
-      result.putIfAbsent('series_title', () => parsed.$1);
-      result.putIfAbsent('series_volume', () => parsed.$2);
+    final apiVol = int.tryParse(result['series_volume'] ?? '');
+    final parsed = BookTitleParser.parse(
+      [title, ?subtitle].join(' : '),
+      apiVolumeNumber: apiVol,
+    );
+    if (parsed.hasSeries) {
+      result.putIfAbsent('series_title', () => parsed.seriesName!.trim());
+    }
+    if (parsed.hasVolume) {
+      result['series_volume'] =
+          parsed.volumeNumber!.round().toString();
     }
 
     return result;
-  }
-
-  static (String, String)? _parseSeriesFromTitle(String title) {
-    final parsed = BookTitleParser.parse(title);
-    if (parsed.hasSeries && parsed.hasVolume) {
-      final n = parsed.volumeNumber!;
-      final label = n == n.roundToDouble() ? '${n.toInt()}' : '$n';
-      return (parsed.seriesName!.trim(), label);
-    }
-    return null;
   }
 
   static String _hdGoogleCover(String url) {

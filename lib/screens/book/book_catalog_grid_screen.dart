@@ -273,10 +273,12 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
     // Même méthode que book_series_service : lookupManga + /cover (Vagabond 37).
     // Le timeout parallèle peut renvoyer une liste vide / pauvre → force ici.
     if (wantMangaOfficial && seriesQ.length >= 2) {
+      final coverN = primaryMangaDex?.coverByVolume.length ?? 0;
+      final pubN = primaryMangaDex?.volumesPublished ?? 0;
       final needForce = primaryMangaDex == null ||
           BookSeriesNormalizer.mergeKey(primaryMangaDex.title) != qKey ||
-          (primaryMangaDex.coverByVolume.length < 5 &&
-              (primaryMangaDex.volumesPublished ?? 0) < 5);
+          coverN < 8 ||
+          (pubN > 0 && coverN + 2 < pubN);
       if (needForce) {
         try {
           final looked = await MangaDexService.lookupManga(
@@ -482,9 +484,27 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
               ),
     );
     if (hasExactOfficial) {
+      String? bannerAuthor = exactAuthor;
+      for (final b in officialBanners) {
+        if (BookSeriesNormalizer.mergeKey(b.name) !=
+            BookSeriesNormalizer.mergeKey(primarySeries)) {
+          continue;
+        }
+        if (b.author != null && b.author!.trim().isNotEmpty) {
+          bannerAuthor = b.author;
+          break;
+        }
+      }
       enriched = enriched.where((h) {
         final title = h.raw['title'] ?? h.displayTitle;
-        return BookSeriesNormalizer.hitBelongsToSeries(title, primarySeries);
+        if (!BookSeriesNormalizer.hitBelongsToSeries(title, primarySeries)) {
+          return false;
+        }
+        final src = (h.raw['source'] ?? '').toLowerCase();
+        if (src.contains('mangadex') || src.contains('anilist')) return true;
+        if (bannerAuthor == null || bannerAuthor.trim().isEmpty) return true;
+        if (h.author == null || h.author!.trim().isEmpty) return false;
+        return BookSeriesNormalizer.authorsMatch(bannerAuthor, h.author);
       }).toList();
     }
 
@@ -505,13 +525,20 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
     // MangaDex : fill covers manquantes + suite JP — SANS iTunes tome-par-tome.
     if (primaryMangaDex != null) {
       final md = primaryMangaDex;
+      final mdAuthor = md.author ?? exactAuthor;
       final frVols = <int>{
         for (final h in enriched)
           if (h.parsed.volumeNumber != null &&
               BookSeriesNormalizer.mergeKey(
                     h.parsed.seriesName ?? h.displayTitle,
                   ) ==
-                  BookSeriesNormalizer.mergeKey(md.title))
+                  BookSeriesNormalizer.mergeKey(md.title) &&
+              (mdAuthor == null ||
+                  mdAuthor.trim().isEmpty ||
+                  BookSeriesNormalizer.authorMatchesExpected(
+                    h.author,
+                    mdAuthor,
+                  )))
             h.parsed.volumeNumber!.round(),
       };
       final maxFr = frVols.isEmpty ? 0 : frVols.reduce((a, b) => a > b ? a : b);
@@ -559,7 +586,14 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
               BookSeriesNormalizer.mergeKey(
                     h.parsed.seriesName ?? h.displayTitle,
                   ) ==
-                  BookSeriesNormalizer.mergeKey(md.title))
+                  BookSeriesNormalizer.mergeKey(md.title) &&
+              (mdAuthor == null ||
+                  mdAuthor.trim().isEmpty ||
+                  BookSeriesNormalizer.authorMatchesExpected(
+                    h.author,
+                    mdAuthor,
+                  ) ||
+                  (h.raw['source'] ?? '').toLowerCase().contains('mangadex')))
             h.parsed.volumeNumber!.round(),
       };
       final mdMax = md.volumesPublished ??
@@ -749,6 +783,32 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       if (a.fromAnilist != b.fromAnilist) return a.fromAnilist ? -1 : 1;
       return b.volumeCount.compareTo(a.volumeCount);
     });
+
+    // Grille = série principale (exact query) uniquement : pas d'homonymes
+    // ni d'intégrales mélangées aux tomes standard.
+    if (mergedBanners.isNotEmpty) {
+      final primary = mergedBanners.first;
+      final primaryKey = BookSeriesNormalizer.mergeKey(primary.name);
+      final qMatch = qSort.isNotEmpty &&
+          (primaryKey == qSort ||
+              BookSeriesNormalizer.normalizeKey(primary.name) == qSort);
+      if (qMatch || primary.fromAnilist) {
+        enriched = enriched.where((h) {
+          final title = h.raw['title'] ?? h.displayTitle;
+          if (!BookSeriesNormalizer.hitBelongsToSeries(title, primary.name)) {
+            return false;
+          }
+          if (primary.author != null &&
+              primary.author!.trim().isNotEmpty &&
+              h.author != null &&
+              h.author!.trim().isNotEmpty &&
+              !(h.raw['source'] ?? '').toLowerCase().contains('mangadex')) {
+            return BookSeriesNormalizer.authorsMatch(primary.author, h.author);
+          }
+          return true;
+        }).toList();
+      }
+    }
 
     if (!mounted) return;
     setState(() {
@@ -1143,6 +1203,21 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
   }
 
   Widget _hitsGrid(List<EnrichedBookHit> hits, {required bool chapterBadge}) {
+    final voBySeries = <String, ({int maxVf, int? firstUpcomingVf})>{};
+    if (!chapterBadge) {
+      for (final h in hits) {
+        final key = BookSeriesNormalizer.mergeKey(
+          h.parsed.seriesName ?? h.displayTitle,
+        );
+        voBySeries.putIfAbsent(
+          key,
+          () => BookIntelligenceService.vfExtentFromHits(
+            hits,
+            h.parsed.seriesName ?? h.displayTitle,
+          ),
+        );
+      }
+    }
     return SliverPadding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
       sliver: SliverGrid(
@@ -1163,6 +1238,16 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
                 owned != null &&
                 vol != null &&
                 owned.ownedVolumes.contains(vol);
+            final voExtent = voBySeries[BookSeriesNormalizer.mergeKey(
+              seriesName,
+            )];
+            final isJpVo = !chapterBadge &&
+                voExtent != null &&
+                BookIntelligenceService.hitIsJapaneseVo(
+                  hit,
+                  maxVf: voExtent.maxVf,
+                  firstUpcomingVf: voExtent.firstUpcomingVf,
+                );
             return Stack(
               children: [
                 CatalogItemTile(
@@ -1208,7 +1293,33 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
                       ),
                     ),
                   ),
-                if (!chapterBadge && hit.isUpcoming)
+                if (!chapterBadge && isJpVo)
+                  Positioned(
+                    top: 4,
+                    left: 4,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1B2838),
+                        borderRadius: BorderRadius.circular(6),
+                        boxShadow: const [
+                          BoxShadow(color: Colors.black45, blurRadius: 3),
+                        ],
+                      ),
+                      child: const Text(
+                        '🇯🇵 VO (Japon)',
+                        style: TextStyle(
+                          color: Color(0xFFE3EEF8),
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  )
+                else if (!chapterBadge && hit.isUpcoming)
                   Positioned(
                     top: 4,
                     left: 4,

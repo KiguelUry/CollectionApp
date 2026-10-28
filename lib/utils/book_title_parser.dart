@@ -60,7 +60,28 @@ abstract final class BookTitleParser {
     r'\s*(?:\(.*\)|\[.*\]|\{.*\})\s*$',
   );
 
-  static ParsedBookTitle parse(String title) {
+  static final _companionTitleRe = RegExp(
+    r'collection\s+compl[eè]te|\b1\s*[-–]\s*7\b|quiz\s*book|'
+    r'fiche\s+de\s+lecture|\b[ée]tude\b|\banalysis\b',
+    caseSensitive: false,
+  );
+
+  static final _integraleMarkerRe = RegExp(
+    r'\b(int[eé]grale|omnibus|coffret)\b',
+    caseSensitive: false,
+  );
+
+  static bool isCompanionOrStudyTitle(String title) =>
+      _companionTitleRe.hasMatch(title);
+
+  static bool looksLikeIntegraleEdition(String name) =>
+      _integraleMarkerRe.hasMatch(name);
+
+  static ParsedBookTitle parse(
+    String title, {
+    int? apiVolumeNumber,
+    String? queryHint,
+  }) {
     var t = title.trim();
     if (t.isEmpty) {
       return ParsedBookTitle(rawTitle: title);
@@ -70,7 +91,9 @@ abstract final class BookTitleParser {
 
     // 1) Mid-string d'abord : « … - Tome 2 : SEO… », « … : Sous-titre - Tome 3 ».
     final mid = _parseVolumeAnywhere(title, t);
-    if (mid != null) return mid;
+    if (mid != null) {
+      return _withApiVolume(mid, apiVolumeNumber);
+    }
 
     t = t.replaceAll(_stripSuffix, '').trim();
 
@@ -80,10 +103,13 @@ abstract final class BookTitleParser {
         final series = _canonicalSeriesName(m.group(1)!);
         final vol = _parseVolume(m.group(2)!);
         if (series != null && vol != null && _isPlausibleVolume(vol)) {
-          return ParsedBookTitle(
-            rawTitle: title,
-            seriesName: series,
-            volumeNumber: vol,
+          return _withApiVolume(
+            ParsedBookTitle(
+              rawTitle: title,
+              seriesName: series,
+              volumeNumber: vol,
+            ),
+            apiVolumeNumber,
           );
         }
       }
@@ -97,15 +123,97 @@ abstract final class BookTitleParser {
           vol != null &&
           series.length >= 3 &&
           _isPlausibleVolume(vol)) {
+        return _withApiVolume(
+          ParsedBookTitle(
+            rawTitle: title,
+            seriesName: series,
+            volumeNumber: vol,
+          ),
+          apiVolumeNumber,
+        );
+      }
+    }
+
+    // seriesInfo Google Books / préfixe « Harry Potter à/et/… » :
+    // seulement si on a un n° API ou une requête série.
+    final apiVol = apiVolumeNumber?.toDouble();
+    final canInfer = (queryHint != null && queryHint.trim().length >= 3) ||
+        (apiVol != null && _isPlausibleVolume(apiVol));
+    if (canInfer && !isCompanionOrStudyTitle(title)) {
+      final inferred = inferSeriesName(title, queryHint: queryHint);
+      if (inferred != null &&
+          apiVol != null &&
+          _isPlausibleVolume(apiVol)) {
         return ParsedBookTitle(
           rawTitle: title,
-          seriesName: series,
-          volumeNumber: vol,
+          seriesName: inferred,
+          volumeNumber: apiVol,
+        );
+      }
+      if (inferred != null &&
+          queryHint != null &&
+          queryHint.trim().length >= 3) {
+        return ParsedBookTitle(
+          rawTitle: title,
+          seriesName: inferred,
+          volumeNumber: apiVol != null && _isPlausibleVolume(apiVol)
+              ? apiVol
+              : null,
+        );
+      }
+      if (apiVol != null && _isPlausibleVolume(apiVol)) {
+        return ParsedBookTitle(
+          rawTitle: title,
+          seriesName: inferred ??
+              (queryHint?.trim().isNotEmpty == true ? queryHint!.trim() : null),
+          volumeNumber: apiVol,
         );
       }
     }
 
     return ParsedBookTitle(rawTitle: title);
+  }
+
+  static ParsedBookTitle _withApiVolume(ParsedBookTitle parsed, int? apiVol) {
+    if (parsed.hasVolume || apiVol == null) return parsed;
+    final v = apiVol.toDouble();
+    if (!_isPlausibleVolume(v)) return parsed;
+    return ParsedBookTitle(
+      rawTitle: parsed.rawTitle,
+      seriesName: parsed.seriesName,
+      volumeNumber: v,
+    );
+  }
+
+  /// « Harry Potter à l'école… » / « Harry Potter et la Chambre… » / « Préfixe : … ».
+  static String? inferSeriesName(String title, {String? queryHint}) {
+    if (isCompanionOrStudyTitle(title)) return null;
+    var t = title.trim().replaceAll(RegExp(r'[–—−]'), '-');
+    t = t.replaceAll(_stripSuffix, '').trim();
+    final q = (queryHint ?? '').trim();
+    if (q.length >= 3) {
+      final qLower = q.toLowerCase();
+      final tLower = t.toLowerCase();
+      if (tLower == qLower) return q;
+      if (tLower.startsWith(qLower) && t.length > q.length + 1) {
+        final rest = t.substring(q.length).trim();
+        if (rest.startsWith(':') ||
+            rest.startsWith('-') ||
+            RegExp(r'^(à|a|et|and|to)\b', caseSensitive: false)
+                .hasMatch(rest)) {
+          return q;
+        }
+      }
+    }
+    final m = RegExp(
+      r'^(.{3,60}?)(?:\s*:\s+|\s+(?:à|a|et|and)\s+)',
+      caseSensitive: false,
+    ).firstMatch(t);
+    if (m == null) return null;
+    final prefix = _cleanSeriesName(m.group(1)!);
+    if (prefix == null || prefix.split(' ').length < 2) return null;
+    if (looksLikeIntegraleEdition(prefix)) return prefix;
+    return prefix;
   }
 
   /// Trouve le premier `Tome|Vol|Book|Livre|T. N` avec N < 1900.
