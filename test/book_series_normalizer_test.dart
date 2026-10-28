@@ -1,4 +1,4 @@
-import 'package:collection_app/models/book_subcategory.dart';
+﻿import 'package:collection_app/models/book_subcategory.dart';
 import 'package:collection_app/services/anilist_manga_service.dart';
 import 'package:collection_app/services/book_intelligence_service.dart';
 import 'package:collection_app/services/mangadex_service.dart';
@@ -170,6 +170,34 @@ void main() {
         hits,
         queryHint: 'Harry Potter',
       );
+      expect(
+        BookIntelligenceService.assignPublicationOrderVolumes(
+          [
+            EnrichedBookHit(
+              raw: {
+                'title': 'Kagurabachi - Tome 6',
+                'source': 'google_books',
+              },
+              parsed: BookTitleParser.parse('Kagurabachi - Tome 6'),
+              displayTitle: 'Kagurabachi - Tome 6',
+              score: 1,
+              detectedSubcategory: BookSubcategory.manga,
+            ),
+            EnrichedBookHit(
+              raw: {
+                'title': 'Kagurabachi - Tome 3',
+                'source': 'google_books',
+              },
+              parsed: BookTitleParser.parse('Kagurabachi - Tome 3'),
+              displayTitle: 'Kagurabachi - Tome 3',
+              score: 1,
+              detectedSubcategory: BookSubcategory.manga,
+            ),
+          ],
+          queryHint: 'Kagurabachi',
+        ).map((h) => h.parsed.volumeNumber?.round()).toList(),
+        [6, 3],
+      );
       expect(numbered.length, 7);
       expect(
         numbered.map((h) => h.parsed.volumeNumber?.round()).toList(),
@@ -239,7 +267,7 @@ void main() {
   group('BookSeriesNormalizer', () {
     test('expectedCount / preferredSubcategory toujours null (plus de dicos)', () {
       expect(
-        BookSeriesNormalizer.expectedCount('Thorgal', BookSubcategory.comic),
+        BookSeriesNormalizer.expectedCount('Thorgal', BookSubcategory.bd),
         isNull,
       );
       expect(
@@ -326,11 +354,27 @@ void main() {
       );
       expect(
         BookSeriesNormalizer.detectSubcategory(publisher: 'Le Lombard'),
-        BookSubcategory.comic,
+        BookSubcategory.bd,
+      );
+      expect(
+        BookSeriesNormalizer.detectSubcategory(publisher: 'Dargaud'),
+        BookSubcategory.bd,
+      );
+      expect(
+        BookSeriesNormalizer.detectSubcategory(publisher: 'Dupuis'),
+        BookSubcategory.bd,
+      );
+      expect(
+        BookSeriesNormalizer.detectSubcategory(publisher: 'Casterman'),
+        BookSubcategory.bd,
+      );
+      expect(
+        BookSeriesNormalizer.detectSubcategory(publisher: 'Soleil'),
+        BookSubcategory.bd,
       );
       expect(
         BookSeriesNormalizer.detectSubcategory(publisher: 'Bamboo'),
-        BookSubcategory.comic,
+        BookSubcategory.bd,
       );
       expect(
         BookSeriesNormalizer.detectSubcategory(publisher: 'Urban Comics'),
@@ -346,7 +390,7 @@ void main() {
           publisher: 'Dargaud',
           subjects: 'Fiction / Graphic novels',
         ),
-        BookSubcategory.comic,
+        BookSubcategory.bd,
       );
       expect(
         BookSeriesNormalizer.detectSubcategory(
@@ -371,14 +415,14 @@ void main() {
           author: 'Jean Van Hamme',
           publisher: 'Dargaud',
         ),
-        BookSubcategory.comic,
+        BookSubcategory.bd,
       );
       expect(
         BookSeriesNormalizer.detectSubcategory(
           seriesName: 'XIII',
           author: 'William Vance',
         ),
-        BookSubcategory.comic,
+        BookSubcategory.bd,
       );
       expect(
         BookSeriesNormalizer.formatAuthorList([
@@ -402,10 +446,10 @@ void main() {
       );
       expect(BookSubcategory.fromDbValue('roman'), BookSubcategory.novel);
       expect(BookSubcategory.fromDbValue('comics'), BookSubcategory.comics);
-      expect(
-        BookSubcategory.comics.legacyDbValue,
-        BookSubcategory.comic.dbValue,
-      );
+      expect(BookSubcategory.fromDbValue('bd'), BookSubcategory.bd);
+      expect(BookSubcategory.fromDbValue('comic'), BookSubcategory.bd);
+      expect(BookSubcategory.comics.legacyDbValue, 'comic');
+      expect(BookSubcategory.bd.dbValue, 'bd');
     });
 
     test('looksLikeChapterOrScan distingue chapitres et tomes', () {

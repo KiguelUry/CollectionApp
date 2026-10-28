@@ -20,8 +20,18 @@ class GoogleBooksService {
 
   static bool get hasApiKey => _apiKey != null && _apiKey!.isNotEmpty;
 
-  /// File d'attente globale : 1 HTTP Google Books à la fois.
+  /// File d'attente globale : 1 HTTP Google Books à la fois, ≥ 350 ms d'écart.
   static Future<void> _gate = Future<void>.value();
+  static DateTime _lastHttpAt = DateTime.fromMillisecondsSinceEpoch(0);
+  static const _minGap = Duration(milliseconds: 350);
+
+  static Future<void> _pace() async {
+    final wait = _lastHttpAt.add(_minGap).difference(DateTime.now());
+    if (!wait.isNegative && wait > Duration.zero) {
+      await Future<void>.delayed(wait);
+    }
+    _lastHttpAt = DateTime.now();
+  }
 
   static Future<T> _serialized<T>(Future<T> Function() run) {
     late final Future<T> result;
@@ -138,6 +148,7 @@ class GoogleBooksService {
       // Proxy avec clé si dispo (évite 429 anonymes côté serveur).
       final withKey = hasApiKey && !_preferKeyless;
       final target = _volumesUri(p, withKey: withKey);
+      await _pace();
       final proxied = proxiedCatalogUri(target);
       final anon = AppEnv.supabaseAnonKey.trim().isNotEmpty
           ? AppEnv.supabaseAnonKey.trim()
@@ -172,8 +183,10 @@ class GoogleBooksService {
   static Future<http.Response?> _fetchVolumes(Map<String, String> params) async {
     if (_isLocked) return null;
 
-    Future<http.Response> get(Uri uri) =>
-        http.get(uri).timeout(const Duration(seconds: 6));
+    Future<http.Response> get(Uri uri) async {
+      await _pace();
+      return http.get(uri).timeout(const Duration(seconds: 6));
+    }
 
     final base = Map<String, String>.from(params)..remove('orderBy');
 
@@ -199,7 +212,7 @@ class GoogleBooksService {
             final retry = await get(_volumesUri(light, withKey: true));
             if (retry.statusCode == 200) return retry;
           } catch (_) {}
-          _tripBreaker('server ${res.statusCode}');
+          // 503 = cette requête-là, pas un ban. Pas de coupe-circuit.
           return null;
         }
 
@@ -225,15 +238,16 @@ class GoogleBooksService {
         final res = await get(_volumesUri(base, withKey: false));
         if (res.statusCode == 200) return res;
         if (_isLocked) return null;
-        if (_isQuotaError(res.statusCode) || _isServerError(res.statusCode)) {
-          if (_isServerError(res.statusCode)) {
-            await Future<void>.delayed(const Duration(milliseconds: 400));
-          }
+        if (_isQuotaError(res.statusCode)) {
           final proxyRes = await _viaProxy(base);
           if (proxyRes != null && proxyRes.statusCode == 200) return proxyRes;
-          _tripBreaker(
-            'keyless/proxy ${proxyRes?.statusCode ?? res.statusCode}',
-          );
+          _tripBreaker('quota ${res.statusCode}');
+          return null;
+        }
+        if (_isServerError(res.statusCode)) {
+          await Future<void>.delayed(const Duration(milliseconds: 400));
+          final proxyRes = await _viaProxy(base);
+          if (proxyRes != null && proxyRes.statusCode == 200) return proxyRes;
           return null;
         }
         return res;
@@ -242,7 +256,6 @@ class GoogleBooksService {
         if (!_isLocked) {
           final proxyRes = await _viaProxy(base);
           if (proxyRes != null && proxyRes.statusCode == 200) return proxyRes;
-          _tripBreaker('keyless exception');
         }
         return null;
       }
@@ -349,67 +362,24 @@ class GoogleBooksService {
     }
   }
 
-  /// 1–3 pages **séquentielles**. Stop si la 1ʳᵉ requête renvoie déjà des tomes FR.
-  /// Fallback souple `"$name" Tome` si `intitle:` → 0 / 503.
+  /// Une seule requête simple : `"Série" Tome`, maxResults=20.
+  /// Pas de `intitle:` + `inauthor:` (503 backend Google).
   static Future<List<Map<String, String>>> searchSeriesBatched(
     String seriesTitle, {
     String? author,
-    int maxPages = 3,
-    Duration pageDelay = const Duration(milliseconds: 400),
+    int maxPages = 1,
+    Duration pageDelay = const Duration(milliseconds: 350),
     String? langRestrict = 'fr',
     bool preferTomeQuery = true,
   }) async {
     final name = seriesTitle.trim();
     if (name.length < 2) return [];
     if (_isLocked) return [];
-    final authorLast = author != null && author.trim().isNotEmpty
-        ? author.trim().split(RegExp(r'\s+')).last
-        : null;
-    final queries = <String>[
-      if (preferTomeQuery) 'intitle:"$name" Tome',
-      if (authorLast != null && authorLast.length >= 2)
-        'intitle:"$name" inauthor:"$authorLast"',
-      // Fallback souple (évite totalItems:0 / 503 sur intitle: strict).
-      if (preferTomeQuery) '"$name" Tome',
-      if (authorLast != null && authorLast.length >= 2) '"$name" $authorLast',
-      'intitle:"$name"',
-      '"$name"',
-    ];
-    final out = <Map<String, String>>[];
-    final seen = <String>{};
-    final pages = maxPages.clamp(1, 3);
-    for (final q in queries) {
-      if (_isLocked) break;
-      var gotBatch = false;
-      for (var page = 0; page < pages; page++) {
-        if (_isLocked) break;
-        if (page > 0) await Future<void>.delayed(pageDelay);
-        final batch = await search(
-          q,
-          maxResults: 25,
-          startIndex: page * 25,
-          langRestrict: langRestrict,
-        );
-        if (batch.isEmpty) break;
-        gotBatch = true;
-        for (final hit in batch) {
-          final title = hit['title']?.trim().toLowerCase() ?? '';
-          if (title.isEmpty || !seen.add(title)) continue;
-          out.add(hit);
-        }
-        if (batch.length < 25) break;
-      }
-      // Assez de tomes FR numérotés → ne pas enchaîner les autres requêtes (anti-503).
-      final frTomes = out.where((h) {
-        final title = h['title'] ?? '';
-        final lang = h['language'];
-        if (!BookVfEdition.isFrenchLanguage(lang)) return false;
-        return BookTitleParser.extractVolumeNumberStrict(title) != null;
-      }).length;
-      if (frTomes >= 3) break;
-      if (gotBatch && out.length >= 15) break;
-    }
-    return out;
+    return search(
+      '"$name" Tome',
+      maxResults: 20,
+      langRestrict: langRestrict,
+    );
   }
 
   static Map<String, String>? _mapVolume(

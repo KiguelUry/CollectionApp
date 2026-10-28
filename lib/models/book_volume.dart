@@ -99,6 +99,14 @@ class BookVolume {
   BookVolumeEdition get edition =>
       BookVolumeEdition.fromMeta(metadata['edition']?.toString());
 
+  /// `fr` (défaut), `ja` ou `en`.
+  String get editionLanguage {
+    final raw = metadata['edition_language']?.toString().trim().toLowerCase();
+    if (raw == 'ja' || raw == 'jp') return 'ja';
+    if (raw == 'en') return 'en';
+    return 'fr';
+  }
+
   String? get editionBadge {
     return switch (edition) {
       BookVolumeEdition.collector => '✨ Collector',

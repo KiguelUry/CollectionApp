@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 /// Sous-type pour la catégorie Livres (manga, BD, comics, roman…).
 enum BookSubcategory {
   manga,
-  comic, // BD franco-belge
+  bd, // BD franco-belge (Dargaud, Dupuis, Lombard…)
   comics, // Comics US / anglo
   novel,
   other;
@@ -12,7 +12,7 @@ enum BookSubcategory {
 
   String get label => switch (this) {
         BookSubcategory.manga => 'Manga',
-        BookSubcategory.comic => 'BD',
+        BookSubcategory.bd => 'BD',
         BookSubcategory.comics => 'Comics',
         BookSubcategory.novel => 'Roman',
         BookSubcategory.other => 'Autre',
@@ -20,7 +20,7 @@ enum BookSubcategory {
 
   String get filterLabel => switch (this) {
         BookSubcategory.manga => '⛩️ Manga',
-        BookSubcategory.comic => '💬 BD',
+        BookSubcategory.bd => '💬 BD',
         BookSubcategory.comics => '🦸 Comics',
         BookSubcategory.novel => '📖 Roman',
         BookSubcategory.other => 'Autre',
@@ -29,7 +29,7 @@ enum BookSubcategory {
   /// Emoji seul (évite le texte tronqué dans les FilterChip étroits).
   String get filterEmoji => switch (this) {
         BookSubcategory.manga => '⛩️',
-        BookSubcategory.comic => '💬',
+        BookSubcategory.bd => '💬',
         BookSubcategory.comics => '🦸',
         BookSubcategory.novel => '📖',
         BookSubcategory.other => '📚',
@@ -37,7 +37,7 @@ enum BookSubcategory {
 
   String get description => switch (this) {
         BookSubcategory.manga => 'Séries, tomes, scan ISBN',
-        BookSubcategory.comic => 'BD franco-belge',
+        BookSubcategory.bd => 'BD franco-belge',
         BookSubcategory.comics => 'Comics & graphic novels',
         BookSubcategory.novel => 'Romans & essais',
         BookSubcategory.other => 'Tous types de livres',
@@ -45,7 +45,7 @@ enum BookSubcategory {
 
   String get searchHint => switch (this) {
         BookSubcategory.manga => 'One Piece, Naruto, Demon Slayer…',
-        BookSubcategory.comic => 'Astérix, Tintin, Thorgal…',
+        BookSubcategory.bd => 'Astérix, Tintin, Thorgal…',
         BookSubcategory.comics => 'Batman, Saga, Watchmen…',
         BookSubcategory.novel => 'Titre ou auteur…',
         BookSubcategory.other => 'Titre du livre…',
@@ -53,7 +53,7 @@ enum BookSubcategory {
 
   IconData get icon => switch (this) {
         BookSubcategory.manga => Icons.auto_stories_rounded,
-        BookSubcategory.comic => Icons.menu_book_rounded,
+        BookSubcategory.bd => Icons.menu_book_rounded,
         BookSubcategory.comics => Icons.flash_on_rounded,
         BookSubcategory.novel => Icons.import_contacts_rounded,
         BookSubcategory.other => Icons.book_rounded,
@@ -61,7 +61,7 @@ enum BookSubcategory {
 
   Color get color => switch (this) {
         BookSubcategory.manga => const Color(0xFF00A896),
-        BookSubcategory.comic => const Color(0xFFE67E22),
+        BookSubcategory.bd => const Color(0xFFE67E22),
         BookSubcategory.comics => const Color(0xFF5C6BC0),
         BookSubcategory.novel => const Color(0xFFBA4A00),
         BookSubcategory.other => Colors.blueGrey,
@@ -70,7 +70,7 @@ enum BookSubcategory {
   /// Filtres collection (sans « Autre » dans la barre principale).
   static List<BookSubcategory> get filterChips => [
         BookSubcategory.manga,
-        BookSubcategory.comic,
+        BookSubcategory.bd,
         BookSubcategory.comics,
         BookSubcategory.novel,
       ];
@@ -78,7 +78,7 @@ enum BookSubcategory {
   static BookSubcategory fromDbValue(String? value) {
     if (value == null) return BookSubcategory.other;
     // Ancien libellé unique « BD / Comics » → BD.
-    if (value == 'bd') return BookSubcategory.comic;
+    if (value == 'bd' || value == 'comic') return BookSubcategory.bd;
     if (value == 'roman') return BookSubcategory.novel;
     return BookSubcategory.values.firstWhere(
       (s) => s.dbValue == value,
@@ -88,7 +88,8 @@ enum BookSubcategory {
 
   /// Valeur acceptée par l’ancienne contrainte SQL (`comic` pas `comics`).
   String get legacyDbValue => switch (this) {
-        BookSubcategory.comics => BookSubcategory.comic.dbValue,
+        BookSubcategory.comics => 'comic',
+        BookSubcategory.bd => 'comic',
         BookSubcategory.novel => 'novel',
         _ => dbValue,
       };
@@ -100,7 +101,7 @@ enum BookSubcategory {
           'q': q,
           'subject': 'manga',
         },
-      BookSubcategory.comic => {
+      BookSubcategory.bd => {
           'q': q,
           'subject': 'bande dessinée',
         },
@@ -128,7 +129,7 @@ enum BookSubcategory {
     return switch (this) {
       BookSubcategory.manga =>
         has('manga') || has('comic books, strips'),
-      BookSubcategory.comic =>
+      BookSubcategory.bd =>
         has('bande dessinée') ||
             has('bandes dessinées') ||
             has('graphic novel') ||

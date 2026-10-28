@@ -1,4 +1,4 @@
-import '../models/book_subcategory.dart';
+﻿import '../models/book_subcategory.dart';
 import '../utils/book_series_normalizer.dart';
 import '../utils/book_title_parser.dart';
 import '../utils/book_vf_edition.dart';
@@ -201,10 +201,14 @@ abstract final class BookIntelligenceService {
         )
         .toList();
     enriched = inferSharedPrefixSeries(enriched, queryHint: filters.titleQuery);
-    enriched = assignPublicationOrderVolumes(
-      enriched,
-      queryHint: filters.titleQuery,
-    );
+    // Jamais sur Manga / BD / Comics : le n° de tome du titre fait foi.
+    if (subcategory == BookSubcategory.novel ||
+        subcategory == BookSubcategory.other) {
+      enriched = assignPublicationOrderVolumes(
+        enriched,
+        queryHint: filters.titleQuery,
+      );
+    }
 
     final filtered = enriched.where((hit) {
       return _matchesFilters(hit, filters);
@@ -461,37 +465,18 @@ abstract final class BookIntelligenceService {
     int maxPages = 3,
   }) async {
     final cleanName = BookSeriesNormalizer.coverSearchSeriesName(seriesName);
-    if (cleanName.length < 2) return {};
+    if (cleanName.length < 2 || maxPages < 1) return {};
 
-    final pages = maxPages.clamp(1, 3);
-    final preferTome = subcategory == BookSubcategory.manga ||
-        subcategory == BookSubcategory.novel ||
-        subcategory == BookSubcategory.comic;
     final itunesF = ItunesBooksService.search(cleanName, limit: 50);
-    // VF d'abord (une seule chaîne sérialisée), puis EN pour combler les trous.
     var hits = await GoogleBooksService.searchSeriesBatched(
       cleanName,
       author: authorHint,
-      maxPages: pages,
+      maxPages: 1,
       langRestrict: 'fr',
-      preferTomeQuery: preferTome,
-    );
-    final enHits = await GoogleBooksService.searchSeriesBatched(
-      cleanName,
-      author: authorHint,
-      maxPages: subcategory == BookSubcategory.novel ? 2 : 1,
-      langRestrict: 'en',
-      preferTomeQuery: preferTome,
     );
     final seenTitles = {
       for (final h in hits) (h['title'] ?? '').toLowerCase(),
     };
-    for (final h in enHits) {
-      final t = (h['title'] ?? '').toLowerCase();
-      if (t.isEmpty || seenTitles.contains(t)) continue;
-      seenTitles.add(t);
-      hits.add(h);
-    }
     try {
       for (final h in await itunesF) {
         final t = (h['title'] ?? '').toLowerCase();
@@ -777,7 +762,7 @@ abstract final class BookIntelligenceService {
     return int.tryParse(raw.replaceAll(RegExp(r'[^\d]'), ''));
   }
 
-  /// Si ≥3 livres du même auteur partagent un préfixe (« Harry Potter … »),
+  /// Si ≥3 livres du même auteur partagent un préfixe de titre,
   /// rattache-les à ce nom de série.
   static List<EnrichedBookHit> inferSharedPrefixSeries(
     List<EnrichedBookHit> hits, {
@@ -852,12 +837,25 @@ abstract final class BookIntelligenceService {
     return out;
   }
 
-  /// Romans d’une saga (« Harry Potter à/et … ») : n° = ordre de publication.
+  /// Romans d’une saga (préfixe + à/et) : n° = ordre de publication.
+  /// Ne touche jamais un Manga / BD / Comics, ni un livre qui a déjà `Tome N`.
   static List<EnrichedBookHit> assignPublicationOrderVolumes(
     List<EnrichedBookHit> hits, {
     String? queryHint,
   }) {
     if (hits.length < 2) return hits;
+    final serial = hits.any((h) {
+      final sub = h.detectedSubcategory;
+      return sub == BookSubcategory.manga ||
+          sub == BookSubcategory.bd ||
+          sub == BookSubcategory.comics;
+    });
+    if (serial) return hits;
+    final anyExplicit = hits.any((h) {
+      final title = h.raw['title'] ?? h.displayTitle;
+      return BookTitleParser.extractVolumeNumberStrict(title) != null;
+    });
+    if (anyExplicit) return hits;
     final groups = <String, List<int>>{};
     for (var i = 0; i < hits.length; i++) {
       final h = hits[i];
@@ -955,6 +953,36 @@ abstract final class BookIntelligenceService {
       maxVf = firstUpcoming - 1;
     }
     return (maxVf: maxVf, firstUpcomingVf: firstUpcoming);
+  }
+
+  /// Tome pas encore paru en France.
+  static bool hitIsJapanReleaseOnly(
+    EnrichedBookHit hit, {
+    required int maxVf,
+    int? firstUpcomingVf,
+  }) {
+    final n = hit.parsed.volumeNumber?.round();
+    if (n == null) return false;
+    if (firstUpcomingVf != null && n > firstUpcomingVf) return true;
+    return maxVf > 0 && n > maxVf;
+  }
+
+  /// Déjà paru en VF, mais la couverture affichée est encore MangaDex.
+  static bool hitShowsVoCover(
+    EnrichedBookHit hit, {
+    required int maxVf,
+    int? firstUpcomingVf,
+  }) {
+    if (hitIsJapanReleaseOnly(
+      hit,
+      maxVf: maxVf,
+      firstUpcomingVf: firstUpcomingVf,
+    )) {
+      return false;
+    }
+    final src = (hit.raw['source'] ?? '').toLowerCase();
+    final img = hit.imageUrl ?? '';
+    return src.contains('mangadex') || img.contains('mangadex');
   }
 
   static bool hitIsJapaneseVo(

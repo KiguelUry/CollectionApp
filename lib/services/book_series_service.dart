@@ -1,4 +1,4 @@
-import 'package:supabase_flutter/supabase_flutter.dart';
+﻿import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/book_series.dart';
 import '../models/book_subcategory.dart';
@@ -280,9 +280,15 @@ class BookSeriesService {
           url.isNotEmpty &&
           !isMangaDexCoverUrl(url);
 
-      if (url != null &&
+      final hasCover = v.coverUrl != null && v.coverUrl!.isNotEmpty;
+      final existingMd = isMangaDexCoverUrl(v.coverUrl);
+      final incomingMd = url != null && isMangaDexCoverUrl(url);
+      // MangaDex ne remplit qu'un tome vide. Une VF écrase une couv. MD.
+      final allowCover = url != null &&
           url.isNotEmpty &&
-          (!hasVerified || overwriteWithCatalog)) {
+          url != v.coverUrl &&
+          (!hasCover || (existingMd && !incomingMd));
+      if (allowCover && (!hasVerified || overwriteWithCatalog || existingMd)) {
         await setVolumeCoverUrl(
           v.id,
           url,
@@ -427,18 +433,9 @@ class BookSeriesService {
     return (await fetchSeriesById(updated.id)) ?? updated;
   }
 
-  /// Sonde le catalogue si le compte de tomes semble trop bas, ou roman (VF+EN).
+  /// Ne contacte jamais Google Books. L'enrichissement est réservé à la fiche série.
   Future<BookSeries> ensureRealisticVolumeCount(BookSeries series) async {
-    // Romans : toujours resynchroniser (purge IT, tomes manquants).
-    if (series.subcategory == BookSubcategory.novel) {
-      return refreshPublications(series);
-    }
-    final isSerial = series.subcategory == BookSubcategory.manga ||
-        series.subcategory == BookSubcategory.comic ||
-        series.subcategory == BookSubcategory.comics;
-    if (!isSerial) return series;
-    if ((series.expectedVolumeCount ?? 0) > 1) return series;
-    return refreshPublications(series);
+    return series;
   }
 
   /// Séries `other` qui sont des romans → `novel` (badge Roman).
@@ -459,7 +456,7 @@ class BookSeriesService {
   /// AniList/MangaDex confirme un manga → reclasse BD/Autre → Manga.
   Future<BookSeries> reclassifyAsMangaIfConfirmed(BookSeries series) async {
     if (series.subcategory == BookSubcategory.manga) return series;
-    if (series.subcategory != BookSubcategory.comic &&
+    if (series.subcategory != BookSubcategory.bd &&
         series.subcategory != BookSubcategory.other &&
         series.subcategory != BookSubcategory.novel) {
       return series;
@@ -832,29 +829,6 @@ class BookSeriesService {
       final meta = await AnilistMangaService.lookupManga(series.name);
       onFive = meta?.ratingOnFive;
     }
-    if (onFive == null || onFive <= 0) {
-      try {
-        final hits = await BookCatalogService.searchBooks(
-          series.name,
-          subcategory: series.subcategory,
-          filters: BookSearchFilters(titleQuery: series.name),
-        );
-        for (final h in hits.take(8)) {
-          if (!BookSeriesNormalizer.hitBelongsToSeries(
-            h['title'] ?? '',
-            series.name,
-          )) {
-            continue;
-          }
-          final raw = h['community_rating'];
-          final n = double.tryParse(raw ?? '');
-          if (n != null && n > 0) {
-            onFive = n.clamp(0, 5);
-            break;
-          }
-        }
-      } catch (_) {}
-    }
     if (onFive == null || onFive <= 0) return series;
     final meta = Map<String, dynamic>.from(series.metadata);
     meta['community_rating'] =
@@ -993,41 +967,6 @@ class BookSeriesService {
         .eq('id', volumeId);
   }
 
-  /// Infère l’auteur dominant parmi les hits strictement rattachés à la série.
-  Future<String?> _inferAuthorFromCatalog(BookSeries series) async {
-    try {
-      final name = BookSeriesNormalizer.coverSearchSeriesName(series.name);
-      final raw = await BookCatalogService.searchBooks(
-        name,
-        subcategory: series.subcategory,
-        filters: BookSearchFilters(titleQuery: name),
-      );
-      final votes = <String, int>{};
-      final labels = <String, String>{};
-      for (final h in raw) {
-        final title = h['title'] ?? '';
-        if (!BookSeriesNormalizer.hitBelongsToSeries(title, name)) continue;
-        final author = h['author']?.trim();
-        if (author == null || author.isEmpty) continue;
-        final key = BookSeriesNormalizer.normalizeAuthorKey(author);
-        votes[key] = (votes[key] ?? 0) + 1;
-        labels.putIfAbsent(key, () => author);
-      }
-      if (votes.isEmpty) return null;
-      var best = votes.keys.first;
-      var bestN = votes[best] ?? 0;
-      for (final e in votes.entries) {
-        if (e.value > bestN) {
-          best = e.key;
-          bestN = e.value;
-        }
-      }
-      return labels[best];
-    } catch (_) {
-      return null;
-    }
-  }
-
   /// Couvertures : Google Books FR d'abord (écrase MangaDex), MD comble les trous.
   /// [onProgress] est appelé tous les [progressEvery] tomes trouvés (UI live).
   Future<int> enrichMissingVolumeCovers({
@@ -1043,13 +982,6 @@ class BookSeriesService {
 
     var working = series;
     var seriesAuthor = working.author;
-    if (seriesAuthor == null || seriesAuthor.isEmpty) {
-      seriesAuthor = await _inferAuthorFromCatalog(working);
-      if (seriesAuthor != null) {
-        working = await ensureSeriesAuthor(working, seriesAuthor);
-        seriesAuthor = working.author;
-      }
-    }
 
     final batch = <int, ({String coverUrl, String? publishedDate})>{};
     var vfMax = 0;
@@ -1071,34 +1003,25 @@ class BookSeriesService {
       }
     } catch (_) {}
 
-    // 2) Apple Books FR comble les trous (romans / BD / comics).
-    if (working.subcategory != BookSubcategory.manga) {
-      try {
-        final missing = <int>[];
-        final cap = working.expectedVolumeCount ?? volumes.length;
-        for (var n = 1; n <= cap.clamp(1, 80); n++) {
-          if (!batch.containsKey(n)) missing.add(n);
+    // 2) Apple Books FR avant MangaDex (mangas inclus) — 1 recherche, pas 1/tome.
+    try {
+      final itunes = await ItunesBooksService.search(working.name, limit: 50);
+      for (final h in itunes) {
+        final title = h['title'] ?? '';
+        if (!BookSeriesNormalizer.hitBelongsToSeries(title, working.name)) {
+          continue;
         }
-        if (missing.isNotEmpty) {
-          final it = await ItunesBooksService.lookupFrenchVolumesBatch(
-            working.name,
-            missing.take(24),
-          );
-          for (final e in it.entries) {
-            final img = e.value['image_url'] ?? '';
-            if (img.isEmpty) continue;
-            batch.putIfAbsent(
-              e.key,
-              () => (
-                coverUrl: img,
-                publishedDate: e.value['published_date'],
-              ),
-            );
-            if (e.key > vfMax) vfMax = e.key;
-          }
-        }
-      } catch (_) {}
-    }
+        final n = BookTitleParser.extractVolumeNumberStrict(title);
+        if (n == null || n < 1) continue;
+        final img = h['image_url'] ?? '';
+        if (img.isEmpty || isMangaDexCoverUrl(img)) continue;
+        batch.putIfAbsent(
+          n,
+          () => (coverUrl: img, publishedDate: h['published_date']),
+        );
+        if (n > vfMax) vfMax = n;
+      }
+    } catch (_) {}
 
     // 3) MangaDex comble TOUS les trous restants (T25, T28, T31-39…).
     if (working.subcategory == BookSubcategory.manga) {
@@ -1157,30 +1080,21 @@ class BookSeriesService {
       if (vol.isHorsSerie) continue;
       final n = vol.volumeNumber.round();
       final hit = batch[n];
-      final verified = vol.metadata['cover_volume_verified'];
       final hasCover = vol.coverUrl != null && vol.coverUrl!.isNotEmpty;
-      final needsRepair = repairUnverified &&
-          hasCover &&
-          (verified == null || verified != n);
 
-      if (hit == null) {
-        if (hasCover && needsRepair) {
-          await clearVolumeCover(vol.id);
-          updated++;
-        }
-        continue;
-      }
+      if (hit == null) continue;
 
       final url = hit.coverUrl;
       final pub = hit.publishedDate;
       final upcoming = BookIntelligenceService.isFuturePublishedDate(pub);
+      final incomingMd = isMangaDexCoverUrl(url);
+      final existingMd = isMangaDexCoverUrl(vol.coverUrl);
       final sameCover = hasCover && vol.coverUrl == url;
       final dateMissing = pub != null &&
           pub.isNotEmpty &&
           (vol.metadata['published_date'] == null ||
               vol.metadata['published_date'].toString().isEmpty);
 
-      // Jamais de PATCH si l’URL n’a pas changé.
       if (sameCover) {
         if (dateMissing) {
           await patchVolumePublishedDate(
@@ -1190,6 +1104,14 @@ class BookSeriesService {
           );
           updated++;
         }
+        continue;
+      }
+
+      // MangaDex : trou vide seulement, jamais par-dessus une couverture.
+      if (incomingMd) {
+        if (hasCover) continue;
+      } else if (hasCover && !existingMd) {
+        // Couverture VF déjà en base : on la garde.
         continue;
       }
 
@@ -1306,6 +1228,7 @@ class BookSeriesService {
   }
 
   Future<void> removeVolumeItem(String itemId) async {
+    if (!_isPersistedItemId(itemId)) return;
     await _client.from('collection_items').delete().eq('id', itemId);
   }
 
@@ -1543,7 +1466,11 @@ class BookSeriesService {
     return n;
   }
 
+  bool _isPersistedItemId(String id) =>
+      id.isNotEmpty && !id.startsWith('local-');
+
   Future<void> setItemRead(String itemId, bool isRead) async {
+    if (!_isPersistedItemId(itemId)) return;
     await _client
         .from('collection_items')
         .update({'is_read': isRead})
@@ -1551,6 +1478,7 @@ class BookSeriesService {
   }
 
   Future<void> setItemRating(String itemId, double rating) async {
+    if (!_isPersistedItemId(itemId)) return;
     final clamped = double.parse(rating.clamp(0.0, 5.0).toStringAsFixed(1));
     await _client.from('collection_items').update({
       'rating': clamped <= 0 ? null : clamped,
@@ -1563,7 +1491,7 @@ class BookSeriesService {
   }) async {
     // Lu possible sans possession (scan / bibliothèque) via flag volume.
     final item = slot.item;
-    if (item != null && !item.isWishlist) {
+    if (item != null && !item.isWishlist && _isPersistedItemId(item.id)) {
       await setItemRead(item.id, read);
       await setVolumeReadFlag(slot.volume.id, read);
       return;
@@ -1577,6 +1505,16 @@ class BookSeriesService {
   }) async {
     await patchVolumeMetadata(volumeId, {
       'edition': edition.dbValue,
+    });
+  }
+
+  /// `fr` | `ja` | `en` — langue de l'exemplaire physique.
+  Future<void> setVolumeEditionLanguage({
+    required String volumeId,
+    required String language,
+  }) async {
+    await patchVolumeMetadata(volumeId, {
+      'edition_language': language,
     });
   }
 

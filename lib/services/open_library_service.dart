@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -207,7 +207,7 @@ class OpenLibraryService {
         has('graphic novel') ||
         has('bande dessinée') ||
         has('bandes dessinées')) {
-      return BookSubcategory.comic;
+      return BookSubcategory.bd;
     }
     if (has('fiction') || has('roman') || has('literature')) {
       return BookSubcategory.novel;

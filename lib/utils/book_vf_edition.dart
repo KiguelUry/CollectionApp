@@ -8,28 +8,20 @@ abstract final class BookVfEdition {
   );
 
   /// Guides / IA / companions non officiels (Google Books spam).
+  /// Motifs génériques — jamais une liste de titres de séries.
   static final parasiteTitleRe = RegExp(
     r'\b(?:summary|study\s*guide|companion(?:\s+guide)?|after\s+reading|'
     r'analysis|unauthorized|reflections\s+on|quiz\s*book|'
     r'fiche\s+de\s+lecture|collection\s+compl[eè]te|'
     r'boxed\s+set|bakboek|'
-    r'les\s+raisons\s+d.?un\s+succ[eè]s|'
-    r'le\s+droit\s+dans\s+la\s+saga|'
-    r'la\s+magie\s+r[eé]v[eé]l|'
-    r"l.?enfant\s+h[eé]ros|"
-    r'monde\s+antique\s+de|'
-    r'galileo\s*&\s*harry)\b',
+    r'raisons\s+d.?un\s+succ[eè]s)\b',
     caseSensitive: false,
   );
 
   /// Éditions étrangères repérables dans le titre (même si language manquant).
   static final foreignEditionTitleRe = RegExp(
-    r'svensk\s+utg[aå]va|il\s+giorno\s+del\s+giudizio|il\s+varco\s+degli|'
-    r'il\s+ricettario|edizione\s+italiana|'
-    r'\bog\s+føniks|\bog\s+foniks|harry\s+potter\s+og\b|'
-    r'\benth[uü]llt\b|\befsanesi\b|'
-    r'harry\s+potter\s+og\s+f|'
-    r'\bbakboek\b',
+    r'svensk\s+utg[aå]va|edizione\s+italiana|'
+    r'[æøå]|enth[uü]llt|\befsanesi\b|\bbakboek\b',
     caseSensitive: false,
   );
 

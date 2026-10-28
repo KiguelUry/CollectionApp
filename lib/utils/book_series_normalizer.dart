@@ -1,4 +1,4 @@
-import '../models/book_subcategory.dart';
+﻿import '../models/book_subcategory.dart';
 import 'book_title_parser.dart';
 
 /// Normalise titres livres → (série, tome). Catégorie / compteurs = API + éditeurs.
@@ -96,7 +96,7 @@ abstract final class BookSeriesNormalizer {
     'neil gaiman',
   };
 
-  /// Auteurs BD franco-belge (XIII, Thorgal…).
+  /// Auteurs BD franco-belge fréquents.
   static const bdAuthors = <String>{
     'van hamme',
     'jean van hamme',
@@ -131,8 +131,8 @@ abstract final class BookSeriesNormalizer {
   }
 
   /// Déduit Manga / BD / Comics depuis éditeur + subjects API (jamais une liste de titres).
-  /// BD et Comics **avant** Roman (fiction/graphic novel ne doivent jamais
-  /// classer XIII ou Walking Dead en roman).
+  /// BD et Comics **avant** Roman (un éditeur franco-belge ne doit jamais
+  /// retomber en roman à cause d’un subject « fiction »).
   static BookSubcategory? detectSubcategory({
     String? seriesName,
     String? title,
@@ -178,21 +178,22 @@ abstract final class BookSeriesNormalizer {
     final mixedPublisher = pub.isNotEmpty &&
         mixedFrancoPublishers.any((p) => pub.contains(p));
 
-    // Comics / BD **avant** tout hint « fiction » / roman.
+    // Éditeurs BD franco-belge (Dargaud, Dupuis, Lombard, Casterman, Soleil…)
+    // → toujours BD, jamais Comics US — même si les subjects disent « graphic novels ».
+    if (bdPublisher) return BookSubcategory.bd;
+    if (francoBdAuthor) return BookSubcategory.bd;
+    if (looksBdSubj) return BookSubcategory.bd;
+    if (mixedPublisher && !looksComicsSubj) return BookSubcategory.bd;
+
+    // Comics US ensuite.
     if (comicsPublisher) return BookSubcategory.comics;
     if (usComicsAuthor) return BookSubcategory.comics;
-    if (francoBdAuthor) return BookSubcategory.comic;
     if (mixedPublisher && looksComicsSubj) return BookSubcategory.comics;
-    if (bdPublisher) return BookSubcategory.comic;
-    if (looksBdSubj) return BookSubcategory.comic;
-    if (mixedPublisher) return BookSubcategory.comic;
     if (looksComicsSubj) return BookSubcategory.comics;
     if (blob.contains('bande dessinée') ||
         blob.contains('bande dessinee') ||
-        RegExp(r'\bbd\b').hasMatch(blob) ||
-        blob.contains('graphic novel') ||
-        blob.contains('comics')) {
-      return BookSubcategory.comic;
+        RegExp(r'\bbd\b').hasMatch(blob)) {
+      return BookSubcategory.bd;
     }
 
     const novelHints = [

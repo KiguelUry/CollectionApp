@@ -63,9 +63,7 @@ abstract final class BookTitleParser {
   static final _companionTitleRe = RegExp(
     r'collection\s+compl[eè]te|\b1\s*[-–]\s*7\b|quiz\s*book|'
     r'fiche\s+de\s+lecture|\b[ée]tude\b|\banalysis\b|'
-    r'boxed\s+set|bakboek|les\s+raisons\s+d.?un\s+succ[eè]s|'
-    r'le\s+droit\s+dans\s+la\s+saga|la\s+magie\s+r[eé]v[eé]l|'
-    r"l.?enfant\s+h[eé]ros",
+    r'boxed\s+set|bakboek|raisons\s+d.?un\s+succ[eè]s',
     caseSensitive: false,
   );
 
@@ -137,7 +135,7 @@ abstract final class BookTitleParser {
       }
     }
 
-    // seriesInfo Google Books / préfixe « Harry Potter à/et/… » :
+    // seriesInfo Google Books / préfixe « Série à/et/… » :
     // seulement si on a un n° API ou une requête série.
     final apiVol = apiVolumeNumber?.toDouble();
     final canInfer = (queryHint != null && queryHint.trim().length >= 3) ||
@@ -202,7 +200,7 @@ abstract final class BookTitleParser {
             .hasMatch(rest);
   }
 
-  /// « Harry Potter à l'école… » / « Harry Potter et la Chambre… » / « Préfixe : … ».
+  /// Préfixe série + `à` / `et` / `:` / `-` (saga de romans, pas une liste de titres).
   static String? inferSeriesName(String title, {String? queryHint}) {
     if (isCompanionOrStudyTitle(title)) return null;
     var t = title.trim().replaceAll(RegExp(r'[–—−]'), '-');

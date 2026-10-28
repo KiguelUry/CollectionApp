@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../constants/book_accent.dart';
@@ -945,7 +945,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
     if (sub == null) return '';
     return switch (sub) {
       BookSubcategory.manga => '⛩️ Manga',
-      BookSubcategory.comic => '💬 BD',
+      BookSubcategory.bd => '💬 BD',
       BookSubcategory.comics => '🦸 Comics',
       BookSubcategory.novel => '📖 Roman',
       _ => sub.label,
@@ -1265,13 +1265,23 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
             final voExtent = voBySeries[BookSeriesNormalizer.mergeKey(
               seriesName,
             )];
-            final isJpVo = !chapterBadge &&
+            final japanOnly = !chapterBadge &&
                 voExtent != null &&
-                BookIntelligenceService.hitIsJapaneseVo(
+                BookIntelligenceService.hitIsJapanReleaseOnly(
                   hit,
                   maxVf: voExtent.maxVf,
                   firstUpcomingVf: voExtent.firstUpcomingVf,
                 );
+            final voCover = !chapterBadge &&
+                voExtent != null &&
+                BookIntelligenceService.hitShowsVoCover(
+                  hit,
+                  maxVf: voExtent.maxVf,
+                  firstUpcomingVf: voExtent.firstUpcomingVf,
+                );
+            final jpBadge = japanOnly
+                ? '🇯🇵 Paru au Japon'
+                : (voCover ? '🇯🇵 Couv. VO' : null);
             return Stack(
               children: [
                 CatalogItemTile(
@@ -1317,7 +1327,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
                       ),
                     ),
                   ),
-                if (!chapterBadge && isJpVo)
+                if (jpBadge != null)
                   Positioned(
                     top: 4,
                     left: 4,
@@ -1333,9 +1343,9 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
                           BoxShadow(color: Colors.black45, blurRadius: 3),
                         ],
                       ),
-                      child: const Text(
-                        '🇯🇵 VO (Japon)',
-                        style: TextStyle(
+                      child: Text(
+                        jpBadge,
+                        style: const TextStyle(
                           color: Color(0xFFE3EEF8),
                           fontSize: 9,
                           fontWeight: FontWeight.w800,

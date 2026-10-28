@@ -1,4 +1,4 @@
-import 'book_subcategory.dart';
+﻿import 'book_subcategory.dart';
 
 class BookSeries {
   final String id;
@@ -39,7 +39,7 @@ class BookSeries {
   /// Manga / BD / Comics ne sont JAMAIS « Œuvre unique » par défaut.
   bool get isStandalone {
     if (subcategory == BookSubcategory.manga ||
-        subcategory == BookSubcategory.comic ||
+        subcategory == BookSubcategory.bd ||
         subcategory == BookSubcategory.comics) {
       return false;
     }

@@ -62,9 +62,8 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
       if (!silent) {
         series = await _service.sanitizeSeriesName(series);
         await _service.dedupeVolumeItems(series.id);
-        // Berserk/Glénat classé BD → Manga si AniList/MangaDex confirme.
+        // Pas de Google Books ici : seulement AniList/MangaDex pour reclasser.
         series = await _service.reclassifyAsMangaIfConfirmed(series);
-        series = await _service.ensureRealisticVolumeCount(series);
       }
       final volumes = await _service.fetchVolumes(series.id);
       final items = await _service.fetchSeriesItems(series.id);
@@ -280,6 +279,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     bool? read,
     bool? wishlist,
     BookVolumeEdition? edition,
+    String? editionLanguage,
     double? rating,
   }) {
     final idx = _slots.indexWhere((s) => s.volume.id == slot.volume.id);
@@ -295,6 +295,10 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     }
     if (edition != null) {
       nextVolume = nextVolume.copyWithMetadata({'edition': edition.dbValue});
+    }
+    if (editionLanguage != null) {
+      nextVolume =
+          nextVolume.copyWithMetadata({'edition_language': editionLanguage});
     }
 
     CollectionItem? nextItem;
@@ -398,6 +402,18 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     try {
       final refreshed = _slots.firstWhere((s) => s.volume.id == slot.volume.id);
       await _service.toggleVolumeRead(slot: refreshed, read: next);
+    } catch (e) {
+      if (mounted) await _load(silent: true);
+    }
+  }
+
+  Future<void> _setEditionLanguage(BookVolumeSlot slot, String language) async {
+    _patchSlotLocal(slot, editionLanguage: language);
+    try {
+      await _service.setVolumeEditionLanguage(
+        volumeId: slot.volume.id,
+        language: language,
+      );
     } catch (e) {
       if (mounted) await _load(silent: true);
     }
@@ -1023,18 +1039,30 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     return (maxVf: maxVf, firstUpcomingVf: firstUpcoming);
   }
 
-  bool _slotIsJapaneseVo(
+  bool _slotNotYetInFrance(
     BookVolumeSlot slot, {
     required int maxVf,
     int? firstUpcomingVf,
   }) {
     if (slot.volume.isHorsSerie || slot.volume.isChapterOrScan) return false;
-    if (!BookSeriesService.isMangaDexCoverUrl(slot.volume.coverUrl)) {
-      return false;
-    }
     final n = slot.volume.volumeNumber.round();
     if (firstUpcomingVf != null && n > firstUpcomingVf) return true;
-    return n > maxVf;
+    return maxVf > 0 && n > maxVf;
+  }
+
+  bool _slotShowsVoCover(
+    BookVolumeSlot slot, {
+    required int maxVf,
+    int? firstUpcomingVf,
+  }) {
+    if (_slotNotYetInFrance(
+      slot,
+      maxVf: maxVf,
+      firstUpcomingVf: firstUpcomingVf,
+    )) {
+      return false;
+    }
+    return BookSeriesService.isMangaDexCoverUrl(slot.volume.coverUrl);
   }
 
   Widget _buildCoverGrid(
@@ -1075,12 +1103,21 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         final key = _slotKeys.putIfAbsent(slot.volume.id, GlobalKey.new);
         final coverUrl = slot.volume.coverUrl ?? slot.item?.imageUrl;
         final isChapter = chapterBadge || slot.volume.isChapterOrScan;
-        final isJpVo = !isChapter &&
-            _slotIsJapaneseVo(
+        final japanOnly = !isChapter &&
+            _slotNotYetInFrance(
               slot,
               maxVf: vf.maxVf,
               firstUpcomingVf: vf.firstUpcomingVf,
             );
+        final voCover = !isChapter &&
+            _slotShowsVoCover(
+              slot,
+              maxVf: vf.maxVf,
+              firstUpcomingVf: vf.firstUpcomingVf,
+            );
+        final jpBadge = japanOnly
+            ? '🇯🇵 Paru au Japon'
+            : (voCover ? '🇯🇵 Couv. VO' : null);
 
         final editionBadge = slot.volume.editionBadge;
 
@@ -1153,7 +1190,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                           ),
                         ),
                       ),
-                    if (isJpVo)
+                    if (jpBadge != null)
                       Positioned(
                         top: 6,
                         left: 6,
@@ -1169,9 +1206,9 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                               BoxShadow(color: Colors.black45, blurRadius: 3),
                             ],
                           ),
-                          child: const Text(
-                            '🇯🇵 VO (Japon)',
-                            style: TextStyle(
+                          child: Text(
+                            jpBadge,
+                            style: const TextStyle(
                               fontSize: 9,
                               fontWeight: FontWeight.w800,
                               color: Color(0xFFE3EEF8),
@@ -1207,7 +1244,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                       ),
                     if (editionBadge != null)
                       Positioned(
-                        top: isJpVo || slot.volume.isUpcoming ? 40 : 6,
+                        top: jpBadge != null || slot.volume.isUpcoming ? 40 : 6,
                         right: 6,
                         child: Container(
                           padding: const EdgeInsets.symmetric(
@@ -1405,11 +1442,17 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     final edition = slot.volume.edition;
     final upcoming = slot.volume.upcomingLabel;
     final vf = _vfExtent();
-    final isJpVo = _slotIsJapaneseVo(
+    final japanOnly = _slotNotYetInFrance(
       slot,
       maxVf: vf.maxVf,
       firstUpcomingVf: vf.firstUpcomingVf,
     );
+    final voCover = _slotShowsVoCover(
+      slot,
+      maxVf: vf.maxVf,
+      firstUpcomingVf: vf.firstUpcomingVf,
+    );
+    final lang = slot.volume.editionLanguage;
     return Card(
       margin: inSheet
           ? EdgeInsets.zero
@@ -1454,10 +1497,20 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                       fontSize: 15,
                     ),
                   ),
-                  if (isJpVo) ...[
+                  if (japanOnly) ...[
                     const SizedBox(height: 4),
                     const Text(
-                      '🇯🇵 VO (Japon)',
+                      '🇯🇵 Paru au Japon',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF90A4AE),
+                      ),
+                    ),
+                  ] else if (voCover) ...[
+                    const SizedBox(height: 4),
+                    const Text(
+                      '🇯🇵 Couv. VO',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
@@ -1547,6 +1600,46 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                           visualDensity: VisualDensity.compact,
                           materialTapTargetSize:
                               MaterialTapTargetSize.shrinkWrap,
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Langue de l\'exemplaire',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade400,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final opt in const [
+                        ('fr', '🇫🇷 Français (VF)'),
+                        ('ja', '🇯🇵 Japonais (VO)'),
+                        ('en', '🇬🇧 Anglais'),
+                      ])
+                        ChoiceChip(
+                          label: Text(
+                            opt.$2,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight:
+                                  lang == opt.$1 ? FontWeight.w800 : FontWeight.w500,
+                              color: lang == opt.$1 ? Colors.white : null,
+                            ),
+                          ),
+                          selected: lang == opt.$1,
+                          selectedColor: accent,
+                          checkmarkColor: Colors.white,
+                          onSelected: (_) {
+                            _setEditionLanguage(slot, opt.$1);
+                            onSheetChanged?.call();
+                          },
+                          visualDensity: VisualDensity.compact,
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
                     ],
                   ),
