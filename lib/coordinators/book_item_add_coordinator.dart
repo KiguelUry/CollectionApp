@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/book_subcategory.dart';
+import '../models/book_volume.dart';
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../screens/book_series_detail_screen.dart';
@@ -66,6 +69,76 @@ class BookItemAddCoordinator {
           author: author,
         );
       },
+      onQuickAddVolume: quickAddVolume,
+    );
+  }
+
+  /// Ajoute un tome depuis la recherche sans attendre l'enrichissement des covers.
+  Future<void> quickAddVolume({
+    required String seriesName,
+    required BookSubcategory subcategory,
+    required int volumeNumber,
+    required String title,
+    String? coverUrl,
+    String? author,
+    required bool wishlist,
+  }) async {
+    final series = await _seriesService.findOrCreateSeries(
+      name: seriesName,
+      subcategory: subcategory,
+      coverUrl: coverUrl,
+      author: author,
+    );
+    final volume = await _seriesService.getOrCreateVolume(
+      series.id,
+      volumeNumber.toDouble(),
+    );
+    if (wishlist) {
+      await _seriesService.toggleVolumeWishlist(
+        series: series,
+        slot: BookVolumeSlot(
+          volume: volume,
+          status: BookVolumeStatus.missing,
+        ),
+        wishlist: true,
+      );
+    } else {
+      await _seriesService.addVolumeQuick(series: series, volume: volume);
+    }
+    if (coverUrl != null && coverUrl.isNotEmpty) {
+      unawaited(_seriesService.setVolumeCoverUrl(
+        volume.id,
+        coverUrl,
+        coverLanguage: 'fr',
+      ));
+      unawaited(_seriesService.ensureSeriesCoverFromItem(
+        seriesId: series.id,
+        imageUrl: coverUrl,
+      ));
+    }
+    unawaited(() async {
+      final volumes = await _seriesService.fetchVolumes(series.id);
+      await _seriesService.enrichMissingVolumeCovers(
+        series: series,
+        volumes: volumes,
+      );
+    }());
+    CollectionRefresh.instance.bump();
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          wishlist
+              ? '♡ Tome $volumeNumber ajouté à la wishlist'
+              : '✓ Tome $volumeNumber ajouté',
+        ),
+      ),
+    );
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BookSeriesDetailScreen(seriesId: series.id),
+      ),
     );
   }
 

@@ -834,4 +834,168 @@ void main() {
       );
     });
   });
+
+  group('séries distinctes et synopsis', () {
+    test('Jujutsu Kaisen, 0 et Modulo ne fusionnent pas', () {
+      expect(
+        BookSeriesNormalizer.namesMatch('Jujutsu Kaisen', 'Jujutsu Kaisen'),
+        isTrue,
+      );
+      expect(
+        BookSeriesNormalizer.namesMatch(
+          'Jujutsu Kaisen',
+          'Jujutsu Kaisen Modulo',
+        ),
+        isFalse,
+      );
+      expect(
+        BookSeriesNormalizer.namesMatch('Jujutsu Kaisen', 'Jujutsu Kaisen 0'),
+        isFalse,
+      );
+      expect(
+        BookSeriesNormalizer.normalizeSeriesKey('Jujutsu Kaisen 0'),
+        isNot(BookSeriesNormalizer.normalizeSeriesKey('Jujutsu Kaisen')),
+      );
+    });
+
+    test('la description ne rattache pas une autre série', () {
+      expect(
+        BookSeriesNormalizer.catalogIdentityMatchesSeries(
+          title: 'The Wandering Inn',
+          collectionName: null,
+          seriesName: 'Dungeon Crawler Carl',
+        ),
+        isFalse,
+      );
+      expect(
+        BookSeriesNormalizer.catalogIdentityMatchesSeries(
+          title: 'La Doublure',
+          seriesName: 'Tout le bleu du ciel',
+        ),
+        isFalse,
+      );
+      expect(
+        BookSeriesNormalizer.catalogIdentityMatchesSeries(
+          title: 'La Tour des Fous',
+          collectionName: 'La Trilogie Hussite',
+          seriesName: 'Le Sorceleur',
+        ),
+        isFalse,
+      );
+      expect(
+        BookSeriesNormalizer.catalogIdentityMatchesSeries(
+          title: 'La sœur à la perle',
+          collectionName: 'Les sept sœurs',
+          seriesName: 'Les sept sœurs',
+        ),
+        isTrue,
+      );
+      expect(
+        BookSeriesNormalizer.normalizeKey('Tout le bleu du ciel'),
+        BookSeriesNormalizer.normalizeKey('tout le bleu du ciel'),
+      );
+    });
+
+    test('cleanSynopsis décode les entités HTML', () {
+      final clean = BookVfEdition.cleanSynopsis(
+        '<p>Hello&#8203; monde&#xa0;!</p> &quot;Fin&quot; &amp; &#39;ok&#39;',
+      );
+      expect(clean, isNotNull);
+      expect(clean!.contains('&#'), isFalse);
+      expect(clean.contains('<p>'), isFalse);
+      expect(clean.contains('\u200B'), isFalse);
+      expect(clean.contains('"Fin"'), isTrue);
+      expect(clean.contains('&'), isTrue);
+    });
+
+    test('synopsis en pages de 2 phrases', () {
+      final pages = BookVfEdition.synopsisPages(
+        'Une phrase. Deuxième phrase. Troisième phrase.',
+      );
+      expect(pages.length, 2);
+      expect(pages.first.contains('Une phrase'), isTrue);
+      expect(pages.first.contains('Deuxième'), isTrue);
+    });
+
+    test('fiches de lecture rejetées', () {
+      expect(
+        BookVfEdition.isRejectedCatalogTitle(
+          'Harry Potter à l\'école des sorciers',
+          publisher: 'lepetitlitteraire.fr',
+        ),
+        isTrue,
+      );
+      expect(
+        BookVfEdition.isRejectedCatalogTitle(
+          'Harry Potter',
+          subtitle: "Analyse de l'œuvre",
+        ),
+        isTrue,
+      );
+      expect(
+        BookVfEdition.isRejectedCatalogTitle(
+          'Harry Potter',
+          author: 'Guide de lecture',
+        ),
+        isTrue,
+      );
+      expect(
+        BookVfEdition.isRejectedCatalogTitle(
+          "Harry Potter à l'école des sorciers",
+          author: 'J.K. Rowling',
+        ),
+        isFalse,
+      );
+    });
+
+    test('à paraître seulement après aujourd\'hui + 2 jours', () {
+      final tomorrow = DateTime.now().add(const Duration(days: 1));
+      final later = DateTime.now().add(const Duration(days: 4));
+      expect(
+        BookIntelligenceService.isFuturePublishedDate(
+          tomorrow.toIso8601String(),
+        ),
+        isFalse,
+      );
+      expect(
+        BookIntelligenceService.isFuturePublishedDate(later.toIso8601String()),
+        isTrue,
+      );
+      expect(BookIntelligenceService.isFuturePublishedDate(null), isFalse);
+    });
+
+    test('Sept Sœurs : le numéro vient de la description une fois la collection connue', () {
+      final ranked = BookIntelligenceService.enrichAndRank(
+        [
+          {
+            'title': 'La sœur à la perle',
+            'author': 'Lucinda Riley',
+            'collection_name': 'Les sept sœurs',
+            'series_title': 'Les sept sœurs',
+            'description': 'Quatrième tome de la saga.',
+          },
+          {
+            'title': 'The Wandering Inn',
+            'author': 'Pirateaba',
+            'description': 'for fans of Dungeon Crawler Carl',
+          },
+        ],
+        subcategory: BookSubcategory.novel,
+        filters: const BookSearchFilters(titleQuery: 'Les sept sœurs'),
+      );
+      expect(ranked, isNotEmpty);
+      expect(ranked.first.parsed.volumeNumber, 4);
+      expect(
+        BookSeriesNormalizer.namesMatch(
+          ranked.first.parsed.seriesName ?? '',
+          'Les sept sœurs',
+        ),
+        isTrue,
+      );
+      expect(
+        ranked.any((h) => (h.raw['title'] ?? '').contains('Wandering')),
+        isFalse,
+      );
+    });
+  });
 }

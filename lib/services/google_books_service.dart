@@ -11,9 +11,10 @@ import '../utils/book_vf_edition.dart';
 import '../utils/web_catalog_proxy.dart';
 import 'open_library_service.dart';
 
-/// Google Books API — source prioritaire VF (`langRestrict=fr`).
-/// Pas de `orderBy` (provoque des 503). Clé conservée sur retry 503.
-/// Keyless uniquement après 429/403. Circuit breaker 60s + cache négatif.
+/// Google Books API — repli VF (`langRestrict=fr`), après Apple Books.
+/// Pas de `orderBy` (provoque des 503).
+/// Un 429 ou un 503 sur une requête `&key=` désactive la clé pour la session
+/// (`quota_limit_value: 0`). Circuit breaker 60s seulement sur 429/403 keyless.
 /// Toutes les requêtes sont **sérialisées** (évite 3× 503 concurrents).
 class GoogleBooksService {
   static String? get _apiKey => AppEnv.googleBooksApiKey;
@@ -42,8 +43,27 @@ class GoogleBooksService {
     return _gate.then((_) => result);
   }
 
-  /// Uniquement après un vrai 429/403 avec clé — jamais après un 503.
+  /// Clé inutilisable pour toute la session (429, 503, ou quota à 0).
+  static bool _apiKeyDisabled = false;
+
+  /// Vrai dès que la clé est désactivée : plus aucun appel n'envoie `&key=`.
   static bool _preferKeyless = false;
+
+  static bool get _sendApiKey =>
+      hasApiKey && !_apiKeyDisabled && !_preferKeyless;
+
+  static void _disableApiKey(String reason) {
+    _apiKeyDisabled = true;
+    _preferKeyless = true;
+    if (kDebugMode) {
+      debugPrint('Google Books API key disabled for session ($reason)');
+    }
+  }
+
+  static bool _quotaIsZero(String body) {
+    return body.contains('quota_limit_value') &&
+        RegExp(r'"quota_limit_value"\s*:\s*"0"').hasMatch(body);
+  }
 
   /// Coupe-circuit : aucun HTTP tant que `now < lockedUntil`.
   static DateTime _googleBooksLockedUntil =
@@ -145,8 +165,8 @@ class GoogleBooksService {
 
   static Future<http.Response?> _viaProxy(Map<String, String> p) async {
     try {
-      // Proxy avec clé si dispo (évite 429 anonymes côté serveur).
-      final withKey = hasApiKey && !_preferKeyless;
+      // Jamais la clé si elle a déjà renvoyé 429/503 (quota à 0).
+      final withKey = _sendApiKey;
       final target = _volumesUri(p, withKey: withKey);
       await _pace();
       final proxied = proxiedCatalogUri(target);
@@ -190,20 +210,22 @@ class GoogleBooksService {
 
     final base = Map<String, String>.from(params)..remove('orderBy');
 
-    // ——— Avec clé ———
-    if (!_preferKeyless && hasApiKey) {
+    // ——— Avec clé (une seule fois : 429/503 la retire pour la session) ———
+    if (_sendApiKey) {
       try {
         final res = await get(_volumesUri(base, withKey: true));
-        if (res.statusCode == 200) return res;
+        if (res.statusCode == 200 && !_quotaIsZero(res.body)) return res;
 
-        // 503/5xx : cette requête seulement. Retry SANS clé, puis proxy.
-        if (_isServerError(res.statusCode)) {
+        final killKey = _isServerError(res.statusCode) ||
+            _isQuotaError(res.statusCode) ||
+            _quotaIsZero(res.body);
+        if (killKey) {
+          _disableApiKey(
+            _quotaIsZero(res.body) ? 'quota_limit_value 0' : '${res.statusCode}',
+          );
           if (_isLocked) return null;
-          await Future<void>.delayed(const Duration(milliseconds: 400));
-          if (kDebugMode) {
-            debugPrint(
-              'Google Books ${res.statusCode} keyed → retry without key',
-            );
+          if (_isServerError(res.statusCode)) {
+            await Future<void>.delayed(const Duration(milliseconds: 400));
           }
           try {
             final keyless = await get(_volumesUri(base, withKey: false));
@@ -211,15 +233,8 @@ class GoogleBooksService {
           } catch (_) {}
           final proxyRes = await _viaProxy(base);
           if (proxyRes != null && proxyRes.statusCode == 200) return proxyRes;
-          return null;
-        }
-
-        // 429/403 : autorise keyless pour la suite de la session.
-        if (_isQuotaError(res.statusCode)) {
-          _preferKeyless = true;
-          if (kDebugMode) {
-            debugPrint('Google Books ${res.statusCode} keyed → keyless OK');
-          }
+          // 503 : pas de coupe-circuit. 429 keyless : le bloc suivant tranche.
+          if (_isServerError(res.statusCode)) return null;
         } else {
           return res;
         }

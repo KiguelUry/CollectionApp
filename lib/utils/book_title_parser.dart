@@ -422,12 +422,25 @@ abstract final class BookTitleParser {
     return extracted == targetVolume;
   }
 
+  /// Égalité stricte. Un préfixe (« Jujutsu Kaisen » vs « … Modulo ») ne matche pas.
   static bool seriesNamesMatch(String a, String b) {
     final na = _normName(a);
     final nb = _normName(b);
     if (na.isEmpty || nb.isEmpty) return false;
-    if (na == nb) return true;
-    return na.startsWith(nb) || nb.startsWith(na);
+    return na == nb;
+  }
+
+  /// Fascicule US (`Issue #193`, `Vol. #193`), pas un tome relié VF.
+  static bool looksLikeUsIssue(String title) {
+    return RegExp(
+      r'\bissues?\b|\bvol\.?\s*#\s*\d+|\#\s*\d+',
+      caseSensitive: false,
+    ).hasMatch(title);
+  }
+
+  /// Tome relié annoncé comme tel (« Tome 4 », « Tomes »).
+  static bool looksLikeCollectedTome(String title) {
+    return RegExp(r'\btomes?\b', caseSensitive: false).hasMatch(title);
   }
 
   static String _normName(String s) {

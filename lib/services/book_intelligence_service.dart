@@ -47,6 +47,7 @@ VfSeriesCatalog vfCatalogFromHits(
   final covers = <int, String>{};
   final dates = <int, String>{};
   var maxVol = 0;
+  final ownedHits = <EnrichedBookHit>[];
   for (final h in hits) {
     final sn = h.parsed.seriesName ?? h.raw['series_title'];
     if (sn == null || sn.isEmpty) continue;
@@ -55,7 +56,23 @@ VfSeriesCatalog vfCatalogFromHits(
     if (n == null || n < 1) continue;
     final src = (h.raw['source'] ?? '').toLowerCase();
     if (src.contains('mangadex')) continue;
+    ownedHits.add(h);
+  }
+  final anyCollected = ownedHits.any(
+    (h) => BookTitleParser.looksLikeCollectedTome(
+      h.raw['title'] ?? h.displayTitle,
+    ),
+  );
+  for (final h in ownedHits) {
+    final n = h.parsed.volumeNumber!.round();
     final title = h.raw['title'] ?? h.displayTitle;
+    if (anyCollected && !BookTitleParser.looksLikeCollectedTome(title)) {
+      continue;
+    }
+    if (BookTitleParser.looksLikeUsIssue(title) &&
+        !BookTitleParser.looksLikeCollectedTome(title)) {
+      continue;
+    }
     if (BookTitleParser.looksLikeIntegraleEdition(title) &&
         !BookTitleParser.looksLikeIntegraleEdition(seriesName)) {
       continue;
@@ -226,10 +243,27 @@ abstract final class BookIntelligenceService {
       });
     }
 
-    final deduped = dedupeBySeriesVolume(filtered);
-    // Si le filtre titre a tout tué, garde les hits bruts dédupliqués.
+    List<EnrichedBookHit> onlyIdentity(List<EnrichedBookHit> list) {
+      final q = filters.titleQuery.trim();
+      if (q.length < 3) return list;
+      return list
+          .where(
+            (h) => BookSeriesNormalizer.catalogIdentityMatchesSeries(
+              title: h.raw['title'] ?? h.displayTitle,
+              subtitle: h.raw['subtitle'],
+              collectionName: h.raw['collection_name'],
+              seriesTitle: h.raw['series_title'],
+              seriesName: q,
+            ),
+          )
+          .toList();
+    }
+
+    final deduped = onlyIdentity(dedupeBySeriesVolume(filtered));
     if (deduped.isEmpty && enriched.isNotEmpty) {
-      return sortByVolumeThenScore(dedupeBySeriesVolume(enriched));
+      return sortByVolumeThenScore(
+        onlyIdentity(dedupeBySeriesVolume(enriched)),
+      );
     }
     return sortByVolumeThenScore(deduped);
   }
@@ -476,29 +510,40 @@ abstract final class BookIntelligenceService {
     final cleanName = BookSeriesNormalizer.coverSearchSeriesName(seriesName);
     if (cleanName.length < 2 || maxPages < 1) return {};
 
-    final itunesF = ItunesBooksService.search(cleanName, limit: 200);
-    var hits = await GoogleBooksService.searchSeriesBatched(
-      cleanName,
-      author: authorHint,
-      maxPages: 1,
-      langRestrict: 'fr',
-    );
-    final seenTitles = {
-      for (final h in hits) (h['title'] ?? '').toLowerCase(),
-    };
-    try {
-      for (final h in await itunesF) {
+    final hits = <Map<String, String>>[];
+    final seenTitles = <String>{};
+    void addHits(List<Map<String, String>> list) {
+      for (final h in list) {
         final t = (h['title'] ?? '').toLowerCase();
         if (t.isEmpty || seenTitles.contains(t)) continue;
         seenTitles.add(t);
         hits.add(h);
       }
+    }
+
+    // Apple Books FR en premier (mangas inclus). Google Books ne comble que les trous.
+    try {
+      addHits(await ItunesBooksService.searchSeries(
+        cleanName,
+        author: authorHint,
+        mangaPublisherPass: subcategory == BookSubcategory.manga,
+      ));
+    } catch (_) {}
+
+    try {
+      addHits(await GoogleBooksService.searchSeriesBatched(
+        cleanName,
+        author: authorHint,
+        maxPages: 1,
+        langRestrict: 'fr',
+      ));
     } catch (_) {}
 
     if ((authorHint ?? '').trim().length >= 2 &&
         (subcategory == BookSubcategory.novel ||
             subcategory == BookSubcategory.manga ||
-            subcategory == BookSubcategory.bd)) {
+            subcategory == BookSubcategory.bd ||
+            subcategory == BookSubcategory.comics)) {
       try {
         final author = authorHint!.trim();
         final extraQ = '"$cleanName" "$author"';
@@ -538,11 +583,21 @@ abstract final class BookIntelligenceService {
       if (BookVfEdition.isRejectedCatalogTitle(
         title,
         subtitle: h.raw['subtitle'],
+        author: h.author,
+        publisher: h.publisher,
       )) {
         continue;
       }
       if (BookSeriesNormalizer.looksLikeChapterOrScan(title)) continue;
-      if (!BookSeriesNormalizer.hitBelongsToSeries(title, cleanName)) continue;
+      if (!BookSeriesNormalizer.catalogIdentityMatchesSeries(
+        title: title,
+        subtitle: h.raw['subtitle'],
+        collectionName: h.raw['collection_name'],
+        seriesTitle: h.raw['series_title'],
+        seriesName: cleanName,
+      )) {
+        continue;
+      }
       if (!BookSeriesNormalizer.authorMatchesExpected(h.author, authorHint)) {
         continue;
       }
@@ -668,7 +723,9 @@ abstract final class BookIntelligenceService {
         : null;
     if (d == null) return false;
     final today = DateTime.now();
-    return d.isAfter(DateTime(today.year, today.month, today.day));
+    final cutoff = DateTime(today.year, today.month, today.day)
+        .add(const Duration(days: 2));
+    return d.isAfter(cutoff);
   }
 
   /// Couverture d'un tome via Google Books + iTunes (+ OL).
@@ -725,15 +782,39 @@ abstract final class BookIntelligenceService {
         (seriesFromMeta != null && seriesFromMeta.length >= 2
             ? seriesFromMeta
             : null);
-    final proseBlob =
-        '${hit['description'] ?? ''} ${hit['collection_name'] ?? ''} '
-        '${hit['subtitle'] ?? ''} ${hit['series_title'] ?? ''}';
-    if ((seriesName == null || seriesName.isEmpty) &&
-        queryHint != null &&
+    // collectionName Apple prime sur un découpage « Titre à … » du tome.
+    if (queryHint != null &&
         queryHint.trim().length >= 3 &&
-        BookSeriesNormalizer.textMentionsSeries(proseBlob, queryHint)) {
+        seriesFromMeta != null &&
+        seriesFromMeta.length >= 2 &&
+        (BookSeriesNormalizer.namesMatch(seriesFromMeta, queryHint) ||
+            BookSeriesNormalizer.textMentionsSeries(
+              seriesFromMeta,
+              queryHint,
+            ))) {
+      seriesName = BookSeriesNormalizer.displaySeriesName(seriesFromMeta);
+    }
+    final identityMatchesQuery = queryHint != null &&
+        queryHint.trim().length >= 3 &&
+        BookSeriesNormalizer.catalogIdentityMatchesSeries(
+          title: title,
+          subtitle: subtitle,
+          collectionName: hit['collection_name'],
+          seriesTitle: seriesFromMeta,
+          seriesName: queryHint,
+        );
+    // Jamais la description pour décider de l'appartenance à la série.
+    if ((seriesName == null || seriesName.isEmpty) && identityMatchesQuery) {
       seriesName = queryHint.trim();
     }
+    final identified = parsed.seriesName != null ||
+        (seriesFromMeta != null && seriesFromMeta.length >= 2) ||
+        identityMatchesQuery;
+    final proseBlob = identified
+        ? '${hit['description'] ?? ''} ${hit['collection_name'] ?? ''} '
+            '${hit['subtitle'] ?? ''} ${hit['series_title'] ?? ''}'
+        : '${hit['collection_name'] ?? ''} ${hit['subtitle'] ?? ''} '
+            '${hit['series_title'] ?? ''}';
     final proseVol = BookTitleParser.extractVolumeFromProse(proseBlob);
     final trailing = seriesName == null
         ? null

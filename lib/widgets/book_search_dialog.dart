@@ -16,6 +16,15 @@ Future<void> showBookSearch(
     Map<int, String>? publishedDatesByVolume,
     String? author,
   })? onAddSeries,
+  Future<void> Function({
+    required String seriesName,
+    required BookSubcategory subcategory,
+    required int volumeNumber,
+    required String title,
+    String? coverUrl,
+    String? author,
+    required bool wishlist,
+  })? onQuickAddVolume,
   BookSubcategory? initialSub,
   String? initialQuery,
   VoidCallback? onManualEntry,
@@ -33,6 +42,7 @@ Future<void> showBookSearch(
         },
         // Séries : reste sur la page de recherche.
         onAddSeries: onAddSeries,
+        onQuickAddVolume: onQuickAddVolume,
       ),
     ),
   );

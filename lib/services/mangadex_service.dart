@@ -315,6 +315,9 @@ abstract final class MangaDexService {
         (volumes.isNotEmpty ? covers[volumes.first] : null) ??
         _coverFromRelationships(manga, mangaId);
 
+    final originalLanguage = attrs['originalLanguage']?.toString();
+    final description = _pickDescription(attrs['description']);
+
     return MangaDexSeriesMeta(
       id: mangaId,
       title: title,
@@ -322,6 +325,8 @@ abstract final class MangaDexService {
       volumesPublished: lastVol > 0 ? lastVol : null,
       coverByVolume: covers,
       seriesCoverUrl: coverUrl,
+      originalLanguage: originalLanguage,
+      description: description,
     );
   }
 
@@ -336,8 +341,7 @@ abstract final class MangaDexService {
           '$_base/cover?manga[]=${Uri.encodeQueryComponent(mangaId)}'
           '&limit=$pageSize'
           '&offset=$offset'
-          '&order[volume]=asc'
-          '&locales[]=fr&locales[]=ja&locales[]=en',
+          '&order[volume]=asc',
         );
         final res = await http
             .get(
@@ -380,6 +384,19 @@ abstract final class MangaDexService {
     return {for (final e in best.entries) e.key: e.value.url};
   }
 
+  static String? _pickDescription(dynamic raw) {
+    if (raw is! Map) return null;
+    for (final key in ['fr', 'fr-fr', 'en', 'ja', 'ja-ro']) {
+      final v = raw[key]?.toString().trim();
+      if (v != null && v.isNotEmpty) return v;
+    }
+    for (final v in raw.values) {
+      final t = v?.toString().trim() ?? '';
+      if (t.length >= 20) return t;
+    }
+    return null;
+  }
+
   /// fr > ja > en > autres.
   static int _localeScore(String locale) {
     if (locale.startsWith('fr')) return 40;
@@ -418,6 +435,8 @@ class MangaDexSeriesMeta {
   final int? volumesPublished;
   final Map<int, String> coverByVolume;
   final String? seriesCoverUrl;
+  final String? originalLanguage;
+  final String? description;
 
   const MangaDexSeriesMeta({
     required this.id,
@@ -426,5 +445,18 @@ class MangaDexSeriesMeta {
     this.volumesPublished,
     this.coverByVolume = const {},
     this.seriesCoverUrl,
+    this.originalLanguage,
+    this.description,
   });
+
+  /// Manga seulement si la langue d'origine est asiatique (ja / ko / zh).
+  bool get isAsianOrigin {
+    final l = (originalLanguage ?? '').trim().toLowerCase();
+    if (l.isEmpty) return true;
+    return l == 'ja' ||
+        l == 'ko' ||
+        l == 'zh' ||
+        l.startsWith('zh-') ||
+        l == 'jp';
+  }
 }

@@ -11,6 +11,7 @@ import '../models/book_volume.dart';
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../services/book_series_service.dart';
+import '../utils/book_vf_edition.dart';
 import '../services/books_collection_cache.dart';
 import '../widgets/app_app_bar.dart';
 import '../widgets/book_manual_volume_dialog.dart';
@@ -39,7 +40,8 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   List<BookVolumeSlot> _slots = [];
   _VolumeFilter _filter = _VolumeFilter.all;
   bool _friseExpanded = false;
-  bool _synopsisExpanded = false;
+  int _synopsisPage = 0;
+  bool _synopsisVisible = true;
   bool _chaptersExpanded = false;
   bool _refreshingPubs = false;
   /// `enrichMissingVolumeCovers` : une seule fois par ouverture d’écran.
@@ -643,6 +645,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     if (url == null || url.isEmpty) return;
     showDialog<void>(
       context: context,
+      barrierDismissible: true,
       barrierColor: Colors.black54,
       builder: (ctx) => Dialog(
         backgroundColor: Colors.transparent,
@@ -653,21 +656,27 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
           child: Stack(
           children: [
             Positioned.fill(
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                child: const ColoredBox(color: Colors.black87),
+              child: GestureDetector(
+                onTap: () => Navigator.pop(ctx),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                  child: const ColoredBox(color: Colors.black87),
+                ),
               ),
             ),
             Center(
-              child: InteractiveViewer(
-                minScale: 0.8,
-                maxScale: 5,
-                child: CollectionCoverImage(
-                  url: url,
-                  bookCover: true,
-                  width: 420,
-                  height: 640,
-                  fit: BoxFit.contain,
+              child: GestureDetector(
+                onTap: () {},
+                child: InteractiveViewer(
+                  minScale: 0.8,
+                  maxScale: 5,
+                  child: CollectionCoverImage(
+                    url: url,
+                    bookCover: true,
+                    width: 420,
+                    height: 640,
+                    fit: BoxFit.contain,
+                  ),
                 ),
               ),
             ),
@@ -992,38 +1001,133 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   }
 
   Widget _buildSynopsis(BookSeries series) {
-    final text = series.description?.trim() ?? '';
-    if (text.length < 40) return const SizedBox.shrink();
+    final text = BookVfEdition.cleanSynopsis(series.description) ?? '';
+    if (text.length < 20) return const SizedBox.shrink();
+    final pages = BookVfEdition.synopsisPages(text);
+    if (pages.isEmpty) return const SizedBox.shrink();
+    final page = _synopsisPage.clamp(0, pages.length - 1);
+    final last = page >= pages.length - 1;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            text,
-            maxLines: _synopsisExpanded ? 40 : 3,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 13,
-              height: 1.35,
-              color: Colors.grey.shade300,
-            ),
+          Row(
+            children: [
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                tooltip: _synopsisVisible ? 'Masquer le synopsis' : 'Synopsis',
+                onPressed: () =>
+                    setState(() => _synopsisVisible = !_synopsisVisible),
+                icon: const Text('💬', style: TextStyle(fontSize: 18)),
+              ),
+              if (!_synopsisVisible)
+                Text(
+                  'Synopsis',
+                  style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
+                ),
+            ],
           ),
-          TextButton(
-            onPressed: () =>
-                setState(() => _synopsisExpanded = !_synopsisExpanded),
-            style: TextButton.styleFrom(
-              visualDensity: VisualDensity.compact,
-              padding: EdgeInsets.zero,
+          if (_synopsisVisible)
+            GestureDetector(
+              onTap: pages.length < 2
+                  ? null
+                  : () => setState(() {
+                        _synopsisPage = last ? 0 : page + 1;
+                      }),
+              child: SizedBox(
+                height: 108,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Positioned(
+                      left: 18,
+                      top: 0,
+                      child: CustomPaint(
+                        size: const Size(14, 8),
+                        painter: _BubbleTailPainter(
+                          fill: const Color(0xFF1E293B),
+                          border: BookAccent.primary.withValues(alpha: 0.85),
+                        ),
+                      ),
+                    ),
+                    Positioned.fill(
+                      top: 7,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1E293B),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: BookAccent.primary.withValues(alpha: 0.85),
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 220),
+                                  child: Text(
+                                    pages[page],
+                                    key: ValueKey(page),
+                                    maxLines: 3,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 13,
+                                      height: 1.3,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              if (pages.length > 1)
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: Text(
+                                    last
+                                        ? '↺ Début'
+                                        : '▸ Suite (${page + 1}/${pages.length})',
+                                    style: const TextStyle(
+                                      color: Color(0xFF38BDF8),
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
-            child: Text(
-              _synopsisExpanded ? 'Réduire ▴' : 'Lire la suite ▾',
-              style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
-          ),
         ],
       ),
     );
+  }
+
+  List<(String, String)> _languageOptions(BookSubcategory? sub) {
+    return switch (sub) {
+      BookSubcategory.manga => const [
+          ('fr', '🇫🇷 Français (VF)'),
+          ('ja', '🇯🇵 Japonais (VO)'),
+          ('en', '🇬🇧 Anglais'),
+        ],
+      BookSubcategory.bd => const [
+          ('fr', '🇫🇷 Français (Original)'),
+          ('en', '🇬🇧 Anglais'),
+          ('other', '🌍 Autre'),
+        ],
+      _ => const [
+          ('fr', '🇫🇷 Français (VF)'),
+          ('en', '🇬🇧 Anglais (VO)'),
+          ('other', '🌍 Autre'),
+        ],
+    };
   }
 
   String _filterLabel(_VolumeFilter f) => switch (f) {
@@ -1294,13 +1398,16 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         final key = _slotKeys.putIfAbsent(slot.volume.id, GlobalKey.new);
         final coverUrl = slot.volume.coverUrl ?? slot.item?.imageUrl;
         final isChapter = chapterBadge || slot.volume.isChapterOrScan;
-        final japanOnly = !isChapter &&
+        final showJp = _series?.subcategory == BookSubcategory.manga;
+        final japanOnly = showJp &&
+            !isChapter &&
             _slotNotYetInFrance(
               slot,
               maxVf: vf.maxVf,
               firstUpcomingVf: vf.firstUpcomingVf,
             );
-        final voCover = !isChapter &&
+        final voCover = showJp &&
+            !isChapter &&
             _slotShowsVoCover(
               slot,
               maxVf: vf.maxVf,
@@ -1605,12 +1712,15 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     final edition = slot.volume.edition;
     final upcoming = slot.volume.upcomingLabel;
     final vf = _vfExtent();
-    final japanOnly = _slotNotYetInFrance(
+    final showJp = _series?.subcategory == BookSubcategory.manga;
+    final japanOnly = showJp &&
+        _slotNotYetInFrance(
       slot,
       maxVf: vf.maxVf,
       firstUpcomingVf: vf.firstUpcomingVf,
     );
-    final voCover = _slotShowsVoCover(
+    final voCover = showJp &&
+        _slotShowsVoCover(
       slot,
       maxVf: vf.maxVf,
       firstUpcomingVf: vf.firstUpcomingVf,
@@ -1782,11 +1892,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                     spacing: 6,
                     runSpacing: 6,
                     children: [
-                      for (final opt in const [
-                        ('fr', '🇫🇷 Français (VF)'),
-                        ('ja', '🇯🇵 Japonais (VO)'),
-                        ('en', '🇬🇧 Anglais'),
-                      ])
+                      for (final opt in _languageOptions(_series?.subcategory))
                         ChoiceChip(
                           label: Text(
                             opt.$2,
@@ -1901,5 +2007,33 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     BooksCollectionCache.instance.clear();
     if (mounted) Navigator.pop(context);
   }
+}
+
+class _BubbleTailPainter extends CustomPainter {
+  final Color fill;
+  final Color border;
+
+  const _BubbleTailPainter({required this.fill, required this.border});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = Path()
+      ..moveTo(0, size.height)
+      ..lineTo(size.width * 0.25, 0)
+      ..lineTo(size.width, size.height)
+      ..close();
+    canvas.drawPath(path, Paint()..color = fill);
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = border
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _BubbleTailPainter oldDelegate) =>
+      oldDelegate.fill != fill || oldDelegate.border != border;
 }
 

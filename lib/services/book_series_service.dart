@@ -888,7 +888,33 @@ class BookSeriesService {
     double? onFive;
     if (series.subcategory == BookSubcategory.manga) {
       final meta = await AnilistMangaService.lookupManga(series.name);
-      onFive = meta?.ratingOnFive;
+      if (meta != null &&
+          BookSeriesNormalizer.namesMatch(meta.title, series.name)) {
+        onFive = meta.ratingOnFive;
+      }
+    }
+    if (onFive == null || onFive <= 0) {
+      try {
+        final hits = await ItunesBooksService.search(series.name, limit: 40);
+        double sum = 0;
+        var n = 0;
+        for (final h in hits) {
+          if (!BookSeriesNormalizer.catalogIdentityMatchesSeries(
+            title: h['title'] ?? '',
+            subtitle: h['subtitle'],
+            collectionName: h['collection_name'],
+            seriesTitle: h['series_title'],
+            seriesName: series.name,
+          )) {
+            continue;
+          }
+          final r = double.tryParse(h['community_rating'] ?? '');
+          if (r == null || r <= 0) continue;
+          sum += r;
+          n++;
+        }
+        if (n > 0) onFive = sum / n;
+      } catch (_) {}
     }
     if (onFive == null || onFive <= 0) return series;
     final meta = Map<String, dynamic>.from(series.metadata);
@@ -1040,27 +1066,7 @@ class BookSeriesService {
         .eq('id', volumeId);
   }
 
-  static String? _cleanSynopsis(String? raw) {
-    if (raw == null) return null;
-    var s = raw.replaceAll(RegExp(r'<[^>]+>'), ' ');
-    s = s
-        .replaceAll('&nbsp;', ' ')
-        .replaceAll('&amp;', '&')
-        .replaceAll('&quot;', '"')
-        .replaceAll('&#39;', "'");
-    final parts = s.split(RegExp(r'(?<=[.!?])\s+'));
-    final kept = <String>[];
-    for (final part in parts) {
-      final t = part.trim();
-      if (t.length < 12) continue;
-      final letters = t.replaceAll(RegExp(r'[^A-Za-zÀ-ÿ]'), '');
-      if (letters.length >= 16 && letters == letters.toUpperCase()) continue;
-      kept.add(t);
-    }
-    s = kept.join(' ').replaceAll(RegExp(r'\s+'), ' ').trim();
-    if (s.length < 40) return null;
-    return s;
-  }
+  static String? _cleanSynopsis(String? raw) => BookVfEdition.cleanSynopsis(raw);
 
   /// Couvertures : Google Books FR d'abord (écrase MangaDex), MD comble les trous.
   /// [onProgress] est appelé tous les [progressEvery] tomes trouvés (UI live).
@@ -1098,30 +1104,57 @@ class BookSeriesService {
       }
     } catch (_) {}
 
-    // 2) Apple Books FR avant MangaDex (mangas inclus) — 1 recherche, pas 1/tome.
+    // 2) Apple Books FR (nom + Tome + auteur, Glénat/Kana si manga).
+    String? tome1Synopsis;
     try {
-      final itunes = await ItunesBooksService.search(working.name, limit: 200);
-      String? synopsis;
+      final itunes = await ItunesBooksService.searchSeries(
+        working.name,
+        author: seriesAuthor,
+        mangaPublisherPass: working.subcategory == BookSubcategory.manga,
+      );
       for (final h in itunes) {
         final title = h['title'] ?? '';
-        final blob =
-            '$title ${h['description'] ?? ''} ${h['collection_name'] ?? ''} ${h['series_title'] ?? ''}';
-        final belongs = BookSeriesNormalizer.hitBelongsToSeries(
-              title,
-              working.name,
-            ) ||
-            BookSeriesNormalizer.textMentionsSeries(blob, working.name);
-        if (!belongs) continue;
+        if (BookVfEdition.isRejectedCatalogTitle(
+          title,
+          subtitle: h['subtitle'],
+          author: h['author'],
+          publisher: h['publisher'],
+        )) {
+          continue;
+        }
+        if (!BookSeriesNormalizer.catalogIdentityMatchesSeries(
+          title: title,
+          subtitle: h['subtitle'],
+          collectionName: h['collection_name'],
+          seriesTitle: h['series_title'],
+          seriesName: working.name,
+        )) {
+          continue;
+        }
         if (!BookSeriesNormalizer.authorMatchesExpected(
           h['author'],
           seriesAuthor,
         )) {
           continue;
         }
-        synopsis ??= _cleanSynopsis(h['description']);
+        final identityBlob =
+            '$title ${h['collection_name'] ?? ''} ${h['series_title'] ?? ''} ${h['subtitle'] ?? ''}';
         final n = BookTitleParser.extractVolumeNumberStrict(title) ??
             BookTitleParser.volumeTrailingSeries(title, working.name) ??
-            BookTitleParser.extractVolumeFromProse(blob);
+            BookTitleParser.extractVolumeFromProse(
+              '$identityBlob ${h['description'] ?? ''}',
+            );
+        // Synopsis : série ou Tome 1 uniquement. Jamais un tome > 1.
+        if (n == null || n == 1) {
+          final cleaned = _cleanSynopsis(h['description']);
+          if (cleaned != null && (n == 1 || tome1Synopsis == null)) {
+            if (n == 1) {
+              tome1Synopsis = cleaned;
+            } else {
+              tome1Synopsis ??= cleaned;
+            }
+          }
+        }
         if (n == null || n < 1) continue;
         final img = h['image_url'] ?? '';
         if (img.isEmpty || isMangaDexCoverUrl(img)) continue;
@@ -1141,23 +1174,19 @@ class BookSeriesService {
         }
         if (n > vfMax) vfMax = n;
       }
-      if ((working.description ?? '').trim().length < 40 &&
-          synopsis != null) {
-        working = working.copyWith(description: synopsis);
-        try {
-          await updateSeries(working);
-        } catch (_) {}
-      }
     } catch (_) {}
 
     // 3) MangaDex comble TOUS les trous restants (T25, T28, T31-39…).
+    String? seriesLevelSynopsis;
     if (working.subcategory == BookSubcategory.manga) {
       try {
         final md = await MangaDexService.lookupManga(
           working.name,
           authorHint: seriesAuthor,
         );
-        if (md != null) {
+        if (md != null &&
+            BookSeriesNormalizer.namesMatch(md.title, working.name)) {
+          seriesLevelSynopsis = _cleanSynopsis(md.description);
           var covers = Map<int, String>.from(md.coverByVolume);
           final need = md.volumesPublished ??
               (working.expectedVolumeCount ?? volumes.length);
@@ -1200,8 +1229,25 @@ class BookSeriesService {
           }
         }
       } catch (_) {}
+      try {
+        final ani = await AnilistMangaService.lookupManga(working.name);
+        if (ani != null &&
+            ani.isAsianOrigin &&
+            BookSeriesNormalizer.namesMatch(ani.title, working.name)) {
+          seriesLevelSynopsis =
+              _cleanSynopsis(ani.description) ?? seriesLevelSynopsis;
+        }
+      } catch (_) {}
     } else if (vfMax > (working.expectedVolumeCount ?? 0)) {
       working = (await bumpExpectedCountIfHigher(working, vfMax)) ?? working;
+    }
+
+    final safeSynopsis = seriesLevelSynopsis ?? tome1Synopsis;
+    if (safeSynopsis != null && safeSynopsis != working.description) {
+      working = working.copyWith(description: safeSynopsis);
+      try {
+        await updateSeries(working);
+      } catch (_) {}
     }
 
     final ordered = List<BookVolume>.from(await fetchVolumes(working.id))

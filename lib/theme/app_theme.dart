@@ -93,6 +93,7 @@ abstract final class AppTheme {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         side: BorderSide(color: scheme.outlineVariant),
       ),
+      snackBarTheme: _snackBarTheme,
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: {
           TargetPlatform.android: CupertinoPageTransitionsBuilder(),
@@ -102,6 +103,21 @@ abstract final class AppTheme {
       ),
     );
   }
+
+  static const SnackBarThemeData _snackBarTheme = SnackBarThemeData(
+    behavior: SnackBarBehavior.floating,
+    backgroundColor: Color(0xFF1E293B),
+    elevation: 6,
+    insetPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.all(Radius.circular(14)),
+      side: BorderSide(color: Color(0xFF10B981)),
+    ),
+    contentTextStyle: TextStyle(
+      color: Colors.white,
+      fontWeight: FontWeight.w600,
+    ),
+  );
 
   static ThemeData get dark {
     const midnight = Color(0xFF121212);
@@ -183,6 +199,7 @@ abstract final class AppTheme {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         side: BorderSide(color: scheme.outlineVariant),
       ),
+      snackBarTheme: _snackBarTheme,
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: {
           TargetPlatform.android: CupertinoPageTransitionsBuilder(),

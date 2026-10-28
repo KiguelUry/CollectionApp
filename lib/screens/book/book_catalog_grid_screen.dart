@@ -32,6 +32,15 @@ class BookCatalogGridScreen extends StatefulWidget {
     Map<int, String>? publishedDatesByVolume,
     String? author,
   })? onAddSeries;
+  final Future<void> Function({
+    required String seriesName,
+    required BookSubcategory subcategory,
+    required int volumeNumber,
+    required String title,
+    String? coverUrl,
+    String? author,
+    required bool wishlist,
+  })? onQuickAddVolume;
 
   const BookCatalogGridScreen({
     super.key,
@@ -39,6 +48,7 @@ class BookCatalogGridScreen extends StatefulWidget {
     this.initialQuery,
     this.onBookSelected,
     this.onAddSeries,
+    this.onQuickAddVolume,
   });
 
   @override
@@ -375,6 +385,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
     final officialBanners = <SeriesBannerCandidate>[];
     final byKey = <String, SeriesBannerCandidate>{};
     for (final md in mdList) {
+      if (!md.isAsianOrigin) continue;
       final key = BookSeriesNormalizer.mergeKey(md.title);
       final vols = md.volumesPublished ?? 0;
       final coverMax = md.coverByVolume.isEmpty
@@ -392,6 +403,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       );
     }
     for (final ani in aniResults) {
+      if (!ani.isAsianOrigin) continue;
       final key = BookSeriesNormalizer.mergeKey(ani.title);
       final existing = byKey[key];
       final mdVols = existing?.volumeCount ?? 0;
@@ -491,13 +503,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
         ? officialBanners.first.name
         : seriesQ;
     final hasExactOfficial = officialBanners.any(
-      (b) =>
-          BookSeriesNormalizer.normalizeKey(b.name) ==
-              BookSeriesNormalizer.normalizeKey(seriesQ) ||
-          BookSeriesNormalizer.hitBelongsToSeries(b.name, seriesQ) ||
-          BookSeriesNormalizer.normalizeKey(b.name).startsWith(
-                BookSeriesNormalizer.normalizeKey(seriesQ),
-              ),
+      (b) => BookSeriesNormalizer.namesMatch(b.name, seriesQ),
     );
     if (hasExactOfficial) {
       String? bannerAuthor = exactAuthor;
@@ -730,7 +736,6 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
           ? 'official|$mergeKey'
           : BookSeriesNormalizer.seriesSubcategoryKey(b.name, det);
       if (fromOfficial && seenKeys.contains('official|$mergeKey')) continue;
-      if (!fromOfficial && officialMergeKeys.contains(mergeKey)) continue;
       if (!seenKeys.add(key)) continue;
       if (!b.fromAnilist && b.volumeCount < 1) continue;
 
@@ -752,6 +757,11 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
             ? vf.maxVol
             : covers.keys.reduce((a, b) => a > b ? a : b);
         count = [vf.maxVol, count, coverMax].reduce((a, b) => a > b ? a : b);
+        // BD / Comics : le nombre de tomes reliés VF (Tome 1..N), pas les issues US.
+        if (det != BookSubcategory.manga) {
+          count = vf.maxVol;
+          covers.removeWhere((k, _) => k > vf.maxVol);
+        }
       } else {
         for (final o in officialBanners) {
           if (BookSeriesNormalizer.mergeKey(o.name) == mergeKey) {
@@ -786,6 +796,24 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
           fromAnilist: fromOfficial,
         ),
       );
+    }
+
+    // Doublon Manga d'une BD / Comics occidentale déjà riche (≥ 3 tomes VF).
+    final westernKeys = <String>{
+      for (final b in mergedBanners)
+        if ((b.detectedSubcategory == BookSubcategory.bd ||
+                b.detectedSubcategory == BookSubcategory.comics) &&
+            b.volumeCount >= 3)
+          BookSeriesNormalizer.normalizeSeriesKey(b.name),
+    };
+    if (westernKeys.isNotEmpty) {
+      mergedBanners.removeWhere((b) {
+        final mangaBanner =
+            b.fromAnilist || b.detectedSubcategory == BookSubcategory.manga;
+        if (!mangaBanner) return false;
+        return westernKeys
+            .contains(BookSeriesNormalizer.normalizeSeriesKey(b.name));
+      });
     }
 
     // Exact match query toujours en 1re bannière.
@@ -829,6 +857,16 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
     final qLower = seriesQ.toLowerCase().trim();
     if (qLower.length >= 3) {
       enriched.sort((a, b) {
+        int exactTitle(EnrichedBookHit h) {
+          final title = h.raw['title'] ?? h.displayTitle;
+          return BookSeriesNormalizer.normalizeKey(title) ==
+                  BookSeriesNormalizer.normalizeKey(seriesQ)
+              ? 0
+              : 1;
+        }
+
+        final exact = exactTitle(a).compareTo(exactTitle(b));
+        if (exact != 0) return exact;
         int unitRank(EnrichedBookHit h) {
           final title = (h.raw['title'] ?? h.displayTitle).toLowerCase();
           final unit = h.parsed.volumeNumber == null;
@@ -915,6 +953,117 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
         author: banner.author,
       ),
     );
+  }
+
+  Future<void> _promptQuickVolume(EnrichedBookHit hit, int volumeNumber) async {
+    final seriesName = hit.parsed.seriesName ?? hit.displayTitle;
+    final sub = hit.detectedSubcategory ??
+        BookSeriesNormalizer.detectSubcategory(
+          seriesName: hit.parsed.seriesName,
+          title: hit.displayTitle,
+          publisher: hit.publisher,
+        ) ??
+        _effectiveSub;
+    final cover = hit.imageUrl;
+    final choice = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF1E293B),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: cover != null && cover.isNotEmpty
+                    ? Image.network(
+                        coverUrlForWeb(cover),
+                        height: 180,
+                        width: 128,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) => const SizedBox(
+                          height: 180,
+                          width: 128,
+                          child: Center(
+                            child: Text('📚', style: TextStyle(fontSize: 40)),
+                          ),
+                        ),
+                      )
+                    : const SizedBox(
+                        height: 180,
+                        width: 128,
+                        child: Center(
+                          child: Text('📚', style: TextStyle(fontSize: 40)),
+                        ),
+                      ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                '$seriesName — Tome $volumeNumber',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 16,
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF10B981),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('✓ Ajouter à ma collection (Possédé)'),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF7C3AED),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('♡ Ajouter à ma Wishlist'),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (choice == null || !mounted) return;
+    final quick = widget.onQuickAddVolume;
+    if (quick != null) {
+      await quick(
+        seriesName: seriesName,
+        subcategory: sub,
+        volumeNumber: volumeNumber,
+        title: hit.displayTitle,
+        coverUrl: cover,
+        author: hit.author,
+        wishlist: choice,
+      );
+      return;
+    }
+    _select(hit);
   }
 
   void _select(EnrichedBookHit hit) {
@@ -1286,14 +1435,17 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
             final voExtent = voBySeries[BookSeriesNormalizer.mergeKey(
               seriesName,
             )];
-            final japanOnly = !chapterBadge &&
+            final isMangaHit = det == BookSubcategory.manga;
+            final japanOnly = isMangaHit &&
+                !chapterBadge &&
                 voExtent != null &&
                 BookIntelligenceService.hitIsJapanReleaseOnly(
                   hit,
                   maxVf: voExtent.maxVf,
                   firstUpcomingVf: voExtent.firstUpcomingVf,
                 );
-            final voCover = !chapterBadge &&
+            final voCover = isMangaHit &&
+                !chapterBadge &&
                 voExtent != null &&
                 BookIntelligenceService.hitShowsVoCover(
                   hit,
@@ -1326,7 +1478,13 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
                   placeholderIcon: chapterBadge
                       ? Icons.article_outlined
                       : Icons.menu_book_outlined,
-                  onTap: () => _select(hit),
+                  onTap: () {
+                    if (!chapterBadge && vol != null) {
+                      _promptQuickVolume(hit, vol);
+                      return;
+                    }
+                    _select(hit);
+                  },
                 ),
                 if (chapterBadge)
                   Positioned(

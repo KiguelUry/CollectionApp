@@ -14,7 +14,12 @@ abstract final class BookVfEdition {
     r'analysis|unauthorized|reflections\s+on|quiz\s*book|'
     r'fiche\s+de\s+lecture|collection\s+compl[eè]te|'
     r'boxed\s+set|bakboek|'
-    r'raisons\s+d.?un\s+succ[eè]s)\b',
+    r'raisons\s+d.?un\s+succ[eè]s|'
+    r'lepetitlitteraire|petit\s+litt[eé]raire|'
+    r'analyse\s+de\s+l.?œuvre|analyse\s+de\s+l.?oeuvre|'
+    r'profil\s+d.?une\s+œuvre|profil\s+d.?une\s+oeuvre|'
+    r'commentaire\s+compos[eé]|'
+    r'r[eé]sum[eé]\s+et\s+analyse|guide\s+de\s+lecture)\b',
     caseSensitive: false,
   );
 
@@ -27,12 +32,68 @@ abstract final class BookVfEdition {
 
   static bool isUsVolTitle(String title) => usVolTitleRe.hasMatch(title);
 
-  /// Titre / sous-titre à exclure du catalogue (parasite ou édition IT/SV…).
-  static bool isRejectedCatalogTitle(String title, {String? subtitle}) {
-    final blob = '$title ${subtitle ?? ''}';
+  /// Titre, sous-titre, auteur ou éditeur à exclure (parasite ou édition IT/SV…).
+  static bool isRejectedCatalogTitle(
+    String title, {
+    String? subtitle,
+    String? author,
+    String? publisher,
+  }) {
+    final blob = '$title ${subtitle ?? ''} ${author ?? ''} ${publisher ?? ''}';
     if (parasiteTitleRe.hasMatch(blob)) return true;
     if (foreignEditionTitleRe.hasMatch(blob)) return true;
     return false;
+  }
+
+  /// Retire les balises et décode les entités HTML (numériques et nommées).
+  static String? cleanSynopsis(String? raw) {
+    if (raw == null) return null;
+    var s = raw.replaceAll(RegExp(r'<[^>]+>'), ' ');
+    s = s.replaceAll('&#8203;', '').replaceAll('\u200B', '');
+    s = s
+        .replaceAll(RegExp(r'&#x0*a0;', caseSensitive: false), ' ')
+        .replaceAll('&#160;', ' ')
+        .replaceAll('&nbsp;', ' ');
+    s = s.replaceAllMapped(RegExp(r'&#x([0-9a-fA-F]+);'), (m) {
+      final c = int.tryParse(m.group(1)!, radix: 16);
+      if (c == null || c == 0x200B) return '';
+      if (c == 0xA0) return ' ';
+      return String.fromCharCode(c);
+    });
+    s = s.replaceAllMapped(RegExp(r'&#(\d+);'), (m) {
+      final c = int.tryParse(m.group(1)!);
+      if (c == null || c == 0x200B) return '';
+      if (c == 160) return ' ';
+      return String.fromCharCode(c);
+    });
+    s = s
+        .replaceAll('&quot;', '"')
+        .replaceAll('&apos;', "'")
+        .replaceAll('&#39;', "'")
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&amp;', '&');
+    s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (s.length < 20) return null;
+    return s;
+  }
+
+  /// Découpe un synopsis propre en pages de 2 phrases.
+  static List<String> synopsisPages(String clean) {
+    final text = clean.trim();
+    if (text.isEmpty) return const [];
+    final sentences = text
+        .split(RegExp(r'(?<=[.!?…])\s+'))
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+    if (sentences.length <= 2) return [text];
+    final pages = <String>[];
+    for (var i = 0; i < sentences.length; i += 2) {
+      final end = i + 2 > sentences.length ? sentences.length : i + 2;
+      pages.add(sentences.sublist(i, end).join(' '));
+    }
+    return pages;
   }
 
   /// FR ou EN uniquement (codes ISO).

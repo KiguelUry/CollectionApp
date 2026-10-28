@@ -15,6 +15,7 @@ import '../services/collection_display_preferences.dart';
 import '../services/boardgame_market_service.dart';
 import '../utils/wishlist_market_metadata.dart';
 import '../services/bgg_service.dart';
+import '../coordinators/book_item_add_coordinator.dart';
 import '../services/book_catalog_service.dart';
 import '../services/card_catalog_service.dart';
 import '../services/media_catalog_service.dart';
@@ -1061,9 +1062,11 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void _showBookSearchDialog() {
+    final books = BookItemAddCoordinator(context);
     showBookSearch(
       context,
       onManualEntry: _showManualAddFlow,
+      onQuickAddVolume: books.quickAddVolume,
       onBookSelected: (book, subcategory) => _showOptionsDialog(
         title: book['title']!,
         imageUrl: book['image_url']!.isEmpty ? null : book['image_url'],

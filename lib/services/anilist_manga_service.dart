@@ -48,6 +48,8 @@ query ($search: String, $perPage: Int) {
     ) {
       id
       format
+      countryOfOrigin
+      description
       title { romaji english native }
       volumes
       chapters
@@ -188,6 +190,9 @@ query ($search: String, $perPage: Int) {
     final authorRaw = BookSeriesNormalizer.formatAuthorList(staffNames);
     final author = authorRaw.isEmpty ? null : authorRaw;
 
+    final country = media['countryOfOrigin']?.toString();
+    final description = media['description']?.toString();
+
     return AnilistMangaMeta(
       title: BookSeriesNormalizer.displaySeriesName(title),
       volumes: volumes != null && volumes > 0 ? volumes : null,
@@ -195,6 +200,8 @@ query ($search: String, $perPage: Int) {
       ratingOnFive: ratingOnFive,
       author: author,
       anilistId: media['id'] is int ? media['id'] as int : null,
+      countryOfOrigin: country,
+      description: description,
     );
   }
 }
@@ -206,6 +213,8 @@ class AnilistMangaMeta {
   final double? ratingOnFive;
   final String? author;
   final int? anilistId;
+  final String? countryOfOrigin;
+  final String? description;
 
   const AnilistMangaMeta({
     required this.title,
@@ -214,5 +223,16 @@ class AnilistMangaMeta {
     this.ratingOnFive,
     this.author,
     this.anilistId,
+    this.countryOfOrigin,
+    this.description,
   });
+
+  /// JP / KR / CN (ou langue d'origine asiatique). Un pays occidental exclut le manga.
+  bool get isAsianOrigin {
+    final c = (countryOfOrigin ?? '').trim().toUpperCase();
+    const asian = {'JP', 'KR', 'CN', 'TW', 'HK', 'TH'};
+    if (asian.contains(c)) return true;
+    if (c.isNotEmpty) return false;
+    return true;
+  }
 }

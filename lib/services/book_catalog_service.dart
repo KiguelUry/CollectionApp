@@ -112,10 +112,8 @@ class BookCatalogService {
 
     final seen = <String>{};
     final merged = <Map<String, String>>[];
-    // Apple Books FR en tête pour romans / BD / comics (titres VF, covers HD).
-    final lists = subcategory == BookSubcategory.manga
-        ? [google, itunes, ol]
-        : [itunes, google, ol];
+    // Apple Books FR en tête pour toutes les catégories (mangas inclus).
+    final lists = [itunes, google, ol];
     for (final list in lists) {
       for (final b in list) {
         final title = b['title']?.trim();

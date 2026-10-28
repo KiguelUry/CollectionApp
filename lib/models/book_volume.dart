@@ -74,16 +74,15 @@ class BookVolume {
     return null;
   }
 
-  /// Tome pas encore sorti (précommande / date future).
-  /// Si `publishedDate` ≤ aujourd'hui → paru (ignore un vieux flag is_upcoming).
+  /// Tome pas encore sorti. La date doit être strictement après aujourd'hui + 2 jours.
+  /// Un flag `is_upcoming` sans date future ne suffit pas.
   bool get isUpcoming {
     final d = publishedDate;
+    if (d == null) return false;
     final today = DateTime.now();
-    final day = DateTime(today.year, today.month, today.day);
-    if (d != null) {
-      return d.isAfter(day);
-    }
-    return metadata['is_upcoming'] == true;
+    final cutoff = DateTime(today.year, today.month, today.day)
+        .add(const Duration(days: 2));
+    return d.isAfter(cutoff);
   }
 
   String? get upcomingLabel {
@@ -104,6 +103,7 @@ class BookVolume {
     final raw = metadata['edition_language']?.toString().trim().toLowerCase();
     if (raw == 'ja' || raw == 'jp') return 'ja';
     if (raw == 'en') return 'en';
+    if (raw == 'other' || raw == 'autre') return 'other';
     return 'fr';
   }
 

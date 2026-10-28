@@ -262,9 +262,43 @@ abstract final class BookSeriesNormalizer {
     return normalizeKey(text).contains(want);
   }
 
+  /// Clé stricte d'identité (égalité seule : pas de préfixe, pas de contains).
+  static String normalizeSeriesKey(String name) => mergeKey(name);
+
+  /// Vrai seulement si les deux noms sont la même série.
+  /// « Jujutsu Kaisen », « Jujutsu Kaisen 0 » et « Jujutsu Kaisen Modulo »
+  /// sont trois séries distinctes.
   static bool namesMatch(String a, String b) =>
-      BookTitleParser.seriesNamesMatch(normalizeKey(a), normalizeKey(b)) ||
-      BookTitleParser.seriesNamesMatch(a, b);
+      normalizeSeriesKey(a) == normalizeSeriesKey(b);
+
+  /// Le titre, le sous-titre ou le `collectionName` Apple désigne cette série.
+  /// La description n'est jamais lue ici.
+  static bool catalogIdentityMatchesSeries({
+    required String title,
+    String? subtitle,
+    String? collectionName,
+    String? seriesTitle,
+    required String seriesName,
+  }) {
+    final want = seriesName.trim();
+    if (want.length < 2) return false;
+    if (hitBelongsToSeries(title, want)) return true;
+    if (normalizeSeriesKey(title) == normalizeSeriesKey(want)) return true;
+    final sub = subtitle?.trim() ?? '';
+    if (sub.isNotEmpty &&
+        (hitBelongsToSeries(sub, want) ||
+            normalizeSeriesKey(sub) == normalizeSeriesKey(want))) {
+      return true;
+    }
+    for (final extra in [collectionName, seriesTitle]) {
+      final c = extra?.trim() ?? '';
+      if (c.isEmpty) continue;
+      if (hitBelongsToSeries(c, want)) return true;
+      if (normalizeSeriesKey(c) == normalizeSeriesKey(want)) return true;
+      if (textMentionsSeries(c, want)) return true;
+    }
+    return false;
+  }
 
   /// Vrai si le titre du hit appartient strictement à la série [seriesName].
   /// Une « Intégrale » numérotée n'appartient pas à la série standard.

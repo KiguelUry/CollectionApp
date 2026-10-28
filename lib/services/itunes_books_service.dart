@@ -12,6 +12,37 @@ import '../utils/web_catalog_proxy.dart';
 /// Recherche livres / mangas / BD — API iTunes (couvertures HD).
 /// Sur le web : Edge Function Supabase `catalog-proxy` (CORS).
 class ItunesBooksService {
+  /// Apple Books FR : nom, « Nom Tome », auteur, et pour un manga
+  /// les passes éditeur VF (Glénat / Kana) qui portent les couvertures.
+  static Future<List<Map<String, String>>> searchSeries(
+    String name, {
+    String? author,
+    bool mangaPublisherPass = false,
+  }) async {
+    final clean = name.trim();
+    if (clean.length < 2) return const [];
+    final queries = <String>[
+      clean,
+      '$clean Tome',
+      if (author != null && author.trim().length >= 2) '$clean ${author.trim()}',
+      if (mangaPublisherPass) '$clean Glénat',
+      if (mangaPublisherPass) '$clean Kana',
+    ];
+    final lists = await Future.wait(
+      queries.map((q) => search(q, limit: 200)),
+    );
+    final seen = <String>{};
+    final out = <Map<String, String>>[];
+    for (final list in lists) {
+      for (final h in list) {
+        final t = (h['title'] ?? '').toLowerCase();
+        if (t.isEmpty || !seen.add(t)) continue;
+        out.add(h);
+      }
+    }
+    return out;
+  }
+
   static Future<List<Map<String, String>>> search(
     String query, {
     int limit = 200,
@@ -198,6 +229,15 @@ class ItunesBooksService {
     final description = m['description']?.toString().trim();
     if (description != null && description.isNotEmpty) {
       result['description'] = description;
+    }
+    final rating = m['averageUserRating'];
+    if (rating is num && rating > 0) {
+      result['community_rating'] = rating.toString();
+    } else {
+      final parsed = double.tryParse('${rating ?? ''}');
+      if (parsed != null && parsed > 0) {
+        result['community_rating'] = parsed.toString();
+      }
     }
 
     final genres = m['genres'] as List<dynamic>?;
