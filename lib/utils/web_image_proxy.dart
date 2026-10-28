@@ -66,11 +66,11 @@ String _supabaseImageProxy(String url) {
           ? AppEnv.supabaseUrl
           : SupabasePublicConfig.url)
       .replaceAll(RegExp(r'/+$'), '');
-  final anon = AppEnv.supabaseAnonKey;
+  final anon = AppEnv.supabaseAnonKey.trim().isNotEmpty
+      ? AppEnv.supabaseAnonKey.trim()
+      : SupabasePublicConfig.anonKey;
   final qp = StringBuffer('url=${Uri.encodeComponent(url)}');
-  if (anon.isNotEmpty) {
-    qp.write('&apikey=${Uri.encodeComponent(anon)}');
-  }
+  qp.write('&apikey=${Uri.encodeComponent(anon)}');
   // image-proxy (images) ; fallback wsrv si besoin côté caller.
   return '$base/functions/v1/image-proxy?$qp';
 }

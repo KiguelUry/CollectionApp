@@ -1,6 +1,13 @@
 import 'package:flutter/foundation.dart';
 
 import '../config/app_env.dart';
+import '../config/supabase_public_config.dart';
+
+String _catalogAnonKey() {
+  final anon = AppEnv.supabaseAnonKey.trim();
+  if (anon.isNotEmpty) return anon;
+  return SupabasePublicConfig.anonKey;
+}
 
 /// Sur le web, route les API CORS-bloquées (MangaDex, iTunes) via l'Edge Function
 /// Supabase `catalog-proxy` — plus fiable que allorigins / codetabs (520/522).
@@ -16,11 +23,11 @@ Uri proxiedCatalogUri(Uri target) {
   if (!allowed.contains(host)) return target;
 
   final base = AppEnv.supabaseUrl.replaceAll(RegExp(r'/+$'), '');
-  final anon = AppEnv.supabaseAnonKey;
+  final anon = _catalogAnonKey();
   return Uri.parse('$base/functions/v1/catalog-proxy').replace(
     queryParameters: {
       'url': target.toString(),
-      if (anon.isNotEmpty) 'apikey': anon,
+      'apikey': anon,
     },
   );
 }
@@ -31,11 +38,9 @@ Map<String, String> proxiedCatalogHeaders([Map<String, String>? extra]) {
     ...?extra,
   };
   if (kIsWeb) {
-    final anon = AppEnv.supabaseAnonKey;
-    if (anon.isNotEmpty) {
-      headers['apikey'] = anon;
-      headers['Authorization'] = 'Bearer $anon';
-    }
+    final anon = _catalogAnonKey();
+    headers['apikey'] = anon;
+    headers['Authorization'] = 'Bearer $anon';
   }
   return headers;
 }

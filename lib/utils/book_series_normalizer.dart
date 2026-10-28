@@ -96,6 +96,40 @@ abstract final class BookSeriesNormalizer {
     'neil gaiman',
   };
 
+  /// Auteurs BD franco-belge (XIII, Thorgal…).
+  static const bdAuthors = <String>{
+    'van hamme',
+    'jean van hamme',
+    'william vance',
+  };
+
+  /// « A, B & C » à partir d’une liste d’auteurs/dessinateurs.
+  static String formatAuthorList(Iterable<String> names) {
+    final unique = <String>[];
+    final seen = <String>{};
+    for (final n in names) {
+      final t = n.trim();
+      if (t.isEmpty) continue;
+      final k = normalizeAuthorKey(t);
+      if (k.isEmpty || !seen.add(k)) continue;
+      unique.add(t);
+    }
+    if (unique.isEmpty) return '';
+    if (unique.length == 1) return unique.first;
+    if (unique.length == 2) return '${unique[0]} & ${unique[1]}';
+    return '${unique.sublist(0, unique.length - 1).join(', ')} & ${unique.last}';
+  }
+
+  static String? preferRicherAuthor(String? a, String? b) {
+    final aa = a?.trim() ?? '';
+    final bb = b?.trim() ?? '';
+    if (aa.isEmpty) return bb.isEmpty ? null : bb;
+    if (bb.isEmpty) return aa;
+    return bb.split(RegExp(r'[,&]')).length > aa.split(RegExp(r'[,&]')).length
+        ? bb
+        : aa;
+  }
+
   /// Déduit Manga / BD / Comics depuis éditeur + subjects API (jamais une liste de titres).
   /// BD et Comics **avant** Roman (fiction/graphic novel ne doivent jamais
   /// classer XIII ou Walking Dead en roman).
@@ -134,6 +168,8 @@ abstract final class BookSeriesNormalizer {
         subj.contains('european');
     final usComicsAuthor = authorKey.isNotEmpty &&
         comicsAuthors.any((a) => authorKey.contains(a));
+    final francoBdAuthor = authorKey.isNotEmpty &&
+        bdAuthors.any((a) => authorKey.contains(a));
     final comicsPublisher = pub.isNotEmpty &&
         comicsPublishers.any((p) => pub.contains(p)) &&
         !pub.contains('manga');
@@ -145,6 +181,7 @@ abstract final class BookSeriesNormalizer {
     // Comics / BD **avant** tout hint « fiction » / roman.
     if (comicsPublisher) return BookSubcategory.comics;
     if (usComicsAuthor) return BookSubcategory.comics;
+    if (francoBdAuthor) return BookSubcategory.comic;
     if (mixedPublisher && looksComicsSubj) return BookSubcategory.comics;
     if (bdPublisher) return BookSubcategory.comic;
     if (looksBdSubj) return BookSubcategory.comic;

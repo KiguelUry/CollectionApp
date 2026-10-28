@@ -13,7 +13,7 @@ alter table public.collection_items
     subcategory is null
     or (
       category = 'book'
-      and subcategory in ('manga', 'comic', 'novel', 'other')
+      and subcategory in ('manga', 'bd', 'comics', 'comic', 'novel', 'roman', 'other')
     )
     or (
       category = 'card'

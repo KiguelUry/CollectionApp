@@ -159,7 +159,7 @@ query ($search: String, $perPage: Int) {
     final ratingOnFive =
         score100 != null && score100 > 0 ? score100 / 20.0 : null;
 
-    String? author;
+    final staffNames = <String>[];
     final staff = media['staff'] as Map<String, dynamic>?;
     final edges = staff?['edges'] as List<dynamic>? ?? const [];
     for (final edge in edges) {
@@ -174,23 +174,19 @@ query ($search: String, $perPage: Int) {
       final node = edge['node'] as Map<String, dynamic>?;
       final name = node?['name'] as Map<String, dynamic>?;
       final full = (name?['full'] ?? name?['native'])?.toString().trim();
-      if (full != null && full.isNotEmpty) {
-        author = full;
-        break;
-      }
+      if (full != null && full.isNotEmpty) staffNames.add(full);
     }
-    if (author == null) {
+    if (staffNames.isEmpty) {
       for (final edge in edges) {
         if (edge is! Map<String, dynamic>) continue;
         final node = edge['node'] as Map<String, dynamic>?;
         final name = node?['name'] as Map<String, dynamic>?;
         final full = (name?['full'] ?? name?['native'])?.toString().trim();
-        if (full != null && full.isNotEmpty) {
-          author = full;
-          break;
-        }
+        if (full != null && full.isNotEmpty) staffNames.add(full);
       }
     }
+    final authorRaw = BookSeriesNormalizer.formatAuthorList(staffNames);
+    final author = authorRaw.isEmpty ? null : authorRaw;
 
     return AnilistMangaMeta(
       title: BookSeriesNormalizer.displaySeriesName(title),

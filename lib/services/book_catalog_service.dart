@@ -82,22 +82,24 @@ class BookCatalogService {
     final enhanced = _searchQueryForSubcategory(query, subcategory, frenchOnly);
 
     const t = Duration(seconds: 5);
-    // GB d'abord (sérialisé), iTunes en parallèle ; OL seulement si GB vide.
-    final itunesF = ItunesBooksService.search(enhanced)
+    // iTunes FR + Google Books en parallèle ; OL seulement si les deux sont vides.
+    final itunesF = ItunesBooksService.search(enhanced, limit: 50)
         .timeout(t, onTimeout: () => <Map<String, String>>[]);
+    final googleF = GoogleBooksService.search(
+      enhanced,
+      maxResults: 25,
+      langRestrict: frenchOnly ? _defaultLang : null,
+    ).timeout(t, onTimeout: () => <Map<String, String>>[]);
 
     List<Map<String, String>> google = [];
     List<Map<String, String>> itunes = [];
     List<Map<String, String>> ol = [];
     try {
-      google = await GoogleBooksService.search(
-        enhanced,
-        maxResults: 25,
-        langRestrict: frenchOnly ? _defaultLang : null,
-      ).timeout(t, onTimeout: () => <Map<String, String>>[]);
-      itunes = await itunesF;
-      // OL souvent timeout/CORS sur le web — skip si GB a déjà répondu.
-      if (google.isEmpty) {
+      final pair = await Future.wait([itunesF, googleF]);
+      itunes = pair[0];
+      google = pair[1];
+      // OL souvent timeout/CORS sur le web — skip si une source a déjà répondu.
+      if (google.isEmpty && itunes.isEmpty) {
         ol = await OpenLibraryService.searchBooks(
           query,
           subcategory: subcategory,
@@ -110,7 +112,11 @@ class BookCatalogService {
 
     final seen = <String>{};
     final merged = <Map<String, String>>[];
-    for (final list in [google, itunes, ol]) {
+    // Apple Books FR en tête pour romans / BD / comics (titres VF, covers HD).
+    final lists = subcategory == BookSubcategory.manga
+        ? [google, itunes, ol]
+        : [itunes, google, ol];
+    for (final list in lists) {
       for (final b in list) {
         final title = b['title']?.trim();
         if (title == null || title.isEmpty) continue;

@@ -55,10 +55,10 @@ class BookItemAddCoordinator {
         coversByVolume,
         publishedDatesByVolume,
         author,
-      }) async {
-        await _addSeriesFromSearch(
+      }) {
+        return _addSeriesFromSearch(
           name: name,
-          subcategory: subcategory ?? sub,
+          subcategory: sub,
           volumeCount: volumeCount,
           coversByVolume: coversByVolume,
           publishedDatesByVolume: publishedDatesByVolume,
@@ -70,7 +70,7 @@ class BookItemAddCoordinator {
   }
 
   /// Ajout série depuis la recherche : popup possession immédiat, reste sur la page.
-  Future<void> _addSeriesFromSearch({
+  Future<bool> _addSeriesFromSearch({
     required String name,
     required BookSubcategory subcategory,
     int? volumeCount,
@@ -83,13 +83,13 @@ class BookItemAddCoordinator {
     final total = volumeCount ?? 1;
 
     // Popup 0 ms — aucun réseau avant.
-    if (!context.mounted) return;
+    if (!context.mounted) return false;
     final range = await showBookOwnedRangeDialog(
       context,
       seriesName: name,
       totalVolumes: total,
     );
-    if (range == null || !context.mounted) return;
+    if (range == null || !context.mounted) return false;
 
     showDialog(
       context: context,
@@ -180,6 +180,7 @@ class BookItemAddCoordinator {
           SnackBar(content: Text('« $name » ajoutée à ta collection')),
         );
       }
+      return true;
     } catch (e) {
       if (context.mounted) {
         Navigator.pop(context); // loading
@@ -187,6 +188,7 @@ class BookItemAddCoordinator {
           SnackBar(content: Text('Erreur: $e')),
         );
       }
+      return false;
     }
   }
 

@@ -8,7 +8,7 @@ create table if not exists public.book_series (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid not null references public.profiles (id) on delete cascade,
   name text not null,
-  subcategory text not null check (subcategory in ('manga', 'comic', 'novel', 'other')),
+  subcategory text not null check (subcategory in ('manga', 'bd', 'comics', 'comic', 'novel', 'roman', 'other')),
   cover_url text,
   parent_series_id uuid references public.book_series (id) on delete cascade,
   description text,

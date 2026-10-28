@@ -38,6 +38,8 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   bool _friseExpanded = false;
   bool _chaptersExpanded = false;
   bool _refreshingPubs = false;
+  /// `enrichMissingVolumeCovers` : une seule fois par ouverture d’écran.
+  bool _hasEnrichedThisSession = false;
 
   @override
   void initState() {
@@ -56,11 +58,14 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     try {
       var series = await _service.fetchSeriesById(widget.seriesId);
       if (series == null) throw Exception('Série introuvable');
-      series = await _service.sanitizeSeriesName(series);
-      await _service.dedupeVolumeItems(series.id);
-      // Berserk/Glénat classé BD → Manga si AniList/MangaDex confirme.
-      series = await _service.reclassifyAsMangaIfConfirmed(series);
-      series = await _service.ensureRealisticVolumeCount(series);
+      // Reloads silencieux : lecture seule (sinon enrich → PATCH → _load infini).
+      if (!silent) {
+        series = await _service.sanitizeSeriesName(series);
+        await _service.dedupeVolumeItems(series.id);
+        // Berserk/Glénat classé BD → Manga si AniList/MangaDex confirme.
+        series = await _service.reclassifyAsMangaIfConfirmed(series);
+        series = await _service.ensureRealisticVolumeCount(series);
+      }
       final volumes = await _service.fetchVolumes(series.id);
       final items = await _service.fetchSeriesItems(series.id);
       final stats = _service.computeStats(
@@ -87,8 +92,10 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         _slots = slots;
         _loading = false;
       });
-      // Couvertures : 1 seul batch Google Books (pas de boucle 1 req/tome).
+      if (_hasEnrichedThisSession) return;
+      _hasEnrichedThisSession = true;
       final seriesForBg = series;
+      final volumesForBg = volumes;
       Future(() async {
         var any = false;
         if (seriesForBg.communityRating == null) {
@@ -98,15 +105,11 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         }
         final n = await _service.enrichMissingVolumeCovers(
           series: seriesForBg,
-          volumes: volumes,
+          volumes: volumesForBg,
           repairUnverified: true,
-          progressEvery: 5,
-          onProgress: (_) {
-            if (mounted) _load(silent: true);
-          },
         );
         if (n > 0) any = true;
-        if (any && mounted) _load(silent: true);
+        if (any && mounted) await _load(silent: true);
       });
     } catch (e) {
       if (!mounted) return;
@@ -142,6 +145,13 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     await _toggleOwned(slot);
   }
 
+  BookVolumeSlot _liveSlot(BookVolumeSlot slot) {
+    for (final s in _slots) {
+      if (s.volume.id == slot.volume.id) return s;
+    }
+    return slot;
+  }
+
   /// Carte couverture : ouvre le détail en bottom sheet (pas en bas de page).
   Future<void> _onCardTap(BookVolumeSlot slot) async {
     final accent = BookAccent.primary;
@@ -161,12 +171,22 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
             minChildSize: 0.45,
             maxChildSize: 0.95,
             builder: (_, scrollCtrl) {
-              return ListView(
-                controller: scrollCtrl,
-                padding: const EdgeInsets.fromLTRB(8, 0, 8, 24),
-                children: [
-                  _buildVolumeDrawer(slot, accent, inSheet: true),
-                ],
+              return StatefulBuilder(
+                builder: (modalCtx, setModal) {
+                  final live = _liveSlot(slot);
+                  return ListView(
+                    controller: scrollCtrl,
+                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 24),
+                    children: [
+                      _buildVolumeDrawer(
+                        live,
+                        accent,
+                        inSheet: true,
+                        onSheetChanged: () => setModal(() {}),
+                      ),
+                    ],
+                  );
+                },
               );
             },
           ),
@@ -284,13 +304,10 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     } else {
       nextItem = _fakeItem(cur, wishlist: nextWish, read: nextRead);
       if (rating != null) {
-        final base = nextItem ?? cur.item;
-        if (base != null) {
-          nextItem = base.copyWith(
-            rating: rating <= 0 ? null : rating,
-            clearRating: rating <= 0,
-          );
-        }
+        nextItem = nextItem.copyWith(
+          rating: rating <= 0 ? null : rating,
+          clearRating: rating <= 0,
+        );
       }
     }
 
@@ -528,9 +545,20 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
 
   Future<void> _setSeriesCoverFrom(BookVolumeSlot slot) async {
     final url = slot.volume.coverUrl ?? slot.item?.imageUrl;
-    if (url == null || url.isEmpty) return;
-    await _service.updateSeries(_series!.copyWith(coverUrl: url));
-    await _load(silent: true);
+    if (url == null || url.isEmpty || _series == null) return;
+    final meta = Map<String, dynamic>.from(_series!.metadata);
+    meta['cover_locked'] = true;
+    final updated = _series!.copyWith(coverUrl: url, metadata: meta);
+    setState(() => _series = updated);
+    try {
+      await _service.updateSeries(updated);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e')),
+        );
+      }
+    }
   }
 
   Future<void> _setVolumeRating(BookVolumeSlot slot, double rating) async {
@@ -1235,26 +1263,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                               ),
                             ),
                             const SizedBox(height: 4),
-                            if (!owned && slot.volume.isUpcoming)
-                              FilledButton(
-                                onPressed: () => _toggleWishlist(slot),
-                                style: FilledButton.styleFrom(
-                                  visualDensity: VisualDensity.compact,
-                                  backgroundColor: Colors.deepPurple,
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 6,
-                                  ),
-                                  minimumSize: const Size(0, 28),
-                                ),
-                                child: Text(
-                                  _slotWish(slot)
-                                      ? '💜 En wishlist'
-                                      : '💜 Wishlist',
-                                  style: const TextStyle(fontSize: 11),
-                                ),
-                              )
-                            else
-                              Wrap(
+                            Wrap(
                                 spacing: 4,
                                 runSpacing: 4,
                                 children: [
@@ -1352,10 +1361,43 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     return const Color(0xFFE53935);
   }
 
+  Widget _sheetActionButton({
+    required bool active,
+    required Color activeColor,
+    required String activeLabel,
+    required String idleLabel,
+    required VoidCallback onTap,
+  }) {
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(10),
+    );
+    if (active) {
+      return FilledButton(
+        onPressed: onTap,
+        style: FilledButton.styleFrom(
+          backgroundColor: activeColor,
+          foregroundColor: Colors.white,
+          visualDensity: VisualDensity.compact,
+          shape: shape,
+        ),
+        child: Text(activeLabel),
+      );
+    }
+    return OutlinedButton(
+      onPressed: onTap,
+      style: OutlinedButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        shape: shape,
+      ),
+      child: Text(idleLabel),
+    );
+  }
+
   Widget _buildVolumeDrawer(
     BookVolumeSlot slot,
     Color accent, {
     bool inSheet = false,
+    VoidCallback? onSheetChanged,
   }) {
     final owned = _slotOwned(slot);
     final read = _slotRead(slot);
@@ -1438,17 +1480,35 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                     spacing: 6,
                     runSpacing: 6,
                     children: [
-                      FilledButton.tonal(
-                        onPressed: () => _toggleOwned(slot),
-                        child: Text(owned ? '✓ Possédé' : '+ Possédé'),
+                      _sheetActionButton(
+                        active: owned,
+                        activeColor: const Color(0xFF0D9488),
+                        activeLabel: '✓ Possédé',
+                        idleLabel: '+ Possédé',
+                        onTap: () {
+                          _toggleOwned(slot);
+                          onSheetChanged?.call();
+                        },
                       ),
-                      OutlinedButton(
-                        onPressed: () => _toggleRead(slot),
-                        child: Text(read ? '👁️ Lu' : '👁️ Non lu'),
+                      _sheetActionButton(
+                        active: read,
+                        activeColor: const Color(0xFF1565C0),
+                        activeLabel: '✓ Lu',
+                        idleLabel: '👁 Non lu',
+                        onTap: () {
+                          _toggleRead(slot);
+                          onSheetChanged?.call();
+                        },
                       ),
-                      OutlinedButton(
-                        onPressed: () => _toggleWishlist(slot),
-                        child: Text(wish ? '❤️ Wishlist' : '♡ Wishlist'),
+                      _sheetActionButton(
+                        active: wish,
+                        activeColor: const Color(0xFF6A1B9A),
+                        activeLabel: '♥ Wishlist',
+                        idleLabel: '♡ Wishlist',
+                        onTap: () {
+                          _toggleWishlist(slot);
+                          onSheetChanged?.call();
+                        },
                       ),
                     ],
                   ),
@@ -1469,10 +1529,21 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                         ChoiceChip(
                           label: Text(
                             e.label,
-                            style: const TextStyle(fontSize: 11),
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: edition == e
+                                  ? FontWeight.w800
+                                  : FontWeight.w500,
+                              color: edition == e ? Colors.white : null,
+                            ),
                           ),
                           selected: edition == e,
-                          onSelected: (_) => _setEdition(slot, e),
+                          selectedColor: accent,
+                          checkmarkColor: Colors.white,
+                          onSelected: (_) {
+                            _setEdition(slot, e);
+                            onSheetChanged?.call();
+                          },
                           visualDensity: VisualDensity.compact,
                           materialTapTargetSize:
                               MaterialTapTargetSize.shrinkWrap,

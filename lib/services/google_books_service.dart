@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_env.dart';
+import '../config/supabase_public_config.dart';
 import '../utils/book_title_parser.dart';
 import '../utils/book_vf_edition.dart';
 import '../utils/web_catalog_proxy.dart';
@@ -138,21 +139,24 @@ class GoogleBooksService {
       final withKey = hasApiKey && !_preferKeyless;
       final target = _volumesUri(p, withKey: withKey);
       final proxied = proxiedCatalogUri(target);
+      final anon = AppEnv.supabaseAnonKey.trim().isNotEmpty
+          ? AppEnv.supabaseAnonKey.trim()
+          : SupabasePublicConfig.anonKey;
       final uri = kIsWeb
           ? proxied
           : Uri.parse(
               '${AppEnv.supabaseUrl.replaceAll(RegExp(r'/+$'), '')}'
               '/functions/v1/catalog-proxy'
               '?url=${Uri.encodeComponent(target.toString())}'
-              '&apikey=${Uri.encodeComponent(AppEnv.supabaseAnonKey)}',
+              '&apikey=${Uri.encodeComponent(anon)}',
             );
       return await http
           .get(
             uri,
             headers: {
               'Accept': 'application/json',
-              'apikey': AppEnv.supabaseAnonKey,
-              'Authorization': 'Bearer ${AppEnv.supabaseAnonKey}',
+              'apikey': anon,
+              'Authorization': 'Bearer $anon',
             },
           )
           .timeout(const Duration(seconds: 10));
@@ -182,12 +186,13 @@ class GoogleBooksService {
         // 503/5xx : retry AVEC clé, requête allégée (jamais keyless).
         if (_isServerError(res.statusCode)) {
           if (_isLocked) return null;
+          await Future<void>.delayed(const Duration(milliseconds: 400));
           final light = Map<String, String>.from(base)
             ..remove('langRestrict')
             ..['maxResults'] = '20';
           if (kDebugMode) {
             debugPrint(
-              'Google Books ${res.statusCode} → retry keyed light (no langRestrict)',
+              'Google Books ${res.statusCode} → wait 400ms, retry keyed light',
             );
           }
           try {
@@ -221,6 +226,9 @@ class GoogleBooksService {
         if (res.statusCode == 200) return res;
         if (_isLocked) return null;
         if (_isQuotaError(res.statusCode) || _isServerError(res.statusCode)) {
+          if (_isServerError(res.statusCode)) {
+            await Future<void>.delayed(const Duration(milliseconds: 400));
+          }
           final proxyRes = await _viaProxy(base);
           if (proxyRes != null && proxyRes.statusCode == 200) return proxyRes;
           _tripBreaker(

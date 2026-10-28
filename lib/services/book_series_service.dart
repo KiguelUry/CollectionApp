@@ -10,6 +10,7 @@ import '../utils/book_title_parser.dart';
 import 'anilist_manga_service.dart';
 import 'book_catalog_service.dart';
 import 'book_intelligence_service.dart';
+import 'itunes_books_service.dart';
 import 'mangadex_service.dart';
 import 'open_library_service.dart';
 import 'profile_service.dart';
@@ -18,6 +19,44 @@ class BookSeriesService {
   final _client = Supabase.instance.client;
 
   String get _userId => _client.auth.currentUser!.id;
+
+  static bool _isSubcategoryCheckFailure(Object e) {
+    if (e is PostgrestException) {
+      if (e.code == '23514') return true;
+      final m = e.message.toLowerCase();
+      return m.contains('subcategory_check');
+    }
+    final s = e.toString().toLowerCase();
+    return s.contains('23514') || s.contains('subcategory_check');
+  }
+
+  Future<Map<String, dynamic>> _insertCollectionItem(
+    Map<String, dynamic> payload,
+  ) async {
+    try {
+      return await _client
+          .from('collection_items')
+          .insert(payload)
+          .select()
+          .single();
+    } on PostgrestException catch (e) {
+      if (!_isSubcategoryCheckFailure(e)) rethrow;
+      final raw = payload['subcategory']?.toString();
+      final fallback = switch (raw) {
+        'comics' => 'comic',
+        'roman' => 'novel',
+        'bd' => 'comic',
+        _ => null,
+      };
+      if (fallback == null || fallback == raw) rethrow;
+      payload = Map<String, dynamic>.from(payload)..['subcategory'] = fallback;
+      return await _client
+          .from('collection_items')
+          .insert(payload)
+          .select()
+          .single();
+    }
+  }
 
   Future<List<BookSeries>> fetchSeries({
     required BookSubcategory subcategory,
@@ -67,19 +106,25 @@ class BookSeriesService {
     final a = author?.trim();
     if (a != null && a.isNotEmpty) meta['author'] = a;
 
-    final row = await _client
-        .from('book_series')
-        .insert({
-          'owner_id': _userId,
-          'name': name.trim(),
-          'subcategory': subcategory.dbValue,
-          'parent_series_id': parentSeriesId,
-          'expected_volume_count': expectedVolumeCount,
-          'cover_url': coverUrl,
-          if (meta.isNotEmpty) 'metadata': meta,
-        })
-        .select()
-        .single();
+    final payload = <String, dynamic>{
+      'owner_id': _userId,
+      'name': name.trim(),
+      'subcategory': subcategory.dbValue,
+      'parent_series_id': parentSeriesId,
+      'expected_volume_count': expectedVolumeCount,
+      'cover_url': coverUrl,
+      if (meta.isNotEmpty) 'metadata': meta,
+    };
+    Map<String, dynamic> row;
+    try {
+      row = await _client.from('book_series').insert(payload).select().single();
+    } on PostgrestException catch (e) {
+      if (!_isSubcategoryCheckFailure(e)) rethrow;
+      final fallback = subcategory.legacyDbValue;
+      if (fallback == subcategory.dbValue) rethrow;
+      payload['subcategory'] = fallback;
+      row = await _client.from('book_series').insert(payload).select().single();
+    }
 
     final series = BookSeries.fromJson(row);
     if (expectedVolumeCount != null && expectedVolumeCount > 0) {
@@ -105,11 +150,24 @@ class BookSeriesService {
   }
 
   Future<void> updateSeries(BookSeries series) async {
-    await _client
-        .from('book_series')
-        .update(series.toUpdateJson())
-        .eq('id', series.id)
-        .eq('owner_id', _userId);
+    final payload = series.toUpdateJson();
+    try {
+      await _client
+          .from('book_series')
+          .update(payload)
+          .eq('id', series.id)
+          .eq('owner_id', _userId);
+    } on PostgrestException catch (e) {
+      if (!_isSubcategoryCheckFailure(e)) rethrow;
+      final fallback = series.subcategory.legacyDbValue;
+      if (fallback == series.subcategory.dbValue) rethrow;
+      payload['subcategory'] = fallback;
+      await _client
+          .from('book_series')
+          .update(payload)
+          .eq('id', series.id)
+          .eq('owner_id', _userId);
+    }
   }
 
   Future<void> deleteSeries(String id) async {
@@ -1013,7 +1071,36 @@ class BookSeriesService {
       }
     } catch (_) {}
 
-    // 2) MangaDex comble TOUS les trous restants (T25, T28, T31-39…).
+    // 2) Apple Books FR comble les trous (romans / BD / comics).
+    if (working.subcategory != BookSubcategory.manga) {
+      try {
+        final missing = <int>[];
+        final cap = working.expectedVolumeCount ?? volumes.length;
+        for (var n = 1; n <= cap.clamp(1, 80); n++) {
+          if (!batch.containsKey(n)) missing.add(n);
+        }
+        if (missing.isNotEmpty) {
+          final it = await ItunesBooksService.lookupFrenchVolumesBatch(
+            working.name,
+            missing.take(24),
+          );
+          for (final e in it.entries) {
+            final img = e.value['image_url'] ?? '';
+            if (img.isEmpty) continue;
+            batch.putIfAbsent(
+              e.key,
+              () => (
+                coverUrl: img,
+                publishedDate: e.value['published_date'],
+              ),
+            );
+            if (e.key > vfMax) vfMax = e.key;
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 3) MangaDex comble TOUS les trous restants (T25, T28, T31-39…).
     if (working.subcategory == BookSubcategory.manga) {
       try {
         final md = await MangaDexService.lookupManga(
@@ -1021,7 +1108,16 @@ class BookSeriesService {
           authorHint: seriesAuthor,
         );
         if (md != null) {
-          for (final e in md.coverByVolume.entries) {
+          var covers = Map<int, String>.from(md.coverByVolume);
+          final need = md.volumesPublished ??
+              (working.expectedVolumeCount ?? volumes.length);
+          if (covers.length < need && md.id.isNotEmpty) {
+            try {
+              final extra = await MangaDexService.fetchAllCovers(md.id);
+              covers.addAll(extra);
+            } catch (_) {}
+          }
+          for (final e in covers.entries) {
             batch.putIfAbsent(
               e.key,
               () => (coverUrl: e.value, publishedDate: null),
@@ -1036,6 +1132,7 @@ class BookSeriesService {
             vfMax,
             mdVols ?? 0,
             batchMax,
+            covers.isEmpty ? 0 : covers.keys.reduce((a, b) => a > b ? a : b),
           ].reduce((a, b) => a > b ? a : b);
           if (target > (working.expectedVolumeCount ?? 0)) {
             working =
@@ -1077,36 +1174,14 @@ class BookSeriesService {
       final url = hit.coverUrl;
       final pub = hit.publishedDate;
       final upcoming = BookIntelligenceService.isFuturePublishedDate(pub);
-      // GB VF remplace systématiquement MD / anciennes couvs IT.
-      final catalogCover = !isMangaDexCoverUrl(url);
       final sameCover = hasCover && vol.coverUrl == url;
       final dateMissing = pub != null &&
           pub.isNotEmpty &&
           (vol.metadata['published_date'] == null ||
               vol.metadata['published_date'].toString().isEmpty);
 
-      if (hasCover &&
-          !needsRepair &&
-          verified == n &&
-          sameCover &&
-          !catalogCover) {
-        if (dateMissing) {
-          await patchVolumePublishedDate(
-            vol.id,
-            publishedDate: pub,
-            upcoming: upcoming,
-          );
-          updated++;
-        }
-        continue;
-      }
-
-      // Même tome déjà vérifié avec une autre URL non-catalogue → garder.
-      if (hasCover &&
-          !needsRepair &&
-          verified == n &&
-          !catalogCover &&
-          !sameCover) {
+      // Jamais de PATCH si l’URL n’a pas changé.
+      if (sameCover) {
         if (dateMissing) {
           await patchVolumePublishedDate(
             vol.id,
@@ -1134,7 +1209,7 @@ class BookSeriesService {
       }
     }
 
-    // Couverture série = Tome 1 vérifié (VF si possible).
+    // Couverture série = Tome 1 seulement si vide / non verrouillée.
     final fresh = await fetchSeriesById(working.id);
     final refreshed = await fetchVolumes(working.id);
     String? tome1;
@@ -1148,14 +1223,10 @@ class BookSeriesService {
       }
     }
     if (fresh != null &&
-        tome1 != null &&
-        tome1.isNotEmpty &&
-        (fresh.coverUrl != tome1 || isMangaDexCoverUrl(fresh.coverUrl))) {
-      await updateSeries(fresh.copyWith(coverUrl: tome1));
-      updated++;
-    } else if (fresh != null &&
+        !fresh.coverLocked &&
         (fresh.coverUrl == null || fresh.coverUrl!.isEmpty) &&
-        tome1 != null) {
+        tome1 != null &&
+        tome1.isNotEmpty) {
       await updateSeries(fresh.copyWith(coverUrl: tome1));
       updated++;
     }
@@ -1183,7 +1254,7 @@ class BookSeriesService {
 
     await ProfileService().ensureCurrentUserProfile();
     final n = slot.volume.volumeNumber.ceil();
-    await _client.from('collection_items').insert({
+    await _insertCollectionItem({
       'title': '${series.name} - Tome $n',
       'category': CollectionCategory.book.dbValue,
       'subcategory': series.subcategory.dbValue,
@@ -1206,6 +1277,7 @@ class BookSeriesService {
     if (imageUrl == null || imageUrl.isEmpty) return;
     final series = await fetchSeriesById(seriesId);
     if (series == null) return;
+    if (series.coverLocked) return;
     if (series.coverUrl != null && series.coverUrl!.isNotEmpty) return;
     await updateSeries(series.copyWith(coverUrl: imageUrl));
   }
@@ -1266,26 +1338,22 @@ class BookSeriesService {
         ? '${series.name} — $customTitle'
         : '${series.name} - Tome $n';
     final read = markAsRead || volume.isRead;
-    final row = await _client
-        .from('collection_items')
-        .insert({
-          'title': title,
-          'category': CollectionCategory.book.dbValue,
-          'subcategory': series.subcategory.dbValue,
-          'series_id': series.id,
-          'volume_id': volume.id,
-          'is_wishlist': false,
-          'is_read': read,
-          'quantity': 1,
-          'added_by': _userId,
-          'location_user_id': _userId,
-          'metadata': {
-            if (volume.metadata['cover_url'] != null)
-              'image_url': volume.metadata['cover_url'],
-          },
-        })
-        .select()
-        .single();
+    final row = await _insertCollectionItem({
+      'title': title,
+      'category': CollectionCategory.book.dbValue,
+      'subcategory': series.subcategory.dbValue,
+      'series_id': series.id,
+      'volume_id': volume.id,
+      'is_wishlist': false,
+      'is_read': read,
+      'quantity': 1,
+      'added_by': _userId,
+      'location_user_id': _userId,
+      'metadata': {
+        if (volume.metadata['cover_url'] != null)
+          'image_url': volume.metadata['cover_url'],
+      },
+    });
     if (read) {
       await setVolumeReadFlag(volume.id, false);
     }
@@ -1824,7 +1892,7 @@ class BookSeriesService {
       if (byVolumeId.containsKey(vol.id)) continue;
 
       final title = '${series.name} - Tome $n';
-      await _client.from('collection_items').insert({
+      await _insertCollectionItem({
         'title': title,
         'category': CollectionCategory.book.dbValue,
         'subcategory': series.subcategory.dbValue,

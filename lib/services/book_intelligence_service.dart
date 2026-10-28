@@ -3,6 +3,7 @@ import '../utils/book_series_normalizer.dart';
 import '../utils/book_title_parser.dart';
 import '../utils/book_vf_edition.dart';
 import 'google_books_service.dart';
+import 'itunes_books_service.dart';
 
 /// Bannière série détectée dans les résultats de recherche.
 class SeriesBannerCandidate {
@@ -200,6 +201,10 @@ abstract final class BookIntelligenceService {
         )
         .toList();
     enriched = inferSharedPrefixSeries(enriched, queryHint: filters.titleQuery);
+    enriched = assignPublicationOrderVolumes(
+      enriched,
+      queryHint: filters.titleQuery,
+    );
 
     final filtered = enriched.where((hit) {
       return _matchesFilters(hit, filters);
@@ -462,6 +467,7 @@ abstract final class BookIntelligenceService {
     final preferTome = subcategory == BookSubcategory.manga ||
         subcategory == BookSubcategory.novel ||
         subcategory == BookSubcategory.comic;
+    final itunesF = ItunesBooksService.search(cleanName, limit: 50);
     // VF d'abord (une seule chaîne sérialisée), puis EN pour combler les trous.
     var hits = await GoogleBooksService.searchSeriesBatched(
       cleanName,
@@ -486,6 +492,14 @@ abstract final class BookIntelligenceService {
       seenTitles.add(t);
       hits.add(h);
     }
+    try {
+      for (final h in await itunesF) {
+        final t = (h['title'] ?? '').toLowerCase();
+        if (t.isEmpty || seenTitles.contains(t)) continue;
+        seenTitles.add(t);
+        hits.add(h);
+      }
+    } catch (_) {}
 
     final ranked = enrichAndRank(
       hits,
@@ -716,7 +730,7 @@ abstract final class BookIntelligenceService {
         seriesName: seriesName,
         title: title,
         publisher: publisher,
-        subjects: hit['subjects'] ?? hit['categories'],
+        subjects: hit['subjects'] ?? hit['categories'] ?? hit['genre'],
         author: author,
         comicsContent: hit['comics_content'] == 'true',
       );
@@ -831,6 +845,74 @@ abstract final class BookIntelligenceService {
           publisher: h.publisher,
           estimatedTotalVolumes: h.estimatedTotalVolumes,
           score: h.score + 20,
+          detectedSubcategory: h.detectedSubcategory,
+        );
+      }
+    }
+    return out;
+  }
+
+  /// Romans d’une saga (« Harry Potter à/et … ») : n° = ordre de publication.
+  static List<EnrichedBookHit> assignPublicationOrderVolumes(
+    List<EnrichedBookHit> hits, {
+    String? queryHint,
+  }) {
+    if (hits.length < 2) return hits;
+    final groups = <String, List<int>>{};
+    for (var i = 0; i < hits.length; i++) {
+      final h = hits[i];
+      final title = h.raw['title'] ?? h.displayTitle;
+      if (BookTitleParser.isCompanionOrStudyTitle(title)) continue;
+      if (BookVfEdition.isRejectedCatalogTitle(
+        title,
+        subtitle: h.raw['subtitle'],
+      )) {
+        continue;
+      }
+      final series = h.parsed.seriesName ??
+          BookTitleParser.inferSeriesName(title, queryHint: queryHint);
+      if (series == null || series.trim().length < 3) continue;
+      if (!BookTitleParser.titleContinuesSeriesPrefix(title, series)) continue;
+      final authorKey = BookSeriesNormalizer.normalizeAuthorKey(h.author ?? '');
+      if (authorKey.isEmpty) continue;
+      final key = '${BookSeriesNormalizer.mergeKey(series)}|$authorKey';
+      groups.putIfAbsent(key, () => []).add(i);
+    }
+    final out = List<EnrichedBookHit>.from(hits);
+    for (final idxs in groups.values) {
+      if (idxs.length < 2) continue;
+      idxs.sort((a, b) {
+        final da = out[a].publishedDate ?? out[a].raw['year'] ?? '';
+        final db = out[b].publishedDate ?? out[b].raw['year'] ?? '';
+        final c = da.compareTo(db);
+        if (c != 0) return c;
+        return (out[a].raw['title'] ?? '').compareTo(out[b].raw['title'] ?? '');
+      });
+      String? seriesName;
+      for (final i in idxs) {
+        seriesName = out[i].parsed.seriesName ?? seriesName;
+      }
+      if (seriesName == null) continue;
+      for (var n = 0; n < idxs.length; n++) {
+        final i = idxs[n];
+        final h = out[i];
+        final vol = (n + 1).toDouble();
+        if (h.parsed.volumeNumber?.round() == n + 1) continue;
+        final raw = Map<String, String>.from(h.raw);
+        raw['series_volume'] = '${n + 1}';
+        raw['series_title'] = seriesName;
+        out[i] = EnrichedBookHit(
+          raw: raw,
+          parsed: ParsedBookTitle(
+            rawTitle: h.parsed.rawTitle,
+            seriesName: seriesName,
+            volumeNumber: vol,
+          ),
+          displayTitle: '$seriesName - Tome ${n + 1}',
+          author: h.author,
+          publisher: h.publisher,
+          estimatedTotalVolumes: idxs.length,
+          score: h.score + 30,
           detectedSubcategory: h.detectedSubcategory,
         );
       }

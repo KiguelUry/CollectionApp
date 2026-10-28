@@ -24,7 +24,7 @@ class BookCatalogGridScreen extends StatefulWidget {
   final String? initialQuery;
   final void Function(Map<String, String> book, BookSubcategory sub)?
       onBookSelected;
-  final Future<void> Function(
+  final Future<bool> Function(
     String seriesName,
     BookSubcategory sub, {
     int? volumeCount,
@@ -210,8 +210,10 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
     );
 
     const srcTimeout = Duration(seconds: 8);
-    final wantMangaOfficial =
-        seriesQ.length >= 2 && (_sub == null || _sub == BookSubcategory.manga);
+    // Toujours sonder AniList/MangaDex (même onglet Roman) pour exclure les mangas.
+    final wantMangaOfficial = seriesQ.length >= 2;
+    final includeMangaUi =
+        _sub == null || _sub == BookSubcategory.manga;
 
     // AniList + MangaDex + Google Books EN PARALLÈLE (≤4s / source).
     final mdFuture = wantMangaOfficial
@@ -409,7 +411,10 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
         volumeCount: count,
         coversByVolume: covers,
         detectedSubcategory: BookSubcategory.manga,
-        author: existing?.author ?? ani.author,
+        author: BookSeriesNormalizer.preferRicherAuthor(
+          existing?.author,
+          ani.author,
+        ),
         coverUrl: existing?.coverUrl ?? ani.coverUrl ?? covers[1],
         fromAnilist: true,
       );
@@ -470,6 +475,17 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       officialMergeKeysEarly,
     );
 
+    // Manga confirmé (Pluto, Monster…) : jamais dans l’onglet Roman / BD / Comics.
+    if (!includeMangaUi) {
+      enriched = enriched.where((h) {
+        if (h.detectedSubcategory == BookSubcategory.manga) return false;
+        final sn = h.parsed.seriesName ?? h.displayTitle;
+        return !officialMergeKeysEarly
+            .contains(BookSeriesNormalizer.mergeKey(sn));
+      }).toList();
+      officialBanners.clear();
+    }
+
     // Série officielle exacte → filtre strict « Tomes reliés » (pas Crooked Kingdom).
     final primarySeries = officialBanners.isNotEmpty
         ? officialBanners.first.name
@@ -523,7 +539,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
     }).toList();
 
     // MangaDex : fill covers manquantes + suite JP — SANS iTunes tome-par-tome.
-    if (primaryMangaDex != null) {
+    if (includeMangaUi && primaryMangaDex != null) {
       final md = primaryMangaDex;
       final mdAuthor = md.author ?? exactAuthor;
       final frVols = <int>{
@@ -833,17 +849,25 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
 
     final cb = widget.onAddSeries;
     if (cb != null) {
-      await cb(
-        banner.name,
-        preferred,
-        volumeCount: banner.volumeCount,
-        coversByVolume: banner.coversByVolume,
-        publishedDatesByVolume: banner.publishedDatesByVolume,
-        author: banner.author,
-      );
-      if (!mounted) return;
-      setState(() => _addedSeriesKeys.add(key));
-      await _loadOwnedIndex();
+      try {
+        final ok = await cb(
+          banner.name,
+          preferred,
+          volumeCount: banner.volumeCount,
+          coversByVolume: banner.coversByVolume,
+          publishedDatesByVolume: banner.publishedDatesByVolume,
+          author: banner.author,
+        );
+        if (!mounted) return;
+        if (!ok) return;
+        setState(() => _addedSeriesKeys.add(key));
+        await _loadOwnedIndex();
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur: $e')),
+        );
+      }
       return;
     }
     _select(

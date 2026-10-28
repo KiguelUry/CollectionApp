@@ -1,5 +1,6 @@
 import 'package:collection_app/models/book_subcategory.dart';
 import 'package:collection_app/services/anilist_manga_service.dart';
+import 'package:collection_app/services/book_intelligence_service.dart';
 import 'package:collection_app/services/mangadex_service.dart';
 import 'package:collection_app/utils/book_series_normalizer.dart';
 import 'package:collection_app/utils/book_title_parser.dart';
@@ -126,6 +127,56 @@ void main() {
       expect(p2.volumeNumber?.round(), 2);
     });
 
+    test('Harry Potter : ordre de publication → 7 tomes', () {
+      final titles = [
+        "Harry Potter à l'école des sorciers",
+        'Harry Potter et la Chambre des secrets',
+        "Harry Potter et le Prisonnier d'Azkaban",
+        'Harry Potter et la Coupe de feu',
+        "Harry Potter et l'Ordre du Phénix",
+        'Harry Potter et le Prince de sang-mêlé',
+        'Harry Potter et les Reliques de la Mort',
+      ];
+      final years = [
+        '1998-10-09',
+        '1999-03-23',
+        '1999-10-14',
+        '2000-11-09',
+        '2003-12-03',
+        '2005-12-01',
+        '2007-10-26',
+      ];
+      final hits = [
+        for (var i = 0; i < titles.length; i++)
+          EnrichedBookHit(
+            raw: {
+              'title': titles[i],
+              'author': 'J.K. Rowling',
+              'published_date': years[i],
+              'source': 'itunes',
+              'language': 'fr',
+            },
+            parsed: BookTitleParser.parse(
+              titles[i],
+              queryHint: 'Harry Potter',
+            ),
+            displayTitle: titles[i],
+            author: 'J.K. Rowling',
+            score: 1,
+            detectedSubcategory: BookSubcategory.novel,
+          ),
+      ];
+      final numbered = BookIntelligenceService.assignPublicationOrderVolumes(
+        hits,
+        queryHint: 'Harry Potter',
+      );
+      expect(numbered.length, 7);
+      expect(
+        numbered.map((h) => h.parsed.volumeNumber?.round()).toList(),
+        [1, 2, 3, 4, 5, 6, 7],
+      );
+    });
+
     test('Intégrale numérotée reste une série distincte', () {
       final p = BookTitleParser.parse('Walking Dead - Intégrale - Tome 25');
       expect(p.seriesName, 'Walking Dead - Intégrale');
@@ -157,6 +208,26 @@ void main() {
         BookVfEdition.isRejectedCatalogTitle(
           'Dungeon Crawler Carl (svensk utgåva)',
         ),
+        isTrue,
+      );
+      expect(
+        BookVfEdition.isRejectedCatalogTitle(
+          'Harry Potter og Føniksordenen',
+        ),
+        isTrue,
+      );
+      expect(
+        BookVfEdition.isRejectedCatalogTitle('Harry Potter Bakboek'),
+        isTrue,
+      );
+      expect(
+        BookVfEdition.isRejectedCatalogTitle(
+          'Harry Potter, les raisons d\'un succès',
+        ),
+        isTrue,
+      );
+      expect(
+        BookVfEdition.isRejectedCatalogTitle('Harry Potter Boxed Set'),
         isTrue,
       );
       expect(BookVfEdition.isFrOrEnLanguage('it'), isFalse);
@@ -296,6 +367,29 @@ void main() {
       );
       expect(
         BookSeriesNormalizer.detectSubcategory(
+          seriesName: 'XIII',
+          author: 'Jean Van Hamme',
+          publisher: 'Dargaud',
+        ),
+        BookSubcategory.comic,
+      );
+      expect(
+        BookSeriesNormalizer.detectSubcategory(
+          seriesName: 'XIII',
+          author: 'William Vance',
+        ),
+        BookSubcategory.comic,
+      );
+      expect(
+        BookSeriesNormalizer.formatAuthorList([
+          'Osamu Tezuka',
+          'Naoki Urasawa',
+          'Takashi Nagasaki',
+        ]),
+        'Osamu Tezuka, Naoki Urasawa & Takashi Nagasaki',
+      );
+      expect(
+        BookSeriesNormalizer.detectSubcategory(
           subjects: 'Comics & Graphic Novels / Manga',
         ),
         BookSubcategory.manga,
@@ -305,6 +399,12 @@ void main() {
           'One Piece - Édition originale',
         ),
         'One Piece',
+      );
+      expect(BookSubcategory.fromDbValue('roman'), BookSubcategory.novel);
+      expect(BookSubcategory.fromDbValue('comics'), BookSubcategory.comics);
+      expect(
+        BookSubcategory.comics.legacyDbValue,
+        BookSubcategory.comic.dbValue,
       );
     });
 

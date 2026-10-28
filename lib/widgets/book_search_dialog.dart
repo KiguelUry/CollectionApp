@@ -8,7 +8,7 @@ Future<void> showBookSearch(
   BuildContext context, {
   required void Function(Map<String, String> book, BookSubcategory subcategory)
       onBookSelected,
-  Future<void> Function(
+  Future<bool> Function(
     String seriesName,
     BookSubcategory subcategory, {
     int? volumeCount,

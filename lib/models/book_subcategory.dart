@@ -79,11 +79,19 @@ enum BookSubcategory {
     if (value == null) return BookSubcategory.other;
     // Ancien libellé unique « BD / Comics » → BD.
     if (value == 'bd') return BookSubcategory.comic;
+    if (value == 'roman') return BookSubcategory.novel;
     return BookSubcategory.values.firstWhere(
       (s) => s.dbValue == value,
       orElse: () => BookSubcategory.other,
     );
   }
+
+  /// Valeur acceptée par l’ancienne contrainte SQL (`comic` pas `comics`).
+  String get legacyDbValue => switch (this) {
+        BookSubcategory.comics => BookSubcategory.comic.dbValue,
+        BookSubcategory.novel => 'novel',
+        _ => dbValue,
+      };
 
   Map<String, String> openLibraryQueryParams(String query) {
     final q = query.trim();

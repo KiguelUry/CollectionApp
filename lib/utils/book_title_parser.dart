@@ -62,7 +62,10 @@ abstract final class BookTitleParser {
 
   static final _companionTitleRe = RegExp(
     r'collection\s+compl[eè]te|\b1\s*[-–]\s*7\b|quiz\s*book|'
-    r'fiche\s+de\s+lecture|\b[ée]tude\b|\banalysis\b',
+    r'fiche\s+de\s+lecture|\b[ée]tude\b|\banalysis\b|'
+    r'boxed\s+set|bakboek|les\s+raisons\s+d.?un\s+succ[eè]s|'
+    r'le\s+droit\s+dans\s+la\s+saga|la\s+magie\s+r[eé]v[eé]l|'
+    r"l.?enfant\s+h[eé]ros",
     caseSensitive: false,
   );
 
@@ -185,6 +188,20 @@ abstract final class BookTitleParser {
     );
   }
 
+  /// Vrai si le titre continue le préfixe série par `à` / `et` / `:` / `-`.
+  static bool titleContinuesSeriesPrefix(String title, String series) {
+    final t = title.trim().toLowerCase();
+    final s = series.trim().toLowerCase();
+    if (s.length < 3 || !t.startsWith(s)) return false;
+    final rest = t.substring(s.length).trim();
+    if (rest.isEmpty) return false;
+    return rest.startsWith(':') ||
+        rest.startsWith('-') ||
+        RegExp(r'^(à|a|et|and|to)(?:\s|$|[^\wàâäéèêëïîôùûüç])',
+                caseSensitive: false)
+            .hasMatch(rest);
+  }
+
   /// « Harry Potter à l'école… » / « Harry Potter et la Chambre… » / « Préfixe : … ».
   static String? inferSeriesName(String title, {String? queryHint}) {
     if (isCompanionOrStudyTitle(title)) return null;
@@ -199,7 +216,8 @@ abstract final class BookTitleParser {
         final rest = t.substring(q.length).trim();
         if (rest.startsWith(':') ||
             rest.startsWith('-') ||
-            RegExp(r'^(à|a|et|and|to)\b', caseSensitive: false)
+            RegExp(r'^(à|a|et|and|to)(?:\s|$|[^\wàâäéèêëïîôùûüç])',
+                    caseSensitive: false)
                 .hasMatch(rest)) {
           return q;
         }

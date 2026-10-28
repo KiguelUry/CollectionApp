@@ -264,18 +264,17 @@ abstract final class MangaDexService {
       if (!ok) return null;
     }
 
-    String? author;
     final rels = manga['relationships'] as List<dynamic>? ?? const [];
+    final staffNames = <String>[];
     for (final r in rels) {
       if (r is! Map<String, dynamic>) continue;
       if (r['type'] != 'author' && r['type'] != 'artist') continue;
       final a = r['attributes'] as Map<String, dynamic>?;
       final name = a?['name']?.toString().trim();
-      if (name != null && name.isNotEmpty) {
-        author = name;
-        break;
-      }
+      if (name != null && name.isNotEmpty) staffNames.add(name);
     }
+    final authorRaw = BookSeriesNormalizer.formatAuthorList(staffNames);
+    final author = authorRaw.isEmpty ? null : authorRaw;
     if (authorHint != null &&
         authorHint.trim().isNotEmpty &&
         author != null &&

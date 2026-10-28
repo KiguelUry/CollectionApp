@@ -14,7 +14,7 @@ import '../utils/web_catalog_proxy.dart';
 class ItunesBooksService {
   static Future<List<Map<String, String>>> search(
     String query, {
-    int limit = 25,
+    int limit = 50,
   }) async {
     final q = query.trim();
     if (q.length < 2) return [];

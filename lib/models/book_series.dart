@@ -68,6 +68,9 @@ class BookSeries {
     return a;
   }
 
+  /// Couverture choisie manuellement — l’enrichissement ne doit pas l’écraser.
+  bool get coverLocked => metadata['cover_locked'] == true;
+
   static double? _parseDouble(dynamic v) {
     if (v == null) return null;
     if (v is num) return v.toDouble();
