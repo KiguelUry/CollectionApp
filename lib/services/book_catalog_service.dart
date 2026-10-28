@@ -83,7 +83,7 @@ class BookCatalogService {
 
     const t = Duration(seconds: 5);
     // iTunes FR + Google Books en parallèle ; OL seulement si les deux sont vides.
-    final itunesF = ItunesBooksService.search(enhanced, limit: 50)
+    final itunesF = ItunesBooksService.search(enhanced, limit: 200)
         .timeout(t, onTimeout: () => <Map<String, String>>[]);
     final googleF = GoogleBooksService.search(
       enhanced,

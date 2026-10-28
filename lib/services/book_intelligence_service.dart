@@ -430,6 +430,14 @@ abstract final class BookIntelligenceService {
       final key = BookSeriesNormalizer.mergeKey(sn);
       if (!officialMergeKeys.contains(key)) return h;
       if (h.detectedSubcategory == BookSubcategory.manga) return h;
+      final locked = BookSeriesNormalizer.detectSubcategory(
+        seriesName: sn,
+        title: h.displayTitle,
+        publisher: h.publisher,
+        author: h.author,
+        subjects: h.raw['categories'] ?? h.raw['subjects'],
+      );
+      if (locked == BookSubcategory.bd) return h;
       return EnrichedBookHit(
         raw: h.raw,
         parsed: h.parsed,
@@ -457,7 +465,8 @@ abstract final class BookIntelligenceService {
 
   /// Batch unique Google Books (1–3 pages séquentielles) → map tome → cover.
   /// JAMAIS une requête par tome. [maxPages] jusqu'à 3 (= 120 items).
-  static Future<Map<int, ({String coverUrl, String? publishedDate})>>
+  static Future<
+      Map<int, ({String coverUrl, String? publishedDate, String? language})>>
       batchFetchSeriesCovers({
     required String seriesName,
     required BookSubcategory subcategory,
@@ -467,7 +476,7 @@ abstract final class BookIntelligenceService {
     final cleanName = BookSeriesNormalizer.coverSearchSeriesName(seriesName);
     if (cleanName.length < 2 || maxPages < 1) return {};
 
-    final itunesF = ItunesBooksService.search(cleanName, limit: 50);
+    final itunesF = ItunesBooksService.search(cleanName, limit: 200);
     var hits = await GoogleBooksService.searchSeriesBatched(
       cleanName,
       author: authorHint,
@@ -486,6 +495,31 @@ abstract final class BookIntelligenceService {
       }
     } catch (_) {}
 
+    if ((authorHint ?? '').trim().length >= 2 &&
+        (subcategory == BookSubcategory.novel ||
+            subcategory == BookSubcategory.manga ||
+            subcategory == BookSubcategory.bd)) {
+      try {
+        final author = authorHint!.trim();
+        final extraQ = '"$cleanName" "$author"';
+        final extraGb = await GoogleBooksService.search(
+          extraQ,
+          maxResults: 20,
+          langRestrict: 'fr',
+        );
+        final extraIt = await ItunesBooksService.search(
+          '$cleanName $author',
+          limit: 200,
+        );
+        for (final h in [...extraIt, ...extraGb]) {
+          final t = (h['title'] ?? '').toLowerCase();
+          if (t.isEmpty || seenTitles.contains(t)) continue;
+          seenTitles.add(t);
+          hits.add(h);
+        }
+      } catch (_) {}
+    }
+
     final ranked = enrichAndRank(
       hits,
       subcategory: subcategory,
@@ -495,7 +529,7 @@ abstract final class BookIntelligenceService {
       ),
     );
 
-    final out = <int, ({String coverUrl, String? publishedDate})>{};
+    final out = <int, ({String coverUrl, String? publishedDate, String? language})>{};
     final vfPrefer = <int, bool>{};
     for (final h in ranked) {
       final img = h.imageUrl;
@@ -514,12 +548,20 @@ abstract final class BookIntelligenceService {
       }
       final n = h.parsed.volumeNumber?.round();
       if (n == null || n < 1) continue;
-      if (!hitMatchesVolumeExactly(h, n)) continue;
+      if (!hitMatchesVolumeExactly(h, n, seriesName: cleanName)) continue;
       final isVf = looksVfTitle(title) ||
           BookVfEdition.isFrenchLanguage(h.raw['language']);
+      final isEn = BookVfEdition.isExplicitEnglish(h.raw['language']);
       final pub = h.raw['published_date'] ?? h.raw['year'];
+      if (out.containsKey(n) && vfPrefer[n] == true && isEn && !isVf) {
+        continue;
+      }
       if (!out.containsKey(n) || (isVf && vfPrefer[n] != true)) {
-        out[n] = (coverUrl: img, publishedDate: pub);
+        out[n] = (
+          coverUrl: img,
+          publishedDate: pub,
+          language: h.raw['language'],
+        );
         vfPrefer[n] = isVf;
       }
     }
@@ -565,11 +607,28 @@ abstract final class BookIntelligenceService {
   }
 
   /// Hit catalogue dont le n° de tome matche [target] de façon stricte.
-  static bool hitMatchesVolumeExactly(EnrichedBookHit hit, int target) {
+  static bool hitMatchesVolumeExactly(
+    EnrichedBookHit hit,
+    int target, {
+    String? seriesName,
+  }) {
     final title = hit.raw['title'] ?? hit.displayTitle;
     final subtitle = hit.raw['subtitle'] ?? '';
     final combined = '$title $subtitle';
-    return BookTitleParser.titleMatchesVolumeExactly(combined, target);
+    if (BookTitleParser.titleMatchesVolumeExactly(combined, target)) {
+      return true;
+    }
+    final prose = BookTitleParser.extractVolumeFromProse(
+      '${hit.raw['description'] ?? ''} $subtitle ${hit.raw['collection_name'] ?? ''}',
+    );
+    if (prose == target) return true;
+    final series = seriesName ?? hit.parsed.seriesName ?? '';
+    if (series.isNotEmpty &&
+        BookTitleParser.volumeTrailingSeries(title, series) == target) {
+      return true;
+    }
+    final api = int.tryParse(hit.raw['series_volume'] ?? '');
+    return api == target;
   }
 
   /// Couverture d'UN tome via le batch série (1–3 requêtes), jamais 8+ appels.
@@ -662,15 +721,30 @@ abstract final class BookIntelligenceService {
       queryHint: queryHint,
     );
     final seriesFromMeta = hit['series_title']?.trim();
-    final seriesName = parsed.seriesName ??
+    var seriesName = parsed.seriesName ??
         (seriesFromMeta != null && seriesFromMeta.length >= 2
             ? seriesFromMeta
             : null);
+    final proseBlob =
+        '${hit['description'] ?? ''} ${hit['collection_name'] ?? ''} '
+        '${hit['subtitle'] ?? ''} ${hit['series_title'] ?? ''}';
+    if ((seriesName == null || seriesName.isEmpty) &&
+        queryHint != null &&
+        queryHint.trim().length >= 3 &&
+        BookSeriesNormalizer.textMentionsSeries(proseBlob, queryHint)) {
+      seriesName = queryHint.trim();
+    }
+    final proseVol = BookTitleParser.extractVolumeFromProse(proseBlob);
+    final trailing = seriesName == null
+        ? null
+        : BookTitleParser.volumeTrailingSeries(title, seriesName);
 
     final normalizedParsed = ParsedBookTitle(
       rawTitle: title,
       seriesName: seriesName,
       volumeNumber: parsed.volumeNumber ??
+          proseVol?.toDouble() ??
+          trailing?.toDouble() ??
           (apiVol != null && apiVol >= 1 && apiVol < 1900
               ? apiVol.toDouble()
               : null),
@@ -853,7 +927,15 @@ abstract final class BookIntelligenceService {
     if (serial) return hits;
     final anyExplicit = hits.any((h) {
       final title = h.raw['title'] ?? h.displayTitle;
-      return BookTitleParser.extractVolumeNumberStrict(title) != null;
+      if (BookTitleParser.extractVolumeNumberStrict(title) != null) {
+        return true;
+      }
+      if (h.parsed.volumeNumber != null) return true;
+      final prose = BookTitleParser.extractVolumeFromProse(
+        '${h.raw['description'] ?? ''} ${h.raw['subtitle'] ?? ''} '
+        '${h.raw['collection_name'] ?? ''}',
+      );
+      return prose != null;
     });
     if (anyExplicit) return hits;
     final groups = <String, List<int>>{};
@@ -882,10 +964,13 @@ abstract final class BookIntelligenceService {
       idxs.sort((a, b) {
         final da = out[a].publishedDate ?? out[a].raw['year'] ?? '';
         final db = out[b].publishedDate ?? out[b].raw['year'] ?? '';
-        final c = da.compareTo(db);
-        if (c != 0) return c;
-        return (out[a].raw['title'] ?? '').compareTo(out[b].raw['title'] ?? '');
+        return da.compareTo(db);
       });
+      final dates = idxs
+          .map((i) => out[i].publishedDate ?? out[i].raw['year'] ?? '')
+          .where((d) => d.isNotEmpty)
+          .toSet();
+      if (dates.length != idxs.length) continue;
       String? seriesName;
       for (final i in idxs) {
         seriesName = out[i].parsed.seriesName ?? seriesName;
@@ -945,12 +1030,10 @@ abstract final class BookIntelligenceService {
       if (fromMd) continue;
       if (h.isUpcoming) {
         if (firstUpcoming == null || n < firstUpcoming) firstUpcoming = n;
+        if (n > maxVf) maxVf = n;
         continue;
       }
       if (n > maxVf) maxVf = n;
-    }
-    if (firstUpcoming != null && firstUpcoming - 1 > maxVf) {
-      maxVf = firstUpcoming - 1;
     }
     return (maxVf: maxVf, firstUpcomingVf: firstUpcoming);
   }

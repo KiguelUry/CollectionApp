@@ -208,8 +208,10 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
   }
 
   Future<void> _onRatingChip(_SeriesEntry entry) async {
-    var rating = entry.series.userRating ?? entry.stats.displayRating ?? 0.0;
-    if (rating > 5) rating = rating / 2;
+    final stored = entry.series.userRating ?? entry.stats.displayRating;
+    final rating = stored == null
+        ? null
+        : (stored > 5 ? stored / 2 : stored).clamp(0.0, 5.0).toDouble();
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -225,12 +227,11 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
               ),
               const SizedBox(height: 16),
               PrecisionStarRatingBar(
-                rating: rating.clamp(0.0, 5.0),
+                rating: rating,
                 onChanged: (v) {
-                  // Optimistic : UI déjà à jour via _localRating ; persist silencieuse.
                   final updated = entry.series.copyWith(
-                    userRating: v <= 0 ? null : v,
-                    clearUserRating: v <= 0,
+                    userRating: v,
+                    clearUserRating: v == null,
                   );
                   final idx = _entries.indexWhere(
                     (e) => e.series.id == entry.series.id,
@@ -241,8 +242,8 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
                         series: updated,
                         volumes: entry.volumes,
                         stats: entry.stats.copyWith(
-                          displayRating: v <= 0 ? null : v,
-                          clearDisplayRating: v <= 0,
+                          displayRating: v,
+                          clearDisplayRating: v == null,
                         ),
                         items: entry.items,
                       );

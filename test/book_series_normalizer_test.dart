@@ -1,4 +1,5 @@
-﻿import 'package:collection_app/models/book_subcategory.dart';
+﻿import 'package:collection_app/constants/rating_colors.dart';
+import 'package:collection_app/models/book_subcategory.dart';
 import 'package:collection_app/services/anilist_manga_service.dart';
 import 'package:collection_app/services/book_intelligence_service.dart';
 import 'package:collection_app/services/mangadex_service.dart';
@@ -198,6 +199,54 @@ void main() {
         ).map((h) => h.parsed.volumeNumber?.round()).toList(),
         [6, 3],
       );
+      expect(
+        BookTitleParser.extractVolumeFromProse(
+          'Quatrième tome de la saga Les Sept Sœurs.',
+        ),
+        4,
+      );
+      expect(
+        BookTitleParser.extractVolumeFromProse('The first book in the series.'),
+        1,
+      );
+      expect(BookTitleParser.volumeTrailingSeries('One Piece 12', 'One Piece'), 12);
+      expect(BookTitleParser.volumeTrailingSeries('One Piece T01', 'One Piece'), 1);
+      expect(
+        BookSeriesNormalizer.textMentionsSeries(
+          'Collection Les sept sœurs, roman de Lucinda Riley',
+          'Les sept sœurs',
+        ),
+        isTrue,
+      );
+      final sameDate = BookIntelligenceService.assignPublicationOrderVolumes(
+        [
+          for (final title in [
+            'Harry Potter and the Chamber of Secrets',
+            'Harry Potter and the Deathly Hallows',
+          ])
+            EnrichedBookHit(
+              raw: {
+                'title': title,
+                'author': 'J.K. Rowling',
+                'published_date': '2015-01-01',
+                'source': 'itunes',
+                'language': 'en',
+              },
+              parsed: BookTitleParser.parse(title, queryHint: 'Harry Potter'),
+              displayTitle: title,
+              author: 'J.K. Rowling',
+              score: 1,
+              detectedSubcategory: BookSubcategory.novel,
+            ),
+        ],
+        queryHint: 'Harry Potter',
+      );
+      expect(
+        sameDate.map((h) => h.parsed.volumeNumber).toList(),
+        [null, null],
+      );
+      expect(ratingColor(0).toARGB32(), 0xFF991B1B);
+      expect(ratingColor(5).toARGB32(), 0xFF38BDF8);
       expect(numbered.length, 7);
       expect(
         numbered.map((h) => h.parsed.volumeNumber?.round()).toList(),

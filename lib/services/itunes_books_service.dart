@@ -14,7 +14,7 @@ import '../utils/web_catalog_proxy.dart';
 class ItunesBooksService {
   static Future<List<Map<String, String>>> search(
     String query, {
-    int limit = 50,
+    int limit = 200,
   }) async {
     final q = query.trim();
     if (q.length < 2) return [];
@@ -193,6 +193,11 @@ class ItunesBooksService {
         series.isNotEmpty &&
         series.toLowerCase() != title.toLowerCase()) {
       result['series_title'] = series;
+      result['collection_name'] = series;
+    }
+    final description = m['description']?.toString().trim();
+    if (description != null && description.isNotEmpty) {
+      result['description'] = description;
     }
 
     final genres = m['genres'] as List<dynamic>?;

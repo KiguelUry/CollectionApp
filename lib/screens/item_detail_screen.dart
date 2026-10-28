@@ -2072,20 +2072,17 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
         const SizedBox(height: 6),
         PrecisionStarRatingBar(
           rating: personalRatingOnFive(
-                _item.rating,
-                metadata: _item.metadata,
-              ) ??
-              0,
+            _item.rating,
+            metadata: _item.metadata,
+          ),
           readOnly: ro,
           onChanged: (value) {
-            final clamped =
-                double.parse(value.clamp(0.0, 5.0).toStringAsFixed(1));
             final meta = Map<String, dynamic>.from(_item.metadata ?? {});
             meta['rating_scale'] = '5';
             setState(() {
               _item = _item.copyWith(
-                rating: clamped <= 0 ? null : clamped,
-                clearRating: clamped <= 0,
+                rating: value,
+                clearRating: value == null,
                 metadata: meta,
               );
             });

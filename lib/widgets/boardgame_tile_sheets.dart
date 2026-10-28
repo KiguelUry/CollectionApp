@@ -86,30 +86,30 @@ class _BoardgameTileRatingSheet extends StatefulWidget {
 }
 
 class _BoardgameTileRatingSheetState extends State<_BoardgameTileRatingSheet> {
-  late double _rating;
+  double? _rating;
   bool _saving = false;
 
   @override
   void initState() {
     super.initState();
     _rating = personalRatingOnFive(
-          widget.item.rating,
-          metadata: widget.item.metadata,
-        ) ??
-        0;
+      widget.item.rating,
+      metadata: widget.item.metadata,
+    );
   }
 
-  Future<void> _saveRating(double value) async {
+  Future<void> _saveRating(double? value) async {
     if (widget.readOnly || _saving) return;
-    final clamped = double.parse(value.clamp(0.0, 5.0).toStringAsFixed(1));
-    // Optimistic UI : note locale immédiate, pas de barre de chargement.
+    final clamped = value == null
+        ? null
+        : double.parse(value.clamp(0.0, 5.0).toStringAsFixed(1));
     setState(() => _rating = clamped);
     _saving = true;
     try {
       final meta = Map<String, dynamic>.from(widget.item.metadata ?? {});
       meta['rating_scale'] = '5';
       await Supabase.instance.client.from('collection_items').update({
-        'rating': clamped <= 0 ? null : clamped,
+        'rating': clamped,
         'metadata': meta,
       }).eq('id', widget.item.id);
       CollectionRefresh.instance.bump();

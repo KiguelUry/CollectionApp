@@ -55,7 +55,7 @@ double? bggRatingOnFive(dynamic raw) {
 /// Normalise une note personnelle stockée vers /5 pour l’UI.
 /// Anciennes notes /10 (`rating_scale=10` ou valeur > 5) → ÷2.
 double? personalRatingOnFive(double? stored, {Map<String, dynamic>? metadata}) {
-  if (stored == null || stored <= 0) return null;
+  if (stored == null || stored < 0) return null;
   final scale = metadata?['rating_scale']?.toString();
   if (scale == '10' || stored > 5.0) {
     return double.parse((stored / 2).clamp(0, 5).toStringAsFixed(1));

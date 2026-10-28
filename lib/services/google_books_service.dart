@@ -196,23 +196,21 @@ class GoogleBooksService {
         final res = await get(_volumesUri(base, withKey: true));
         if (res.statusCode == 200) return res;
 
-        // 503/5xx : retry AVEC clé, requête allégée (jamais keyless).
+        // 503/5xx : cette requête seulement. Retry SANS clé, puis proxy.
         if (_isServerError(res.statusCode)) {
           if (_isLocked) return null;
           await Future<void>.delayed(const Duration(milliseconds: 400));
-          final light = Map<String, String>.from(base)
-            ..remove('langRestrict')
-            ..['maxResults'] = '20';
           if (kDebugMode) {
             debugPrint(
-              'Google Books ${res.statusCode} → wait 400ms, retry keyed light',
+              'Google Books ${res.statusCode} keyed → retry without key',
             );
           }
           try {
-            final retry = await get(_volumesUri(light, withKey: true));
-            if (retry.statusCode == 200) return retry;
+            final keyless = await get(_volumesUri(base, withKey: false));
+            if (keyless.statusCode == 200) return keyless;
           } catch (_) {}
-          // 503 = cette requête-là, pas un ban. Pas de coupe-circuit.
+          final proxyRes = await _viaProxy(base);
+          if (proxyRes != null && proxyRes.statusCode == 200) return proxyRes;
           return null;
         }
 
@@ -451,6 +449,10 @@ class GoogleBooksService {
 
     if (subtitle != null && subtitle.isNotEmpty) {
       result['subtitle'] = subtitle;
+    }
+    final description = info['description']?.toString().trim();
+    if (description != null && description.isNotEmpty) {
+      result['description'] = description;
     }
 
     final publisher = info['publisher'] as String?;

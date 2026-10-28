@@ -808,7 +808,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       final qMatch = qSort.isNotEmpty &&
           (primaryKey == qSort ||
               BookSeriesNormalizer.normalizeKey(primary.name) == qSort);
-      if (qMatch || primary.fromAnilist) {
+      if (qMatch) {
         enriched = enriched.where((h) {
           final title = h.raw['title'] ?? h.displayTitle;
           if (!BookSeriesNormalizer.hitBelongsToSeries(title, primary.name)) {
@@ -824,6 +824,27 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
           return true;
         }).toList();
       }
+    }
+
+    final qLower = seriesQ.toLowerCase().trim();
+    if (qLower.length >= 3) {
+      enriched.sort((a, b) {
+        int unitRank(EnrichedBookHit h) {
+          final title = (h.raw['title'] ?? h.displayTitle).toLowerCase();
+          final unit = h.parsed.volumeNumber == null;
+          if (unit && title.contains(qLower)) return 0;
+          return 1;
+        }
+
+        final c = unitRank(a).compareTo(unitRank(b));
+        if (c != 0) return c;
+        final va = a.parsed.volumeNumber;
+        final vb = b.parsed.volumeNumber;
+        if (va != null && vb != null && (va - vb).abs() > 0.01) {
+          return va.compareTo(vb);
+        }
+        return b.score.compareTo(a.score);
+      });
     }
 
     if (!mounted) return;
@@ -1279,9 +1300,12 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
                   maxVf: voExtent.maxVf,
                   firstUpcomingVf: voExtent.firstUpcomingVf,
                 );
-            final jpBadge = japanOnly
-                ? '🇯🇵 Paru au Japon'
-                : (voCover ? '🇯🇵 Couv. VO' : null);
+            final upcoming = !chapterBadge && hit.isUpcoming;
+            final jpBadge = upcoming
+                ? (hit.upcomingLabel ?? '⏳ À paraître')
+                : japanOnly
+                    ? '🇯🇵 Paru au Japon'
+                    : (voCover ? '🇯🇵 Couv. VO (Japon)' : null);
             return Stack(
               children: [
                 CatalogItemTile(
@@ -1337,7 +1361,9 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
                         vertical: 3,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF1B2838),
+                        color: upcoming
+                            ? Colors.deepPurple.shade700
+                            : const Color(0xFF1B2838),
                         borderRadius: BorderRadius.circular(6),
                         boxShadow: const [
                           BoxShadow(color: Colors.black45, blurRadius: 3),

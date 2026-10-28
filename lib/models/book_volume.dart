@@ -176,7 +176,10 @@ class BookVolume {
       volumeNumber: volumeNumber,
       label: label,
       sortIndex: sortIndex,
-      metadata: {...metadata, ...patch},
+      metadata: {
+        ...metadata,
+        ...patch,
+      }..removeWhere((k, v) => patch.containsKey(k) && v == null),
     );
   }
 

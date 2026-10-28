@@ -330,13 +330,14 @@ abstract final class MangaDexService {
     final best = <int, _CoverPick>{};
     var offset = 0;
     const pageSize = 100;
-    for (var page = 0; page < 5; page++) {
+    for (var page = 0; page < 8; page++) {
       try {
         final uri = Uri.parse(
           '$_base/cover?manga[]=${Uri.encodeQueryComponent(mangaId)}'
           '&limit=$pageSize'
           '&offset=$offset'
-          '&order[volume]=asc',
+          '&order[volume]=asc'
+          '&locales[]=fr&locales[]=ja&locales[]=en',
         );
         final res = await http
             .get(

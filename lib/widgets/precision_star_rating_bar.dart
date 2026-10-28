@@ -5,14 +5,12 @@ import 'package:flutter/services.dart';
 
 import '../constants/rating_colors.dart';
 
-/// 5 étoiles au clic : 1er clic = N.0, 2e = N−0.5, 3e = effacer.
-/// Note personnelle = bleu métallique (jamais or communauté).
-/// Optimistic UI : `_localRating` synchrone au tap ; debounce 350 ms vers le parent
-/// (le parent ne doit PAS afficher de spinner / barre de chargement).
+/// 5 étoiles. La 1re étoile cycle `1.0 → 0.5 → 0.0 → null`.
+/// Le badge `— / 5` bascule vers `0.0` ou efface la note.
+/// `null` = non noté. `0.0` = zéro explicite.
 class PrecisionStarRatingBar extends StatefulWidget {
-  final double rating;
-  /// Appelé après debounce — doit être non-bloquant (pas de loader UI).
-  final ValueChanged<double> onChanged;
+  final double? rating;
+  final ValueChanged<double?> onChanged;
   final bool readOnly;
   final double starSize;
   final Color? starColor;
@@ -31,23 +29,22 @@ class PrecisionStarRatingBar extends StatefulWidget {
 }
 
 class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
-  late double _localRating;
+  double? _localRating;
   Timer? _debounce;
   static const _debounceMs = 350;
 
   @override
   void initState() {
     super.initState();
-    _localRating = widget.rating.clamp(0.0, 5.0);
+    _localRating = _clamp(widget.rating);
   }
 
   @override
   void didUpdateWidget(covariant PrecisionStarRatingBar oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Ignore les updates parent pendant le debounce (évite 2.5 → 3.0).
     if (_debounce?.isActive == true) return;
-    if ((oldWidget.rating - widget.rating).abs() > 0.01) {
-      _localRating = widget.rating.clamp(0.0, 5.0);
+    if (oldWidget.rating != widget.rating) {
+      _localRating = _clamp(widget.rating);
     }
   }
 
@@ -57,9 +54,14 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
     super.dispose();
   }
 
-  bool get _isUnrated => _localRating <= 0.001;
+  double? _clamp(double? value) {
+    if (value == null || value < 0) return null;
+    return double.parse(value.clamp(0.0, 5.0).toStringAsFixed(1));
+  }
 
-  void _commitDebounced(double next) {
+  bool get _isUnrated => _localRating == null;
+
+  void _commitDebounced(double? next) {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: _debounceMs), () {
       if (!mounted) return;
@@ -67,31 +69,58 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
     });
   }
 
+  void _set(double? next) {
+    setState(() => _localRating = next);
+    _commitDebounced(next);
+  }
+
   void _onStarPointer(int starIndex) {
     if (widget.readOnly) return;
     final n = (starIndex + 1).toDouble();
+    final current = _localRating;
+    if (starIndex == 0) {
+      if (current == null) {
+        _set(1.0);
+      } else if ((current - 1.0).abs() < 0.05) {
+        _set(0.5);
+      } else if ((current - 0.5).abs() < 0.05) {
+        _set(0.0);
+      } else if (current <= 0.001) {
+        _set(null);
+      } else {
+        _set(1.0);
+      }
+      return;
+    }
     final full = n;
     final half = n - 0.5;
-    double next;
-    if ((_localRating - full).abs() < 0.05) {
-      next = half;
-    } else if ((_localRating - half).abs() < 0.05) {
-      next = 0;
+    if (current != null && (current - full).abs() < 0.05) {
+      _set(half);
+    } else if (current != null && (current - half).abs() < 0.05) {
+      _set(null);
     } else {
-      next = full;
+      _set(full);
     }
-    next = double.parse(next.clamp(0.0, 5.0).toStringAsFixed(1));
-    // Mise à jour locale synchrone immédiate (avant le round-trip Supabase).
-    setState(() => _localRating = next);
-    _commitDebounced(next);
+  }
+
+  void _onBadgeTap() {
+    if (widget.readOnly) return;
+    if (_localRating == null) {
+      _set(0.0);
+    } else if (_localRating! <= 0.001) {
+      _set(null);
+    } else {
+      _set(0.0);
+    }
   }
 
   Future<void> _editNumeric() async {
     if (widget.readOnly) return;
     final ctrl = TextEditingController(
-      text: _isUnrated ? '' : _localRating.toStringAsFixed(1),
+      text: _isUnrated ? '' : _localRating!.toStringAsFixed(1),
     );
-    final result = await showDialog<double>(
+    var apply = false;
+    final result = await showDialog<double?>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Note /5'),
@@ -103,12 +132,13 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
             FilteringTextInputFormatter.allow(RegExp(r'[\d.,]')),
           ],
           decoration: const InputDecoration(
-            hintText: '4.5',
+            hintText: '0.0 à 5.0',
             suffixText: '/ 5',
           ),
           onSubmitted: (v) {
+            apply = true;
             if (v.trim().isEmpty) {
-              Navigator.pop(ctx, 0.0);
+              Navigator.pop(ctx, null);
               return;
             }
             Navigator.pop(ctx, double.tryParse(v.replaceAll(',', '.')));
@@ -119,10 +149,18 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Annuler'),
           ),
+          TextButton(
+            onPressed: () {
+              apply = true;
+              Navigator.pop(ctx, null);
+            },
+            child: const Text('Effacer'),
+          ),
           FilledButton(
             onPressed: () {
+              apply = true;
               if (ctrl.text.trim().isEmpty) {
-                Navigator.pop(ctx, 0.0);
+                Navigator.pop(ctx, null);
                 return;
               }
               Navigator.pop(
@@ -136,76 +174,73 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
       ),
     );
     ctrl.dispose();
-    if (result == null) return;
-    final r = double.parse(result.clamp(0.0, 5.0).toStringAsFixed(1));
-    setState(() => _localRating = r);
-    _commitDebounced(r);
+    if (!mounted || !apply) return;
+    _set(result == null ? null : _clamp(result));
   }
 
   IconData _iconFor(int i) {
+    final value = _localRating;
+    if (value == null || value <= 0.001) return Icons.star_border_rounded;
     final threshold = i + 1.0;
-    if (_localRating >= threshold - 0.01) return Icons.star_rounded;
-    if (_localRating >= threshold - 0.5 - 0.01) return Icons.star_half_rounded;
+    if (value >= threshold - 0.01) return Icons.star_rounded;
+    if (value >= threshold - 0.5 - 0.01) return Icons.star_half_rounded;
     return Icons.star_border_rounded;
   }
 
   @override
   Widget build(BuildContext context) {
     final color = widget.starColor ?? RatingColors.personal;
-    final badge =
-        _isUnrated ? '— / 5' : '${_localRating.toStringAsFixed(1)} / 5';
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () {},
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (var i = 0; i < 5; i++)
-            Padding(
-              padding: EdgeInsets.only(right: i < 4 ? 2 : 0),
-              child: SizedBox(
-                width: 32,
-                height: 32,
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    // onTapDown = réponse synchrone au 1er contact (évite 2.5→3.0).
-                    onTapDown: widget.readOnly
-                        ? null
-                        : (_) => _onStarPointer(i),
-                    customBorder: const CircleBorder(),
-                    child: Icon(
-                      _iconFor(i),
-                      size: widget.starSize.clamp(18, 28),
-                      color: color,
-                    ),
+    final badge = _isUnrated
+        ? '— / 5'
+        : '${_localRating!.toStringAsFixed(1)} / 5';
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < 5; i++)
+          Padding(
+            padding: EdgeInsets.only(right: i < 4 ? 2 : 0),
+            child: SizedBox(
+              width: 32,
+              height: 32,
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTapDown: widget.readOnly ? null : (_) => _onStarPointer(i),
+                  customBorder: const CircleBorder(),
+                  child: Icon(
+                    _iconFor(i),
+                    size: widget.starSize.clamp(18, 28),
+                    color: color,
                   ),
                 ),
               ),
             ),
-          const SizedBox(width: 8),
-          InkWell(
-            onTap: widget.readOnly ? null : _editNumeric,
-            borderRadius: BorderRadius.circular(8),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: color.withValues(alpha: 0.45)),
-              ),
-              child: Text(
-                badge,
-                style: TextStyle(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 14,
-                  color: RatingColors.personalDark,
-                ),
+          ),
+        const SizedBox(width: 8),
+        InkWell(
+          onTap: widget.readOnly ? null : _onBadgeTap,
+          onLongPress: widget.readOnly ? null : _editNumeric,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: color.withValues(alpha: 0.45)),
+            ),
+            child: Text(
+              badge,
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 14,
+                color: _isUnrated
+                    ? RatingColors.personalDark
+                    : ratingColor(_localRating!),
               ),
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

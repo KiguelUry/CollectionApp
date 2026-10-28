@@ -204,9 +204,9 @@ class BookSeriesStats {
 
   String? get ratingLabel {
     final r = displayRating ?? communityRating;
-    if (r == null || r <= 0) return null;
+    if (r == null || r < 0) return null;
     final onFive = r > 5.0 ? r / 2 : r;
-    if (onFive <= 0) return null;
+    if (onFive < 0) return null;
     return '★ ${onFive.toStringAsFixed(1)}';
   }
 

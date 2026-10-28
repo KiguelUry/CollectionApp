@@ -7,6 +7,7 @@ import '../models/collection_item.dart';
 import '../models/collection_category.dart';
 import '../utils/book_series_normalizer.dart';
 import '../utils/book_title_parser.dart';
+import '../utils/book_vf_edition.dart';
 import 'anilist_manga_service.dart';
 import 'book_catalog_service.dart';
 import 'book_intelligence_service.dart';
@@ -30,31 +31,71 @@ class BookSeriesService {
     return s.contains('23514') || s.contains('subcategory_check');
   }
 
+  static const _itemColumns = {
+    'title',
+    'category',
+    'subcategory',
+    'metadata',
+    'image_url',
+    'is_wishlist',
+    'is_read',
+    'quantity',
+    'added_by',
+    'location_user_id',
+    'series_id',
+    'volume_id',
+    'rating',
+  };
+
+  Map<String, dynamic> _itemPayload(Map<String, dynamic> payload) {
+    final clean = <String, dynamic>{};
+    for (final e in payload.entries) {
+      if (!_itemColumns.contains(e.key) || e.value == null) continue;
+      clean[e.key] = e.value;
+    }
+    return clean;
+  }
+
   Future<Map<String, dynamic>> _insertCollectionItem(
     Map<String, dynamic> payload,
   ) async {
+    var clean = _itemPayload(payload);
     try {
       return await _client
           .from('collection_items')
-          .insert(payload)
+          .insert(clean)
           .select()
           .single();
     } on PostgrestException catch (e) {
-      if (!_isSubcategoryCheckFailure(e)) rethrow;
-      final raw = payload['subcategory']?.toString();
-      final fallback = switch (raw) {
-        'comics' => 'comic',
-        'roman' => 'novel',
-        'bd' => 'comic',
-        _ => null,
-      };
-      if (fallback == null || fallback == raw) rethrow;
-      payload = Map<String, dynamic>.from(payload)..['subcategory'] = fallback;
-      return await _client
-          .from('collection_items')
-          .insert(payload)
-          .select()
-          .single();
+      if (_isSubcategoryCheckFailure(e)) {
+        final raw = clean['subcategory']?.toString();
+        final fallback = switch (raw) {
+          'comics' => 'comic',
+          'roman' => 'novel',
+          'bd' => 'comic',
+          _ => null,
+        };
+        if (fallback != null && fallback != raw) {
+          clean = Map<String, dynamic>.from(clean)..['subcategory'] = fallback;
+          return await _client
+              .from('collection_items')
+              .insert(clean)
+              .select()
+              .single();
+        }
+      }
+      final missing = RegExp(
+        r"Could not find the '(\w+)' column",
+      ).firstMatch(e.message);
+      if (missing != null) {
+        clean = Map<String, dynamic>.from(clean)..remove(missing.group(1));
+        return await _client
+            .from('collection_items')
+            .insert(clean)
+            .select()
+            .single();
+      }
+      rethrow;
     }
   }
 
@@ -461,6 +502,16 @@ class BookSeriesService {
         series.subcategory != BookSubcategory.novel) {
       return series;
     }
+    final lockedBd = BookSeriesNormalizer.detectSubcategory(
+      seriesName: series.name,
+      publisher: series.metadata['publisher']?.toString(),
+      author: series.author,
+      title: series.name,
+    );
+    if (series.subcategory == BookSubcategory.bd &&
+        lockedBd == BookSubcategory.bd) {
+      return series;
+    }
     try {
       final md = await MangaDexService.lookupManga(
         series.name,
@@ -469,17 +520,13 @@ class BookSeriesService {
       final ani = await AnilistMangaService.lookupManga(series.name);
       final confirmed = md != null || ani != null;
       if (!confirmed) return series;
-      // Auteur : si AniList/MD a un auteur et la série aussi, exiger match faible.
       final officialAuthor = md?.author ?? ani?.author;
       if (series.author != null &&
           series.author!.trim().isNotEmpty &&
           officialAuthor != null &&
           officialAuthor.trim().isNotEmpty &&
           !BookSeriesNormalizer.authorsMatch(series.author!, officialAuthor)) {
-        // Titre exact quand même → reclasse (Berserk / Glénat).
-        final q = BookSeriesNormalizer.mergeKey(series.name);
-        final t = BookSeriesNormalizer.mergeKey(md?.title ?? ani?.title ?? '');
-        if (q != t) return series;
+        return series;
       }
       final vols = [
         series.expectedVolumeCount ?? 0,
@@ -775,14 +822,28 @@ class BookSeriesService {
     }
     final readCount = readNumbers.length;
 
-    // Moyenne perso UNIQUEMENT sur notes > 0.
+    // Moyenne perso des tomes lus, 0.0 inclus.
     double? rating = series.userRating;
-    if (rating != null && rating <= 0) rating = null;
+    if (rating != null && rating < 0) rating = null;
     if (rating == null) {
-      final rated = active
-          .where((i) => i.rating != null && i.rating! > 0)
-          .map((i) => i.rating! > 5.0 ? i.rating! / 2 : i.rating!)
-          .toList();
+      final rated = <double>[];
+      for (final i in active) {
+        if (!i.isRead || i.rating == null || i.rating! < 0) continue;
+        final n = i.rating! > 5.0 ? i.rating! / 2 : i.rating!;
+        if (n >= 0 && n <= 5) rated.add(n);
+      }
+      for (final v in volumes) {
+        if (!v.isRead) continue;
+        final raw = v.metadata['personal_rating'];
+        if (raw == null) continue;
+        final n = raw is num ? raw.toDouble() : double.tryParse('$raw');
+        if (n == null || n < 0 || n > 5) continue;
+        final owned = active.any(
+          (i) => i.volumeId == v.id && !i.isWishlist && i.rating != null,
+        );
+        if (owned) continue;
+        rated.add(n);
+      }
       if (rated.isNotEmpty) {
         rating = rated.reduce((a, b) => a + b) / rated.length;
       }
@@ -897,6 +958,7 @@ class BookSeriesService {
     String? publishedDate,
     bool? upcoming,
     double? communityRating,
+    String? coverLanguage,
   }) async {
     if (coverUrl.isEmpty) return;
     final row = await _client
@@ -921,6 +983,11 @@ class BookSeriesService {
       } else {
         meta.remove('is_upcoming');
       }
+    }
+    if (coverLanguage != null && coverLanguage.trim().isNotEmpty) {
+      final lang = coverLanguage.toLowerCase();
+      meta['cover_language'] =
+          lang.startsWith('fr') ? 'fr' : (lang.startsWith('en') ? 'en' : lang);
     }
     if (communityRating != null && communityRating > 0) {
       meta['community_rating'] =
@@ -960,11 +1027,39 @@ class BookSeriesService {
         .maybeSingle();
     if (row == null) return;
     final meta = Map<String, dynamic>.from(row['metadata'] as Map? ?? {});
-    meta.addAll(patch);
+    for (final e in patch.entries) {
+      if (e.value == null) {
+        meta.remove(e.key);
+      } else {
+        meta[e.key] = e.value;
+      }
+    }
     await _client
         .from('book_volumes')
         .update({'metadata': meta})
         .eq('id', volumeId);
+  }
+
+  static String? _cleanSynopsis(String? raw) {
+    if (raw == null) return null;
+    var s = raw.replaceAll(RegExp(r'<[^>]+>'), ' ');
+    s = s
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#39;', "'");
+    final parts = s.split(RegExp(r'(?<=[.!?])\s+'));
+    final kept = <String>[];
+    for (final part in parts) {
+      final t = part.trim();
+      if (t.length < 12) continue;
+      final letters = t.replaceAll(RegExp(r'[^A-Za-zÀ-ÿ]'), '');
+      if (letters.length >= 16 && letters == letters.toUpperCase()) continue;
+      kept.add(t);
+    }
+    s = kept.join(' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (s.length < 40) return null;
+    return s;
   }
 
   /// Couvertures : Google Books FR d'abord (écrase MangaDex), MD comble les trous.
@@ -983,7 +1078,7 @@ class BookSeriesService {
     var working = series;
     var seriesAuthor = working.author;
 
-    final batch = <int, ({String coverUrl, String? publishedDate})>{};
+    final batch = <int, ({String coverUrl, String? publishedDate, String? language})>{};
     var vfMax = 0;
 
     // 1) Google Books FR = source de vérité VF (covers + dates + max tome).
@@ -1005,21 +1100,53 @@ class BookSeriesService {
 
     // 2) Apple Books FR avant MangaDex (mangas inclus) — 1 recherche, pas 1/tome.
     try {
-      final itunes = await ItunesBooksService.search(working.name, limit: 50);
+      final itunes = await ItunesBooksService.search(working.name, limit: 200);
+      String? synopsis;
       for (final h in itunes) {
         final title = h['title'] ?? '';
-        if (!BookSeriesNormalizer.hitBelongsToSeries(title, working.name)) {
+        final blob =
+            '$title ${h['description'] ?? ''} ${h['collection_name'] ?? ''} ${h['series_title'] ?? ''}';
+        final belongs = BookSeriesNormalizer.hitBelongsToSeries(
+              title,
+              working.name,
+            ) ||
+            BookSeriesNormalizer.textMentionsSeries(blob, working.name);
+        if (!belongs) continue;
+        if (!BookSeriesNormalizer.authorMatchesExpected(
+          h['author'],
+          seriesAuthor,
+        )) {
           continue;
         }
-        final n = BookTitleParser.extractVolumeNumberStrict(title);
+        synopsis ??= _cleanSynopsis(h['description']);
+        final n = BookTitleParser.extractVolumeNumberStrict(title) ??
+            BookTitleParser.volumeTrailingSeries(title, working.name) ??
+            BookTitleParser.extractVolumeFromProse(blob);
         if (n == null || n < 1) continue;
         final img = h['image_url'] ?? '';
         if (img.isEmpty || isMangaDexCoverUrl(img)) continue;
-        batch.putIfAbsent(
-          n,
-          () => (coverUrl: img, publishedDate: h['published_date']),
-        );
+        final isFr = BookVfEdition.isFrenchLanguage(h['language']) ||
+            BookIntelligenceService.looksVfTitle(title);
+        final prev = batch[n];
+        final prevFr = prev != null &&
+            (BookVfEdition.isFrenchLanguage(prev.language) ||
+                (prev.language ?? '').isEmpty);
+        if (prev != null && prevFr && !isFr) continue;
+        if (prev == null || isFr) {
+          batch[n] = (
+            coverUrl: img,
+            publishedDate: h['published_date'],
+            language: isFr ? 'fr' : h['language'],
+          );
+        }
         if (n > vfMax) vfMax = n;
+      }
+      if ((working.description ?? '').trim().length < 40 &&
+          synopsis != null) {
+        working = working.copyWith(description: synopsis);
+        try {
+          await updateSeries(working);
+        } catch (_) {}
       }
     } catch (_) {}
 
@@ -1043,7 +1170,11 @@ class BookSeriesService {
           for (final e in covers.entries) {
             batch.putIfAbsent(
               e.key,
-              () => (coverUrl: e.value, publishedDate: null),
+              () => (
+                coverUrl: e.value,
+                publishedDate: null,
+                language: null,
+              ),
             );
           }
           final mdVols = md.volumesPublished;
@@ -1107,12 +1238,15 @@ class BookSeriesService {
         continue;
       }
 
-      // MangaDex : trou vide seulement, jamais par-dessus une couverture.
+      final existingLang = vol.metadata['cover_language']?.toString();
+      final incomingFr = BookVfEdition.isFrenchLanguage(hit.language) ||
+          hit.language == 'fr';
+      // MangaDex : trou vide seulement. Une VF peut remplacer une couv. EN.
       if (incomingMd) {
         if (hasCover) continue;
       } else if (hasCover && !existingMd) {
-        // Couverture VF déjà en base : on la garde.
-        continue;
+        final alreadyFr = existingLang == 'fr';
+        if (alreadyFr || !incomingFr) continue;
       }
 
       await setVolumeCoverUrl(
@@ -1121,6 +1255,7 @@ class BookSeriesService {
         verifiedVolume: n,
         publishedDate: pub,
         upcoming: upcoming,
+        coverLanguage: incomingFr ? 'fr' : hit.language,
       );
       updated++;
       sinceProgress++;
@@ -1477,11 +1612,13 @@ class BookSeriesService {
         .eq('id', itemId);
   }
 
-  Future<void> setItemRating(String itemId, double rating) async {
+  Future<void> setItemRating(String itemId, double? rating) async {
     if (!_isPersistedItemId(itemId)) return;
-    final clamped = double.parse(rating.clamp(0.0, 5.0).toStringAsFixed(1));
+    final value = rating == null
+        ? null
+        : double.parse(rating.clamp(0.0, 5.0).toStringAsFixed(1));
     await _client.from('collection_items').update({
-      'rating': clamped <= 0 ? null : clamped,
+      'rating': value,
     }).eq('id', itemId);
   }
 
@@ -1491,6 +1628,12 @@ class BookSeriesService {
   }) async {
     // Lu possible sans possession (scan / bibliothèque) via flag volume.
     final item = slot.item;
+    if (!read) {
+      if (item != null && _isPersistedItemId(item.id)) {
+        await setItemRating(item.id, null);
+      }
+      await patchVolumeMetadata(slot.volume.id, {'personal_rating': null});
+    }
     if (item != null && !item.isWishlist && _isPersistedItemId(item.id)) {
       await setItemRead(item.id, read);
       await setVolumeReadFlag(slot.volume.id, read);

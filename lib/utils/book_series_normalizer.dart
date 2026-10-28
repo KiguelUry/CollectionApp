@@ -255,6 +255,13 @@ abstract final class BookSeriesNormalizer {
     return s;
   }
 
+  /// Le texte (description, collection, sous-titre) cite le nom de la série.
+  static bool textMentionsSeries(String text, String seriesName) {
+    final want = normalizeKey(seriesName);
+    if (want.length < 3) return false;
+    return normalizeKey(text).contains(want);
+  }
+
   static bool namesMatch(String a, String b) =>
       BookTitleParser.seriesNamesMatch(normalizeKey(a), normalizeKey(b)) ||
       BookTitleParser.seriesNamesMatch(a, b);

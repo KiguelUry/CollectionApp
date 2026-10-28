@@ -282,6 +282,113 @@ abstract final class BookTitleParser {
   /// Ignore les années (2024/2025…) prises pour un n° de tome.
   static bool _isPlausibleVolume(double n) => n >= 1 && n < 1900 && n <= 500;
 
+  /// « Quatrième tome », « tome 4 », « first book » dans une description.
+  static int? extractVolumeFromProse(String text) {
+    final raw = text.trim();
+    if (raw.length < 4) return null;
+    final numbered = RegExp(
+      r'\b(?:tome|livre|book|volume)\s*0*(\d+)\b',
+      caseSensitive: false,
+    ).firstMatch(raw);
+    if (numbered != null) {
+      final n = int.tryParse(numbered.group(1)!);
+      if (n != null && _isPlausibleVolume(n.toDouble())) return n;
+    }
+    final fr = RegExp(
+      r'\b(premier|1er|premi[eè]re|deuxi[eè]me|2e|2[eè]me|second|seconde|'
+      r'troisi[eè]me|3e|3[eè]me|quatri[eè]me|4e|4[eè]me|'
+      r'cinqui[eè]me|5e|5[eè]me|sixi[eè]me|6e|6[eè]me|'
+      r'septi[eè]me|7e|7[eè]me|huiti[eè]me|8e|8[eè]me)\s+'
+      r'(?:tome|livre|volume|volet|opus)\b',
+      caseSensitive: false,
+    ).firstMatch(raw);
+    if (fr != null) return _ordinalToInt(fr.group(1)!);
+    final en = RegExp(
+      r'\b(first|second|third|fourth|fifth|sixth|seventh|eighth)\s+'
+      r'(?:book|volume|tome)\b',
+      caseSensitive: false,
+    ).firstMatch(raw);
+    if (en != null) return _ordinalToInt(en.group(1)!);
+    return null;
+  }
+
+  /// « One Piece 1 », « One Piece T01 », « One Piece, Tome 01 ».
+  static int? volumeTrailingSeries(String title, String seriesName) {
+    final series = seriesName.trim();
+    if (series.length < 2) return null;
+    final re = RegExp(
+      '^${RegExp.escape(series)}\\b',
+      caseSensitive: false,
+    );
+    final trimmed = title.trim();
+    if (!re.hasMatch(trimmed)) return null;
+    var rest = trimmed.replaceFirst(re, '').trim();
+    rest = rest.replaceFirst(RegExp(r'^[\s,:\-–—]+'), '').trim();
+    final m = RegExp(
+      r'^(?:tome\s*|t\.?\s*)?0*(\d+)$',
+      caseSensitive: false,
+    ).firstMatch(rest);
+    if (m == null) return null;
+    final n = int.tryParse(m.group(1)!);
+    if (n == null || !_isPlausibleVolume(n.toDouble())) return null;
+    return n;
+  }
+
+  static int? _ordinalToInt(String word) {
+    final w = word.toLowerCase();
+    const map = {
+      'premier': 1,
+      '1er': 1,
+      'premiere': 1,
+      'première': 1,
+      'deuxieme': 2,
+      'deuxième': 2,
+      '2e': 2,
+      '2eme': 2,
+      '2ème': 2,
+      'second': 2,
+      'seconde': 2,
+      'troisieme': 3,
+      'troisième': 3,
+      '3e': 3,
+      '3eme': 3,
+      '3ème': 3,
+      'quatrieme': 4,
+      'quatrième': 4,
+      '4e': 4,
+      '4eme': 4,
+      '4ème': 4,
+      'cinquieme': 5,
+      'cinquième': 5,
+      '5e': 5,
+      '5eme': 5,
+      '5ème': 5,
+      'sixieme': 6,
+      'sixième': 6,
+      '6e': 6,
+      '6eme': 6,
+      '6ème': 6,
+      'septieme': 7,
+      'septième': 7,
+      '7e': 7,
+      '7eme': 7,
+      '7ème': 7,
+      'huitieme': 8,
+      'huitième': 8,
+      '8e': 8,
+      '8eme': 8,
+      '8ème': 8,
+      'first': 1,
+      'third': 3,
+      'fourth': 4,
+      'fifth': 5,
+      'sixth': 6,
+      'seventh': 7,
+      'eighth': 8,
+    };
+    return map[w];
+  }
+
   /// Extrait le n° de tome avec borne stricte (1 ≠ 16 ; matche aussi `T10`).
   static int? extractVolumeNumberStrict(String title) {
     final normalized = title.replaceAll(RegExp(r'[–—−]'), '-');
