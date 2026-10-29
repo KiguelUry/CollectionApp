@@ -107,26 +107,40 @@ class _BookSubcategorySeriesScreenState
   }
 
   Future<void> _confirmDeleteSeries(BookSeries series) async {
-    final ok = await showDialog<bool>(
+    final choice = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Supprimer la série ?'),
-        content: Text('« ${series.name} » sera retirée de ta liste.'),
+        content: Text(
+          '« ${series.name} »\n\n'
+          'Supprimer aussi tous les tomes possédés ?\n'
+          '• Oui : série + exemplaires retirés\n'
+          '• Non : série masquée, tomes / notes / éditions conservés\n'
+          '• Annuler : rien ne change',
+        ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
+            onPressed: () => Navigator.pop(ctx, 'cancel'),
             child: const Text('Annuler'),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
+            onPressed: () => Navigator.pop(ctx, 'keep'),
+            child: const Text('Non'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'purge'),
             style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Supprimer'),
+            child: const Text('Oui'),
           ),
         ],
       ),
     );
-    if (ok != true || !mounted) return;
-    await _service.deleteSeries(series.id);
+    if (choice == null || choice == 'cancel' || !mounted) return;
+    if (choice == 'purge') {
+      await _service.deleteSeriesAndOwnedVolumes(series.id);
+    } else {
+      await _service.hideSeriesFromCollection(series.id);
+    }
     _load();
   }
 

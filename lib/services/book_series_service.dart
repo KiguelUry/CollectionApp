@@ -123,7 +123,7 @@ class BookSeriesService {
     }
 
     final rows = await query.order('name');
-    return _seriesList(rows);
+    return _visibleSeries(_seriesList(rows));
   }
 
   Future<BookSeries?> fetchSeriesById(String id) async {
@@ -1099,6 +1099,11 @@ class BookSeriesService {
     // 2) Apple Books FR (nom + Tome + auteur, Glénat/Kana si manga).
     String? tome1Synopsis;
     final frenchTomeLocked = <int>{};
+    final sisterSaga = BookSeriesNormalizer.queryWords(working.name)
+        .join(' ')
+        .contains('soeur');
+    final pendingByDate =
+        <({String coverUrl, String? publishedDate, String? language, String date})>[];
     try {
       final itunes = await ItunesBooksService.searchSeries(
         working.name,
@@ -1107,6 +1112,8 @@ class BookSeriesService {
       );
       for (final h in itunes) {
         final title = h['title'] ?? '';
+        if (BookSeriesNormalizer.looksLikeChapterOrScan(title)) continue;
+        if (BookTitleParser.isCompanionOrStudyTitle(title)) continue;
         if (BookVfEdition.isRejectedCatalogTitle(
           title,
           subtitle: h['subtitle'],
@@ -1129,12 +1136,21 @@ class BookSeriesService {
           description: h['description'] ?? '',
           seriesName: working.name,
         );
-        final sisterVol = BookSeriesNormalizer.queryWords(working.name)
-                .join(' ')
-                .contains('soeur')
+        final sisterVol = sisterSaga
             ? BookTitleParser.sisterOrdinal(h['description'] ?? '')
             : null;
-        if (!identity && !descBind && sisterVol == null) continue;
+        // Roman « sœur » : titre qui partage un mot (sœur) + même auteure,
+        // même sans « Les sept sœurs » dans le titre (Lune, Soleil…).
+        final softSister = sisterSaga &&
+            working.subcategory == BookSubcategory.novel &&
+            BookSeriesNormalizer.authorMatchesExpected(
+              h['author'],
+              seriesAuthor,
+            ) &&
+            BookSeriesNormalizer.titleSharesQueryWord(working.name, title);
+        if (!identity && !descBind && sisterVol == null && !softSister) {
+          continue;
+        }
         if (BookSeriesNormalizer.rejectAsDifferentWork(
           title: title,
           seriesName: working.name,
@@ -1147,6 +1163,7 @@ class BookSeriesService {
         final titleIsThisSeries =
             BookSeriesNormalizer.hitBelongsToSeries(title, working.name);
         if (!titleIsThisSeries &&
+            !softSister &&
             !BookSeriesNormalizer.authorMatchesExpected(
               h['author'],
               seriesAuthor,
@@ -1166,7 +1183,7 @@ class BookSeriesService {
             labeled ??
             BookTitleParser.volumeTrailingSeries(title, working.name) ??
             BookTitleParser.extractVolumeFromProse(
-              descBind
+              descBind || softSister
                   ? (h['description'] ?? '')
                   : '$identityBlob ${h['description'] ?? ''}',
             ) ??
@@ -1182,13 +1199,27 @@ class BookSeriesService {
             }
           }
         }
-        if (n == null || n < 1) continue;
         final img = h['image_url'] ?? '';
         if (img.isEmpty || isMangaDexCoverUrl(img)) continue;
         final isFr = BookVfEdition.isFrenchLanguage(h['language']) ||
             BookIntelligenceService.looksVfTitle(title);
         final frenchTome = BookTitleParser.isFrenchTomeTitle(title);
         final englishVol = BookTitleParser.isEnglishVolumeTitle(title);
+        final lang = frenchTome ? 'fr-tome' : (isFr ? 'fr' : h['language']);
+        if (n == null || n < 1) {
+          // Uniquement les tomes « sœur » sans numéro (Lune, Soleil…),
+          // pas le tome 1 au nom exact de la série.
+          if (softSister && !identity) {
+            final date = h['published_date'] ?? h['year'] ?? '';
+            pendingByDate.add((
+              coverUrl: img,
+              publishedDate: h['published_date'],
+              language: lang,
+              date: date,
+            ));
+          }
+          continue;
+        }
         if (englishVol && frenchTomeLocked.contains(n)) continue;
         final prev = batch[n];
         final prevFr = prev != null &&
@@ -1202,11 +1233,35 @@ class BookSeriesService {
           batch[n] = (
             coverUrl: img,
             publishedDate: h['published_date'],
-            language: frenchTome ? 'fr-tome' : (isFr ? 'fr' : h['language']),
+            language: lang,
           );
           if (frenchTome) frenchTomeLocked.add(n);
         }
         if (n > vfMax) vfMax = n;
+      }
+      // Trous sans « Tome N » dans le titre : ordre de parution (Lune → 5…).
+      if (pendingByDate.isNotEmpty) {
+        pendingByDate.sort((a, b) => a.date.compareTo(b.date));
+        final expected = working.expectedVolumeCount ??
+            (vfMax > 0 ? vfMax : pendingByDate.length);
+        final gaps = <int>[];
+        for (var i = 1; i <= expected.clamp(1, 80); i++) {
+          if (!batch.containsKey(i)) gaps.add(i);
+        }
+        var gi = 0;
+        for (final pending in pendingByDate) {
+          if (gi >= gaps.length) break;
+          final slot = gaps[gi++];
+          batch.putIfAbsent(
+            slot,
+            () => (
+              coverUrl: pending.coverUrl,
+              publishedDate: pending.publishedDate,
+              language: pending.language,
+            ),
+          );
+          if (slot > vfMax) vfMax = slot;
+        }
       }
     } catch (_) {}
 
@@ -1347,23 +1402,19 @@ class BookSeriesService {
       final incomingFr = incomingTome ||
           BookVfEdition.isFrenchLanguage(hit.language) ||
           hit.language == 'fr';
-      // MangaDex : trou vide seulement. Un « Tome N » VF remplace un Volume
-      // anglais déjà enregistré. Une couverture « Tome » déjà posée reste.
+      // MangaDex : trou vide seulement. Jamais écraser une couverture déjà
+      // posée (FR iTunes/Google) — c'est ce qui remettait One Piece en JP.
       if (incomingMd) {
-        if (hasCover) {
-          // Un manga déjà marqué « Tome N » reste. Une couverture « fr »
-          // qui n'est pas un tome (homonyme Monster, etc.) cède la place
-          // au MangaDex de la vraie série, faute de tome VF.
-          final restoreMd = working.subcategory == BookSubcategory.manga &&
-              existingLang == 'fr';
-          if (!restoreMd) continue;
-        }
+        if (hasCover) continue;
       } else if (hasCover && !existingMd) {
         final alreadyTome = existingLang == 'fr-tome';
-        // Un vrai « Tome N » peut corriger une couverture homonyme.
-        // L'inverse est refusé : on ne remplace pas un tome VF par autre chose.
+        final alreadyFr = alreadyTome ||
+            existingLang == 'fr' ||
+            BookVfEdition.isFrenchLanguage(existingLang);
+        // Un vrai « Tome N » peut corriger une couverture homonyme non-VF.
+        // Une couverture FR (tome ou non) ne cède jamais la place.
+        if (alreadyFr && !incomingTome) continue;
         if (alreadyTome && !incomingTome) continue;
-        if (existingLang == 'fr' && !incomingTome) continue;
         if (!incomingFr) continue;
       }
 
@@ -1470,7 +1521,9 @@ class BookSeriesService {
     }).eq('id', itemId);
   }
 
-  Future<List<BookSeries>> fetchAllRootSeries() async {
+  Future<List<BookSeries>> fetchAllRootSeries({
+    bool includeHidden = false,
+  }) async {
     final userId = _client.auth.currentUser?.id;
     if (userId == null || userId.isEmpty) return const [];
     final rows = await _client
@@ -1479,7 +1532,8 @@ class BookSeriesService {
         .eq('owner_id', userId)
         .filter('parent_series_id', 'is', null)
         .order('name');
-    return _seriesList(rows);
+    final all = _seriesList(rows);
+    return includeHidden ? all : _visibleSeries(all);
   }
 
   List<BookSeries> _seriesList(dynamic rows) {
@@ -1494,6 +1548,29 @@ class BookSeriesService {
       } catch (_) {}
     }
     return out;
+  }
+
+  List<BookSeries> _visibleSeries(List<BookSeries> list) => list
+      .where((s) => s.metadata['hidden_from_collection'] != true)
+      .toList();
+
+  /// Retire la série de « Mes livres » sans toucher aux tomes / notes / éditions.
+  Future<void> hideSeriesFromCollection(String id) async {
+    final series = await fetchSeriesById(id);
+    if (series == null) return;
+    final meta = Map<String, dynamic>.from(series.metadata);
+    meta['hidden_from_collection'] = true;
+    await updateSeries(series.copyWith(metadata: meta));
+  }
+
+  /// Oui : retire tous les exemplaires puis la série (tomes inclus).
+  Future<void> deleteSeriesAndOwnedVolumes(String id) async {
+    final items = await fetchSeriesItems(id);
+    for (final item in items) {
+      if (item.id.startsWith('local-')) continue;
+      await removeVolumeItem(item.id);
+    }
+    await deleteSeries(id);
   }
 
   Map<String, List<CollectionItem>> _bookItemsBySeries(dynamic rows) {
@@ -1595,7 +1672,18 @@ class BookSeriesService {
     required bool owned,
   }) async {
     if (owned) {
-      await addVolumeQuick(series: series, volume: slot.volume);
+      final item = await addVolumeQuick(series: series, volume: slot.volume);
+      // Note / lu hors possession → reporter sur l'exemplaire.
+      final raw = slot.volume.metadata['personal_rating'];
+      final kept = raw is num
+          ? raw.toDouble()
+          : double.tryParse('$raw');
+      if (kept != null && item.rating == null) {
+        await setItemRating(item.id, kept);
+        await setItemRead(item.id, true);
+      } else if (slot.volume.isRead && !item.isRead) {
+        await setItemRead(item.id, true);
+      }
       return;
     }
     // Supprime TOUTES les lignes pour ce volume (anti 73/42).
@@ -1605,12 +1693,20 @@ class BookSeriesService {
             i.volumeId == slot.volume.id && !i.isWishlist && !i.isSold)
         .toList();
     var keepReadFlag = false;
+    double? keepRating;
     for (final item in toRemove) {
       if (item.isRead) keepReadFlag = true;
+      keepRating ??= item.rating;
       await removeVolumeItem(item.id);
     }
-    if (keepReadFlag) {
+    if (keepReadFlag || keepRating != null) {
       await setVolumeReadFlag(slot.volume.id, true);
+    }
+    if (keepRating != null) {
+      await patchVolumeMetadata(slot.volume.id, {
+        'personal_rating': keepRating,
+        'is_read': true,
+      });
     }
   }
 
@@ -1867,7 +1963,7 @@ class BookSeriesService {
 
   /// Cherche une série par nom dans toutes les sous-catégories.
   Future<BookSeries?> findSeriesByNameAnySub(String name) async {
-    final all = await fetchAllRootSeries();
+    final all = await fetchAllRootSeries(includeHidden: true);
     for (final s in all) {
       if (BookSeriesNormalizer.namesMatch(s.name, name) ||
           BookSeriesNormalizer.mergeKey(s.name) ==
@@ -1908,9 +2004,18 @@ class BookSeriesService {
       }
       // Retire le flag standalone si multi-tomes.
       final exp = updated.expectedVolumeCount ?? expectedVolumeCount ?? 0;
-      if (exp > 1 && existing.metadata['is_standalone'] == true) {
-        final meta = Map<String, dynamic>.from(updated.metadata);
+      final meta = Map<String, dynamic>.from(updated.metadata);
+      var metaChanged = false;
+      if (exp > 1 && meta['is_standalone'] == true) {
         meta['is_standalone'] = false;
+        metaChanged = true;
+      }
+      // Remettre une série masquée dans la collection.
+      if (meta['hidden_from_collection'] == true) {
+        meta.remove('hidden_from_collection');
+        metaChanged = true;
+      }
+      if (metaChanged) {
         updated = updated.copyWith(metadata: meta);
       }
       // Persiste le nom nettoyé (« One Piece - Édition originale » → « One Piece »).

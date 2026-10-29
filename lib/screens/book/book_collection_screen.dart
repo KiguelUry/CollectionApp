@@ -480,32 +480,50 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
     ..sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
 
   Future<void> _confirmDeleteSeries(BookSeries series) async {
-    final ok = await showDialog<bool>(
+    final choice = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Supprimer la série ?'),
         content: Text(
-          '« ${series.name} » sera retirée. Les livres restent en collection '
-          'mais ne seront plus liés à cette série.',
+          '« ${series.name} »\n\n'
+          'Supprimer aussi tous les tomes possédés ?\n'
+          '• Oui : série + exemplaires retirés de la collection\n'
+          '• Non : série masquée, tomes / notes / éditions conservés '
+          '(ils réapparaissent si tu la rajoutes)\n'
+          '• Annuler : rien ne change',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
+            onPressed: () => Navigator.pop(ctx, 'cancel'),
             child: const Text('Annuler'),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
+            onPressed: () => Navigator.pop(ctx, 'keep'),
+            child: const Text('Non'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'purge'),
             style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Supprimer'),
+            child: const Text('Oui'),
           ),
         ],
       ),
     );
-    if (ok != true || !mounted) return;
-    await _service.deleteSeries(series.id);
+    if (choice == null || choice == 'cancel' || !mounted) return;
+    if (choice == 'purge') {
+      await _service.deleteSeriesAndOwnedVolumes(series.id);
+    } else {
+      await _service.hideSeriesFromCollection(series.id);
+    }
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('« ${series.name} » supprimée')),
+        SnackBar(
+          content: Text(
+            choice == 'purge'
+                ? '« ${series.name} » et ses tomes retirés'
+                : '« ${series.name} » masquée — tomes conservés',
+          ),
+        ),
       );
       _load();
     }

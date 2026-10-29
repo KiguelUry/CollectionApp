@@ -213,7 +213,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   double? _slotRating(BookVolumeSlot slot) {
     if (!_slotRead(slot)) return null;
     final raw = _slotOwned(slot)
-        ? slot.item?.rating
+        ? (slot.item?.rating ?? slot.volume.metadata['personal_rating'])
         : slot.volume.metadata['personal_rating'];
     if (raw == null) return null;
     final n = raw is num ? raw.toDouble() : double.tryParse('$raw');
@@ -328,8 +328,8 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     }
 
     CollectionItem? nextItem;
-    if (!nextOwned && !nextWish && rating == null) {
-      // Lu sans possession : flag volume uniquement.
+    if (!nextOwned && !nextWish) {
+      // Noté / lu sans possession : flags volume uniquement, pas d'item.
       nextItem = null;
     } else {
       nextItem = _fakeItem(cur, wishlist: nextWish, read: nextRead);
@@ -337,14 +337,22 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         nextItem = nextItem.copyWith(clearRating: true);
       } else if (applyRating) {
         nextItem = nextItem.copyWith(rating: rating, isRead: nextRead);
+      } else if (nextOwned) {
+        // Possédé après une note hors possession : reporter la note volume.
+        final kept = cur.volume.metadata['personal_rating'];
+        final keptN = kept is num
+            ? kept.toDouble()
+            : double.tryParse('$kept');
+        if (keptN != null && nextItem.rating == null) {
+          nextItem = nextItem.copyWith(rating: keptN, isRead: true);
+          nextVolume = nextVolume.copyWithMetadata({'is_read': true});
+        }
       }
     }
 
     final status = nextWish
         ? BookVolumeStatus.wishlist
-        : (nextOwned || (rating != null && nextItem != null)
-            ? BookVolumeStatus.owned
-            : BookVolumeStatus.missing);
+        : (nextOwned ? BookVolumeStatus.owned : BookVolumeStatus.missing);
 
     setState(() {
       _slots = List.of(_slots);
@@ -1246,7 +1254,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     final border = owned ? const Color(0xFF10B981) : const Color(0xFF334155);
     return SizedBox(
       width: 44,
-      height: note == null ? 40 : 52,
+      height: note == null ? 40 : 54,
       child: Material(
         color: Colors.transparent,
         child: InkWell(
@@ -1264,49 +1272,45 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                   Container(
                     height: 3.5,
                     width: double.infinity,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFFFBBF24),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFBBF24),
                       borderRadius: BorderRadius.vertical(
-                        top: Radius.circular(5),
+                        top: Radius.circular(note == null ? 5 : 4.5),
                       ),
                     ),
                   ),
                 Expanded(
-                  child: Column(
-                    mainAxisAlignment: note == null
-                        ? MainAxisAlignment.center
-                        : MainAxisAlignment.spaceEvenly,
-                    children: [
-                      Text(
-                        'T${slot.volume.displayNumber}',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          color: Colors.white,
-                        ),
+                  child: Center(
+                    child: Text(
+                      'T${slot.volume.displayNumber}',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
                       ),
-                      if (note != null)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 4,
-                            vertical: 1,
-                          ),
-                          decoration: BoxDecoration(
-                            color: ratingColor(note),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            note.toStringAsFixed(1),
-                            style: const TextStyle(
-                              fontSize: 8,
-                              fontWeight: FontWeight.w800,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                    ],
+                    ),
                   ),
                 ),
+                if (note != null)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    decoration: BoxDecoration(
+                      color: ratingColor(note),
+                      borderRadius: const BorderRadius.vertical(
+                        bottom: Radius.circular(4.5),
+                      ),
+                    ),
+                    child: Text(
+                      note.toStringAsFixed(1),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 8,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -1993,26 +1997,40 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   }
 
   Future<void> _confirmDelete(BookSeries series) async {
-    final ok = await showDialog<bool>(
+    final choice = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Supprimer la série ?'),
-        content: Text('« ${series.name} » sera retirée.'),
+        content: Text(
+          '« ${series.name} »\n\n'
+          'Supprimer aussi tous les tomes possédés ?\n'
+          '• Oui : série + exemplaires retirés\n'
+          '• Non : série masquée, tomes / notes / éditions conservés\n'
+          '• Annuler : rien ne change',
+        ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
+            onPressed: () => Navigator.pop(ctx, 'cancel'),
             child: const Text('Annuler'),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
+            onPressed: () => Navigator.pop(ctx, 'keep'),
+            child: const Text('Non'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'purge'),
             style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Supprimer'),
+            child: const Text('Oui'),
           ),
         ],
       ),
     );
-    if (ok != true || !mounted) return;
-    await _service.deleteSeries(series.id);
+    if (choice == null || choice == 'cancel' || !mounted) return;
+    if (choice == 'purge') {
+      await _service.deleteSeriesAndOwnedVolumes(series.id);
+    } else {
+      await _service.hideSeriesFromCollection(series.id);
+    }
     BooksCollectionCache.instance.clear();
     if (mounted) Navigator.pop(context);
   }

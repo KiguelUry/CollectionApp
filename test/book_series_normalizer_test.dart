@@ -916,9 +916,8 @@ void main() {
       final pages = BookVfEdition.synopsisPages(
         'Une phrase. Deuxième phrase. Troisième phrase.',
       );
-      expect(pages.length, 2);
-      expect(pages.first.endsWith('.'), isTrue);
-      expect(pages.last.contains('Troisième'), isTrue);
+      expect(pages.length, 1);
+      expect(pages.first.contains('Troisième'), isTrue);
       final long = BookVfEdition.synopsisPages(
         List.filled(8, 'Phrase assez longue pour remplir la page du synopsis.').join(' '),
       );
@@ -1340,9 +1339,10 @@ void main() {
 
     test('le synopsis se coupe sur un point', () {
       const text =
-          'Première phrase assez longue pour compter. '
-          'Deuxième phrase qui termine la page. '
-          'Troisième phrase sur la page suivante.';
+          'Première phrase assez longue pour compter vraiment le quota. '
+          'Deuxième phrase qui termine déjà la première page du synopsis. '
+          'Troisième phrase qui doit basculer sur la page suivante clairement. '
+          'Quatrième phrase encore pour forcer une coupure nette.';
       final pages = BookVfEdition.synopsisPages(text);
       expect(pages.length, greaterThan(1));
       for (final page in pages) {

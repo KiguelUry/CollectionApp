@@ -615,7 +615,18 @@ abstract final class BookIntelligenceService {
         description: h.raw['description'] ?? '',
         seriesName: cleanName,
       );
-      if (!identity && !descBind && h.parsed.volumeNumber == null) continue;
+      final sisterSaga =
+          BookSeriesNormalizer.queryWords(cleanName).join(' ').contains('soeur');
+      final softSister = sisterSaga &&
+          subcategory == BookSubcategory.novel &&
+          BookSeriesNormalizer.authorMatchesExpected(h.author, authorHint) &&
+          BookSeriesNormalizer.titleSharesQueryWord(cleanName, title);
+      if (!identity &&
+          !descBind &&
+          h.parsed.volumeNumber == null &&
+          !softSister) {
+        continue;
+      }
       if (BookSeriesNormalizer.rejectAsDifferentWork(
         title: title,
         seriesName: cleanName,
