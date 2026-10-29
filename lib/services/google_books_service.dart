@@ -68,9 +68,14 @@ class GoogleBooksService {
   /// Vrai pendant les 10 minutes qui suivent un 429, un 503 ou un quota à 0.
   static bool get isCircuitOpen => _isLocked;
 
-  /// 429, 503, ou corps `quota_limit_value: 0` : on coupe Google Books.
-  static bool opensCircuit(int statusCode, String body) =>
-      statusCode == 429 || statusCode == 503 || _quotaIsZero(body);
+  /// 429 ou quota à 0 : on coupe Google Books.
+  /// Un 503 `backendFailed` est un hoquet Google, pas un quota mort :
+  /// cette requête échoue, les suivantes restent autorisées.
+  static bool opensCircuit(int statusCode, String body) {
+    if (statusCode == 429 || _quotaIsZero(body)) return true;
+    if (statusCode == 503 && !body.contains('backendFailed')) return true;
+    return false;
+  }
 
   static void _tripBreaker([String reason = '']) {
     _circuitOpenUntil = DateTime.now().add(_lockDuration);

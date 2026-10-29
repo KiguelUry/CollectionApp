@@ -952,6 +952,13 @@ void main() {
       );
       expect(GoogleBooksService.opensCircuit(429, ''), isTrue);
       expect(GoogleBooksService.opensCircuit(503, ''), isTrue);
+      expect(
+        GoogleBooksService.opensCircuit(
+          503,
+          '{"reason":"backendFailed"}',
+        ),
+        isFalse,
+      );
       expect(GoogleBooksService.opensCircuit(200, ''), isFalse);
       expect(
         GoogleBooksService.opensCircuit(200, '{"quota_limit_value": "0"}'),
@@ -977,6 +984,68 @@ void main() {
           'dungeon crawler',
         ),
         isTrue,
+      );
+    });
+
+    test('Sept Sœurs : accent, sœur numérotée, pas le manga d’étude', () {
+      expect(
+        BookSeriesNormalizer.textMentionsSeries(
+          'Les cinq premiers tomes de sa série Les Sept sœurs',
+          'les sept soeurs',
+        ),
+        isTrue,
+      );
+      expect(
+        BookTitleParser.sisterOrdinal(
+          'Ally, la deuxième sœur au tempérament tempétueux',
+        ),
+        2,
+      );
+      expect(
+        BookTitleParser.isCompanionOrStudyTitle(
+          "Les sept soeurs - tome 1 de Lucinda Riley (Analyse de l'œuvre)",
+        ),
+        isTrue,
+      );
+      expect(
+        BookSeriesNormalizer.titleSharesQueryWord(
+          'les sept soeurs',
+          'La sœur de la tempête',
+        ),
+        isTrue,
+      );
+    });
+
+    test('Thorgal : le spin-off et le Volume anglais ne prennent pas le tome', () {
+      expect(
+        BookSeriesNormalizer.hitBelongsToSeries(
+          'La Jeunesse de Thorgal - Tome 5 - Slive',
+          'Thorgal',
+        ),
+        isFalse,
+      );
+      expect(
+        BookSeriesNormalizer.hitBelongsToSeries(
+          'Thorgal - Tome 4  La galère noire',
+          'Thorgal',
+        ),
+        isTrue,
+      );
+      expect(
+        BookTitleParser.isFrenchTomeTitle('Thorgal - Tome 20 - La Marque'),
+        isTrue,
+      );
+      expect(
+        BookTitleParser.isEnglishVolumeTitle(
+          'Thorgal - Volume 20 - Kriss of Valnor',
+        ),
+        isTrue,
+      );
+      expect(
+        BookTitleParser.isEnglishVolumeTitle(
+          'Thorgal - Tome 28 - Kriss de Valnor',
+        ),
+        isFalse,
       );
     });
 

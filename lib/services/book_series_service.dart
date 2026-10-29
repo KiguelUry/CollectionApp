@@ -1098,6 +1098,7 @@ class BookSeriesService {
 
     // 2) Apple Books FR (nom + Tome + auteur, Glénat/Kana si manga).
     String? tome1Synopsis;
+    final frenchTomeLocked = <int>{};
     try {
       final itunes = await ItunesBooksService.searchSeries(
         working.name,
@@ -1128,11 +1129,19 @@ class BookSeriesService {
           description: h['description'] ?? '',
           seriesName: working.name,
         );
-        if (!identity && !descBind) continue;
-        if (!BookSeriesNormalizer.authorMatchesExpected(
-          h['author'],
-          seriesAuthor,
-        )) {
+        final sisterVol = BookSeriesNormalizer.queryWords(working.name)
+                .join(' ')
+                .contains('soeur')
+            ? BookTitleParser.sisterOrdinal(h['description'] ?? '')
+            : null;
+        if (!identity && !descBind && sisterVol == null) continue;
+        final titleIsThisSeries =
+            BookSeriesNormalizer.hitBelongsToSeries(title, working.name);
+        if (!titleIsThisSeries &&
+            !BookSeriesNormalizer.authorMatchesExpected(
+              h['author'],
+              seriesAuthor,
+            )) {
           continue;
         }
         final identityBlob =
@@ -1146,7 +1155,8 @@ class BookSeriesService {
               descBind
                   ? (h['description'] ?? '')
                   : '$identityBlob ${h['description'] ?? ''}',
-            );
+            ) ??
+            sisterVol;
         // Synopsis français : Tome 1 Apple Books uniquement. Jamais un tome > 1.
         if (n == 1 || (n == null && identity)) {
           final cleaned = _cleanSynopsis(h['description']);
@@ -1163,17 +1173,24 @@ class BookSeriesService {
         if (img.isEmpty || isMangaDexCoverUrl(img)) continue;
         final isFr = BookVfEdition.isFrenchLanguage(h['language']) ||
             BookIntelligenceService.looksVfTitle(title);
+        final frenchTome = BookTitleParser.isFrenchTomeTitle(title);
+        final englishVol = BookTitleParser.isEnglishVolumeTitle(title);
+        if (englishVol && frenchTomeLocked.contains(n)) continue;
         final prev = batch[n];
         final prevFr = prev != null &&
             (BookVfEdition.isFrenchLanguage(prev.language) ||
                 (prev.language ?? '').isEmpty);
-        if (prev != null && prevFr && !isFr) continue;
-        if (prev == null || isFr) {
+        if (prev != null && prevFr && !isFr && !frenchTome) continue;
+        if (prev == null || isFr || frenchTome) {
+          if (englishVol && prev != null && frenchTomeLocked.contains(n)) {
+            continue;
+          }
           batch[n] = (
             coverUrl: img,
             publishedDate: h['published_date'],
-            language: isFr ? 'fr' : h['language'],
+            language: frenchTome ? 'fr-tome' : (isFr ? 'fr' : h['language']),
           );
+          if (frenchTome) frenchTomeLocked.add(n);
         }
         if (n > vfMax) vfMax = n;
       }
@@ -1312,14 +1329,19 @@ class BookSeriesService {
       }
 
       final existingLang = vol.metadata['cover_language']?.toString();
-      final incomingFr = BookVfEdition.isFrenchLanguage(hit.language) ||
+      final incomingTome = hit.language == 'fr-tome';
+      final incomingFr = incomingTome ||
+          BookVfEdition.isFrenchLanguage(hit.language) ||
           hit.language == 'fr';
-      // MangaDex : trou vide seulement. Une VF peut remplacer une couv. EN.
+      // MangaDex : trou vide seulement. Un « Tome N » VF remplace un Volume
+      // anglais déjà enregistré. Une couverture « Tome » déjà posée reste.
       if (incomingMd) {
         if (hasCover) continue;
       } else if (hasCover && !existingMd) {
-        final alreadyFr = existingLang == 'fr';
-        if (alreadyFr || !incomingFr) continue;
+        final alreadyTome = existingLang == 'fr-tome';
+        if (alreadyTome) continue;
+        if (existingLang == 'fr' && !incomingTome) continue;
+        if (!incomingFr) continue;
       }
 
       await setVolumeCoverUrl(

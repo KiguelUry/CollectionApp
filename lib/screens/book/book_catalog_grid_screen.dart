@@ -840,8 +840,11 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       final primaryKey = BookSeriesNormalizer.mergeKey(primary.name);
       final qMatch = qSort.isNotEmpty &&
           (primaryKey == qSort ||
-              BookSeriesNormalizer.normalizeKey(primary.name) == qSort);
-      if (qMatch) {
+              BookSeriesNormalizer.normalizeKey(primary.name) == qSort ||
+              BookSeriesNormalizer.textMentionsSeries(primary.name, seriesQ));
+      final thinManga =
+          primary.fromAnilist && primary.volumeCount <= 2;
+      if (qMatch && !thinManga) {
         enriched = enriched.where((h) {
           final title = h.raw['title'] ?? h.displayTitle;
           if (BookSeriesNormalizer.normalizeKey(title) == qSort) return true;
@@ -862,19 +865,30 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
 
     final qLower = seriesQ.toLowerCase().trim();
     if (filters.authorQuery.trim().isEmpty && qLower.length >= 3) {
-      final standalone = enriched.where((h) {
+      String? leadAuthor;
+      for (final h in enriched) {
         final title = h.raw['title'] ?? h.displayTitle;
-        return h.parsed.volumeNumber == null &&
+        if (BookSeriesNormalizer.textMentionsSeries(title, seriesQ) ||
             BookSeriesNormalizer.normalizeKey(title) ==
-                BookSeriesNormalizer.normalizeKey(seriesQ);
-      }).toList();
-      final leadAuthor = standalone.isEmpty ? null : standalone.first.author;
-      if (leadAuthor != null && leadAuthor.trim().length >= 3) {
+                BookSeriesNormalizer.normalizeKey(seriesQ)) {
+          leadAuthor = BookSeriesNormalizer.leadAuthorName(h.author);
+          if (leadAuthor != null) break;
+        }
+      }
+      if (leadAuthor != null) {
         try {
-          final more = await ItunesBooksService.search(leadAuthor.trim(), limit: 50)
-              .timeout(srcTimeout, onTimeout: () => <Map<String, String>>[]);
+          final more = await ItunesBooksService.search(
+            '$seriesQ $leadAuthor',
+            limit: 50,
+          ).timeout(srcTimeout, onTimeout: () => <Map<String, String>>[]);
           final extra = more
-              .map((h) => BookIntelligenceService.enrichSingle(h, _effectiveSub))
+              .map(
+                (h) => BookIntelligenceService.enrichSingle(
+                  h,
+                  _effectiveSub,
+                  queryHint: seriesQ,
+                ),
+              )
               .toList();
           final seen = {
             for (final h in enriched)
@@ -885,14 +899,29 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
               continue;
             }
             final title = h.raw['title'] ?? h.displayTitle;
-            if (BookVfEdition.isRejectedCatalogTitle(
-              title,
-              subtitle: h.raw['subtitle'],
-              author: h.author,
-              publisher: h.publisher,
-            )) {
+            if (BookTitleParser.isCompanionOrStudyTitle(title) ||
+                BookVfEdition.isRejectedCatalogTitle(
+                  title,
+                  subtitle: h.raw['subtitle'],
+                  author: h.author,
+                  publisher: h.publisher,
+                )) {
               continue;
             }
+            final desc = h.raw['description'] ?? '';
+            final inTitle = BookSeriesNormalizer.queryWordsMatchIdentity(
+              query: seriesQ,
+              title: title,
+              subtitle: h.raw['subtitle'],
+              collectionName: h.raw['collection_name'],
+              seriesTitle: h.raw['series_title'],
+            );
+            final cited = BookSeriesNormalizer.textMentionsSeries(
+                  desc,
+                  seriesQ,
+                ) &&
+                BookSeriesNormalizer.titleSharesQueryWord(seriesQ, title);
+            if (!inTitle && !cited) continue;
             if (!seen.add(title.toLowerCase())) continue;
             enriched.add(h);
           }

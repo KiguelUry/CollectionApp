@@ -257,9 +257,30 @@ abstract final class BookSeriesNormalizer {
 
   /// Le texte (description, collection, sous-titre) cite le nom de la série.
   static bool textMentionsSeries(String text, String seriesName) {
-    final want = normalizeKey(seriesName);
+    final want = _foldAccents(normalizeKey(seriesName));
     if (want.length < 3) return false;
-    return normalizeKey(text).contains(want);
+    return _foldAccents(normalizeKey(text)).contains(want);
+  }
+
+  /// Premier nom avant « & », « , » ou « et » (« Lucinda Riley & … » → Riley).
+  static String? leadAuthorName(String? raw) {
+    final s = raw?.trim() ?? '';
+    if (s.length < 3) return null;
+    final cut = s.split(RegExp(r'\s*(?:&|,| et )\s*')).first.trim();
+    return cut.length >= 3 ? cut : null;
+  }
+
+  /// Le titre partage un mot de la requête (« sœur » ↔ « sœurs »).
+  static bool titleSharesQueryWord(String query, String title) {
+    final blob = _foldAccents(normalizeKey(title));
+    for (final w in queryWords(query)) {
+      if (w.length < 4) continue;
+      if (blob.contains(w)) return true;
+      if (w.endsWith('s') && blob.contains(w.substring(0, w.length - 1))) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// Clé stricte d'identité (égalité seule : pas de préfixe, pas de contains).

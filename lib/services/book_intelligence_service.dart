@@ -576,6 +576,7 @@ abstract final class BookIntelligenceService {
 
     final out = <int, ({String coverUrl, String? publishedDate, String? language})>{};
     final vfPrefer = <int, bool>{};
+    final frenchTomeLocked = <int>{};
     for (final h in ranked) {
       final img = h.imageUrl;
       if (img == null || img.isEmpty) continue;
@@ -603,8 +604,11 @@ abstract final class BookIntelligenceService {
         description: h.raw['description'] ?? '',
         seriesName: cleanName,
       );
-      if (!identity && !descBind) continue;
-      if (!BookSeriesNormalizer.authorMatchesExpected(h.author, authorHint)) {
+      if (!identity && !descBind && h.parsed.volumeNumber == null) continue;
+      final titleIsThisSeries =
+          BookSeriesNormalizer.hitBelongsToSeries(title, cleanName);
+      if (!titleIsThisSeries &&
+          !BookSeriesNormalizer.authorMatchesExpected(h.author, authorHint)) {
         continue;
       }
       final n = h.parsed.volumeNumber?.round() ??
@@ -619,16 +623,23 @@ abstract final class BookIntelligenceService {
           BookVfEdition.isFrenchLanguage(h.raw['language']);
       final isEn = BookVfEdition.isExplicitEnglish(h.raw['language']);
       final pub = h.raw['published_date'] ?? h.raw['year'];
+      final frenchTome = BookTitleParser.isFrenchTomeTitle(title);
+      final englishVol = BookTitleParser.isEnglishVolumeTitle(title);
+      if (englishVol && frenchTomeLocked.contains(n)) continue;
       if (out.containsKey(n) && vfPrefer[n] == true && isEn && !isVf) {
         continue;
       }
-      if (!out.containsKey(n) || (isVf && vfPrefer[n] != true)) {
+      final replaceEnglish = frenchTome && !frenchTomeLocked.contains(n);
+      if (!out.containsKey(n) ||
+          replaceEnglish ||
+          (isVf && vfPrefer[n] != true && !englishVol)) {
         out[n] = (
           coverUrl: img,
           publishedDate: pub,
-          language: h.raw['language'],
+          language: frenchTome ? 'fr-tome' : h.raw['language'],
         );
         vfPrefer[n] = isVf;
+        if (frenchTome) frenchTomeLocked.add(n);
       }
     }
     return out;
@@ -636,9 +647,10 @@ abstract final class BookIntelligenceService {
 
   static EnrichedBookHit enrichSingle(
     Map<String, String> hit,
-    BookSubcategory subcategory,
-  ) =>
-      _enrich(hit, subcategory);
+    BookSubcategory subcategory, {
+    String? queryHint,
+  }) =>
+      _enrich(hit, subcategory, queryHint: queryHint);
 
   /// Requête catalogue pour un tome (ex. « Kagurabachi Tome 3 »).
   static String volumeSearchQuery(String seriesName, double volumeNumber) {
@@ -695,6 +707,12 @@ abstract final class BookIntelligenceService {
     final series = seriesName ?? hit.parsed.seriesName ?? '';
     if (series.isNotEmpty &&
         BookTitleParser.volumeTrailingSeries(title, series) == target) {
+      return true;
+    }
+    if (series.isNotEmpty &&
+        BookSeriesNormalizer.queryWords(series).join(' ').contains('soeur') &&
+        BookTitleParser.sisterOrdinal(hit.raw['description'] ?? '') ==
+            target) {
       return true;
     }
     final api = int.tryParse(hit.raw['series_volume'] ?? '');
@@ -831,6 +849,12 @@ abstract final class BookIntelligenceService {
         : '${hit['collection_name'] ?? ''} ${hit['subtitle'] ?? ''} '
             '${hit['series_title'] ?? ''}';
     final proseVol = BookTitleParser.extractVolumeFromProse(proseBlob);
+    final seriesKey = BookSeriesNormalizer.queryWords(
+      '${seriesName ?? ''} ${queryHint ?? ''}',
+    ).join(' ');
+    final sisterVol = seriesKey.contains('soeur')
+        ? BookTitleParser.sisterOrdinal(hit['description'] ?? '')
+        : null;
     final landmark = BookTitleParser.volumeFromLandmark(
       '$title ${subtitle ?? ''} ${hit['description'] ?? ''}',
     );
@@ -844,6 +868,7 @@ abstract final class BookIntelligenceService {
       volumeNumber: parsed.volumeNumber ??
           landmark?.toDouble() ??
           proseVol?.toDouble() ??
+          sisterVol?.toDouble() ??
           trailing?.toDouble() ??
           (apiVol != null && apiVol >= 1 && apiVol < 1900
               ? apiVol.toDouble()

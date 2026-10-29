@@ -8,6 +8,7 @@ import '../utils/book_series_normalizer.dart';
 /// Métadonnées manga via AniList GraphQL (gratuit, sans clé).
 abstract final class AnilistMangaService {
   static const _endpoint = 'https://graphql.anilist.co';
+  static DateTime _coolUntil = DateTime.fromMillisecondsSinceEpoch(0);
 
   /// Parasites : one-shots / spin-offs (Bathhouse Quest, Bonus Chapter…).
   static final _parasiteTitleRe = RegExp(
@@ -36,6 +37,7 @@ abstract final class AnilistMangaService {
   }) async {
     final q = query.trim();
     if (q.length < 2) return const [];
+    if (DateTime.now().isBefore(_coolUntil)) return const [];
     // format_in: [MANGA] — exclut ONE_SHOT et NOVEL.
     const gql = r'''
 query ($search: String, $perPage: Int) {
@@ -83,6 +85,10 @@ query ($search: String, $perPage: Int) {
             }),
           )
           .timeout(const Duration(seconds: 12));
+      if (res.statusCode == 429) {
+        _coolUntil = DateTime.now().add(const Duration(minutes: 2));
+        return const [];
+      }
       if (res.statusCode != 200) return const [];
       final data = jsonDecode(res.body) as Map<String, dynamic>?;
       final page = data?['data']?['Page'] as Map<String, dynamic>?;

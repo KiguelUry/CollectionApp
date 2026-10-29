@@ -62,7 +62,8 @@ abstract final class BookTitleParser {
 
   static final _companionTitleRe = RegExp(
     r'collection\s+compl[eè]te|\b1\s*[-–]\s*7\b|quiz\s*book|'
-    r'fiche\s+de\s+lecture|\b[ée]tude\b|\banalysis\b|'
+    r'fiche\s+de\s+lecture|\b[ée]tude\b|\banalys[ei]\b|'
+    r'analyse\s+de\s+l|'
     r'boxed\s+set|bakboek|raisons\s+d.?un\s+succ[eè]s',
     caseSensitive: false,
   );
@@ -346,6 +347,31 @@ abstract final class BookTitleParser {
     if (en != null) return _ordinalToInt(en.group(1)!);
     return null;
   }
+
+  /// « la deuxième sœur », « leur septième sœur » — seulement pour une saga
+  /// dont le nom contient déjà « sœur ».
+  static int? sisterOrdinal(String text) {
+    final m = RegExp(
+      r'\b(premier|1er|premi[eè]re|deuxi[eè]me|2e|troisi[eè]me|3e|'
+      r'quatri[eè]me|4e|cinqui[eè]me|5e|sixi[eè]me|6e|septi[eè]me|7e)\s+'
+      r's(?:œ|oe)ur\b',
+      caseSensitive: false,
+    ).firstMatch(text);
+    if (m == null) return null;
+    return _ordinalToInt(m.group(1)!);
+  }
+
+  static bool isFrenchTomeTitle(String title) => RegExp(
+        r'\btomes?\s*0*\d+',
+        caseSensitive: false,
+      ).hasMatch(title);
+
+  static bool isEnglishVolumeTitle(String title) =>
+      !isFrenchTomeTitle(title) &&
+      RegExp(
+        r'\bvol(?:ume|\.)\s*0*\d+',
+        caseSensitive: false,
+      ).hasMatch(title);
 
   /// « One Piece 1 », « One Piece T01 », « One Piece, Tome 01 ».
   static int? volumeTrailingSeries(String title, String seriesName) {
