@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_env.dart';
 import '../config/supabase_public_config.dart';
+import '../utils/book_series_normalizer.dart';
 import '../utils/book_title_parser.dart';
 import '../utils/book_vf_edition.dart';
 import '../utils/web_catalog_proxy.dart';
@@ -63,6 +64,9 @@ class GoogleBooksService {
   static const _lockDuration = Duration(minutes: 10);
 
   static bool get _isLocked => DateTime.now().isBefore(_circuitOpenUntil);
+
+  /// Vrai pendant les 10 minutes qui suivent un 429, un 503 ou un quota à 0.
+  static bool get isCircuitOpen => _isLocked;
 
   /// 429, 503, ou corps `quota_limit_value: 0` : on coupe Google Books.
   static bool opensCircuit(int statusCode, String body) =>
@@ -156,10 +160,11 @@ class GoogleBooksService {
   }
 
   static Future<http.Response?> _viaProxy(Map<String, String> p) async {
+    if (_isLocked) return null;
     try {
-      // Jamais la clé si elle a déjà renvoyé 429/503 (quota à 0).
-      final withKey = _sendApiKey;
-      final target = _volumesUri(p, withKey: withKey);
+      // La clé n'est jamais dans l'URL du client : catalog-proxy l'ajoute
+      // via Deno.env.get('GOOGLE_BOOKS_API_KEY').
+      final target = _volumesUri(p, withKey: false);
       await _pace();
       final proxied = proxiedCatalogUri(target);
       final anon = AppEnv.supabaseAnonKey.trim().isNotEmpty
@@ -189,8 +194,9 @@ class GoogleBooksService {
     }
   }
 
-  /// Un seul essai. 429 / 503 (direct ou proxy) ouvre le coupe-circuit
-  /// et n'enchaîne aucun autre appel Books.
+  /// Web : uniquement catalog-proxy (le 429/503 direct est masqué par CORS,
+  /// le navigateur le logue mais Dart reçoit une exception et enchaînerait).
+  /// Un 429, un 503, un quota à 0, ou une exception ouvre le coupe-circuit.
   static Future<http.Response?> _fetchVolumes(Map<String, String> params) async {
     if (_isLocked) return null;
 
@@ -200,6 +206,29 @@ class GoogleBooksService {
     }
 
     final base = Map<String, String>.from(params)..remove('orderBy');
+
+    if (kIsWeb) {
+      // Jamais www.googleapis.com depuis le navigateur : le 503/429 n'a pas
+      // les en-têtes CORS, Dart ne voit qu'une exception et enchaînerait.
+      final proxyRes = await _viaProxy(base);
+      if (_isLocked) return null;
+      if (proxyRes == null) {
+        _tripBreaker('proxy injoignable');
+        return null;
+      }
+      if (opensCircuit(proxyRes.statusCode, proxyRes.body) ||
+          proxyRes.statusCode == 401 ||
+          proxyRes.statusCode == 403) {
+        _tripBreaker(
+          _quotaIsZero(proxyRes.body)
+              ? 'quota_limit_value 0'
+              : 'proxy ${proxyRes.statusCode}',
+        );
+        return null;
+      }
+      if (proxyRes.statusCode != 200) return null;
+      return proxyRes;
+    }
 
     try {
       final res = await get(_volumesUri(base, withKey: _sendApiKey));
@@ -211,17 +240,9 @@ class GoogleBooksService {
       }
       if (res.statusCode == 200) return res;
     } catch (e) {
+      _tripBreaker('$e');
       if (kDebugMode) debugPrint('Google Books: $e');
     }
-
-    if (_isLocked) return null;
-
-    final proxyRes = await _viaProxy(base);
-    if (proxyRes != null && opensCircuit(proxyRes.statusCode, proxyRes.body)) {
-      _tripBreaker('proxy ${proxyRes.statusCode}');
-      return null;
-    }
-    if (proxyRes != null && proxyRes.statusCode == 200) return proxyRes;
     return null;
   }
 
@@ -245,9 +266,7 @@ class GoogleBooksService {
   }
 
   static Future<Map<String, String>?> lookupByIsbn(String isbn) async {
-    if (_isLocked) return null;
     for (final variant in OpenLibraryService.isbnLookupVariants(isbn)) {
-      if (_isLocked) return null;
       try {
         final params = {'q': 'isbn:$variant', 'maxResults': '3'};
         final key = _cacheKey(params);
@@ -255,6 +274,7 @@ class GoogleBooksService {
         if (cached != null) {
           return cached.isNotEmpty ? cached.first : null;
         }
+        if (_isLocked) return null;
 
         final response = await _fetchVolumes(params);
         if (response == null || response.statusCode != 200) {
@@ -293,7 +313,6 @@ class GoogleBooksService {
   }) async {
     final q = query.trim();
     if (q.length < 2) return [];
-    if (_isLocked) return [];
 
     try {
       // maxResults ≤ 25 : 40 + intitle: → 503 fréquents.
@@ -308,19 +327,44 @@ class GoogleBooksService {
       final key = _cacheKey(params);
       final cached = await _readCache(key);
       if (cached != null) return cached;
+      if (_isLocked) return [];
 
       final response = await _fetchVolumes(params);
       if (response == null || response.statusCode != 200) {
         await _writeCache(key, const [], negative: true);
         return [];
       }
-      final hits = _parseItems(response.body);
+      final hits = _parseItems(response.body)
+          .where((h) => titleMatchesBooksQuery(h['title'] ?? '', q))
+          .toList();
       await _writeCache(key, hits, negative: hits.isEmpty);
       return hits;
     } catch (e) {
       if (kDebugMode) debugPrint('Google Books search: $e');
       return [];
     }
+  }
+
+  /// Première expression entre guillemets, sinon la requête sans le mot « Tome ».
+  /// Les pubs en fin de volume (My Hero Academia cite Jujutsu Kaisen) ne
+  /// passent pas : le titre doit contenir la série demandée.
+  static String booksQueryNeedle(String query) {
+    final quoted = RegExp(r'"([^"]+)"').firstMatch(query);
+    final phrase = quoted?.group(1)?.trim() ?? '';
+    if (phrase.length >= 2) return phrase;
+    return query
+        .replaceAll(RegExp(r'\btome\b', caseSensitive: false), ' ')
+        .trim();
+  }
+
+  static bool titleMatchesBooksQuery(String title, String query) {
+    final needle = booksQueryNeedle(query);
+    if (needle.length < 2) return true;
+    if (needle.toLowerCase().startsWith('isbn:')) return true;
+    return BookSeriesNormalizer.queryWordsMatchIdentity(
+      query: needle,
+      title: title,
+    );
   }
 
   /// Une seule requête simple : `"Série" Tome`, maxResults=20.
@@ -335,7 +379,6 @@ class GoogleBooksService {
   }) async {
     final name = seriesTitle.trim();
     if (name.length < 2) return [];
-    if (_isLocked) return [];
     return search(
       '"$name" Tome',
       maxResults: 20,
@@ -388,9 +431,9 @@ class GoogleBooksService {
     String? isbn = isbnFallback;
     final ids = info['industryIdentifiers'] as List<dynamic>? ?? [];
     for (final raw in ids) {
-      final id = raw as Map<String, dynamic>;
-      final type = id['type'] as String? ?? '';
-      final value = id['identifier']?.toString();
+      if (raw is! Map) continue;
+      final type = raw['type']?.toString() ?? '';
+      final value = raw['identifier']?.toString();
       if (value == null || value.isEmpty) continue;
       if (type == 'ISBN_13' || type == 'ISBN_10') {
         isbn = value;
@@ -438,17 +481,18 @@ class GoogleBooksService {
           categories.map((e) => e.toString()).join(', ');
     }
 
-    final seriesInfo = info['seriesInfo'] as Map<String, dynamic>?;
-    if (seriesInfo != null) {
+    final seriesInfo = info['seriesInfo'];
+    if (seriesInfo is Map) {
+      // bookDisplayNumber (T04 → 4) prime sur orderNumber (souvent décalé).
       final displayNum = seriesInfo['bookDisplayNumber']?.toString();
       if (displayNum != null && displayNum.isNotEmpty) {
         result['series_volume'] = displayNum;
-      }
-      final volumes = seriesInfo['volumeSeries'] as List<dynamic>?;
-      if (volumes != null && volumes.isNotEmpty) {
-        final first = volumes.first as Map<String, dynamic>;
-        final order = first['orderNumber'];
-        if (order != null) result['series_volume'] = order.toString();
+      } else {
+        final volumes = seriesInfo['volumeSeries'];
+        if (volumes is List && volumes.isNotEmpty && volumes.first is Map) {
+          final order = (volumes.first as Map)['orderNumber'];
+          if (order != null) result['series_volume'] = order.toString();
+        }
       }
     }
 

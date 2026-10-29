@@ -51,8 +51,12 @@ String gridThumbnailUrl(
   if (host == kThumbnailCdnHost ||
       host == 'localhost' ||
       host.startsWith('127.') ||
-      // wsrv renvoie 400 sur AniList.
-      host.contains('anilist.co')) {
+      // wsrv renvoie 400 sur AniList, et 404 (amont 403) sur Fandom/Wikia.
+      host.contains('anilist.co') ||
+      host.contains('wikia.') ||
+      host.contains('fandom.com') ||
+      host.contains('nocookie.net') ||
+      host.contains('brickset.com')) {
     return src;
   }
   // MangaDex : jamais en direct (Referer → bannière anti-hotlink).

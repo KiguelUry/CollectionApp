@@ -957,6 +957,27 @@ void main() {
         GoogleBooksService.opensCircuit(200, '{"quota_limit_value": "0"}'),
         isTrue,
       );
+      expect(
+        GoogleBooksService.titleMatchesBooksQuery(
+          'Jujutsu Kaisen T04',
+          '"Jujutsu Kaisen" "Akutami Gege"',
+        ),
+        isTrue,
+      );
+      expect(
+        GoogleBooksService.titleMatchesBooksQuery(
+          'My Hero Academia T41',
+          '"Jujutsu Kaisen" "Akutami Gege"',
+        ),
+        isFalse,
+      );
+      expect(
+        GoogleBooksService.titleMatchesBooksQuery(
+          'Dungeon Crawler Carl',
+          'dungeon crawler',
+        ),
+        isTrue,
+      );
     });
 
     test('Sept Sœurs : description + même auteur relie le tome', () {

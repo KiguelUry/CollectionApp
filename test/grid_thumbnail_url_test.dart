@@ -47,6 +47,16 @@ void main() {
       expect(gridThumbnailUrl(private), private);
     });
 
+    test('Wikia / Fandom : URL directe, wsrv se fait refuser en 403', () {
+      const src =
+          'https://static.wikia.nocookie.net/lego/images/4/48/75403_alt1.png/revision/latest';
+      expect(gridThumbnailUrl(src), src);
+      expect(
+        gridThumbnailUrl('https://lego.fandom.com/wiki/Special:FilePath/x.png'),
+        'https://lego.fandom.com/wiki/Special:FilePath/x.png',
+      );
+    });
+
     test('stockage Supabase public : transformé', () {
       final out = gridThumbnailUrl(
         'https://abc.supabase.co/storage/v1/object/public/covers/a.jpg',

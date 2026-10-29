@@ -189,7 +189,8 @@ class EnrichedBookHit {
   /// Badge mauve daté : `⏳ À paraître · JJ/MM/AAAA`.
   String? get upcomingLabel {
     if (!isUpcoming) return null;
-    final rawDate = publishedDate!;
+    final rawDate = publishedDate;
+    if (rawDate == null || rawDate.isEmpty) return '⏳ À paraître';
     DateTime? d = DateTime.tryParse(rawDate);
     d ??= RegExp(r'^\d{4}-\d{2}$').hasMatch(rawDate)
         ? DateTime.tryParse('$rawDate-01')
@@ -533,14 +534,16 @@ abstract final class BookIntelligenceService {
       ));
     } catch (_) {}
 
-    try {
-      addHits(await GoogleBooksService.searchSeriesBatched(
-        cleanName,
-        author: authorHint,
-        maxPages: 1,
-        langRestrict: 'fr',
-      ));
-    } catch (_) {}
+    if (!GoogleBooksService.isCircuitOpen) {
+      try {
+        addHits(await GoogleBooksService.searchSeriesBatched(
+          cleanName,
+          author: authorHint,
+          maxPages: 1,
+          langRestrict: 'fr',
+        ));
+      } catch (_) {}
+    }
 
     if ((authorHint ?? '').trim().length >= 2 &&
         (subcategory == BookSubcategory.novel ||
@@ -549,17 +552,11 @@ abstract final class BookIntelligenceService {
             subcategory == BookSubcategory.comics)) {
       try {
         final author = authorHint!.trim();
-        final extraQ = '"$cleanName" "$author"';
-        final extraGb = await GoogleBooksService.search(
-          extraQ,
-          maxResults: 20,
-          langRestrict: 'fr',
-        );
         final extraIt = await ItunesBooksService.search(
           '$cleanName $author',
           limit: 200,
         );
-        for (final h in [...extraIt, ...extraGb]) {
+        for (final h in extraIt) {
           final t = (h['title'] ?? '').toLowerCase();
           if (t.isEmpty || seenTitles.contains(t)) continue;
           seenTitles.add(t);
