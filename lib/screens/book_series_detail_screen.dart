@@ -1035,74 +1035,72 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                   : () => setState(() {
                         _synopsisPage = last ? 0 : page + 1;
                       }),
-              child: SizedBox(
-                height: 108,
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Positioned(
-                      left: 18,
-                      top: 0,
-                      child: CustomPaint(
-                        size: const Size(14, 8),
-                        painter: _BubbleTailPainter(
-                          fill: const Color(0xFF1E293B),
-                          border: BookAccent.primary.withValues(alpha: 0.85),
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(top: 7),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1E293B),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: BookAccent.primary.withValues(alpha: 0.85),
                         ),
                       ),
-                    ),
-                    Positioned.fill(
-                      top: 7,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF1E293B),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: BookAccent.primary.withValues(alpha: 0.85),
-                          ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
                         ),
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: AnimatedSwitcher(
-                                  duration: const Duration(milliseconds: 220),
-                                  child: Text(
-                                    pages[page],
-                                    key: ValueKey(page),
-                                    maxLines: 3,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 13,
-                                      height: 1.3,
-                                    ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 220),
+                              child: Text(
+                                pages[page],
+                                key: ValueKey(page),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  height: 1.35,
+                                ),
+                              ),
+                            ),
+                            if (pages.length > 1) ...[
+                              const SizedBox(height: 6),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: Text(
+                                  last
+                                      ? '↺ Début'
+                                      : '▸ Suite (${page + 1}/${pages.length})',
+                                  style: const TextStyle(
+                                    color: Color(0xFF38BDF8),
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w800,
                                   ),
                                 ),
                               ),
-                              if (pages.length > 1)
-                                Align(
-                                  alignment: Alignment.centerRight,
-                                  child: Text(
-                                    last
-                                        ? '↺ Début'
-                                        : '▸ Suite (${page + 1}/${pages.length})',
-                                    style: const TextStyle(
-                                      color: Color(0xFF38BDF8),
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                ),
                             ],
-                          ),
+                          ],
                         ),
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                  Positioned(
+                    left: 18,
+                    top: 0,
+                    child: CustomPaint(
+                      size: const Size(14, 8),
+                      painter: _BubbleTailPainter(
+                        fill: const Color(0xFF1E293B),
+                        border: BookAccent.primary.withValues(alpha: 0.85),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
         ],
@@ -1334,6 +1332,10 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     return (maxVf: maxVf, firstUpcomingVf: firstUpcoming);
   }
 
+  bool get _vfRunComplete =>
+      _series?.subcategory == BookSubcategory.manga &&
+      _series?.metadata['vf_complete'] == true;
+
   bool _slotNotYetInFrance(
     BookVolumeSlot slot, {
     required int maxVf,
@@ -1341,6 +1343,10 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   }) {
     if (slot.volume.isHorsSerie || slot.volume.isChapterOrScan) return false;
     final n = slot.volume.volumeNumber.round();
+    if (_vfRunComplete) {
+      final total = _series?.expectedVolumeCount;
+      if (total == null || total < 1 || n <= total) return false;
+    }
     if (firstUpcomingVf != null && n > firstUpcomingVf) return true;
     return maxVf > 0 && n > maxVf;
   }

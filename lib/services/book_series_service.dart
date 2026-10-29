@@ -1114,15 +1114,21 @@ class BookSeriesService {
         )) {
           continue;
         }
-        if (!BookSeriesNormalizer.catalogIdentityMatchesSeries(
+        final identity = BookSeriesNormalizer.catalogIdentityMatchesSeries(
           title: title,
           subtitle: h['subtitle'],
           collectionName: h['collection_name'],
           seriesTitle: h['series_title'],
           seriesName: working.name,
-        )) {
-          continue;
-        }
+        );
+        final descBind = BookSeriesNormalizer.descriptionBindsToSeries(
+          author: h['author'],
+          expectedAuthor: seriesAuthor,
+          title: title,
+          description: h['description'] ?? '',
+          seriesName: working.name,
+        );
+        if (!identity && !descBind) continue;
         if (!BookSeriesNormalizer.authorMatchesExpected(
           h['author'],
           seriesAuthor,
@@ -1132,14 +1138,19 @@ class BookSeriesService {
         final identityBlob =
             '$title ${h['collection_name'] ?? ''} ${h['series_title'] ?? ''} ${h['subtitle'] ?? ''}';
         final n = BookTitleParser.extractVolumeNumberStrict(title) ??
+            BookTitleParser.volumeFromLandmark(
+              '$identityBlob ${h['description'] ?? ''}',
+            ) ??
             BookTitleParser.volumeTrailingSeries(title, working.name) ??
             BookTitleParser.extractVolumeFromProse(
-              '$identityBlob ${h['description'] ?? ''}',
+              descBind
+                  ? (h['description'] ?? '')
+                  : '$identityBlob ${h['description'] ?? ''}',
             );
-        // Synopsis : série ou Tome 1 uniquement. Jamais un tome > 1.
-        if (n == null || n == 1) {
+        // Synopsis français : Tome 1 Apple Books uniquement. Jamais un tome > 1.
+        if (n == 1 || (n == null && identity)) {
           final cleaned = _cleanSynopsis(h['description']);
-          if (cleaned != null && (n == 1 || tome1Synopsis == null)) {
+          if (cleaned != null) {
             if (n == 1) {
               tome1Synopsis = cleaned;
             } else {
@@ -1168,8 +1179,11 @@ class BookSeriesService {
       }
     } catch (_) {}
 
-    // 3) MangaDex comble TOUS les trous restants (T25, T28, T31-39…).
-    String? seriesLevelSynopsis;
+    // 3) MangaDex comble les trous. Le français du Tome 1 passe avant MangaDex/AniList.
+    String? mdFrenchSynopsis;
+    String? mdEnglishSynopsis;
+    String? anilistSynopsis;
+    var mangaFinished = false;
     if (working.subcategory == BookSubcategory.manga) {
       try {
         final md = await MangaDexService.lookupManga(
@@ -1178,7 +1192,9 @@ class BookSeriesService {
         );
         if (md != null &&
             BookSeriesNormalizer.namesMatch(md.title, working.name)) {
-          seriesLevelSynopsis = _cleanSynopsis(md.description);
+          if (md.status == 'completed') mangaFinished = true;
+          mdFrenchSynopsis = _cleanSynopsis(md.descriptionFr);
+          mdEnglishSynopsis = _cleanSynopsis(md.descriptionEn);
           var covers = Map<int, String>.from(md.coverByVolume);
           final need = md.volumesPublished ??
               (working.expectedVolumeCount ?? volumes.length);
@@ -1226,17 +1242,36 @@ class BookSeriesService {
         if (ani != null &&
             ani.isAsianOrigin &&
             BookSeriesNormalizer.namesMatch(ani.title, working.name)) {
-          seriesLevelSynopsis =
-              _cleanSynopsis(ani.description) ?? seriesLevelSynopsis;
+          if (ani.status?.toUpperCase() == 'FINISHED') mangaFinished = true;
+          anilistSynopsis = _cleanSynopsis(ani.description);
         }
       } catch (_) {}
     } else if (vfMax > (working.expectedVolumeCount ?? 0)) {
       working = (await bumpExpectedCountIfHigher(working, vfMax)) ?? working;
     }
 
-    final safeSynopsis = seriesLevelSynopsis ?? tome1Synopsis;
+    final hasFrenchEdition = batch.values.any(
+      (v) => v.language == 'fr' || BookVfEdition.isFrenchLanguage(v.language),
+    );
+    var persistSeries = false;
+    if (mangaFinished &&
+        hasFrenchEdition &&
+        working.metadata['vf_complete'] != true) {
+      final meta = Map<String, dynamic>.from(working.metadata);
+      meta['vf_complete'] = true;
+      working = working.copyWith(metadata: meta);
+      persistSeries = true;
+    }
+
+    final safeSynopsis = tome1Synopsis ??
+        mdFrenchSynopsis ??
+        mdEnglishSynopsis ??
+        anilistSynopsis;
     if (safeSynopsis != null && safeSynopsis != working.description) {
       working = working.copyWith(description: safeSynopsis);
+      persistSeries = true;
+    }
+    if (persistSeries) {
       try {
         await updateSeries(working);
       } catch (_) {}

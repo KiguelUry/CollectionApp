@@ -23,8 +23,20 @@ abstract final class MangaDexService {
     String query, {
     String? authorHint,
   }) async {
-    final results = await searchManga(query, authorHint: authorHint, limit: 1);
-    return results.isEmpty ? null : results.first;
+    final results = await searchManga(query, authorHint: authorHint, limit: 8);
+    if (results.isEmpty) return null;
+    final qKey = BookSeriesNormalizer.normalizeKey(query);
+    bool exact(MangaDexSeriesMeta m) =>
+        BookSeriesNormalizer.normalizeKey(m.title) == qKey;
+    bool authorOk(MangaDexSeriesMeta m) =>
+        authorHint == null ||
+        authorHint.trim().isEmpty ||
+        BookSeriesNormalizer.authorsMatch(m.author, authorHint);
+    final both = results.where((m) => exact(m) && authorOk(m)).toList();
+    if (both.isNotEmpty) return both.first;
+    final justExact = results.where(exact).toList();
+    if (justExact.isNotEmpty) return justExact.first;
+    return results.first;
   }
 
   static Future<List<MangaDexSeriesMeta>> searchManga(
@@ -36,11 +48,11 @@ abstract final class MangaDexService {
     if (q.length < 2) return const [];
     try {
       // Récupère un peu plus pour filtrer/trier côté client.
-      final fetchLimit = (limit.clamp(1, 10) * 3).clamp(5, 15);
+      final fetchLimit = (limit.clamp(1, 10) * 4).clamp(8, 32);
       // erotica inclus (Berserk) ; followedCount pour le vrai titre vs spin-offs.
       final params = StringBuffer(
         '$_base/manga?title=${Uri.encodeQueryComponent(q)}'
-        '&limit=${fetchLimit.clamp(1, 10)}'
+        '&limit=$fetchLimit'
         '&order[followedCount]=desc'
         '&originalLanguage[]=ja'
         '&contentRating[]=safe'
@@ -316,7 +328,13 @@ abstract final class MangaDexService {
         _coverFromRelationships(manga, mangaId);
 
     final originalLanguage = attrs['originalLanguage']?.toString();
-    final description = _pickDescription(attrs['description']);
+    final descriptionRaw = attrs['description'];
+    final descriptionFr = _descriptionIn(descriptionRaw, const ['fr', 'fr-fr']);
+    final descriptionEn = _descriptionIn(descriptionRaw, const ['en']);
+    final description = descriptionFr ??
+        _pickDescription(descriptionRaw) ??
+        descriptionEn;
+    final status = attrs['status']?.toString().trim();
 
     return MangaDexSeriesMeta(
       id: mangaId,
@@ -327,6 +345,9 @@ abstract final class MangaDexService {
       seriesCoverUrl: coverUrl,
       originalLanguage: originalLanguage,
       description: description,
+      descriptionFr: descriptionFr,
+      descriptionEn: descriptionEn,
+      status: status == null || status.isEmpty ? null : status,
     );
   }
 
@@ -384,6 +405,15 @@ abstract final class MangaDexService {
     return {for (final e in best.entries) e.key: e.value.url};
   }
 
+  static String? _descriptionIn(dynamic raw, List<String> keys) {
+    if (raw is! Map) return null;
+    for (final key in keys) {
+      final v = raw[key]?.toString().trim();
+      if (v != null && v.length >= 20) return v;
+    }
+    return null;
+  }
+
   static String? _pickDescription(dynamic raw) {
     if (raw is! Map) return null;
     for (final key in ['fr', 'fr-fr', 'en', 'ja', 'ja-ro']) {
@@ -437,6 +467,9 @@ class MangaDexSeriesMeta {
   final String? seriesCoverUrl;
   final String? originalLanguage;
   final String? description;
+  final String? descriptionFr;
+  final String? descriptionEn;
+  final String? status;
 
   const MangaDexSeriesMeta({
     required this.id,
@@ -447,6 +480,9 @@ class MangaDexSeriesMeta {
     this.seriesCoverUrl,
     this.originalLanguage,
     this.description,
+    this.descriptionFr,
+    this.descriptionEn,
+    this.status,
   });
 
   /// Manga seulement si la langue d'origine est asiatique (ja / ko / zh).

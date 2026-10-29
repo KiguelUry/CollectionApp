@@ -11,11 +11,12 @@ import '../utils/book_vf_edition.dart';
 import '../utils/web_catalog_proxy.dart';
 import 'open_library_service.dart';
 
-/// Google Books API — repli VF (`langRestrict=fr`), après Apple Books.
+/// Google Books API — repli après Apple Books.
 /// Pas de `orderBy` (provoque des 503).
-/// Un 429 ou un 503 sur une requête `&key=` désactive la clé pour la session
-/// (`quota_limit_value: 0`). Circuit breaker 60s seulement sur 429/403 keyless.
-/// Toutes les requêtes sont **sérialisées** (évite 3× 503 concurrents).
+/// La clé vient uniquement de `--dart-define` / `.env` (`GOOGLE_BOOKS_API_KEY`).
+/// Un 429 ou un 503 (direct ou catalog-proxy) ouvre `_circuitOpenUntil`
+/// pendant 10 minutes : plus aucun appel vers `googleapis.com/books`.
+/// Toutes les requêtes sont **sérialisées**.
 class GoogleBooksService {
   static String? get _apiKey => AppEnv.googleBooksApiKey;
 
@@ -52,41 +53,32 @@ class GoogleBooksService {
   static bool get _sendApiKey =>
       hasApiKey && !_apiKeyDisabled && !_preferKeyless;
 
-  static void _disableApiKey(String reason) {
-    _apiKeyDisabled = true;
-    _preferKeyless = true;
-    if (kDebugMode) {
-      debugPrint('Google Books API key disabled for session ($reason)');
-    }
-  }
-
   static bool _quotaIsZero(String body) {
     return body.contains('quota_limit_value') &&
         RegExp(r'"quota_limit_value"\s*:\s*"0"').hasMatch(body);
   }
 
-  /// Coupe-circuit : aucun HTTP tant que `now < lockedUntil`.
-  static DateTime _googleBooksLockedUntil =
-      DateTime.fromMillisecondsSinceEpoch(0);
-  static const _lockDuration = Duration(seconds: 60);
+  /// Coupe-circuit : aucun HTTP tant que `now < _circuitOpenUntil`.
+  static DateTime _circuitOpenUntil = DateTime.fromMillisecondsSinceEpoch(0);
+  static const _lockDuration = Duration(minutes: 10);
 
-  static bool get _isLocked =>
-      DateTime.now().isBefore(_googleBooksLockedUntil);
+  static bool get _isLocked => DateTime.now().isBefore(_circuitOpenUntil);
+
+  /// 429, 503, ou corps `quota_limit_value: 0` : on coupe Google Books.
+  static bool opensCircuit(int statusCode, String body) =>
+      statusCode == 429 || statusCode == 503 || _quotaIsZero(body);
 
   static void _tripBreaker([String reason = '']) {
-    _googleBooksLockedUntil = DateTime.now().add(_lockDuration);
+    _circuitOpenUntil = DateTime.now().add(_lockDuration);
+    _apiKeyDisabled = true;
+    _preferKeyless = true;
     if (kDebugMode) {
       debugPrint(
-        'Google Books circuit OPEN 60s'
-        '${reason.isEmpty ? '' : ' ($reason)'} — MangaDex/AniList only',
+        'Google Books circuit OPEN 10min'
+        '${reason.isEmpty ? '' : ' ($reason)'} — plus aucun appel Books',
       );
     }
   }
-
-  static bool _isServerError(int? code) =>
-      code == 500 || code == 502 || code == 503 || code == 504;
-
-  static bool _isQuotaError(int? code) => code == 429 || code == 403;
 
   static final Map<String, _CacheEntry> _memCache = {};
   static const _prefsPrefix = 'gb_cache_v1:';
@@ -197,9 +189,8 @@ class GoogleBooksService {
     }
   }
 
-  /// GET volumes :
-  /// - 503/5xx → retry **avec clé**, sans langRestrict, maxResults=20 → trip
-  /// - 429/403 → seulement là keyless + proxy → trip
+  /// Un seul essai. 429 / 503 (direct ou proxy) ouvre le coupe-circuit
+  /// et n'enchaîne aucun autre appel Books.
   static Future<http.Response?> _fetchVolumes(Map<String, String> params) async {
     if (_isLocked) return null;
 
@@ -210,70 +201,27 @@ class GoogleBooksService {
 
     final base = Map<String, String>.from(params)..remove('orderBy');
 
-    // ——— Avec clé (une seule fois : 429/503 la retire pour la session) ———
-    if (_sendApiKey) {
-      try {
-        final res = await get(_volumesUri(base, withKey: true));
-        if (res.statusCode == 200 && !_quotaIsZero(res.body)) return res;
-
-        final killKey = _isServerError(res.statusCode) ||
-            _isQuotaError(res.statusCode) ||
-            _quotaIsZero(res.body);
-        if (killKey) {
-          _disableApiKey(
-            _quotaIsZero(res.body) ? 'quota_limit_value 0' : '${res.statusCode}',
-          );
-          if (_isLocked) return null;
-          if (_isServerError(res.statusCode)) {
-            await Future<void>.delayed(const Duration(milliseconds: 400));
-          }
-          try {
-            final keyless = await get(_volumesUri(base, withKey: false));
-            if (keyless.statusCode == 200) return keyless;
-          } catch (_) {}
-          final proxyRes = await _viaProxy(base);
-          if (proxyRes != null && proxyRes.statusCode == 200) return proxyRes;
-          // 503 : pas de coupe-circuit. 429 keyless : le bloc suivant tranche.
-          if (_isServerError(res.statusCode)) return null;
-        } else {
-          return res;
-        }
-      } catch (e) {
-        if (kDebugMode) debugPrint('Google Books keyed: $e');
+    try {
+      final res = await get(_volumesUri(base, withKey: _sendApiKey));
+      if (opensCircuit(res.statusCode, res.body)) {
+        _tripBreaker(
+          _quotaIsZero(res.body) ? 'quota_limit_value 0' : '${res.statusCode}',
+        );
+        return null;
       }
+      if (res.statusCode == 200) return res;
+    } catch (e) {
+      if (kDebugMode) debugPrint('Google Books: $e');
     }
 
     if (_isLocked) return null;
 
-    // ——— Keyless UNIQUEMENT après 429/403 ———
-    if (_preferKeyless || !hasApiKey) {
-      try {
-        final res = await get(_volumesUri(base, withKey: false));
-        if (res.statusCode == 200) return res;
-        if (_isLocked) return null;
-        if (_isQuotaError(res.statusCode)) {
-          final proxyRes = await _viaProxy(base);
-          if (proxyRes != null && proxyRes.statusCode == 200) return proxyRes;
-          _tripBreaker('quota ${res.statusCode}');
-          return null;
-        }
-        if (_isServerError(res.statusCode)) {
-          await Future<void>.delayed(const Duration(milliseconds: 400));
-          final proxyRes = await _viaProxy(base);
-          if (proxyRes != null && proxyRes.statusCode == 200) return proxyRes;
-          return null;
-        }
-        return res;
-      } catch (e) {
-        if (kDebugMode) debugPrint('Google Books keyless: $e');
-        if (!_isLocked) {
-          final proxyRes = await _viaProxy(base);
-          if (proxyRes != null && proxyRes.statusCode == 200) return proxyRes;
-        }
-        return null;
-      }
+    final proxyRes = await _viaProxy(base);
+    if (proxyRes != null && opensCircuit(proxyRes.statusCode, proxyRes.body)) {
+      _tripBreaker('proxy ${proxyRes.statusCode}');
+      return null;
     }
-
+    if (proxyRes != null && proxyRes.statusCode == 200) return proxyRes;
     return null;
   }
 

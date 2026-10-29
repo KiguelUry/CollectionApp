@@ -271,6 +271,111 @@ abstract final class BookSeriesNormalizer {
   static bool namesMatch(String a, String b) =>
       normalizeSeriesKey(a) == normalizeSeriesKey(b);
 
+  static const _queryStopWords = {
+    'le',
+    'la',
+    'les',
+    'de',
+    'du',
+    'des',
+    'un',
+    'une',
+    'the',
+    'of',
+    'et',
+    'and',
+    'au',
+    'aux',
+    'en',
+  };
+
+  static String _foldAccents(String raw) {
+    return raw
+        .replaceAll('œ', 'oe')
+        .replaceAll('æ', 'ae')
+        .replaceAll(RegExp('[àâä]'), 'a')
+        .replaceAll(RegExp('[éèêë]'), 'e')
+        .replaceAll(RegExp('[ïî]'), 'i')
+        .replaceAll(RegExp('[ôö]'), 'o')
+        .replaceAll(RegExp('[ùûü]'), 'u')
+        .replaceAll('ç', 'c');
+  }
+
+  /// Mots significatifs d'une requête utilisateur.
+  static List<String> queryWords(String query) {
+    final folded = _foldAccents(normalizeKey(query));
+    return folded
+        .split(RegExp(r'[^a-z0-9]+'))
+        .where((w) => w.length >= 3 && !_queryStopWords.contains(w))
+        .toList();
+  }
+
+  /// La requête de l'utilisateur : chaque mot est dans le titre, le sous-titre
+  /// ou le nom de collection. Pas la description. L'égalité stricte reste
+  /// réservée à [namesMatch] / `isOwnedSeries`.
+  static bool queryWordsMatchIdentity({
+    required String query,
+    required String title,
+    String? subtitle,
+    String? collectionName,
+    String? seriesTitle,
+  }) {
+    final words = queryWords(query);
+    if (words.isEmpty) return true;
+    final blob = _foldAccents(
+      normalizeKey(
+        '$title ${subtitle ?? ''} ${collectionName ?? ''} ${seriesTitle ?? ''}',
+      ),
+    );
+    if (words.every(blob.contains)) return true;
+    final key = _foldAccents(normalizeKey(query));
+    if (key == 'sorceleur' || key == 'witcher') {
+      return blob.contains('sorceleur') || blob.contains('witcher');
+    }
+    return false;
+  }
+
+  /// Requêtes Apple Books FR supplémentaires pour les titres nommés par l'utilisateur.
+  static List<String> extraItunesQueries(String query) {
+    final key = _foldAccents(normalizeKey(query));
+    if (key == 'sorceleur' || key == 'witcher') {
+      return const ['Sorceleur Andrzej Sapkowski', 'The Witcher'];
+    }
+    if (key == 'harry potter' || key.startsWith('harry potter ')) {
+      return const ['Harry Potter Rowling'];
+    }
+    if (key == 'monster') return const ['Monster Naoki Urasawa'];
+    if (key == 'one piece') return const ['One Piece Glénat'];
+    return const [];
+  }
+
+  /// Même auteur, et la description cite la série avec un numéro de tome.
+  /// Un titre qui porte déjà un autre nom de série (« Trilogie Hussite ») est ignoré.
+  static bool descriptionBindsToSeries({
+    required String? author,
+    required String? expectedAuthor,
+    required String title,
+    required String description,
+    required String seriesName,
+  }) {
+    final expected = expectedAuthor?.trim() ?? '';
+    if (expected.isEmpty) return false;
+    if (!authorsMatch(author, expected)) return false;
+    final desc = description.trim();
+    if (!textMentionsSeries(desc, seriesName)) return false;
+    if (BookTitleParser.extractVolumeFromProse(desc) == null) return false;
+    final explicit = BookTitleParser.extractVolumeNumberStrict(title);
+    if (explicit != null) {
+      final parsed = parse(title);
+      if (parsed.hasSeries &&
+          !namesMatch(parsed.seriesName!, seriesName) &&
+          !textMentionsSeries(title, seriesName)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   /// Le titre, le sous-titre ou le `collectionName` Apple désigne cette série.
   /// La description n'est jamais lue ici.
   static bool catalogIdentityMatchesSeries({

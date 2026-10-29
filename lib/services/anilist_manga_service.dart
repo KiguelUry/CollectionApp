@@ -192,6 +192,7 @@ query ($search: String, $perPage: Int) {
 
     final country = media['countryOfOrigin']?.toString();
     final description = media['description']?.toString();
+    final status = media['status']?.toString();
 
     return AnilistMangaMeta(
       title: BookSeriesNormalizer.displaySeriesName(title),
@@ -202,6 +203,7 @@ query ($search: String, $perPage: Int) {
       anilistId: media['id'] is int ? media['id'] as int : null,
       countryOfOrigin: country,
       description: description,
+      status: status,
     );
   }
 }
@@ -215,6 +217,7 @@ class AnilistMangaMeta {
   final int? anilistId;
   final String? countryOfOrigin;
   final String? description;
+  final String? status;
 
   const AnilistMangaMeta({
     required this.title,
@@ -225,6 +228,7 @@ class AnilistMangaMeta {
     this.anilistId,
     this.countryOfOrigin,
     this.description,
+    this.status,
   });
 
   /// JP / KR / CN (ou langue d'origine asiatique). Un pays occidental exclut le manga.

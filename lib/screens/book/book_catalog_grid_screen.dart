@@ -9,6 +9,7 @@ import '../../services/book_intelligence_service.dart';
 import '../../services/book_search_history.dart';
 import '../../services/book_series_service.dart';
 import '../../services/google_books_service.dart';
+import '../../services/itunes_books_service.dart';
 import '../../services/mangadex_service.dart';
 import '../../utils/book_series_normalizer.dart';
 import '../../utils/book_title_parser.dart';
@@ -519,6 +520,10 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       }
       enriched = enriched.where((h) {
         final title = h.raw['title'] ?? h.displayTitle;
+        if (BookSeriesNormalizer.normalizeKey(title) ==
+            BookSeriesNormalizer.normalizeKey(seriesQ)) {
+          return true;
+        }
         if (!BookSeriesNormalizer.hitBelongsToSeries(title, primarySeries)) {
           return false;
         }
@@ -839,6 +844,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       if (qMatch) {
         enriched = enriched.where((h) {
           final title = h.raw['title'] ?? h.displayTitle;
+          if (BookSeriesNormalizer.normalizeKey(title) == qSort) return true;
           if (!BookSeriesNormalizer.hitBelongsToSeries(title, primary.name)) {
             return false;
           }
@@ -855,17 +861,65 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
     }
 
     final qLower = seriesQ.toLowerCase().trim();
+    if (filters.authorQuery.trim().isEmpty && qLower.length >= 3) {
+      final standalone = enriched.where((h) {
+        final title = h.raw['title'] ?? h.displayTitle;
+        return h.parsed.volumeNumber == null &&
+            BookSeriesNormalizer.normalizeKey(title) ==
+                BookSeriesNormalizer.normalizeKey(seriesQ);
+      }).toList();
+      final leadAuthor = standalone.isEmpty ? null : standalone.first.author;
+      if (leadAuthor != null && leadAuthor.trim().length >= 3) {
+        try {
+          final more = await ItunesBooksService.search(leadAuthor.trim(), limit: 50)
+              .timeout(srcTimeout, onTimeout: () => <Map<String, String>>[]);
+          final extra = more
+              .map((h) => BookIntelligenceService.enrichSingle(h, _effectiveSub))
+              .toList();
+          final seen = {
+            for (final h in enriched)
+              (h.raw['title'] ?? h.displayTitle).toLowerCase(),
+          };
+          for (final h in extra) {
+            if (!BookSeriesNormalizer.authorsMatch(h.author, leadAuthor)) {
+              continue;
+            }
+            final title = h.raw['title'] ?? h.displayTitle;
+            if (BookVfEdition.isRejectedCatalogTitle(
+              title,
+              subtitle: h.raw['subtitle'],
+              author: h.author,
+              publisher: h.publisher,
+            )) {
+              continue;
+            }
+            if (!seen.add(title.toLowerCase())) continue;
+            enriched.add(h);
+          }
+        } catch (_) {}
+      }
+    }
     if (qLower.length >= 3) {
       enriched.sort((a, b) {
-        int exactTitle(EnrichedBookHit h) {
+        int bucket(EnrichedBookHit h) {
           final title = h.raw['title'] ?? h.displayTitle;
-          return BookSeriesNormalizer.normalizeKey(title) ==
-                  BookSeriesNormalizer.normalizeKey(seriesQ)
-              ? 0
-              : 1;
+          if (BookSeriesNormalizer.normalizeKey(title) ==
+              BookSeriesNormalizer.normalizeKey(seriesQ)) {
+            return 0;
+          }
+          if (BookSeriesNormalizer.queryWordsMatchIdentity(
+            query: seriesQ,
+            title: title,
+            subtitle: h.raw['subtitle'],
+            collectionName: h.raw['collection_name'],
+            seriesTitle: h.raw['series_title'] ?? h.parsed.seriesName,
+          )) {
+            return 1;
+          }
+          return 2;
         }
 
-        final exact = exactTitle(a).compareTo(exactTitle(b));
+        final exact = bucket(a).compareTo(bucket(b));
         if (exact != 0) return exact;
         int unitRank(EnrichedBookHit h) {
           final title = (h.raw['title'] ?? h.displayTitle).toLowerCase();

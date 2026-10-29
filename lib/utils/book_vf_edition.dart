@@ -73,12 +73,18 @@ abstract final class BookVfEdition {
         .replaceAll('&lt;', '<')
         .replaceAll('&gt;', '>')
         .replaceAll('&amp;', '&');
+    final cut = RegExp(
+      r'(?:\(\s*Source\s*:|\[\s*Source\s*:|\[\s*Written by|\bNotes\s*:|'
+      r'\bAwards\s*:|---\s*Notes)',
+      caseSensitive: false,
+    ).firstMatch(s);
+    if (cut != null) s = s.substring(0, cut.start);
     s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
     if (s.length < 20) return null;
     return s;
   }
 
-  /// Découpe un synopsis propre en pages de 2 phrases.
+  /// Pages d'environ 320–400 caractères, ou 3 à 4 phrases.
   static List<String> synopsisPages(String clean) {
     final text = clean.trim();
     if (text.isEmpty) return const [];
@@ -87,12 +93,28 @@ abstract final class BookVfEdition {
         .map((s) => s.trim())
         .where((s) => s.isNotEmpty)
         .toList();
-    if (sentences.length <= 2) return [text];
+    if (sentences.length <= 1) return [text];
     final pages = <String>[];
-    for (var i = 0; i < sentences.length; i += 2) {
-      final end = i + 2 > sentences.length ? sentences.length : i + 2;
-      pages.add(sentences.sublist(i, end).join(' '));
+    final buf = <String>[];
+    var chars = 0;
+    void flush() {
+      if (buf.isEmpty) return;
+      pages.add(buf.join(' '));
+      buf.clear();
+      chars = 0;
     }
+
+    for (final sentence in sentences) {
+      final sep = buf.isEmpty ? 0 : 1;
+      final next = chars + sep + sentence.length;
+      if (buf.isNotEmpty &&
+          (buf.length >= 4 || next > 400 || (buf.length >= 3 && chars >= 320))) {
+        flush();
+      }
+      buf.add(sentence);
+      chars += (buf.length > 1 ? 1 : 0) + sentence.length;
+    }
+    flush();
     return pages;
   }
 

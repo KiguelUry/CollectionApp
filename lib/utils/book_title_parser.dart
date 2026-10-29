@@ -282,6 +282,41 @@ abstract final class BookTitleParser {
   /// Ignore les années (2024/2025…) prises pour un n° de tome.
   static bool _isPlausibleVolume(double n) => n >= 1 && n < 1900 && n <= 500;
 
+  /// Tomes Harry Potter reconnaissables au sous-titre (FR ou EN), pas au « Tome N ».
+  static int? volumeFromLandmark(String text) {
+    final t = text.toLowerCase();
+    if (t.isEmpty) return null;
+    const cues = <(String, int)>[
+      ("école des sorciers", 1),
+      ("ecole des sorciers", 1),
+      ("philosopher's stone", 1),
+      ("philosopher’s stone", 1),
+      ("sorcerer's stone", 1),
+      ("sorcerer’s stone", 1),
+      ("chambre des secrets", 2),
+      ("chamber of secrets", 2),
+      ("prisonnier d'azkaban", 3),
+      ("prisonnier d’azkaban", 3),
+      ("prisoner of azkaban", 3),
+      ("coupe de feu", 4),
+      ("goblet of fire", 4),
+      ("ordre du phénix", 5),
+      ("ordre du phenix", 5),
+      ("order of the phoenix", 5),
+      ("prince de sang-mêlé", 6),
+      ("prince de sang-mele", 6),
+      ("prince de sang-mélé", 6),
+      ("half-blood prince", 6),
+      ("half blood prince", 6),
+      ("reliques de la mort", 7),
+      ("deathly hallows", 7),
+    ];
+    for (final cue in cues) {
+      if (t.contains(cue.$1)) return cue.$2;
+    }
+    return null;
+  }
+
   /// « Quatrième tome », « tome 4 », « first book » dans une description.
   static int? extractVolumeFromProse(String text) {
     final raw = text.trim();

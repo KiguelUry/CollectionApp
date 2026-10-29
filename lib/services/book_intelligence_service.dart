@@ -248,12 +248,12 @@ abstract final class BookIntelligenceService {
       if (q.length < 3) return list;
       return list
           .where(
-            (h) => BookSeriesNormalizer.catalogIdentityMatchesSeries(
+            (h) => BookSeriesNormalizer.queryWordsMatchIdentity(
+              query: q,
               title: h.raw['title'] ?? h.displayTitle,
               subtitle: h.raw['subtitle'],
               collectionName: h.raw['collection_name'],
-              seriesTitle: h.raw['series_title'],
-              seriesName: q,
+              seriesTitle: h.raw['series_title'] ?? h.parsed.seriesName,
             ),
           )
           .toList();
@@ -279,8 +279,11 @@ abstract final class BookIntelligenceService {
       final seriesKey = BookSeriesNormalizer.normalizeKey(
         h.parsed.seriesName ?? h.displayTitle,
       );
-      final vol = h.parsed.volumeNumber?.round() ?? 0;
-      final key = '$seriesKey|$vol';
+      final vol = h.parsed.volumeNumber?.round();
+      final titleKey = BookSeriesNormalizer.normalizeKey(
+        h.raw['title'] ?? h.displayTitle,
+      );
+      final key = vol == null ? '$seriesKey|unit|$titleKey' : '$seriesKey|$vol';
       final prev = best[key];
       if (prev == null || _preferHit(h, prev)) {
         best[key] = h;
@@ -589,19 +592,30 @@ abstract final class BookIntelligenceService {
         continue;
       }
       if (BookSeriesNormalizer.looksLikeChapterOrScan(title)) continue;
-      if (!BookSeriesNormalizer.catalogIdentityMatchesSeries(
+      final identity = BookSeriesNormalizer.catalogIdentityMatchesSeries(
         title: title,
         subtitle: h.raw['subtitle'],
         collectionName: h.raw['collection_name'],
         seriesTitle: h.raw['series_title'],
         seriesName: cleanName,
-      )) {
-        continue;
-      }
+      );
+      final descBind = BookSeriesNormalizer.descriptionBindsToSeries(
+        author: h.author,
+        expectedAuthor: authorHint,
+        title: title,
+        description: h.raw['description'] ?? '',
+        seriesName: cleanName,
+      );
+      if (!identity && !descBind) continue;
       if (!BookSeriesNormalizer.authorMatchesExpected(h.author, authorHint)) {
         continue;
       }
-      final n = h.parsed.volumeNumber?.round();
+      final n = h.parsed.volumeNumber?.round() ??
+          (descBind
+              ? BookTitleParser.extractVolumeFromProse(
+                  h.raw['description'] ?? '',
+                )
+              : null);
       if (n == null || n < 1) continue;
       if (!hitMatchesVolumeExactly(h, n, seriesName: cleanName)) continue;
       final isVf = looksVfTitle(title) ||
@@ -673,6 +687,10 @@ abstract final class BookIntelligenceService {
     if (BookTitleParser.titleMatchesVolumeExactly(combined, target)) {
       return true;
     }
+    final landmark = BookTitleParser.volumeFromLandmark(
+      '$combined ${hit.raw['description'] ?? ''}',
+    );
+    if (landmark == target) return true;
     final prose = BookTitleParser.extractVolumeFromProse(
       '${hit.raw['description'] ?? ''} $subtitle ${hit.raw['collection_name'] ?? ''}',
     );
@@ -816,6 +834,9 @@ abstract final class BookIntelligenceService {
         : '${hit['collection_name'] ?? ''} ${hit['subtitle'] ?? ''} '
             '${hit['series_title'] ?? ''}';
     final proseVol = BookTitleParser.extractVolumeFromProse(proseBlob);
+    final landmark = BookTitleParser.volumeFromLandmark(
+      '$title ${subtitle ?? ''} ${hit['description'] ?? ''}',
+    );
     final trailing = seriesName == null
         ? null
         : BookTitleParser.volumeTrailingSeries(title, seriesName);
@@ -824,6 +845,7 @@ abstract final class BookIntelligenceService {
       rawTitle: title,
       seriesName: seriesName,
       volumeNumber: parsed.volumeNumber ??
+          landmark?.toDouble() ??
           proseVol?.toDouble() ??
           trailing?.toDouble() ??
           (apiVol != null && apiVol >= 1 && apiVol < 1900

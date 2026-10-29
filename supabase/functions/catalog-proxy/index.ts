@@ -52,6 +52,11 @@ Deno.serve(async (req) => {
 
   try {
     const isImage = host === "uploads.mangadex.org";
+    if (host === "www.googleapis.com" && target.pathname.includes("/books/")) {
+      target.searchParams.delete("key");
+      const booksKey = Deno.env.get("GOOGLE_BOOKS_API_KEY")?.trim() ?? "";
+      if (booksKey.length > 0) target.searchParams.set("key", booksKey);
+    }
     const upstream = await fetch(target.toString(), {
       // Pas de Referer → évite le hotlink MangaDex « You can read this at MANGADEX ».
       headers: isImage

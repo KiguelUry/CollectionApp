@@ -5,6 +5,7 @@ import 'package:collection_app/models/book_volume.dart';
 import 'package:collection_app/models/collection_item.dart';
 import 'package:collection_app/services/anilist_manga_service.dart';
 import 'package:collection_app/services/book_intelligence_service.dart';
+import 'package:collection_app/services/google_books_service.dart';
 import 'package:collection_app/services/mangadex_service.dart';
 import 'package:collection_app/utils/book_series_normalizer.dart';
 import 'package:collection_app/utils/book_title_parser.dart';
@@ -911,13 +912,87 @@ void main() {
       expect(clean.contains('&'), isTrue);
     });
 
-    test('synopsis en pages de 2 phrases', () {
+    test('synopsis en pages de 3 à 4 phrases', () {
       final pages = BookVfEdition.synopsisPages(
         'Une phrase. Deuxième phrase. Troisième phrase.',
       );
-      expect(pages.length, 2);
-      expect(pages.first.contains('Une phrase'), isTrue);
-      expect(pages.first.contains('Deuxième'), isTrue);
+      expect(pages.length, 1);
+      expect(pages.first.contains('Troisième'), isTrue);
+      final long = BookVfEdition.synopsisPages(
+        List.filled(8, 'Phrase assez longue pour remplir la page du synopsis.').join(' '),
+      );
+      expect(long.length, greaterThan(1));
+    });
+
+    test('cleanSynopsis coupe Source et Notes', () {
+      final clean = BookVfEdition.cleanSynopsis(
+        'Cute girl wizard Lucy wants to join the Fairy Tail club today. '
+        '(Source: VIZ Media) Notes: - Ranked 1st in Japan.',
+      );
+      expect(clean, isNotNull);
+      expect(clean!.contains('Lucy'), isTrue);
+      expect(clean.contains('Source'), isFalse);
+      expect(clean.contains('Ranked'), isFalse);
+    });
+
+    test('la requête garde un titre qui contient tous les mots', () {
+      expect(
+        BookSeriesNormalizer.queryWordsMatchIdentity(
+          query: 'dungeon crawler',
+          title: 'Dungeon Crawler Carl',
+        ),
+        isTrue,
+      );
+      expect(
+        BookSeriesNormalizer.queryWordsMatchIdentity(
+          query: 'dungeon crawler',
+          title: 'The Wandering Inn',
+        ),
+        isFalse,
+      );
+      expect(GoogleBooksService.opensCircuit(429, ''), isTrue);
+      expect(GoogleBooksService.opensCircuit(503, ''), isTrue);
+      expect(GoogleBooksService.opensCircuit(200, ''), isFalse);
+      expect(
+        GoogleBooksService.opensCircuit(200, '{"quota_limit_value": "0"}'),
+        isTrue,
+      );
+    });
+
+    test('Sept Sœurs : description + même auteur relie le tome', () {
+      expect(
+        BookSeriesNormalizer.descriptionBindsToSeries(
+          author: 'Lucinda Riley',
+          expectedAuthor: 'Lucinda Riley',
+          title: 'La sœur à la perle',
+          description:
+              'Quatrième tome de la saga Les Sept Sœurs, par Lucinda Riley.',
+          seriesName: 'Les sept sœurs',
+        ),
+        isTrue,
+      );
+      expect(
+        BookSeriesNormalizer.descriptionBindsToSeries(
+          author: 'Andrzej Sapkowski',
+          expectedAuthor: 'Andrzej Sapkowski',
+          title: 'La Trilogie Hussite - Tome 1',
+          description: "Premier tome, par l'auteur du Sorceleur.",
+          seriesName: 'Le Sorceleur',
+        ),
+        isFalse,
+      );
+      expect(
+        BookTitleParser.volumeFromLandmark(
+          "Harry Potter à l'école des sorciers",
+        ),
+        1,
+      );
+      expect(
+        BookTitleParser.volumeFromLandmark(
+          'Harry Potter and the Deathly Hallows',
+        ),
+        7,
+      );
     });
 
     test('fiches de lecture rejetées', () {

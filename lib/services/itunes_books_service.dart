@@ -27,6 +27,7 @@ class ItunesBooksService {
       if (author != null && author.trim().length >= 2) '$clean ${author.trim()}',
       if (mangaPublisherPass) '$clean Glénat',
       if (mangaPublisherPass) '$clean Kana',
+      ...BookSeriesNormalizer.extraItunesQueries(clean),
     ];
     final lists = await Future.wait(
       queries.map((q) => search(q, limit: 200)),

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../models/book_subcategory.dart';
+import '../utils/book_series_normalizer.dart';
 import '../utils/book_vf_edition.dart';
 import 'book_intelligence_service.dart';
 import 'google_books_service.dart';
@@ -82,9 +83,28 @@ class BookCatalogService {
     final enhanced = _searchQueryForSubcategory(query, subcategory, frenchOnly);
 
     const t = Duration(seconds: 5);
-    // iTunes FR + Google Books en parallèle ; OL seulement si les deux sont vides.
-    final itunesF = ItunesBooksService.search(enhanced, limit: 200)
-        .timeout(t, onTimeout: () => <Map<String, String>>[]);
+    // Apple Books FR d'abord (requête + alias nommés), Google Books en parallèle.
+    final itunesQueries = <String>[
+      enhanced,
+      ...BookSeriesNormalizer.extraItunesQueries(query),
+    ];
+    final itunesF = Future.wait(
+      itunesQueries.map(
+        (q) => ItunesBooksService.search(q, limit: q == enhanced ? 200 : 50)
+            .timeout(t, onTimeout: () => <Map<String, String>>[]),
+      ),
+    ).then((lists) {
+      final seen = <String>{};
+      final out = <Map<String, String>>[];
+      for (final list in lists) {
+        for (final h in list) {
+          final title = (h['title'] ?? '').toLowerCase();
+          if (title.isEmpty || !seen.add(title)) continue;
+          out.add(h);
+        }
+      }
+      return out;
+    });
     final googleF = GoogleBooksService.search(
       enhanced,
       maxResults: 25,
