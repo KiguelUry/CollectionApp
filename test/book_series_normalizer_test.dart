@@ -1,5 +1,8 @@
 ﻿import 'package:collection_app/constants/rating_colors.dart';
+import 'package:collection_app/models/book_series.dart';
 import 'package:collection_app/models/book_subcategory.dart';
+import 'package:collection_app/models/book_volume.dart';
+import 'package:collection_app/models/collection_item.dart';
 import 'package:collection_app/services/anilist_manga_service.dart';
 import 'package:collection_app/services/book_intelligence_service.dart';
 import 'package:collection_app/services/mangadex_service.dart';
@@ -946,6 +949,48 @@ void main() {
         ),
         isFalse,
       );
+    });
+
+    test('fromJson tolère les champs nuls', () {
+      final series = BookSeries.fromJson({
+        'id': null,
+        'owner_id': null,
+        'name': null,
+        'subcategory': null,
+        'user_rating': null,
+        'expected_volume_count': null,
+        'metadata': null,
+      });
+      expect(series.id, isEmpty);
+      expect(series.name, 'Sans titre');
+      expect(series.subcategory, BookSubcategory.other);
+      expect(series.userRating, isNull);
+      expect(series.expectedVolumeCount, isNull);
+
+      final volume = BookVolume.fromJson({
+        'id': 'v1',
+        'series_id': 's1',
+        'volume_number': null,
+        'sort_index': null,
+        'metadata': null,
+      });
+      expect(volume.volumeNumber, 0);
+      expect(volume.sortIndex, 0);
+      expect(volume.coverUrl, isNull);
+      expect(volume.publishedDate, isNull);
+
+      final item = CollectionItem.fromJson({
+        'id': null,
+        'title': null,
+        'category': null,
+        'rating': null,
+        'quantity': null,
+        'subcategory': null,
+      });
+      expect(item.id, isEmpty);
+      expect(item.title, isEmpty);
+      expect(item.rating, isNull);
+      expect(item.quantity, 0);
     });
 
     test('à paraître seulement après aujourd\'hui + 2 jours', () {

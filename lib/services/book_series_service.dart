@@ -19,7 +19,13 @@ import 'profile_service.dart';
 class BookSeriesService {
   final _client = Supabase.instance.client;
 
-  String get _userId => _client.auth.currentUser!.id;
+  String get _userId {
+    final id = _client.auth.currentUser?.id;
+    if (id == null || id.isEmpty) {
+      throw StateError('Session absente');
+    }
+    return id;
+  }
 
   static bool _isSubcategoryCheckFailure(Object e) {
     if (e is PostgrestException) {
@@ -117,9 +123,7 @@ class BookSeriesService {
     }
 
     final rows = await query.order('name');
-    return List<Map<String, dynamic>>.from(rows)
-        .map(BookSeries.fromJson)
-        .toList();
+    return _seriesList(rows);
   }
 
   Future<BookSeries?> fetchSeriesById(String id) async {
@@ -233,9 +237,7 @@ class BookSeriesService {
         .select()
         .eq('series_id', seriesId)
         .order('sort_index');
-    return List<Map<String, dynamic>>.from(rows)
-        .map(BookVolume.fromJson)
-        .toList();
+    return _volumeList(rows);
   }
 
   /// Charge séries + volumes + items en 3 requêtes (plus de N+1).
@@ -261,8 +263,7 @@ class BookSeriesService {
         .inFilter('series_id', ids)
         .order('sort_index');
     final volumesBySeries = <String, List<BookVolume>>{};
-    for (final row in List<Map<String, dynamic>>.from(volRows)) {
-      final v = BookVolume.fromJson(row);
+    for (final v in _volumeList(volRows)) {
       volumesBySeries.putIfAbsent(v.seriesId, () => []).add(v);
     }
 
@@ -271,16 +272,7 @@ class BookSeriesService {
         .select()
         .eq('category', 'book')
         .inFilter('series_id', ids);
-    final itemsBySeries = <String, List<CollectionItem>>{};
-    for (final row in List<Map<String, dynamic>>.from(itemRows)) {
-      final item = CollectionItem.fromJson(row);
-      if (item.addedBy != _userId && item.locationUserId != _userId) {
-        continue;
-      }
-      final sid = item.seriesId;
-      if (sid == null) continue;
-      itemsBySeries.putIfAbsent(sid, () => []).add(item);
-    }
+    final itemsBySeries = _bookItemsBySeries(itemRows);
 
     return (
       series: series,
@@ -1397,15 +1389,62 @@ class BookSeriesService {
   }
 
   Future<List<BookSeries>> fetchAllRootSeries() async {
+    final userId = _client.auth.currentUser?.id;
+    if (userId == null || userId.isEmpty) return const [];
     final rows = await _client
         .from('book_series')
         .select()
-        .eq('owner_id', _userId)
+        .eq('owner_id', userId)
         .filter('parent_series_id', 'is', null)
         .order('name');
-    return List<Map<String, dynamic>>.from(rows)
-        .map(BookSeries.fromJson)
-        .toList();
+    return _seriesList(rows);
+  }
+
+  List<BookSeries> _seriesList(dynamic rows) {
+    if (rows is! List) return const [];
+    final out = <BookSeries>[];
+    for (final row in rows) {
+      if (row is! Map) continue;
+      try {
+        final series = BookSeries.fromJson(Map<String, dynamic>.from(row));
+        if (series.id.isEmpty) continue;
+        out.add(series);
+      } catch (_) {}
+    }
+    return out;
+  }
+
+  Map<String, List<CollectionItem>> _bookItemsBySeries(dynamic rows) {
+    final itemsBySeries = <String, List<CollectionItem>>{};
+    if (rows is! List) return itemsBySeries;
+    for (final row in rows) {
+      if (row is! Map) continue;
+      try {
+        final item = CollectionItem.fromJson(Map<String, dynamic>.from(row));
+        if (item.id.isEmpty) continue;
+        if (item.addedBy != _userId && item.locationUserId != _userId) {
+          continue;
+        }
+        final sid = item.seriesId;
+        if (sid == null || sid.isEmpty) continue;
+        itemsBySeries.putIfAbsent(sid, () => []).add(item);
+      } catch (_) {}
+    }
+    return itemsBySeries;
+  }
+
+  List<BookVolume> _volumeList(dynamic rows) {
+    if (rows is! List) return const [];
+    final out = <BookVolume>[];
+    for (final row in rows) {
+      if (row is! Map) continue;
+      try {
+        final volume = BookVolume.fromJson(Map<String, dynamic>.from(row));
+        if (volume.id.isEmpty || volume.seriesId.isEmpty) continue;
+        out.add(volume);
+      } catch (_) {}
+    }
+    return out;
   }
 
   Future<void> removeVolumeItem(String itemId) async {

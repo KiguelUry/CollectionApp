@@ -183,7 +183,11 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
     String? loadError;
 
     try {
-      final userId = Supabase.instance.client.auth.currentUser!.id;
+      final userId = Supabase.instance.client.auth.currentUser?.id;
+      if (userId == null) {
+        if (mounted) setState(() => _loadingCounts = false);
+        return;
+      }
       const hubSelect =
           'id, title, quantity, category, subcategory, is_wishlist, is_sold, '
           'is_expansion, parent_game_id, added_by, metadata';
@@ -205,21 +209,25 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
           return;
         }
         ownedMaps.add(map);
-        if (CollectionCategory.fromDbValue(map['category'] as String) ==
+        if (CollectionCategory.fromDbValue(map['category']?.toString() ?? '') ==
             CollectionCategory.boardgame) {
           boardgameRows.add(map);
         }
       }
 
-      for (final row in rows as List) {
-        final map = Map<String, dynamic>.from(row as Map);
-        if (_hubRowFlag(map, 'is_wishlist') && !_hubRowIsExpansion(map)) {
-          final cat = CollectionCategory.fromDbValue(map['category'] as String);
-          if (cat != CollectionCategory.custom) {
-            wishCounts[cat] = (wishCounts[cat] ?? 0) + 1;
+      for (final row in rows is List ? rows : const []) {
+        if (row is! Map) continue;
+        try {
+          final map = Map<String, dynamic>.from(row);
+          if (_hubRowFlag(map, 'is_wishlist') && !_hubRowIsExpansion(map)) {
+            final cat =
+                CollectionCategory.fromDbValue(map['category']?.toString() ?? '');
+            if (cat != CollectionCategory.custom) {
+              wishCounts[cat] = (wishCounts[cat] ?? 0) + 1;
+            }
           }
-        }
-        collectOwned(map);
+          collectOwned(map);
+        } catch (_) {}
       }
 
       boardgameExpansionCount = countUniqueOwnedExpansions(boardgameRows);
@@ -231,8 +239,12 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
               .from('collection_items')
               .select(hubSelect)
               .inFilter('group_id', groupIds);
-          for (final row in gRows as List) {
-            collectOwned(Map<String, dynamic>.from(row as Map));
+          final rawGroups = gRows as dynamic;
+          for (final row in rawGroups is List ? rawGroups : const []) {
+            if (row is! Map) continue;
+            try {
+              collectOwned(Map<String, dynamic>.from(row));
+            } catch (_) {}
           }
           boardgameExpansionCount = countUniqueOwnedExpansions(boardgameRows);
         }
@@ -240,9 +252,15 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
         // group_members RLS : compteurs perso OK, groupes ignorés
       }
 
-      final visible = visibleOwnedLikeGrid([
-        for (final map in ownedMaps) CollectionItem.fromJson(map),
-      ]);
+      final parsed = <CollectionItem>[];
+      for (final map in ownedMaps) {
+        try {
+          final item = CollectionItem.fromJson(map);
+          if (item.id.isEmpty) continue;
+          parsed.add(item);
+        } catch (_) {}
+      }
+      final visible = visibleOwnedLikeGrid(parsed);
       final byCategory = <CollectionCategory, List<CollectionItem>>{};
       for (final item in visible) {
         if (item.category == CollectionCategory.custom) {

@@ -25,8 +25,10 @@ class BookVolume {
   });
 
   String? get coverUrl {
-    final url = metadata['cover_url'] as String?;
-    if (url == null || url.isEmpty) return null;
+    final raw = metadata['cover_url'];
+    if (raw == null) return null;
+    final url = raw.toString().trim();
+    if (url.isEmpty) return null;
     return url;
   }
 
@@ -183,16 +185,33 @@ class BookVolume {
     );
   }
 
+  static String? _str(dynamic v) {
+    if (v == null) return null;
+    final s = v.toString().trim();
+    return s.isEmpty ? null : s;
+  }
+
+  static double? _double(dynamic v) {
+    if (v == null) return null;
+    if (v is num) return v.toDouble();
+    return double.tryParse(v.toString());
+  }
+
+  static Map<String, dynamic> _map(dynamic v) {
+    if (v is Map<String, dynamic>) return Map<String, dynamic>.from(v);
+    if (v is Map) return Map<String, dynamic>.from(v);
+    return const {};
+  }
+
   factory BookVolume.fromJson(Map<String, dynamic> json) {
+    final volume = _double(json['volume_number']) ?? 0;
     return BookVolume(
-      id: json['id'] as String,
-      seriesId: json['series_id'] as String,
-      volumeNumber: (json['volume_number'] as num).toDouble(),
-      label: json['label'] as String?,
-      sortIndex: (json['sort_index'] as num).toDouble(),
-      metadata: Map<String, dynamic>.from(
-        json['metadata'] as Map? ?? const {},
-      ),
+      id: _str(json['id']) ?? '',
+      seriesId: _str(json['series_id']) ?? '',
+      volumeNumber: volume,
+      label: _str(json['label']),
+      sortIndex: _double(json['sort_index']) ?? volume,
+      metadata: _map(json['metadata']),
     );
   }
 

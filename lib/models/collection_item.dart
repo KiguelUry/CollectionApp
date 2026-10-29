@@ -101,28 +101,28 @@ class CollectionItem {
 
   factory CollectionItem.fromJson(Map<String, dynamic> json) {
     final category = CollectionCategory.fromDbValue(
-      json['category'] as String? ?? CollectionCategory.boardgame.dbValue,
+      json['category']?.toString() ?? CollectionCategory.boardgame.dbValue,
     );
-    final rawSub = json['subcategory'] as String?;
+    final rawSub = json['subcategory']?.toString();
 
     String? locLabel;
     final loc = json['locations'];
     if (loc is Map) {
-      locLabel = loc['label'] as String?;
+      locLabel = loc['label']?.toString();
     }
     final holder = json['location_holder'];
-    final locationUserId = json['location_user_id'] as String?;
+    final locationUserId = json['location_user_id']?.toString();
 
     String? gName;
     final grp = json['groups'];
     if (grp is Map) {
-      gName = grp['name'] as String?;
+      gName = grp['name']?.toString();
     }
 
-    String? loanedName = json['loaned_to_name'] as String?;
+    String? loanedName = json['loaned_to_name']?.toString();
     final loanedProfile = json['loaned_to'];
     if (loanedProfile is Map) {
-      loanedName = loanedProfile['username'] as String? ?? loanedName;
+      loanedName = loanedProfile['username']?.toString() ?? loanedName;
     }
 
     DateTime? loanedAt;
@@ -139,7 +139,7 @@ class CollectionItem {
 
     var metadata = CategoryMetadata.parse(json['metadata']);
 
-    final customHolder = metadata?['holder_label'] as String?;
+    final customHolder = metadata?['holder_label']?.toString();
     final hasCustomHolder =
         customHolder != null && customHolder.trim().isNotEmpty;
 
@@ -151,7 +151,7 @@ class CollectionItem {
     } else if (hasCustomHolder) {
       locLabel = formatManualHolderLabel(customHolder.trim());
     } else if (locLabel == null && loc is Map) {
-      locLabel = loc['label'] as String?;
+      locLabel = loc['label']?.toString();
     }
 
     // Conserve le username d'ajout pour l'UI (groupes / historique).
@@ -182,56 +182,64 @@ class CollectionItem {
     }
 
     return CollectionItem(
-      id: json['id'],
+      id: json['id']?.toString() ?? '',
       title: cleanDisplayText(json['title']?.toString()),
       category: category,
       subcategory: category == CollectionCategory.book
-          ? (rawSub ?? (json['category'] == 'manga' ? 'manga' : null))
+          ? (rawSub ?? (json['category']?.toString() == 'manga' ? 'manga' : null))
           : rawSub,
       metadata: metadata,
       imageUrl: _resolveImageUrl(json),
-      isWishlist: json['is_wishlist'] ?? false,
-      isForSale: json['is_for_sale'] as bool? ?? false,
-      isSold: json['is_sold'] as bool? ?? false,
-      quantity: (json['quantity'] as int?) ?? 0,
-      locationId: json['location_id'] as String?,
+      isWishlist: _flag(json['is_wishlist']),
+      isForSale: _flag(json['is_for_sale']),
+      isSold: _flag(json['is_sold']),
+      quantity: _int(json['quantity']) ?? 0,
+      locationId: json['location_id']?.toString(),
       locationLabel: locLabel,
-      groupId: json['group_id'] as String?,
+      groupId: json['group_id']?.toString(),
       groupName: gName,
-      addedBy: json['added_by'] as String?,
-      locationUserId: json['location_user_id'],
-      loanedToId: json['loaned_to_id'] as String?,
+      addedBy: json['added_by']?.toString(),
+      locationUserId: json['location_user_id']?.toString(),
+      loanedToId: json['loaned_to_id']?.toString(),
       loanedToName: loanedName,
       loanedAt: loanedAt,
-      minPlayers: json['min_players'],
-      maxPlayers: json['max_players'],
-      playingTime: json['playing_time'],
+      minPlayers: _int(json['min_players']),
+      maxPlayers: _int(json['max_players']),
+      playingTime: _int(json['playing_time']),
       rating: _parseDouble(json['rating']),
-      review: json['review'] as String?,
+      review: json['review']?.toString(),
       purchasePrice: _parseDouble(json['purchase_price']),
-      condition: json['condition'] as String?,
-      gamesPlayed: json['games_played'] as int?,
-      personalRules: json['personal_rules'] as String?,
+      condition: json['condition']?.toString(),
+      gamesPlayed: _int(json['games_played']),
+      personalRules: json['personal_rules']?.toString(),
       createdAt: createdAt,
       tags: ItemTag.parseListFromItemJson(json),
-      seriesId: json['series_id'] as String?,
-      volumeId: json['volume_id'] as String?,
-      isRead: json['is_read'] as bool? ?? false,
-      isExpansion: json['is_expansion'] as bool? ??
+      seriesId: json['series_id']?.toString(),
+      volumeId: json['volume_id']?.toString(),
+      isRead: _flag(json['is_read']),
+      isExpansion: _flag(json['is_expansion']) ||
           metadata?['bgg_is_expansion'] == true,
-      parentGameId: json['parent_game_id'] as String?,
+      parentGameId: json['parent_game_id']?.toString(),
     );
   }
 
+  static bool _flag(dynamic v) =>
+      v == true || v == 1 || v == 'true' || v == '1';
+
+  static int? _int(dynamic v) {
+    if (v == null) return null;
+    if (v is int) return v;
+    if (v is num) return v.round();
+    return int.tryParse(v.toString());
+  }
+
   static String? _resolveImageUrl(Map<String, dynamic> json) {
-    final direct = json['image_url'] as String?;
-    if (direct != null && direct.trim().isNotEmpty) return direct.trim();
+    final direct = json['image_url']?.toString().trim();
+    if (direct != null && direct.isNotEmpty) return direct;
     final meta = json['metadata'];
     if (meta is Map) {
-      final fromMeta = meta['image_url'] as String?;
-      if (fromMeta != null && fromMeta.trim().isNotEmpty) {
-        return fromMeta.trim();
-      }
+      final fromMeta = meta['image_url']?.toString().trim();
+      if (fromMeta != null && fromMeta.isNotEmpty) return fromMeta;
     }
     return null;
   }

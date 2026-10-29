@@ -77,22 +77,44 @@ class BookSeries {
     return double.tryParse(v.toString());
   }
 
+  static String? _str(dynamic v) {
+    if (v == null) return null;
+    final s = v.toString().trim();
+    return s.isEmpty ? null : s;
+  }
+
+  static int? _int(dynamic v) {
+    if (v == null) return null;
+    if (v is int) return v;
+    if (v is num) return v.round();
+    return int.tryParse(v.toString());
+  }
+
+  static bool _bool(dynamic v) {
+    if (v == true || v == 1 || v == 'true' || v == '1') return true;
+    return false;
+  }
+
+  static Map<String, dynamic> _map(dynamic v) {
+    if (v is Map<String, dynamic>) return Map<String, dynamic>.from(v);
+    if (v is Map) return Map<String, dynamic>.from(v);
+    return const {};
+  }
+
   factory BookSeries.fromJson(Map<String, dynamic> json) {
     return BookSeries(
-      id: json['id'] as String,
-      ownerId: json['owner_id'] as String,
-      name: json['name'] as String,
-      subcategory: BookSubcategory.fromDbValue(json['subcategory'] as String?),
-      coverUrl: json['cover_url'] as String?,
-      parentSeriesId: json['parent_series_id'] as String?,
-      description: json['description'] as String?,
+      id: _str(json['id']) ?? '',
+      ownerId: _str(json['owner_id']) ?? '',
+      name: _str(json['name']) ?? 'Sans titre',
+      subcategory: BookSubcategory.fromDbValue(_str(json['subcategory'])),
+      coverUrl: _str(json['cover_url']),
+      parentSeriesId: _str(json['parent_series_id']),
+      description: _str(json['description']),
       userRating: _parseDouble(json['user_rating']),
-      userReview: json['user_review'] as String?,
-      expectedVolumeCount: json['expected_volume_count'] as int?,
-      wishlistEntireSeries: json['wishlist_entire_series'] as bool? ?? false,
-      metadata: Map<String, dynamic>.from(
-        json['metadata'] as Map? ?? const {},
-      ),
+      userReview: _str(json['user_review']),
+      expectedVolumeCount: _int(json['expected_volume_count']),
+      wishlistEntireSeries: _bool(json['wishlist_entire_series']),
+      metadata: _map(json['metadata']),
       createdAt: DateTime.tryParse(json['created_at']?.toString() ?? ''),
       updatedAt: DateTime.tryParse(json['updated_at']?.toString() ?? ''),
     );

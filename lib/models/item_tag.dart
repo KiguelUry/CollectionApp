@@ -13,9 +13,9 @@ class ItemTag {
 
   factory ItemTag.fromJson(Map<String, dynamic> json) {
     return ItemTag(
-      id: json['id'] as String,
-      label: json['label'] as String,
-      colorHex: (json['color'] as String?) ?? '#9E9E9E',
+      id: json['id']?.toString() ?? '',
+      label: json['label']?.toString() ?? '',
+      colorHex: json['color']?.toString() ?? '#9E9E9E',
     );
   }
 

@@ -16,8 +16,11 @@ int ownedExpansionCount(CollectionItem item) =>
 int countUniqueOwnedExpansions(Iterable<Map<String, dynamic>> boardgameRows) {
   final ids = <String>{};
   for (final row in boardgameRows) {
-    final isExpansion = row['is_expansion'] as bool? ?? false;
-    final meta = row['metadata'] as Map<String, dynamic>?;
+    final isExpansion = row['is_expansion'] == true ||
+        row['is_expansion'] == 1 ||
+        row['is_expansion'] == 'true';
+    final rawMeta = row['metadata'];
+    final meta = rawMeta is Map ? Map<String, dynamic>.from(rawMeta) : null;
     if (isExpansion) {
       final id = meta?['bgg_id']?.toString();
       if (id != null && id.isNotEmpty) ids.add(id);
