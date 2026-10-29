@@ -1040,7 +1040,9 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                 children: [
                   Padding(
                     padding: const EdgeInsets.only(top: 7),
-                    child: DecoratedBox(
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: DecoratedBox(
                       decoration: BoxDecoration(
                         color: const Color(0xFF1E293B),
                         borderRadius: BorderRadius.circular(16),
@@ -1087,6 +1089,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                           ],
                         ),
                       ),
+                    ),
                     ),
                   ),
                   Positioned(

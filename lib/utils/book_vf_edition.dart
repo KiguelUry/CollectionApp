@@ -84,7 +84,7 @@ abstract final class BookVfEdition {
     return s;
   }
 
-  /// Pages d'environ 320–400 caractères, ou 3 à 4 phrases.
+  /// Deux phrases, ou environ 240 caractères, toujours coupées sur un point.
   static List<String> synopsisPages(String clean) {
     final text = clean.trim();
     if (text.isEmpty) return const [];
@@ -107,8 +107,8 @@ abstract final class BookVfEdition {
     for (final sentence in sentences) {
       final sep = buf.isEmpty ? 0 : 1;
       final next = chars + sep + sentence.length;
-      if (buf.isNotEmpty &&
-          (buf.length >= 4 || next > 400 || (buf.length >= 3 && chars >= 320))) {
+      // Deux phrases, ou ~240 caractères, toujours sur une fin de phrase.
+      if (buf.isNotEmpty && (buf.length >= 2 || next > 240)) {
         flush();
       }
       buf.add(sentence);

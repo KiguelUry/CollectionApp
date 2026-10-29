@@ -499,6 +499,56 @@ abstract final class BookSeriesNormalizer {
     return authorsMatch(hitAuthor, expectedAuthor);
   }
 
+  /// « One Piece Doors », « Sur les mers de One Piece », « Dofus Monster ».
+  /// Le nom parsé contient toute la série, plus d'autres mots : c'est une autre
+  /// œuvre. « One Piece - Édition originale » reste One Piece.
+  static bool isSpinOffSeriesName(String extracted, String want) {
+    final extractedClean =
+        stripEditionSuffix(stripOrphanVolumeSuffix(extracted));
+    final wantClean = stripEditionSuffix(stripOrphanVolumeSuffix(want));
+    if (namesMatch(extractedClean, wantClean)) return false;
+    final wantWords = queryWords(wantClean);
+    final gotWords = queryWords(extractedClean);
+    if (wantWords.isEmpty || gotWords.length <= wantWords.length) {
+      return false;
+    }
+    final got = gotWords.toSet();
+    return wantWords.every(got.contains);
+  }
+
+  /// Manga : l'auteur doit coller quand on le connaît (Monster ≠ Michael Grant).
+  /// BD : un changement de scénariste reste accepté si le titre est la série.
+  /// Un spin-off est toujours rejeté, quelle que soit la catégorie.
+  static bool rejectAsDifferentWork({
+    required String title,
+    required String seriesName,
+    required String? author,
+    required String? expectedAuthor,
+    required bool mangaAuthorRequired,
+  }) {
+    final own = parse(title, queryHint: seriesName).seriesName;
+    if (own != null &&
+        own.isNotEmpty &&
+        isSpinOffSeriesName(own, seriesName)) {
+      return true;
+    }
+    if (BookTitleParser.looksLikeIntegraleEdition(title) &&
+        !BookTitleParser.looksLikeIntegraleEdition(seriesName)) {
+      return true;
+    }
+    if (RegExp(
+      r'\btomes?\s*\d+\s*(?:à|a|-|–)\s*',
+      caseSensitive: false,
+    ).hasMatch(title)) {
+      return true;
+    }
+    if (mangaAuthorRequired &&
+        !authorMatchesExpected(author, expectedAuthor)) {
+      return true;
+    }
+    return false;
+  }
+
   static String seriesAuthorKey(String seriesName, String? author) {
     final s = mergeKey(seriesName);
     final a = normalizeAuthorKey(author ?? '');

@@ -543,6 +543,17 @@ abstract final class BookIntelligenceService {
           langRestrict: 'fr',
         ));
       } catch (_) {}
+      // Romans : le numéro est souvent dans le sous-titre (« Série - 4 »),
+      // pas dans une requête « Série Tome ».
+      if (subcategory == BookSubcategory.novel) {
+        try {
+          addHits(await GoogleBooksService.search(
+            cleanName,
+            maxResults: 20,
+            langRestrict: 'fr',
+          ));
+        } catch (_) {}
+      }
     }
 
     if ((authorHint ?? '').trim().length >= 2 &&
@@ -605,6 +616,15 @@ abstract final class BookIntelligenceService {
         seriesName: cleanName,
       );
       if (!identity && !descBind && h.parsed.volumeNumber == null) continue;
+      if (BookSeriesNormalizer.rejectAsDifferentWork(
+        title: title,
+        seriesName: cleanName,
+        author: h.author,
+        expectedAuthor: authorHint,
+        mangaAuthorRequired: subcategory == BookSubcategory.manga,
+      )) {
+        continue;
+      }
       final titleIsThisSeries =
           BookSeriesNormalizer.hitBelongsToSeries(title, cleanName);
       if (!titleIsThisSeries &&
@@ -715,6 +735,10 @@ abstract final class BookIntelligenceService {
             target) {
       return true;
     }
+    if (series.isNotEmpty &&
+        BookTitleParser.volumeFromLabeledSeries(combined, series) == target) {
+      return true;
+    }
     final api = int.tryParse(hit.raw['series_volume'] ?? '');
     return api == target;
   }
@@ -777,10 +801,13 @@ abstract final class BookIntelligenceService {
   }
 
   static bool _matchesFilters(EnrichedBookHit hit, BookSearchFilters filters) {
-    final authorQ = filters.authorQuery.trim().toLowerCase();
-    if (authorQ.isNotEmpty) {
-      final author = (hit.author ?? hit.raw['author'] ?? '').toLowerCase();
-      if (!author.contains(authorQ)) return false;
+    final authorQ = filters.authorQuery.trim();
+    if (authorQ.isNotEmpty &&
+        !BookSeriesNormalizer.authorsMatch(
+          hit.author ?? hit.raw['author'],
+          authorQ,
+        )) {
+      return false;
     }
     final pubQ = filters.publisherQuery.trim().toLowerCase();
     if (pubQ.isNotEmpty) {
@@ -855,6 +882,25 @@ abstract final class BookIntelligenceService {
     final sisterVol = seriesKey.contains('soeur')
         ? BookTitleParser.sisterOrdinal(hit['description'] ?? '')
         : null;
+    final labelSource = (queryHint != null && queryHint.trim().length >= 3)
+        ? queryHint
+        : seriesName;
+    final labeled = labelSource == null
+        ? null
+        : BookTitleParser.volumeFromLabeledSeries(
+            '$title ${subtitle ?? ''}',
+            labelSource,
+          );
+    if (queryHint != null &&
+        queryHint.trim().length >= 3 &&
+        (labeled != null ||
+            (sisterVol != null &&
+                BookSeriesNormalizer.titleSharesQueryWord(queryHint, title)))) {
+      final own = BookTitleParser.parse(title).seriesName;
+      final spin = own != null &&
+          BookSeriesNormalizer.isSpinOffSeriesName(own, queryHint);
+      if (!spin) seriesName = queryHint.trim();
+    }
     final landmark = BookTitleParser.volumeFromLandmark(
       '$title ${subtitle ?? ''} ${hit['description'] ?? ''}',
     );
@@ -866,6 +912,7 @@ abstract final class BookIntelligenceService {
       rawTitle: title,
       seriesName: seriesName,
       volumeNumber: parsed.volumeNumber ??
+          labeled?.toDouble() ??
           landmark?.toDouble() ??
           proseVol?.toDouble() ??
           sisterVol?.toDouble() ??

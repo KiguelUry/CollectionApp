@@ -822,6 +822,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
     }
 
     // Exact match query toujours en 1re bannière.
+    // Une adaptation manga d'un seul tome ne passe pas devant la saga.
     final qSort = BookSeriesNormalizer.normalizeKey(seriesQ);
     mergedBanners.sort((a, b) {
       final ak = BookSeriesNormalizer.normalizeKey(a.name);
@@ -829,6 +830,9 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
       final aExact = qSort.isNotEmpty && ak == qSort;
       final bExact = qSort.isNotEmpty && bk == qSort;
       if (aExact != bExact) return aExact ? -1 : 1;
+      final aThin = a.fromAnilist && a.volumeCount <= 2;
+      final bThin = b.fromAnilist && b.volumeCount <= 2;
+      if (aThin != bThin) return aThin ? 1 : -1;
       if (a.fromAnilist != b.fromAnilist) return a.fromAnilist ? -1 : 1;
       return b.volumeCount.compareTo(a.volumeCount);
     });
@@ -865,17 +869,34 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
 
     final qLower = seriesQ.toLowerCase().trim();
     if (filters.authorQuery.trim().isEmpty && qLower.length >= 3) {
-      String? leadAuthor;
-      for (final h in enriched) {
+      final leads = <String>[];
+      void consider(EnrichedBookHit h, {required bool first}) {
         final title = h.raw['title'] ?? h.displayTitle;
-        if (BookSeriesNormalizer.textMentionsSeries(title, seriesQ) ||
+        final mentioned = BookSeriesNormalizer.textMentionsSeries(
+              title,
+              seriesQ,
+            ) ||
             BookSeriesNormalizer.normalizeKey(title) ==
-                BookSeriesNormalizer.normalizeKey(seriesQ)) {
-          leadAuthor = BookSeriesNormalizer.leadAuthorName(h.author);
-          if (leadAuthor != null) break;
+                BookSeriesNormalizer.normalizeKey(seriesQ);
+        if (!mentioned) return;
+        final lead = BookSeriesNormalizer.leadAuthorName(h.author);
+        if (lead == null || leads.contains(lead)) return;
+        if (first) {
+          leads.insert(0, lead);
+        } else {
+          leads.add(lead);
         }
       }
-      if (leadAuthor != null) {
+
+      for (final h in enriched) {
+        final manga = h.detectedSubcategory == BookSubcategory.manga ||
+            (h.raw['source'] ?? '').toLowerCase().contains('anilist');
+        consider(h, first: !manga);
+      }
+      final seen = {
+        for (final h in enriched) (h.raw['title'] ?? h.displayTitle).toLowerCase(),
+      };
+      for (final leadAuthor in leads.take(2)) {
         try {
           final more = await ItunesBooksService.search(
             '$seriesQ $leadAuthor',
@@ -890,10 +911,6 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
                 ),
               )
               .toList();
-          final seen = {
-            for (final h in enriched)
-              (h.raw['title'] ?? h.displayTitle).toLowerCase(),
-          };
           for (final h in extra) {
             if (!BookSeriesNormalizer.authorsMatch(h.author, leadAuthor)) {
               continue;
@@ -1038,7 +1055,11 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
     );
   }
 
-  Future<void> _promptQuickVolume(EnrichedBookHit hit, int volumeNumber) async {
+  Future<void> _promptQuickVolume(
+    EnrichedBookHit hit,
+    int volumeNumber, {
+    bool numbered = true,
+  }) async {
     final seriesName = hit.parsed.seriesName ?? hit.displayTitle;
     final sub = hit.detectedSubcategory ??
         BookSeriesNormalizer.detectSubcategory(
@@ -1087,7 +1108,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
               ),
               const SizedBox(height: 12),
               Text(
-                '$seriesName — Tome $volumeNumber',
+                numbered ? '$seriesName — Tome $volumeNumber' : hit.displayTitle,
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   color: Colors.white,
@@ -1562,8 +1583,8 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
                       ? Icons.article_outlined
                       : Icons.menu_book_outlined,
                   onTap: () {
-                    if (!chapterBadge && vol != null) {
-                      _promptQuickVolume(hit, vol);
+                    if (!chapterBadge) {
+                      _promptQuickVolume(hit, vol ?? 1, numbered: vol != null);
                       return;
                     }
                     _select(hit);

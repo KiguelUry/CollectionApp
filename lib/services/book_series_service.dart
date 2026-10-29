@@ -1135,6 +1135,15 @@ class BookSeriesService {
             ? BookTitleParser.sisterOrdinal(h['description'] ?? '')
             : null;
         if (!identity && !descBind && sisterVol == null) continue;
+        if (BookSeriesNormalizer.rejectAsDifferentWork(
+          title: title,
+          seriesName: working.name,
+          author: h['author'],
+          expectedAuthor: seriesAuthor,
+          mangaAuthorRequired: working.subcategory == BookSubcategory.manga,
+        )) {
+          continue;
+        }
         final titleIsThisSeries =
             BookSeriesNormalizer.hitBelongsToSeries(title, working.name);
         if (!titleIsThisSeries &&
@@ -1146,10 +1155,15 @@ class BookSeriesService {
         }
         final identityBlob =
             '$title ${h['collection_name'] ?? ''} ${h['series_title'] ?? ''} ${h['subtitle'] ?? ''}';
+        final labeled = BookTitleParser.volumeFromLabeledSeries(
+          identityBlob,
+          working.name,
+        );
         final n = BookTitleParser.extractVolumeNumberStrict(title) ??
             BookTitleParser.volumeFromLandmark(
               '$identityBlob ${h['description'] ?? ''}',
             ) ??
+            labeled ??
             BookTitleParser.volumeTrailingSeries(title, working.name) ??
             BookTitleParser.extractVolumeFromProse(
               descBind
@@ -1336,10 +1350,19 @@ class BookSeriesService {
       // MangaDex : trou vide seulement. Un « Tome N » VF remplace un Volume
       // anglais déjà enregistré. Une couverture « Tome » déjà posée reste.
       if (incomingMd) {
-        if (hasCover) continue;
+        if (hasCover) {
+          // Un manga déjà marqué « Tome N » reste. Une couverture « fr »
+          // qui n'est pas un tome (homonyme Monster, etc.) cède la place
+          // au MangaDex de la vraie série, faute de tome VF.
+          final restoreMd = working.subcategory == BookSubcategory.manga &&
+              existingLang == 'fr';
+          if (!restoreMd) continue;
+        }
       } else if (hasCover && !existingMd) {
         final alreadyTome = existingLang == 'fr-tome';
-        if (alreadyTome) continue;
+        // Un vrai « Tome N » peut corriger une couverture homonyme.
+        // L'inverse est refusé : on ne remplace pas un tome VF par autre chose.
+        if (alreadyTome && !incomingTome) continue;
         if (existingLang == 'fr' && !incomingTome) continue;
         if (!incomingFr) continue;
       }
@@ -1350,7 +1373,9 @@ class BookSeriesService {
         verifiedVolume: n,
         publishedDate: pub,
         upcoming: upcoming,
-        coverLanguage: incomingFr ? 'fr' : hit.language,
+        coverLanguage: incomingTome
+            ? 'fr-tome'
+            : (incomingFr ? 'fr' : hit.language),
       );
       updated++;
       sinceProgress++;

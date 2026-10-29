@@ -373,6 +373,36 @@ abstract final class BookTitleParser {
         caseSensitive: false,
       ).hasMatch(title);
 
+  /// « Les sept sœurs - 4 », « Les sept sœurs, tome 8 », « Série - Livre 3 ».
+  /// Le nom de la série doit précéder le numéro. Pas une liste de titres.
+  static int? volumeFromLabeledSeries(String text, String seriesName) {
+    final foldedSeries = _foldLight(seriesName).trim();
+    if (foldedSeries.length < 3) return null;
+    final folded = _foldLight(text);
+    final re = RegExp(
+      '${RegExp.escape(foldedSeries)}\\s*[-,:–—]\\s*'
+      r'(?:tome|tomes|livre|volume|vol\.?|n[°o]\s*)?\s*0*(\d+)\b',
+    );
+    final m = re.firstMatch(folded);
+    if (m == null) return null;
+    final n = int.tryParse(m.group(1)!);
+    if (n == null || !_isPlausibleVolume(n.toDouble())) return null;
+    return n;
+  }
+
+  static String _foldLight(String raw) {
+    return raw
+        .toLowerCase()
+        .replaceAll('œ', 'oe')
+        .replaceAll('æ', 'ae')
+        .replaceAll(RegExp('[àâä]'), 'a')
+        .replaceAll(RegExp('[éèêë]'), 'e')
+        .replaceAll(RegExp('[ïî]'), 'i')
+        .replaceAll(RegExp('[ôö]'), 'o')
+        .replaceAll(RegExp('[ùûü]'), 'u')
+        .replaceAll('ç', 'c');
+  }
+
   /// « One Piece 1 », « One Piece T01 », « One Piece, Tome 01 ».
   static int? volumeTrailingSeries(String title, String seriesName) {
     final series = seriesName.trim();

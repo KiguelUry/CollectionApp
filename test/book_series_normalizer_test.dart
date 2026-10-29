@@ -912,16 +912,20 @@ void main() {
       expect(clean.contains('&'), isTrue);
     });
 
-    test('synopsis en pages de 3 à 4 phrases', () {
+    test('synopsis en pages qui finissent sur un point', () {
       final pages = BookVfEdition.synopsisPages(
         'Une phrase. Deuxième phrase. Troisième phrase.',
       );
-      expect(pages.length, 1);
-      expect(pages.first.contains('Troisième'), isTrue);
+      expect(pages.length, 2);
+      expect(pages.first.endsWith('.'), isTrue);
+      expect(pages.last.contains('Troisième'), isTrue);
       final long = BookVfEdition.synopsisPages(
         List.filled(8, 'Phrase assez longue pour remplir la page du synopsis.').join(' '),
       );
       expect(long.length, greaterThan(1));
+      for (final page in long) {
+        expect(page.trim().endsWith('.'), isTrue);
+      }
     });
 
     test('cleanSynopsis coupe Source et Notes', () {
@@ -1206,6 +1210,144 @@ void main() {
         ranked.any((h) => (h.raw['title'] ?? '').contains('Wandering')),
         isFalse,
       );
+    });
+  });
+
+  group('homonymes et sous-titres', () {
+    test('un spin-off n est pas la série', () {
+      expect(
+        BookSeriesNormalizer.isSpinOffSeriesName(
+          'One Piece Doors',
+          'One Piece',
+        ),
+        isTrue,
+      );
+      expect(
+        BookSeriesNormalizer.isSpinOffSeriesName(
+          'Sur les mers de one piece',
+          'One Piece',
+        ),
+        isTrue,
+      );
+      expect(
+        BookSeriesNormalizer.isSpinOffSeriesName(
+          'Dofus Monster',
+          'Monster',
+        ),
+        isTrue,
+      );
+      expect(
+        BookSeriesNormalizer.isSpinOffSeriesName(
+          'One Piece - Édition originale',
+          'One Piece',
+        ),
+        isFalse,
+      );
+      expect(
+        BookSeriesNormalizer.isSpinOffSeriesName('Thorgal', 'Thorgal'),
+        isFalse,
+      );
+    });
+
+    test('manga : un autre auteur ne remplace pas la série', () {
+      expect(
+        BookSeriesNormalizer.rejectAsDifferentWork(
+          title: 'Monster Tome 2',
+          seriesName: 'Monster',
+          author: 'Michael Grant',
+          expectedAuthor: 'Naoki Urasawa',
+          mangaAuthorRequired: true,
+        ),
+        isTrue,
+      );
+      expect(
+        BookSeriesNormalizer.rejectAsDifferentWork(
+          title: 'Monster Tome 2',
+          seriesName: 'Monster',
+          author: 'Naoki Urasawa',
+          expectedAuthor: 'Naoki Urasawa',
+          mangaAuthorRequired: true,
+        ),
+        isFalse,
+      );
+      expect(
+        BookSeriesNormalizer.rejectAsDifferentWork(
+          title: 'Thorgal - Tome 4',
+          seriesName: 'Thorgal',
+          author: 'Jean Van Hamme',
+          expectedAuthor: 'Yann',
+          mangaAuthorRequired: false,
+        ),
+        isFalse,
+      );
+      expect(
+        BookSeriesNormalizer.rejectAsDifferentWork(
+          title: 'One Piece Doors - Tome 01',
+          seriesName: 'One Piece',
+          author: 'Eiichiro Oda',
+          expectedAuthor: 'Eiichiro Oda',
+          mangaAuthorRequired: true,
+        ),
+        isTrue,
+      );
+    });
+
+    test('le sous-titre Série - N donne le tome', () {
+      expect(
+        BookTitleParser.volumeFromLabeledSeries(
+          'La sœur à la perle : Les sept sœurs - 4',
+          'Les sept sœurs',
+        ),
+        4,
+      );
+      expect(
+        BookTitleParser.volumeFromLabeledSeries(
+          'Les sept soeurs, tome 8',
+          'Les sept sœurs',
+        ),
+        8,
+      );
+      final ranked = BookIntelligenceService.enrichAndRank(
+        [
+          {
+            'title': 'La sœur à la perle',
+            'subtitle': 'Les sept sœurs - 4',
+            'author': 'Lucinda Riley',
+            'language': 'fr',
+          },
+          {
+            'title': 'Les sept sœurs - L\'Intégrale',
+            'author': 'Lucinda Riley',
+            'language': 'fr',
+          },
+        ],
+        subcategory: BookSubcategory.novel,
+        filters: const BookSearchFilters(titleQuery: 'Les sept sœurs'),
+      );
+      final perle = ranked.where(
+        (h) => (h.raw['title'] ?? '').contains('perle'),
+      );
+      expect(perle, hasLength(1));
+      expect(perle.single.parsed.volumeNumber, 4);
+      expect(
+        BookSeriesNormalizer.namesMatch(
+          perle.single.parsed.seriesName ?? '',
+          'Les sept sœurs',
+        ),
+        isTrue,
+      );
+    });
+
+    test('le synopsis se coupe sur un point', () {
+      const text =
+          'Première phrase assez longue pour compter. '
+          'Deuxième phrase qui termine la page. '
+          'Troisième phrase sur la page suivante.';
+      final pages = BookVfEdition.synopsisPages(text);
+      expect(pages.length, greaterThan(1));
+      for (final page in pages) {
+        expect(RegExp(r'[.!?…]$').hasMatch(page.trim()), isTrue);
+      }
     });
   });
 }
