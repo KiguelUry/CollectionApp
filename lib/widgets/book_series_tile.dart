@@ -251,14 +251,17 @@ class BookSeriesTile extends StatelessWidget {
                             resolve(SeriesRatingDisplayPref.average) ??
                             resolve(SeriesRatingDisplayPref.community));
                     if (picked != null) {
-                      ratingLabel = picked.label;
+                      // L'icône Icons.star du chip suffit — pas de ★ dans le label.
+                      ratingLabel =
+                          picked.label.replaceFirst(RegExp(r'^★\s*'), '');
                       ratingColor = picked.color;
                     } else {
                       final chip = resolveTileRating(
                         personalOnFive: stats.displayRating,
                         communityOnFive: stats.communityRating,
                       );
-                      ratingLabel = chip.label;
+                      ratingLabel =
+                          chip.label.replaceFirst(RegExp(r'^★\s*'), '');
                       ratingColor = chip.color;
                     }
                     final status = stats.statusChip;
