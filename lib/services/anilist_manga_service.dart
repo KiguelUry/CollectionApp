@@ -30,6 +30,73 @@ abstract final class AnilistMangaService {
     return results.isEmpty ? null : results.first;
   }
 
+  /// Mangas tendance AniList (Découvrir).
+  static Future<List<AnilistMangaMeta>> trendingManga({int limit = 12}) async {
+    if (DateTime.now().isBefore(_coolUntil)) return const [];
+    const gql = r'''
+query ($perPage: Int) {
+  Page(page: 1, perPage: $perPage) {
+    media(
+      type: MANGA
+      format_in: [MANGA]
+      sort: TRENDING_DESC
+    ) {
+      id
+      format
+      countryOfOrigin
+      description
+      title { romaji english native }
+      volumes
+      chapters
+      coverImage { large extraLarge }
+      averageScore
+      status
+      staff(sort: RELEVANCE, perPage: 8) {
+        edges {
+          role
+          node { name { full native } }
+        }
+      }
+    }
+  }
+}
+''';
+    try {
+      final res = await http
+          .post(
+            Uri.parse(_endpoint),
+            headers: const {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: jsonEncode({
+              'query': gql,
+              'variables': {'perPage': limit.clamp(1, 20)},
+            }),
+          )
+          .timeout(const Duration(seconds: 12));
+      if (res.statusCode == 429) {
+        _coolUntil = DateTime.now().add(const Duration(minutes: 2));
+        return const [];
+      }
+      if (res.statusCode != 200) return const [];
+      final data = jsonDecode(res.body) as Map<String, dynamic>?;
+      final page = data?['data']?['Page'] as Map<String, dynamic>?;
+      final mediaList = page?['media'] as List<dynamic>? ?? const [];
+      final out = <AnilistMangaMeta>[];
+      for (final raw in mediaList) {
+        if (raw is! Map<String, dynamic>) continue;
+        final meta = _mapMedia(raw, '');
+        if (meta != null) out.add(meta);
+        if (out.length >= limit) break;
+      }
+      return out;
+    } catch (e) {
+      if (kDebugMode) debugPrint('AniList trending: $e');
+      return const [];
+    }
+  }
+
   /// Recherche multi-résultats (bannières recherche livres).
   static Future<List<AnilistMangaMeta>> searchManga(
     String query, {
@@ -137,8 +204,9 @@ query ($search: String, $perPage: Int) {
         .toString();
     if (looksLikeParasiteTitle(title)) return null;
 
-    // Rejette les homonymes trop éloignés.
-    if (!BookSeriesNormalizer.hitBelongsToSeries(title, q) &&
+    // Rejette les homonymes trop éloignés (sauf trending / q vide).
+    if (q.trim().isNotEmpty &&
+        !BookSeriesNormalizer.hitBelongsToSeries(title, q) &&
         !BookSeriesNormalizer.normalizeKey(title)
             .contains(BookSeriesNormalizer.normalizeKey(q)) &&
         !BookSeriesNormalizer.normalizeKey(q)

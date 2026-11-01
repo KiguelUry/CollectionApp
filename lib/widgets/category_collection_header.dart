@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../models/collection_category.dart';
@@ -36,7 +37,6 @@ class CategoryCollectionHeader extends StatelessWidget {
         quickActions.isNotEmpty ||
         extraActions.isNotEmpty;
     final showLabels = !compactActions;
-    final narrow = MediaQuery.sizeOf(context).width < 720;
 
     final leftActions = <_ToolbarAction>[
       for (final action in quickActions)
@@ -53,7 +53,10 @@ class CategoryCollectionHeader extends StatelessWidget {
     return Material(
       child: Container(
         decoration: CategoryAccentTheme.headerDecoration(accent),
+        // Sur web mobile le chrome navigateur gère déjà le haut : pas de SafeArea.top
+        // (évite la bande verte vide au-dessus du titre).
         child: SafeArea(
+          top: !kIsWeb,
           bottom: false,
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -125,7 +128,8 @@ class CategoryCollectionHeader extends StatelessWidget {
                   child: _ToolbarLayout(
                     leftActions: leftActions,
                     extraActions: extraActions,
-                    twoRows: showLabels && narrow && leftActions.length >= 2,
+                    // Toujours 1 ligne scrollable (évite Découvrir seul + 2e rangée).
+                    twoRows: false,
                     compact: !showLabels,
                   ),
                 ),

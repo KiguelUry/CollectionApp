@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -30,8 +28,6 @@ class PrecisionStarRatingBar extends StatefulWidget {
 
 class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
   double? _localRating;
-  Timer? _debounce;
-  static const _debounceMs = 350;
 
   @override
   void initState() {
@@ -42,16 +38,9 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
   @override
   void didUpdateWidget(covariant PrecisionStarRatingBar oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (_debounce?.isActive == true) return;
     if (oldWidget.rating != widget.rating) {
       _localRating = _clamp(widget.rating);
     }
-  }
-
-  @override
-  void dispose() {
-    _debounce?.cancel();
-    super.dispose();
   }
 
   double? _clamp(double? value) {
@@ -61,17 +50,10 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
 
   bool get _isUnrated => _localRating == null;
 
-  void _commitDebounced(double? next) {
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: _debounceMs), () {
-      if (!mounted) return;
-      widget.onChanged(next);
-    });
-  }
-
+  /// Commit immédiat (pas de debounce annulable à la fermeture du sheet).
   void _set(double? next) {
     setState(() => _localRating = next);
-    _commitDebounced(next);
+    widget.onChanged(next);
   }
 
   void _onStarPointer(int starIndex) {

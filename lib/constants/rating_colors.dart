@@ -13,21 +13,36 @@ abstract final class RatingColors {
 }
 
 /// Dégradé personnel 0.0 → 5.0, pas de 0.5 (11 paliers).
+/// Chaque `.0` est profond, chaque `.5` plus lumineux ; `4.0 → 5.0` s'éclaircit.
 Color ratingColor(double rating) {
   final stepped = (rating.clamp(0.0, 5.0) * 2).round() / 2;
   return switch (stepped) {
-    0.0 => const Color(0xFF991B1B),
-    0.5 => const Color(0xFFEF4444),
-    1.0 => const Color(0xFFF97316),
-    1.5 => const Color(0xFFFB923C),
-    2.0 => const Color(0xFFF59E0B),
-    2.5 => const Color(0xFFEAB308),
-    3.0 => const Color(0xFF84CC16),
-    3.5 => const Color(0xFF14B8A6),
-    4.0 => const Color(0xFF06B6D4),
-    4.5 => const Color(0xFF3B82F6),
-    _ => const Color(0xFF38BDF8),
+    0.0 => const Color(0xFF7F1D1D), // Bordeaux sombre
+    0.5 => const Color(0xFFDC2626), // Rouge écarlate
+    1.0 => const Color(0xFFC2410C), // Orange cuivré
+    1.5 => const Color(0xFFF97316), // Orange mandarine
+    2.0 => const Color(0xFFB45309), // Ambre ocre
+    2.5 => const Color(0xFFEAB308), // Jaune or
+    3.0 => const Color(0xFF65A30D), // Vert pomme
+    3.5 => const Color(0xFF10B981), // Vert émeraude
+    4.0 => const Color(0xFF1D4ED8), // Bleu saphir
+    4.5 => const Color(0xFF0284C7), // Bleu azur
+    _ => const Color(0xFF38BDF8), // Bleu métal GOAT
   };
+}
+
+/// Étoile du badge couverture : éclaircie pour 0.0 (lisible sur fond sombre).
+Color ratingBadgeStarColor(double rating) {
+  final stepped = (rating.clamp(0.0, 5.0) * 2).round() / 2;
+  if (stepped == 0.0) return const Color(0xFFF87171);
+  return ratingColor(stepped);
+}
+
+/// Bordure du badge couverture (`5.0` = cyan brillant).
+Color ratingBadgeBorderColor(double rating) {
+  final stepped = (rating.clamp(0.0, 5.0) * 2).round() / 2;
+  if (stepped == 5.0) return const Color(0xFF7DD3FC);
+  return ratingColor(stepped);
 }
 
 /// Préférence d'affichage de la puce note sur les tuiles.

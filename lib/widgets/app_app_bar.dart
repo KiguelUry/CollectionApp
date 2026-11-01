@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../navigation/app_navigation.dart';
 import 'item_title_text.dart';
@@ -11,6 +12,8 @@ class AppAppBar extends StatelessWidget implements PreferredSizeWidget {
   final Color? foregroundColor;
   final bool showCollectionsHome;
   final bool showBackButton;
+  /// Sur le web mobile, `primary:true` ajoute une bande vide sous le chrome navigateur.
+  final bool? primary;
 
   const AppAppBar({
     super.key,
@@ -21,6 +24,7 @@ class AppAppBar extends StatelessWidget implements PreferredSizeWidget {
     this.foregroundColor,
     this.showCollectionsHome = true,
     this.showBackButton = true,
+    this.primary,
   });
 
   @override
@@ -34,6 +38,7 @@ class AppAppBar extends StatelessWidget implements PreferredSizeWidget {
     final showLeading = showBackButton && canPop;
 
     return AppBar(
+      primary: primary ?? !kIsWeb,
       title: ItemTitleText(
         title: title,
         maxLines: 2,

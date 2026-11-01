@@ -1455,14 +1455,10 @@ class _HomeScreenState extends State<HomeScreen>
   ];
 
   double _headerPreferredHeight(BuildContext context, {required bool compact}) {
-    final top = MediaQuery.paddingOf(context).top;
-    final narrow = MediaQuery.sizeOf(context).width < 720;
-    // SafeArea + title + tabs + toolbar (1 ou 2 lignes sur mobile)
-    final toolbar = compact
-        ? 36.0
-        : (narrow && widget.category == CollectionCategory.boardgame
-            ? 108.0
-            : 44.0);
+    // Sur web : pas de padding.top (évite la bande verte vide).
+    final top = kIsWeb ? 0.0 : MediaQuery.paddingOf(context).top;
+    // 1 seule ligne d'actions scrollable (36/44), plus de double rangée mobile.
+    final toolbar = compact ? 36.0 : 44.0;
     return top + 40 + 36 + toolbar + 6;
   }
 

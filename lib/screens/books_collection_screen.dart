@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../constants/book_accent.dart';
@@ -7,6 +8,8 @@ import '../models/collection_category.dart';
 import '../widgets/category_collection_header.dart';
 import '../widgets/category_collection_shell.dart';
 import 'book/book_collection_screen.dart';
+import 'book/book_discover_screen.dart';
+import 'book/book_reading_pile_screen.dart';
 import 'book/user_lists_hub_screen.dart';
 import 'book_wishlist_tab.dart';
 import 'collection_change_history_screen.dart';
@@ -55,12 +58,18 @@ class _BooksCollectionScreenState extends State<BooksCollectionScreen>
         CategoryQuickAction(
           label: 'Découvrir',
           icon: Icons.auto_awesome,
-          onTap: () => _openSearch(),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const BookDiscoverScreen()),
+          ),
         ),
         CategoryQuickAction(
           label: 'Pile à lire',
           icon: Icons.menu_book_outlined,
-          onTap: () => _tabs.animateTo(0),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const BookReadingPileScreen()),
+          ),
         ),
         CategoryQuickAction(
           label: 'Scanner ISBN',
@@ -106,11 +115,9 @@ class _BooksCollectionScreenState extends State<BooksCollectionScreen>
               if (mounted) setState(() => _compactActions = compact);
             });
           }
-          final top = MediaQuery.paddingOf(context).top;
-          final narrow = MediaQuery.sizeOf(context).width < 720;
-          final toolbar = compact
-              ? 36.0
-              : (narrow ? 108.0 : 44.0);
+          // SafeArea du header gère le notch (native) ; sur web = 0 (pas de double bande).
+          final top = kIsWeb ? 0.0 : MediaQuery.paddingOf(context).top;
+          final toolbar = compact ? 36.0 : 44.0;
           final headerH = top + 40 + 36 + toolbar + 6;
           return [
             SliverAppBar(

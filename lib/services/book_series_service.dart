@@ -1501,11 +1501,17 @@ class BookSeriesService {
       for (final i in existing.where((e) => e.isWishlist)) {
         await removeVolumeItem(i.id);
       }
+      await patchVolumeMetadata(slot.volume.id, {'wishlisted': false});
       return;
     }
-    // Déjà possédé → ne pas forcer wishlist.
-    if (existing.any((e) => !e.isWishlist)) return;
-    if (existing.any((e) => e.isWishlist)) return;
+    // Wishlist ON → retire d'abord la possession (mutuellement exclusif).
+    for (final i in existing.where((e) => !e.isWishlist)) {
+      await removeVolumeItem(i.id);
+    }
+    if (existing.any((e) => e.isWishlist)) {
+      await patchVolumeMetadata(slot.volume.id, {'wishlisted': true});
+      return;
+    }
 
     await ProfileService().ensureCurrentUserProfile();
     final n = slot.volume.volumeNumber.ceil();
@@ -1520,9 +1526,11 @@ class BookSeriesService {
       'added_by': _userId,
       'location_user_id': _userId,
       'metadata': {
+        'wishlisted': true,
         if (slot.volume.coverUrl != null) 'image_url': slot.volume.coverUrl,
       },
     });
+    await patchVolumeMetadata(slot.volume.id, {'wishlisted': true});
   }
 
   Future<void> ensureSeriesCoverFromItem({
@@ -1699,6 +1707,14 @@ class BookSeriesService {
     required bool owned,
   }) async {
     if (owned) {
+      // Possession ON → retire automatiquement de la wishlist.
+      final current = await fetchSeriesItems(series.id);
+      for (final i in current.where(
+        (e) => e.volumeId == slot.volume.id && e.isWishlist && !e.isSold,
+      )) {
+        await removeVolumeItem(i.id);
+      }
+      await patchVolumeMetadata(slot.volume.id, {'wishlisted': false});
       final item = await addVolumeQuick(series: series, volume: slot.volume);
       // Note / lu hors possession → reporter sur l'exemplaire.
       final raw = slot.volume.metadata['personal_rating'];
