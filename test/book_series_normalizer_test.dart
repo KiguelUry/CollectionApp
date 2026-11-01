@@ -927,6 +927,98 @@ void main() {
       }
     });
 
+    test('synopsisMaxCharsForWidth : mobile / tablette / PC', () {
+      expect(BookVfEdition.synopsisMaxCharsForWidth(390), 250);
+      expect(BookVfEdition.synopsisMaxCharsForWidth(800), 420);
+      expect(BookVfEdition.synopsisMaxCharsForWidth(1400), 620);
+    });
+
+    test('synopsis PC remplit davantage que mobile', () {
+      final sentences = List.filled(
+        12,
+        'Smita est une Intouchable. Elle rêve d\'une autre vie pour sa fille.',
+      ).join(' ');
+      final mobile = BookVfEdition.synopsisPages(
+        sentences,
+        maxCharsPerPage: BookVfEdition.synopsisMaxCharsForWidth(390),
+      );
+      final desktop = BookVfEdition.synopsisPages(
+        sentences,
+        maxCharsPerPage: BookVfEdition.synopsisMaxCharsForWidth(1400),
+      );
+      expect(desktop.length, lessThan(mobile.length));
+      expect(desktop.first.length, greaterThan(mobile.first.length));
+      for (final page in desktop) {
+        expect(RegExp(r'[.!?…]$').hasMatch(page.trim()), isTrue);
+      }
+    });
+
+    test('toTitleCase normalise harry potter', () {
+      expect(BookSeriesNormalizer.toTitleCase('harry potter'), 'Harry Potter');
+      expect(
+        BookSeriesNormalizer.displaySeriesName('harry potter'),
+        'Harry Potter',
+      );
+      expect(
+        BookSeriesNormalizer.toTitleCase('Les Sept Sœurs'),
+        'Les Sept Sœurs',
+      );
+    });
+
+    test('statusChip : à lire / trous / complète / wishlist', () {
+      expect(
+        const BookSeriesStats(
+          ownedCount: 2,
+          readCount: 1,
+          totalSlots: 5,
+          nextOwnedUnread: 2,
+        ).statusChip.label,
+        '📖 À lire : T.2',
+      );
+      expect(
+        const BookSeriesStats(
+          ownedCount: 3,
+          readCount: 1,
+          totalSlots: 8,
+          holeCount: 2,
+          nextOwnedUnread: 1,
+        ).statusChip.hint,
+        ColorHint.holes,
+      );
+      expect(
+        const BookSeriesStats(
+          ownedCount: 8,
+          readCount: 8,
+          totalSlots: 8,
+        ).statusChip.label,
+        '🏆 Complète',
+      );
+      expect(
+        const BookSeriesStats(
+          ownedCount: 0,
+          wishlistVolumeCount: 3,
+          totalSlots: 8,
+        ).statusChip.label,
+        '♡ Wishlist',
+      );
+      expect(
+        const BookSeriesStats(ownedCount: 0, totalSlots: 8).statusChip.label,
+        'À découvrir',
+      );
+    });
+
+    test('volumesAverageRating est distincte de displayRating', () {
+      const stats = BookSeriesStats(
+        displayRating: 4.5,
+        volumesAverageRating: 3.2,
+        ratedVolumeCount: 4,
+        communityRating: 4.7,
+      );
+      expect(stats.displayRating, 4.5);
+      expect(stats.volumesAverageRating, 3.2);
+      expect(stats.communityRating, 4.7);
+    });
+
     test('cleanSynopsis coupe Source et Notes', () {
       final clean = BookVfEdition.cleanSynopsis(
         'Cute girl wizard Lucy wants to join the Fairy Tail club today. '
@@ -1343,7 +1435,7 @@ void main() {
           'Deuxième phrase qui termine déjà la première page du synopsis. '
           'Troisième phrase qui doit basculer sur la page suivante clairement. '
           'Quatrième phrase encore pour forcer une coupure nette.';
-      final pages = BookVfEdition.synopsisPages(text);
+      final pages = BookVfEdition.synopsisPages(text, maxCharsPerPage: 160);
       expect(pages.length, greaterThan(1));
       for (final page in pages) {
         expect(RegExp(r'[.!?…]$').hasMatch(page.trim()), isTrue);

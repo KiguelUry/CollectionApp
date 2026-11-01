@@ -202,23 +202,55 @@ class BookSeriesTile extends StatelessWidget {
                 const SizedBox(height: 3),
                 Builder(
                   builder: (context) {
-                    final chip = resolveTileRating(
-                      personalOnFive: stats.displayRating,
-                      communityOnFive: stats.communityRating,
-                    );
+                    final personal = series.userRating == null
+                        ? null
+                        : (series.userRating! > 5
+                            ? series.userRating! / 2
+                            : series.userRating!);
+                    final community = stats.communityRating;
+                    String ratingLabel;
+                    Color ratingColor;
+                    if (personal != null && community != null) {
+                      ratingLabel =
+                          '👤 ${personal.toStringAsFixed(1)} · 🌍 ${community.toStringAsFixed(1)}';
+                      ratingColor = const Color(0xFF38BDF8);
+                    } else if (personal != null) {
+                      ratingLabel = '👤 ${personal.toStringAsFixed(1)}';
+                      ratingColor = const Color(0xFF38BDF8);
+                    } else if (community != null) {
+                      ratingLabel = '🌍 ${community.toStringAsFixed(1)}';
+                      ratingColor = const Color(0xFFF59E0B);
+                    } else {
+                      final chip = resolveTileRating(
+                        personalOnFive: stats.displayRating,
+                        communityOnFive: stats.communityRating,
+                      );
+                      ratingLabel = chip.label.replaceFirst('★ ', '');
+                      ratingColor = chip.color;
+                    }
+                    final status = stats.statusChip;
+                    final statusColor = switch (status.hint) {
+                      ColorHint.complete => const Color(0xFF10B981),
+                      ColorHint.holes => const Color(0xFFF59E0B),
+                      ColorHint.toRead => const Color(0xFF06B6D4),
+                      ColorHint.wishlist => const Color(0xFFA78BFA),
+                      ColorHint.discover => Colors.blueGrey,
+                    };
                     return _MetaRow(
                       children: [
                         _MetaChip(
                           icon: Icons.star_rounded,
-                          label: chip.label.replaceFirst('★ ', ''),
-                          color: chip.color,
+                          label: ratingLabel,
+                          color: ratingColor,
                           onTap: onRatingTap,
                         ),
                         _MetaChip(
-                          icon: Icons.place_outlined,
-                          label: stats.valueLabel ?? '—',
-                          color: Colors.teal.shade600,
-                          onTap: onLocationTap,
+                          icon: Icons.flag_outlined,
+                          label: status.label,
+                          color: statusColor,
+                          onTap: status.hint == ColorHint.toRead
+                              ? (onReadTap ?? onOwnedTap)
+                              : onOwnedTap,
                         ),
                       ],
                     );

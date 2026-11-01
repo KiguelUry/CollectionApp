@@ -4,13 +4,14 @@ import '../constants/book_accent.dart';
 import '../coordinators/book_item_add_coordinator.dart';
 import '../models/book_subcategory.dart';
 import '../models/collection_category.dart';
-import '../widgets/app_app_bar.dart';
+import '../widgets/category_collection_header.dart';
+import '../widgets/category_collection_shell.dart';
 import 'book/book_collection_screen.dart';
 import 'book/user_lists_hub_screen.dart';
 import 'book_wishlist_tab.dart';
 import 'collection_change_history_screen.dart';
 
-/// Accueil Livres — entrée directe Collection / Wishlist (comme les jeux).
+/// Accueil Livres — même DA que « Mes jeux de société » (header coloré + actions).
 class BooksCollectionScreen extends StatefulWidget {
   const BooksCollectionScreen({super.key});
 
@@ -21,6 +22,7 @@ class BooksCollectionScreen extends StatefulWidget {
 class _BooksCollectionScreenState extends State<BooksCollectionScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabs;
+  bool _compactActions = false;
 
   @override
   void initState() {
@@ -36,7 +38,6 @@ class _BooksCollectionScreenState extends State<BooksCollectionScreen>
 
   Future<void> _openSearch({BookSubcategory? subcategory}) async {
     await BookItemAddCoordinator(context).openSearch(subcategory: subcategory);
-    // Rafraîchissement Mes livres via CollectionRefresh (écouteur) + cache.
   }
 
   void _scanIsbn() {
@@ -50,78 +51,45 @@ class _BooksCollectionScreenState extends State<BooksCollectionScreen>
     );
   }
 
+  List<CategoryQuickAction> get _quickActions => [
+        CategoryQuickAction(
+          label: 'Découvrir',
+          icon: Icons.auto_awesome,
+          onTap: () => _openSearch(),
+        ),
+        CategoryQuickAction(
+          label: 'Pile à lire',
+          icon: Icons.menu_book_outlined,
+          onTap: () => _tabs.animateTo(0),
+        ),
+        CategoryQuickAction(
+          label: 'Scanner ISBN',
+          icon: Icons.qr_code_scanner_rounded,
+          onTap: _scanIsbn,
+        ),
+        CategoryQuickAction(
+          label: 'Mes listes',
+          icon: Icons.list_alt_rounded,
+          onTap: _openLists,
+        ),
+        CategoryQuickAction(
+          label: 'Modifs',
+          icon: Icons.restore_rounded,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const CollectionChangeHistoryScreen(
+                category: CollectionCategory.book,
+              ),
+            ),
+          ),
+        ),
+      ];
+
   @override
   Widget build(BuildContext context) {
     const accent = BookAccent.primary;
     return Scaffold(
-      appBar: AppAppBar(
-        title: 'Mes livres',
-        backgroundColor: accent,
-        foregroundColor: Colors.white,
-        bottom: TabBar(
-          controller: _tabs,
-          indicatorColor: Colors.white,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white70,
-          tabs: const [
-            Tab(text: 'Collection'),
-            Tab(text: 'Wishlist'),
-          ],
-        ),
-      ),
-      body: Column(
-        children: [
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-            child: Row(
-              children: [
-                _ToolPill(
-                  icon: Icons.auto_awesome,
-                  label: 'Découvrir',
-                  onTap: () => _openSearch(),
-                ),
-                _ToolPill(
-                  icon: Icons.menu_book_outlined,
-                  label: 'Pile à lire',
-                  onTap: () => _tabs.animateTo(0),
-                ),
-                _ToolPill(
-                  icon: Icons.qr_code_scanner,
-                  label: 'Scanner ISBN',
-                  onTap: _scanIsbn,
-                ),
-                _ToolPill(
-                  icon: Icons.list_alt,
-                  label: 'Mes listes',
-                  onTap: _openLists,
-                ),
-                _ToolPill(
-                  icon: Icons.restore_rounded,
-                  label: 'Modifs',
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const CollectionChangeHistoryScreen(
-                        category: CollectionCategory.book,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: TabBarView(
-              controller: _tabs,
-              children: const [
-                BookCollectionScreen(embedded: true),
-                BookWishlistTab(),
-              ],
-            ),
-          ),
-        ],
-      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _openSearch(),
         backgroundColor: accent,
@@ -129,30 +97,53 @@ class _BooksCollectionScreenState extends State<BooksCollectionScreen>
         icon: const Icon(Icons.add),
         label: const Text('Ajouter'),
       ),
-    );
-  }
-}
-
-class _ToolPill extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  const _ToolPill({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: ActionChip(
-        avatar: Icon(icon, size: 18),
-        label: Text(label),
-        visualDensity: VisualDensity.compact,
-        onPressed: onTap,
+      body: NestedScrollView(
+        floatHeaderSlivers: false,
+        headerSliverBuilder: (context, innerBoxIsScrolled) {
+          final compact = innerBoxIsScrolled;
+          if (compact != _compactActions) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) setState(() => _compactActions = compact);
+            });
+          }
+          final top = MediaQuery.paddingOf(context).top;
+          final narrow = MediaQuery.sizeOf(context).width < 720;
+          final toolbar = compact
+              ? 36.0
+              : (narrow ? 108.0 : 44.0);
+          final headerH = top + 40 + 36 + toolbar + 6;
+          return [
+            SliverAppBar(
+              floating: false,
+              pinned: true,
+              primary: false,
+              automaticallyImplyLeading: false,
+              backgroundColor: accent,
+              elevation: 0,
+              scrolledUnderElevation: 0,
+              toolbarHeight: 0,
+              forceElevated: innerBoxIsScrolled,
+              bottom: PreferredSize(
+                preferredSize: Size.fromHeight(headerH),
+                child: CategoryCollectionHeader(
+                  category: CollectionCategory.book,
+                  title: 'Mes livres',
+                  tabController: _tabs,
+                  accentOverride: accent,
+                  quickActions: _quickActions,
+                  compactActions: compact,
+                ),
+              ),
+            ),
+          ];
+        },
+        body: TabBarView(
+          controller: _tabs,
+          children: const [
+            BookCollectionScreen(embedded: true),
+            BookWishlistTab(),
+          ],
+        ),
       ),
     );
   }

@@ -9,11 +9,15 @@ import '../models/book_series.dart';
 import '../models/book_subcategory.dart';
 import '../models/book_volume.dart';
 import '../models/collection_category.dart';
+import '../models/collection_group.dart';
 import '../models/collection_item.dart';
 import '../services/book_series_service.dart';
-import '../utils/book_vf_edition.dart';
 import '../services/books_collection_cache.dart';
+import '../services/group_service.dart';
+import '../utils/book_series_normalizer.dart';
+import '../utils/book_vf_edition.dart';
 import '../widgets/app_app_bar.dart';
+import '../widgets/boardgame_tile_sheets.dart';
 import '../widgets/book_manual_volume_dialog.dart';
 import '../widgets/collection_cover_image.dart';
 import '../widgets/precision_star_rating_bar.dart';
@@ -211,10 +215,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   }
 
   double? _slotRating(BookVolumeSlot slot) {
-    if (!_slotRead(slot)) return null;
-    final raw = _slotOwned(slot)
-        ? (slot.item?.rating ?? slot.volume.metadata['personal_rating'])
-        : slot.volume.metadata['personal_rating'];
+    final raw = slot.item?.rating ?? slot.volume.metadata['personal_rating'];
     if (raw == null) return null;
     final n = raw is num ? raw.toDouble() : double.tryParse('$raw');
     if (n == null || n < 0) return null;
@@ -222,6 +223,8 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     if (onFive < 0 || onFive > 5) return null;
     return double.parse(onFive.toStringAsFixed(1));
   }
+
+  bool _slotLoaned(BookVolumeSlot slot) => slot.item?.isOnLoan == true;
 
   Future<void> _toggleWishlist(BookVolumeSlot slot) async {
     final next = !_slotWish(slot);
@@ -466,15 +469,14 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
 
   Future<void> _markRangeOwned() async {
     final series = _series!;
+    final total = series.expectedVolumeCount ?? _slots.length;
     final fromCtrl = TextEditingController(text: '1');
-    final toCtrl = TextEditingController(
-      text: '${series.expectedVolumeCount ?? _slots.length}',
-    );
+    final toCtrl = TextEditingController(text: '${total > 0 ? total : 1}');
     try {
-      final ok = await showDialog<bool>(
+      final action = await showDialog<String>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Cocher une plage'),
+          title: const Text('Gestion rapide des tomes possédés'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -492,24 +494,56 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
+              onPressed: () => Navigator.pop(ctx),
               child: const Text('Annuler'),
             ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'clear'),
+              child: const Text('Tout réinitialiser'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'all'),
+              child: Text('✓ Tout (1–$total)'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'remove'),
+              child: const Text('✕ Retirer plage'),
+            ),
             FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Posséder'),
+              onPressed: () => Navigator.pop(ctx, 'own'),
+              child: const Text('✓ Marquer Possédés'),
             ),
           ],
         ),
       );
-      if (ok != true) return;
+      if (action == null) return;
       final from = int.tryParse(fromCtrl.text.trim()) ?? 1;
       final to = int.tryParse(toCtrl.text.trim()) ?? from;
-      await _service.markVolumesOwned(
-        series: series,
-        fromVolume: from,
-        toVolume: to,
-      );
+      if (action == 'own') {
+        await _service.markVolumesOwned(
+          series: series,
+          fromVolume: from,
+          toVolume: to,
+        );
+      } else if (action == 'all') {
+        await _service.markVolumesOwned(
+          series: series,
+          fromVolume: 1,
+          toVolume: total > 0 ? total : 1,
+        );
+      } else if (action == 'remove') {
+        await _service.markVolumesUnowned(
+          series: series,
+          fromVolume: from,
+          toVolume: to,
+        );
+      } else if (action == 'clear') {
+        await _service.markVolumesUnowned(
+          series: series,
+          fromVolume: 1,
+          toVolume: total > 0 ? total : 1,
+        );
+      }
       await _load(silent: true);
     } finally {
       fromCtrl.dispose();
@@ -724,7 +758,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
 
     return Scaffold(
       appBar: AppAppBar(
-        title: series.name,
+        title: BookSeriesNormalizer.displaySeriesName(series.name),
         backgroundColor: accent,
         foregroundColor: Colors.white,
         actions: [
@@ -799,8 +833,10 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
           children: [
             _buildHero(series, stats, accent),
             _buildSynopsis(series),
-            _buildFilterMenu(accent),
-            _buildHybridFrise(physical, accent),
+            if (!_isOneShotView(series, physical)) ...[
+              _buildFilterMenu(accent),
+              _buildHybridFrise(physical, accent),
+            ],
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
               child: _buildCoverGrid(physical, accent),
@@ -931,50 +967,36 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                   ),
                 ),
                 if (stats.communityRating != null && stats.communityRating! > 0)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF59E0B).withValues(alpha: 0.18),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: const Color(0xFFF59E0B)),
-                    ),
-                    child: Text(
-                      '★ ${stats.communityRating!.toStringAsFixed(1)}',
-                      style: const TextStyle(
-                        color: Color(0xFFF59E0B),
-                        fontWeight: FontWeight.w800,
-                        fontSize: 12,
-                      ),
-                    ),
+                  _ratingBadge(
+                    '🌍 ★ ${stats.communityRating!.toStringAsFixed(1)}',
+                    const Color(0xFFF59E0B),
+                    onTap: () => _showSeriesRatingSheet(series, stats),
                   ),
-                if (stats.displayRating != null)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF38BDF8).withValues(alpha: 0.18),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: const Color(0xFF38BDF8)),
-                    ),
-                    child: Text(
-                      '★ ${stats.displayRating!.toStringAsFixed(1)}',
-                      style: const TextStyle(
-                        color: Color(0xFF38BDF8),
-                        fontWeight: FontWeight.w800,
-                        fontSize: 12,
-                      ),
-                    ),
+                _ratingBadge(
+                  series.userRating != null
+                      ? '👤 ★ ${(series.userRating! > 5 ? series.userRating! / 2 : series.userRating!).toStringAsFixed(1)}'
+                      : '👤 Noter la série',
+                  series.userRating != null
+                      ? ratingColor(
+                          series.userRating! > 5
+                              ? series.userRating! / 2
+                              : series.userRating!,
+                        )
+                      : const Color(0xFF38BDF8),
+                  onTap: () => _showSeriesRatingSheet(series, stats),
+                ),
+                if (stats.volumesAverageRating != null &&
+                    stats.ratedVolumeCount > 0)
+                  _ratingBadge(
+                    '📊 Moy. ${stats.volumesAverageRating!.toStringAsFixed(1)}',
+                    const Color(0xFF14B8A6),
+                    onTap: () => _showSeriesRatingSheet(series, stats),
                   ),
                   ],
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  series.name,
+                  BookSeriesNormalizer.displaySeriesName(series.name),
                   style: const TextStyle(
                     fontWeight: FontWeight.w800,
                     fontSize: 18,
@@ -1008,13 +1030,20 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     );
   }
 
+  bool _isOneShotView(BookSeries series, List<BookVolumeSlot> physical) {
+    if (series.subcategory == BookSubcategory.manga ||
+        series.subcategory == BookSubcategory.bd ||
+        series.subcategory == BookSubcategory.comics) {
+      return false;
+    }
+    if (series.isStandalone) return true;
+    final expected = series.expectedVolumeCount ?? physical.length;
+    return physical.length <= 1 && expected <= 1;
+  }
+
   Widget _buildSynopsis(BookSeries series) {
     final text = BookVfEdition.cleanSynopsis(series.description) ?? '';
     if (text.length < 20) return const SizedBox.shrink();
-    final pages = BookVfEdition.synopsisPages(text);
-    if (pages.isEmpty) return const SizedBox.shrink();
-    final page = _synopsisPage.clamp(0, pages.length - 1);
-    final last = page >= pages.length - 1;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
       child: Column(
@@ -1037,82 +1066,95 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
             ],
           ),
           if (_synopsisVisible)
-            GestureDetector(
-              onTap: pages.length < 2
-                  ? null
-                  : () => setState(() {
-                        _synopsisPage = last ? 0 : page + 1;
-                      }),
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(top: 7),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1E293B),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: BookAccent.primary.withValues(alpha: 0.85),
-                        ),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 12,
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            AnimatedSwitcher(
-                              duration: const Duration(milliseconds: 220),
-                              child: Text(
-                                pages[page],
-                                key: ValueKey(page),
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 13,
-                                  height: 1.35,
-                                ),
-                              ),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final maxChars = BookVfEdition.synopsisMaxCharsForWidth(
+                  MediaQuery.sizeOf(context).width,
+                );
+                final pages = BookVfEdition.synopsisPages(
+                  text,
+                  maxCharsPerPage: maxChars,
+                );
+                if (pages.isEmpty) return const SizedBox.shrink();
+                final page = _synopsisPage.clamp(0, pages.length - 1);
+                final last = page >= pages.length - 1;
+                return GestureDetector(
+                  onTap: pages.length < 2
+                      ? null
+                      : () => setState(() {
+                            _synopsisPage = last ? 0 : page + 1;
+                          }),
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 7),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1E293B),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color:
+                                  BookAccent.primary.withValues(alpha: 0.85),
                             ),
-                            if (pages.length > 1) ...[
-                              const SizedBox(height: 6),
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: Text(
-                                  last
-                                      ? '↺ Début'
-                                      : '▸ Suite (${page + 1}/${pages.length})',
-                                  style: const TextStyle(
-                                    color: Color(0xFF38BDF8),
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w800,
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 220),
+                                  child: Text(
+                                    pages[page],
+                                    key: ValueKey('$page-$maxChars'),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 13,
+                                      height: 1.35,
+                                    ),
                                   ),
                                 ),
-                              ),
-                            ],
-                          ],
+                                if (pages.length > 1) ...[
+                                  const SizedBox(height: 6),
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: Text(
+                                      last
+                                          ? '↺ Début'
+                                          : '▸ Suite (${page + 1}/${pages.length})',
+                                      style: const TextStyle(
+                                        color: Color(0xFF38BDF8),
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                    ),
-                  ),
-                  Positioned(
-                    left: 18,
-                    top: 0,
-                    child: CustomPaint(
-                      size: const Size(14, 8),
-                      painter: _BubbleTailPainter(
-                        fill: const Color(0xFF1E293B),
-                        border: BookAccent.primary.withValues(alpha: 0.85),
+                      Positioned(
+                        left: 18,
+                        top: 0,
+                        child: CustomPaint(
+                          size: const Size(14, 8),
+                          painter: _BubbleTailPainter(
+                            fill: const Color(0xFF1E293B),
+                            border:
+                                BookAccent.primary.withValues(alpha: 0.85),
+                          ),
+                        ),
                       ),
-                    ),
+                    ],
                   ),
-                ],
-              ),
+                );
+              },
             ),
         ],
       ),
@@ -1147,46 +1189,183 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         _VolumeFilter.wishlist => 'Wishlist (${_countFilter(f)})',
       };
 
+  Widget _ratingBadge(String label, Color color, {VoidCallback? onTap}) {
+    final child = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.w800,
+          fontSize: 12,
+        ),
+      ),
+    );
+    if (onTap == null) return child;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: child,
+    );
+  }
+
+  Future<void> _showSeriesRatingSheet(
+    BookSeries series,
+    BookSeriesStats stats,
+  ) async {
+    final stored = series.userRating;
+    var current = stored == null
+        ? null
+        : (stored > 5 ? stored / 2 : stored).clamp(0.0, 5.0);
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+            child: StatefulBuilder(
+              builder: (ctx, setModal) {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'Note · ${BookSeriesNormalizer.displaySeriesName(series.name)}',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Ma note globale pour la série',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 8),
+                    PrecisionStarRatingBar(
+                      rating: current,
+                      onChanged: (v) {
+                        setModal(() => current = v);
+                        final updated = series.copyWith(
+                          userRating: v,
+                          clearUserRating: v == null,
+                        );
+                        setState(() => _series = updated);
+                        // ignore: unawaited_futures
+                        _service.updateSeries(updated);
+                      },
+                    ),
+                    const SizedBox(height: 18),
+                    Text(
+                      stats.volumesAverageRating == null
+                          ? '📊 Moyenne de mes tomes notés — aucune note'
+                          : '📊 ${stats.volumesAverageRating!.toStringAsFixed(1)} / 5 '
+                              '(sur ${stats.ratedVolumeCount} tome'
+                              '${stats.ratedVolumeCount > 1 ? 's' : ''} noté'
+                              '${stats.ratedVolumeCount > 1 ? 's' : ''})',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    if (stats.volumesAverageRating != null) ...[
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            final v = double.parse(
+                              stats.volumesAverageRating!.toStringAsFixed(1),
+                            );
+                            setModal(() => current = v);
+                            final updated = series.copyWith(userRating: v);
+                            setState(() => _series = updated);
+                            // ignore: unawaited_futures
+                            _service.updateSeries(updated);
+                          },
+                          icon: const Icon(Icons.copy_rounded, size: 16),
+                          label: const Text('Utiliser comme note globale'),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    Text(
+                      stats.communityRating == null
+                          ? '🌍 Note de la communauté — indisponible'
+                          : '🌍 ★ ${stats.communityRating!.toStringAsFixed(1)} / 5',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFFF59E0B),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+    if (mounted) await _load(silent: true);
+  }
+
   Widget _buildFilterMenu(Color accent) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: PopupMenuButton<_VolumeFilter>(
-          initialValue: _filter,
-          onSelected: (f) => setState(() => _filter = f),
-          itemBuilder: (_) => [
-            for (final f in _VolumeFilter.values)
-              PopupMenuItem(
-                value: f,
-                child: Text(_filterLabel(f)),
-              ),
-          ],
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: accent.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: accent.withValues(alpha: 0.45)),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('🌪️ ', style: TextStyle(fontSize: 13)),
-                Text(
-                  'Filtre : ${_filterLabel(_filter)}',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13,
-                    color: accent,
-                  ),
+      child: Row(
+        children: [
+          PopupMenuButton<_VolumeFilter>(
+            initialValue: _filter,
+            onSelected: (f) => setState(() => _filter = f),
+            itemBuilder: (_) => [
+              for (final f in _VolumeFilter.values)
+                PopupMenuItem(
+                  value: f,
+                  child: Text(_filterLabel(f)),
                 ),
-                const SizedBox(width: 4),
-                Icon(Icons.arrow_drop_down, color: accent, size: 20),
-              ],
+            ],
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: accent.withValues(alpha: 0.45)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('🌪️ ', style: TextStyle(fontSize: 13)),
+                  Text(
+                    'Filtre : ${_filterLabel(_filter)}',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                      color: accent,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(Icons.arrow_drop_down, color: accent, size: 20),
+                ],
+              ),
             ),
           ),
-        ),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: _markRangeOwned,
+            icon: const Icon(Icons.bolt, size: 16),
+            label: const Text('Lot / Rafale'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: accent,
+              side: BorderSide(color: accent.withValues(alpha: 0.55)),
+              visualDensity: VisualDensity.compact,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1247,11 +1426,18 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   Widget _friseCell(BookVolumeSlot slot) {
     final owned = _slotOwned(slot);
     final read = _slotRead(slot);
+    final loaned = _slotLoaned(slot);
     final note = _slotRating(slot);
-    final bg = owned
-        ? const Color(0xFF10B981).withValues(alpha: 0.22)
-        : const Color(0xFF1E293B);
-    final border = owned ? const Color(0xFF10B981) : const Color(0xFF334155);
+    final bg = loaned
+        ? const Color(0xFFF59E0B).withValues(alpha: 0.28)
+        : owned
+            ? const Color(0xFF10B981).withValues(alpha: 0.22)
+            : const Color(0xFF1E293B);
+    final border = loaned
+        ? const Color(0xFFF59E0B)
+        : owned
+            ? const Color(0xFF10B981)
+            : const Color(0xFF334155);
     return SizedBox(
       width: 44,
       height: note == null ? 40 : 54,
@@ -1404,10 +1590,8 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         final slot = slots[i];
         final owned = _slotOwned(slot);
         final read = _slotRead(slot);
-        final rating = slot.item?.rating;
-        final onFive = rating == null
-            ? null
-            : (rating > 5.0 ? rating / 2 : rating);
+        final loaned = _slotLoaned(slot);
+        final onFive = _slotRating(slot);
         final key = _slotKeys.putIfAbsent(slot.volume.id, GlobalKey.new);
         final coverUrl = slot.volume.coverUrl ?? slot.item?.imageUrl;
         final isChapter = chapterBadge || slot.volume.isChapterOrScan;
@@ -1449,10 +1633,12 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                   border: Border.all(
                     color: isChapter
                         ? Colors.red.shade400
-                        : owned
-                            ? const Color(0xFF26A69A)
-                            : Colors.transparent,
-                    width: (owned || isChapter) ? 2 : 0,
+                        : loaned
+                            ? const Color(0xFFF59E0B)
+                            : owned
+                                ? const Color(0xFF26A69A)
+                                : Colors.transparent,
+                    width: (owned || isChapter || loaned) ? 2 : 0,
                   ),
                 ),
                 clipBehavior: Clip.antiAlias,
@@ -1505,6 +1691,56 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                           ),
                         ),
                       ),
+                    if (!isChapter && onFive != null)
+                      Positioned(
+                        top: 6,
+                        right: 6,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0F172A).withValues(alpha: 0.85),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: ratingColor(onFive),
+                              width: 1.5,
+                            ),
+                          ),
+                          child: Text(
+                            '★ ${onFive.toStringAsFixed(1)}',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                              color: ratingColor(onFive),
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (!isChapter && loaned)
+                      Positioned(
+                        bottom: 52,
+                        left: 6,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF59E0B).withValues(alpha: 0.92),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text(
+                            '🤝 Prêté',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w900,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
                     if (jpBadge != null)
                       Positioned(
                         top: 6,
@@ -1538,7 +1774,11 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                       ),
                     if (editionBadge != null)
                       Positioned(
-                        top: jpBadge != null || slot.volume.isUpcoming ? 40 : 6,
+                        top: (jpBadge != null ||
+                                slot.volume.isUpcoming ||
+                                onFive != null)
+                            ? 40
+                            : 6,
                         right: 6,
                         child: Container(
                           padding: const EdgeInsets.symmetric(
@@ -1646,25 +1886,6 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                                       ),
                                     ),
                                   ),
-                                  if (onFive != null)
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 6,
-                                        vertical: 2,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: Colors.black54,
-                                        borderRadius: BorderRadius.circular(6),
-                                      ),
-                                      child: Text(
-                                        '★ ${onFive.toStringAsFixed(1)}',
-                                        style: const TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w700,
-                                          color: Color(0xFF38BDF8),
-                                        ),
-                                      ),
-                                    ),
                                 ],
                               ),
                           ],
@@ -1713,6 +1934,30 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     );
   }
 
+  Future<void> _openVolumeWhereabouts(BookVolumeSlot slot) async {
+    final item = slot.item;
+    if (item == null || item.id.startsWith('local-') || item.isWishlist) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Marque le tome comme possédé pour gérer le rangement.'),
+        ),
+      );
+      return;
+    }
+    List<CollectionGroup> groups = const [];
+    try {
+      groups = await GroupService().fetchMyGroups();
+    } catch (_) {}
+    if (!mounted) return;
+    await showBoardgameTileLocationSheet(
+      context,
+      item: item,
+      groups: groups,
+    );
+    if (mounted) await _load(silent: true);
+  }
+
   Widget _buildVolumeDrawer(
     BookVolumeSlot slot,
     Color accent, {
@@ -1721,6 +1966,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   }) {
     final owned = _slotOwned(slot);
     final read = _slotRead(slot);
+    final loaned = _slotLoaned(slot);
     final wish = _slotWish(slot);
     final edition = slot.volume.edition;
     final upcoming = slot.volume.upcomingLabel;
@@ -1944,6 +2190,21 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                       onSheetChanged?.call();
                     },
                   ),
+                  if (owned) ...[
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: () => _openVolumeWhereabouts(slot),
+                      icon: Icon(
+                        loaned ? Icons.handshake_outlined : Icons.place_outlined,
+                        size: 16,
+                      ),
+                      label: Text(
+                        loaned
+                            ? '🤝 Prêté · Rangement'
+                            : '📍 Rangement / Prêt',
+                      ),
+                    ),
+                  ],
                   TextButton.icon(
                     onPressed: () => _setSeriesCoverFrom(slot),
                     icon: const Icon(Icons.image, size: 16),

@@ -572,7 +572,24 @@ abstract final class BookSeriesNormalizer {
         ? parsed.seriesName!.trim()
         : rawTitle.trim();
     name = stripOrphanVolumeSuffix(name);
-    return stripEditionSuffix(name);
+    return toTitleCase(stripEditionSuffix(name));
+  }
+
+  /// `harry potter` → `Harry Potter`. Conserve une casse déjà mixte.
+  static String toTitleCase(String raw) {
+    final s = raw.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (s.isEmpty) return s;
+    final letters = s.replaceAll(RegExp(r'[^a-zA-ZÀ-ÿ]'), '');
+    if (letters.isNotEmpty &&
+        letters != letters.toLowerCase() &&
+        letters != letters.toUpperCase()) {
+      return s;
+    }
+    return s.split(' ').map((w) {
+      if (w.isEmpty) return w;
+      if (w.length == 1) return w.toUpperCase();
+      return '${w[0].toUpperCase()}${w.substring(1).toLowerCase()}';
+    }).join(' ');
   }
 
   static String stripOrphanVolumeSuffix(String name) {

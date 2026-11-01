@@ -15,12 +15,12 @@ import '../../services/books_migration_service.dart';
 import '../../services/collection_refresh.dart';
 import '../../services/group_service.dart';
 import '../../utils/book_series_focus.dart';
+import '../../utils/book_series_normalizer.dart';
 import '../../utils/collection_grid_layout.dart';
 import '../../utils/tile_rating_display.dart';
 import '../../widgets/app_app_bar.dart';
 import '../../widgets/author_avatar.dart';
 import '../../widgets/boardgame_tile_sheets.dart';
-import '../../widgets/book_owned_range_dialog.dart';
 import '../../widgets/book_series_tile.dart';
 import '../../widgets/collection_cover_image.dart';
 import '../../widgets/collection_filter_bar.dart' show GroupFilterOption;
@@ -121,140 +121,286 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
 
   Future<void> _onOwnedChip(_SeriesEntry entry) async {
     final total = entry.series.expectedVolumeCount ?? entry.stats.totalSlots;
-    final range = await showBookOwnedRangeDialog(
-      context,
-      seriesName: entry.series.name,
-      totalVolumes: total > 0 ? total : 1,
-    );
-    if (range == null || !mounted) return;
-    if (range.choice == BookOwnedRangeChoice.none) return;
-    if (range.choice == BookOwnedRangeChoice.all) {
-      await _service.markVolumesOwned(
-        series: entry.series,
-        fromVolume: 1,
-        toVolume: total > 0 ? total : 1,
+    final fromCtrl = TextEditingController(text: '1');
+    final toCtrl = TextEditingController(text: '${total > 0 ? total : 1}');
+    try {
+      final action = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Gestion rapide des tomes possédés'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '« ${BookSeriesNormalizer.displaySeriesName(entry.series.name)} »',
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: fromCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Du tome'),
+              ),
+              TextField(
+                controller: toCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Au tome'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Annuler'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'clear'),
+              child: const Text('Tout réinitialiser'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'all'),
+              child: Text('✓ Tout (1–${total > 0 ? total : 1})'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'remove'),
+              child: const Text('✕ Retirer plage'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, 'own'),
+              child: const Text('✓ Marquer Possédés'),
+            ),
+          ],
+        ),
       );
-    } else if (range.choice == BookOwnedRangeChoice.range) {
-      await _service.markVolumesOwned(
-        series: entry.series,
-        fromVolume: range.from ?? 1,
-        toVolume: range.to ?? range.from ?? 1,
-      );
+      if (action == null || !mounted) return;
+      final from = int.tryParse(fromCtrl.text.trim()) ?? 1;
+      final to = int.tryParse(toCtrl.text.trim()) ?? from;
+      if (action == 'own') {
+        await _service.markVolumesOwned(
+          series: entry.series,
+          fromVolume: from,
+          toVolume: to,
+        );
+      } else if (action == 'all') {
+        await _service.markVolumesOwned(
+          series: entry.series,
+          fromVolume: 1,
+          toVolume: total > 0 ? total : 1,
+        );
+      } else if (action == 'remove') {
+        await _service.markVolumesUnowned(
+          series: entry.series,
+          fromVolume: from,
+          toVolume: to,
+        );
+      } else if (action == 'clear') {
+        await _service.markVolumesUnowned(
+          series: entry.series,
+          fromVolume: 1,
+          toVolume: total > 0 ? total : 1,
+        );
+      }
+      if (mounted) _load(silent: true);
+    } finally {
+      fromCtrl.dispose();
+      toCtrl.dispose();
     }
-    if (mounted) _load(silent: true);
   }
 
   Future<void> _onReadChip(_SeriesEntry entry) async {
-    // Marque le prochain tome non lu comme lu, ou ouvre la série.
-    final owned = entry.items
-        .where((i) => !i.isWishlist && !i.isSold)
-        .toList()
-      ..sort((a, b) {
-        final av = a.volumeId ?? '';
-        final bv = b.volumeId ?? '';
-        return av.compareTo(bv);
-      });
-    CollectionItem? nextUnread;
-    for (final item in owned) {
-      if (!item.isRead) {
-        nextUnread = item;
-        break;
+    final total = entry.series.expectedVolumeCount ?? entry.stats.totalSlots;
+    final next = entry.stats.nextOwnedUnread;
+    final fromCtrl = TextEditingController(text: '1');
+    final toCtrl = TextEditingController(text: '${total > 0 ? total : 1}');
+    try {
+      final action = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Progression de lecture'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (next != null)
+                Text('Prochain tome non lu : T.$next'),
+              if (next == null)
+                const Text('Tous tes tomes possédés sont lus (ou aucun possédé).'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: fromCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Du tome'),
+              ),
+              TextField(
+                controller: toCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Au tome'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Annuler'),
+            ),
+            if (next != null)
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, 'next'),
+                child: Text('📖 Lire la suite : T.$next'),
+              ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'owned'),
+              child: const Text('✓ Tous mes possédés lus'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, 'range'),
+              child: const Text('Marquer la plage lus'),
+            ),
+          ],
+        ),
+      );
+      if (action == null || !mounted) return;
+      if (action == 'next' && next != null) {
+        await _service.markVolumesRead(
+          series: entry.series,
+          fromVolume: next,
+          toVolume: next,
+        );
+      } else if (action == 'owned') {
+        await _service.markVolumesRead(
+          series: entry.series,
+          fromVolume: 1,
+          toVolume: total > 0 ? total : 1,
+          ownedOnly: true,
+        );
+      } else if (action == 'range') {
+        final from = int.tryParse(fromCtrl.text.trim()) ?? 1;
+        final to = int.tryParse(toCtrl.text.trim()) ?? from;
+        await _service.markVolumesRead(
+          series: entry.series,
+          fromVolume: from,
+          toVolume: to,
+        );
       }
-    }
-    if (nextUnread == null) {
-      if (!mounted) return;
-      await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (ctx) => BookSeriesDetailScreen(seriesId: entry.series.id),
-        ),
-      );
       if (mounted) _load(silent: true);
-      return;
-    }
-    final target = nextUnread;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Marquer comme lu ?'),
-        content: Text('« ${target.title} »'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Ouvrir la série'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Marquer lu'),
-          ),
-        ],
-      ),
-    );
-    if (!mounted) return;
-    if (ok == true) {
-      await _service.setItemRead(target.id, true);
-      if (mounted) _load(silent: true);
-      return;
-    }
-    if (ok == false) {
-      await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (ctx) => BookSeriesDetailScreen(seriesId: entry.series.id),
-        ),
-      );
-      if (mounted) _load(silent: true);
+    } finally {
+      fromCtrl.dispose();
+      toCtrl.dispose();
     }
   }
 
   Future<void> _onRatingChip(_SeriesEntry entry) async {
-    final stored = entry.series.userRating ?? entry.stats.displayRating;
-    final rating = stored == null
+    final stored = entry.series.userRating;
+    var rating = stored == null
         ? null
         : (stored > 5 ? stored / 2 : stored).clamp(0.0, 5.0).toDouble();
+    final avg = entry.stats.volumesAverageRating;
+    final community = entry.stats.communityRating;
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (ctx) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Note · ${entry.series.name}',
-                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
-              ),
-              const SizedBox(height: 16),
-              PrecisionStarRatingBar(
-                rating: rating,
-                onChanged: (v) {
-                  final updated = entry.series.copyWith(
-                    userRating: v,
-                    clearUserRating: v == null,
-                  );
-                  final idx = _entries.indexWhere(
-                    (e) => e.series.id == entry.series.id,
-                  );
-                  if (idx >= 0) {
-                    setState(() {
-                      _entries[idx] = _SeriesEntry(
-                        series: updated,
-                        volumes: entry.volumes,
-                        stats: entry.stats.copyWith(
-                          displayRating: v,
-                          clearDisplayRating: v == null,
-                        ),
-                        items: entry.items,
+          child: StatefulBuilder(
+            builder: (ctx, setModal) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Note · ${BookSeriesNormalizer.displaySeriesName(entry.series.name)}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'Ma note globale pour la série',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 8),
+                  PrecisionStarRatingBar(
+                    rating: rating,
+                    onChanged: (v) {
+                      setModal(() => rating = v);
+                      final updated = entry.series.copyWith(
+                        userRating: v,
+                        clearUserRating: v == null,
                       );
-                    });
-                  }
-                  // ignore: unawaited_futures
-                  _service.updateSeries(updated);
-                },
-              ),
-              const SizedBox(height: 12),
-            ],
+                      final idx = _entries.indexWhere(
+                        (e) => e.series.id == entry.series.id,
+                      );
+                      if (idx >= 0) {
+                        setState(() {
+                          _entries[idx] = _SeriesEntry(
+                            series: updated,
+                            volumes: entry.volumes,
+                            stats: entry.stats.copyWith(
+                              displayRating: v ?? avg,
+                              clearDisplayRating: v == null && avg == null,
+                            ),
+                            items: entry.items,
+                          );
+                        });
+                      }
+                      // ignore: unawaited_futures
+                      _service.updateSeries(updated);
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    avg == null
+                        ? '📊 Moyenne de mes tomes — aucune note'
+                        : '📊 ${avg.toStringAsFixed(1)} / 5 '
+                            '(sur ${entry.stats.ratedVolumeCount} tomes)',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  if (avg != null) ...[
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          final v = double.parse(avg.toStringAsFixed(1));
+                          setModal(() => rating = v);
+                          final updated = entry.series.copyWith(userRating: v);
+                          // ignore: unawaited_futures
+                          _service.updateSeries(updated);
+                          final idx = _entries.indexWhere(
+                            (e) => e.series.id == entry.series.id,
+                          );
+                          if (idx >= 0) {
+                            setState(() {
+                              _entries[idx] = _SeriesEntry(
+                                series: updated,
+                                volumes: entry.volumes,
+                                stats: entry.stats.copyWith(displayRating: v),
+                                items: entry.items,
+                              );
+                            });
+                          }
+                        },
+                        icon: const Icon(Icons.copy_rounded, size: 16),
+                        label: const Text('Utiliser comme note globale'),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 14),
+                  Text(
+                    community == null
+                        ? '🌍 Note de la communauté — indisponible'
+                        : '🌍 ★ ${community.toStringAsFixed(1)} / 5',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFFF59E0B),
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ),

@@ -193,8 +193,15 @@ class BookSeriesStats {
   final int readCount;
   final int wishlistVolumeCount;
   final int totalSlots;
-  /// Moyenne des notes personnelles (tomes / série).
+  /// Note globale perso de la série (`user_rating`), sinon moyenne des tomes.
   final double? displayRating;
+  /// Moyenne auto des tomes notés (jamais la note globale série).
+  final double? volumesAverageRating;
+  final int ratedVolumeCount;
+  /// Premier tome possédé non lu (1-based), si présent.
+  final int? nextOwnedUnread;
+  /// Trous : numéros manquants avant le dernier tome possédé.
+  final int holeCount;
   /// Note communauté /5.
   final double? communityRating;
   final double totalNewValue;
@@ -206,6 +213,10 @@ class BookSeriesStats {
     this.wishlistVolumeCount = 0,
     this.totalSlots = 0,
     this.displayRating,
+    this.volumesAverageRating,
+    this.ratedVolumeCount = 0,
+    this.nextOwnedUnread,
+    this.holeCount = 0,
     this.communityRating,
     this.totalNewValue = 0,
     this.totalUsedValue = 0,
@@ -220,6 +231,9 @@ class BookSeriesStats {
 
   bool get isComplete =>
       totalSlots > 0 && ownedCount >= totalSlots;
+
+  bool get isFullyRead =>
+      isComplete && readCount >= totalSlots && totalSlots > 0;
 
   double get ownedProgress =>
       totalSlots > 0 ? (ownedCount / totalSlots).clamp(0.0, 1.0) : 0;
@@ -238,16 +252,45 @@ class BookSeriesStats {
     return '~${v.round()} €';
   }
 
+  /// Puce statut : à lire / trous / complète / wishlist / à découvrir.
+  ({String label, ColorHint hint}) get statusChip {
+    if (isFullyRead) {
+      return (label: '🏆 Complète', hint: ColorHint.complete);
+    }
+    if (holeCount > 0) {
+      return (
+        label: '🧩 $holeCount trou${holeCount > 1 ? 's' : ''}',
+        hint: ColorHint.holes,
+      );
+    }
+    if (nextOwnedUnread != null) {
+      return (label: '📖 À lire : T.$nextOwnedUnread', hint: ColorHint.toRead);
+    }
+    if (wishlistVolumeCount > 0 && ownedCount < 1) {
+      return (label: '♡ Wishlist', hint: ColorHint.wishlist);
+    }
+    if (ownedCount < 1) {
+      return (label: 'À découvrir', hint: ColorHint.discover);
+    }
+    return (label: '📖 En cours', hint: ColorHint.toRead);
+  }
+
   BookSeriesStats copyWith({
     int? ownedCount,
     int? readCount,
     int? wishlistVolumeCount,
     int? totalSlots,
     double? displayRating,
+    double? volumesAverageRating,
+    int? ratedVolumeCount,
+    int? nextOwnedUnread,
+    int? holeCount,
     double? communityRating,
     double? totalNewValue,
     double? totalUsedValue,
     bool clearDisplayRating = false,
+    bool clearVolumesAverage = false,
+    bool clearNextOwnedUnread = false,
   }) {
     return BookSeriesStats(
       ownedCount: ownedCount ?? this.ownedCount,
@@ -256,9 +299,19 @@ class BookSeriesStats {
       totalSlots: totalSlots ?? this.totalSlots,
       displayRating:
           clearDisplayRating ? null : (displayRating ?? this.displayRating),
+      volumesAverageRating: clearVolumesAverage
+          ? null
+          : (volumesAverageRating ?? this.volumesAverageRating),
+      ratedVolumeCount: ratedVolumeCount ?? this.ratedVolumeCount,
+      nextOwnedUnread: clearNextOwnedUnread
+          ? null
+          : (nextOwnedUnread ?? this.nextOwnedUnread),
+      holeCount: holeCount ?? this.holeCount,
       communityRating: communityRating ?? this.communityRating,
       totalNewValue: totalNewValue ?? this.totalNewValue,
       totalUsedValue: totalUsedValue ?? this.totalUsedValue,
     );
   }
 }
+
+enum ColorHint { complete, holes, toRead, wishlist, discover }

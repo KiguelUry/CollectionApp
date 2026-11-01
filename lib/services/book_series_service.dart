@@ -814,33 +814,56 @@ class BookSeriesService {
     }
     final readCount = readNumbers.length;
 
-    // Moyenne perso des tomes lus, 0.0 inclus.
-    double? rating = series.userRating;
-    if (rating != null && rating < 0) rating = null;
-    if (rating == null) {
-      final rated = <double>[];
-      for (final i in active) {
-        if (!i.isRead || i.rating == null || i.rating! < 0) continue;
-        final n = i.rating! > 5.0 ? i.rating! / 2 : i.rating!;
-        if (n >= 0 && n <= 5) rated.add(n);
-      }
-      for (final v in volumes) {
-        if (!v.isRead) continue;
-        final raw = v.metadata['personal_rating'];
-        if (raw == null) continue;
-        final n = raw is num ? raw.toDouble() : double.tryParse('$raw');
-        if (n == null || n < 0 || n > 5) continue;
-        final owned = active.any(
-          (i) => i.volumeId == v.id && !i.isWishlist && i.rating != null,
-        );
-        if (owned) continue;
+    // Notes tomes (possédés ou metadata volume) → moyenne auto.
+    final rated = <double>[];
+    final ratedByVolume = <int, double>{};
+    for (final i in active) {
+      if (i.rating == null || i.rating! < 0) continue;
+      final n = i.rating! > 5.0 ? i.rating! / 2 : i.rating!;
+      if (n < 0 || n > 5) continue;
+      final vol = i.volumeId != null ? volById[i.volumeId!] : null;
+      if (vol == null || vol.isHorsSerie) {
         rated.add(n);
+        continue;
       }
-      if (rated.isNotEmpty) {
-        rating = rated.reduce((a, b) => a + b) / rated.length;
+      ratedByVolume[vol.volumeNumber.round()] = n;
+    }
+    for (final v in volumes) {
+      if (v.isHorsSerie) continue;
+      final nVol = v.volumeNumber.round();
+      if (ratedByVolume.containsKey(nVol)) continue;
+      final raw = v.metadata['personal_rating'];
+      if (raw == null) continue;
+      final n = raw is num ? raw.toDouble() : double.tryParse('$raw');
+      if (n == null || n < 0 || n > 5) continue;
+      ratedByVolume[nVol] = n;
+    }
+    rated.addAll(ratedByVolume.values);
+    double? volumesAvg;
+    if (rated.isNotEmpty) {
+      volumesAvg = rated.reduce((a, b) => a + b) / rated.length;
+    }
+    double? seriesUser = series.userRating;
+    if (seriesUser != null && seriesUser < 0) seriesUser = null;
+    if (seriesUser != null && seriesUser > 5) seriesUser = seriesUser / 2;
+    final display = seriesUser ?? volumesAvg;
+    final community = series.communityRating;
+
+    var holeCount = 0;
+    int? nextOwnedUnread;
+    if (ownedNumbers.isNotEmpty) {
+      final maxOwned = ownedNumbers.reduce((a, b) => a > b ? a : b);
+      for (var n = 1; n < maxOwned; n++) {
+        if (!ownedNumbers.contains(n)) holeCount++;
+      }
+      final orderedOwned = ownedNumbers.toList()..sort();
+      for (final n in orderedOwned) {
+        if (!readNumbers.contains(n)) {
+          nextOwnedUnread = n;
+          break;
+        }
       }
     }
-    final community = series.communityRating;
 
     var totalNew = series.totalNewValue ?? 0;
     var totalUsed = series.totalUsedValue ?? 0;
@@ -867,7 +890,11 @@ class BookSeriesService {
       readCount: readCount,
       wishlistVolumeCount: wishlistCount,
       totalSlots: totalSlots,
-      displayRating: rating,
+      displayRating: display,
+      volumesAverageRating: volumesAvg,
+      ratedVolumeCount: rated.length,
+      nextOwnedUnread: nextOwnedUnread,
+      holeCount: holeCount,
       communityRating: community,
       totalNewValue: totalNew,
       totalUsedValue: totalUsed,
@@ -2207,6 +2234,79 @@ class BookSeriesService {
       volumeNumbers: numbers,
       markAsRead: markAsRead,
     );
+  }
+
+  /// Retire la possession d'une plage (garde notes / lu sur le volume).
+  Future<int> markVolumesUnowned({
+    required BookSeries series,
+    required int fromVolume,
+    required int toVolume,
+  }) async {
+    final low = fromVolume < toVolume ? fromVolume : toVolume;
+    final high = fromVolume < toVolume ? toVolume : fromVolume;
+    final volumes = await fetchVolumes(series.id);
+    final byNum = {
+      for (final v in volumes)
+        if (!v.isHorsSerie) v.volumeNumber.round(): v,
+    };
+    final items = await fetchSeriesItems(series.id);
+    var removed = 0;
+    for (var n = low; n <= high; n++) {
+      final vol = byNum[n];
+      if (vol == null) continue;
+      final toRemove = items
+          .where((i) =>
+              i.volumeId == vol.id && !i.isWishlist && !i.isSold)
+          .toList();
+      for (final item in toRemove) {
+        if (item.rating != null) {
+          await patchVolumeMetadata(vol.id, {
+            'personal_rating': item.rating,
+            'is_read': true,
+          });
+        } else if (item.isRead) {
+          await setVolumeReadFlag(vol.id, true);
+        }
+        await removeVolumeItem(item.id);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
+  /// Marque lus une plage (possédés ou flag volume).
+  Future<int> markVolumesRead({
+    required BookSeries series,
+    required int fromVolume,
+    required int toVolume,
+    bool ownedOnly = false,
+  }) async {
+    final low = fromVolume < toVolume ? fromVolume : toVolume;
+    final high = fromVolume < toVolume ? toVolume : fromVolume;
+    final volumes = await fetchVolumes(series.id);
+    final items = await fetchSeriesItems(series.id);
+    final byVolId = {
+      for (final i in items)
+        if (i.volumeId != null && !i.isWishlist && !i.isSold) i.volumeId!: i,
+    };
+    var n = 0;
+    for (final vol in volumes) {
+      if (vol.isHorsSerie) continue;
+      final num = vol.volumeNumber.round();
+      if (num < low || num > high) continue;
+      final item = byVolId[vol.id];
+      if (ownedOnly && item == null) continue;
+      if (item != null) {
+        if (!item.isRead) {
+          await setItemRead(item.id, true);
+          n++;
+        }
+      } else {
+        await setVolumeReadFlag(vol.id, true);
+        n++;
+      }
+    }
+    return n;
   }
 
   /// Marque une liste de numéros de tomes (sélection multiple).

@@ -84,10 +84,21 @@ abstract final class BookVfEdition {
     return s;
   }
 
-  /// Environ 3 phrases / 360 caractères, toujours coupées sur un point.
-  static List<String> synopsisPages(String clean) {
+  /// Capacité d'une page de bulle selon la largeur d'écran.
+  static int synopsisMaxCharsForWidth(double width) {
+    if (width >= 1100) return 620;
+    if (width >= 700) return 420;
+    return 250;
+  }
+
+  /// Remplit chaque page jusqu'à [maxCharsPerPage], toujours sur une fin de phrase.
+  static List<String> synopsisPages(
+    String clean, {
+    int maxCharsPerPage = 360,
+  }) {
     final text = clean.trim();
     if (text.isEmpty) return const [];
+    final limit = maxCharsPerPage.clamp(120, 2000);
     final sentences = text
         .split(RegExp(r'(?<=[.!?…])\s+'))
         .map((s) => s.trim())
@@ -107,9 +118,7 @@ abstract final class BookVfEdition {
     for (final sentence in sentences) {
       final sep = buf.isEmpty ? 0 : 1;
       final next = chars + sep + sentence.length;
-      // ~3 phrases ou ~360 caractères, toujours sur une fin de phrase.
-      if (buf.isNotEmpty &&
-          (buf.length >= 3 || next > 360 || (buf.length >= 2 && chars >= 280))) {
+      if (buf.isNotEmpty && next > limit) {
         flush();
       }
       buf.add(sentence);
