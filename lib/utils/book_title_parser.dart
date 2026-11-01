@@ -251,14 +251,28 @@ abstract final class BookTitleParser {
     return null;
   }
 
-  /// Coupe au premier `:` si présent (« Dungeon Crawler Carl : L'Ogive… »).
+  /// Coupe au premier `:` / sous-titre album (« Astérix - L'Iris blanc » → Astérix).
   static String? _canonicalSeriesName(String raw) {
     var s = _cleanSeriesName(raw);
     if (s == null) return null;
     final colon = s.indexOf(':');
     if (colon > 1) {
       final head = _cleanSeriesName(s.substring(0, colon));
-      if (head != null && head.length >= 2) return head;
+      if (head != null && head.length >= 2) s = head;
+    }
+    // Sous-titre d'album après « - », sauf Intégrale / Édition / Jeunesse…
+    final dash = RegExp(r'^(.+?)\s+-\s+(.+)$').firstMatch(s);
+    if (dash != null) {
+      final head = dash.group(1)!.trim();
+      final tail = dash.group(2)!.toLowerCase();
+      final keepTail = RegExp(
+        r'^(?:int[eé]grale|edition|édition|originale|collector|omnibus|'
+        r'saga|jeunesse|mondes|la jeunesse|les mondes)\b',
+        caseSensitive: false,
+      ).hasMatch(tail);
+      if (!keepTail && head.length >= 2) {
+        return _cleanSeriesName(head) ?? head;
+      }
     }
     return s;
   }

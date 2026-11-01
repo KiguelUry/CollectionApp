@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../constants/book_accent.dart';
+import '../constants/rating_colors.dart';
 import '../models/book_series.dart';
 import '../utils/book_series_normalizer.dart';
 import '../utils/tile_rating_display.dart';
@@ -202,30 +203,62 @@ class BookSeriesTile extends StatelessWidget {
                 const SizedBox(height: 3),
                 Builder(
                   builder: (context) {
+                    final pref =
+                        SeriesRatingDisplayPref.fromMetadata(series.metadata);
                     final personal = series.userRating == null
                         ? null
                         : (series.userRating! > 5
                             ? series.userRating! / 2
                             : series.userRating!);
+                    final avg = stats.volumesAverageRating;
                     final community = stats.communityRating;
                     String ratingLabel;
                     Color ratingColor;
-                    if (personal != null && community != null) {
-                      ratingLabel =
-                          '👤 ${personal.toStringAsFixed(1)} · 🌍 ${community.toStringAsFixed(1)}';
-                      ratingColor = const Color(0xFF38BDF8);
-                    } else if (personal != null) {
-                      ratingLabel = '👤 ${personal.toStringAsFixed(1)}';
-                      ratingColor = const Color(0xFF38BDF8);
-                    } else if (community != null) {
-                      ratingLabel = '🌍 ${community.toStringAsFixed(1)}';
-                      ratingColor = const Color(0xFFF59E0B);
+
+                    ({String label, Color color})? resolve(
+                      SeriesRatingDisplayPref p,
+                    ) {
+                      switch (p) {
+                        case SeriesRatingDisplayPref.global:
+                          if (personal == null) return null;
+                          return (
+                            label: '★ ${personal.toStringAsFixed(1)}',
+                            color: const Color(0xFF38BDF8),
+                          );
+                        case SeriesRatingDisplayPref.average:
+                          if (avg == null) return null;
+                          return (
+                            label: '★ ${avg.toStringAsFixed(1)} (moy.)',
+                            color: const Color(0xFF38BDF8),
+                          );
+                        case SeriesRatingDisplayPref.community:
+                          if (community == null) return null;
+                          return (
+                            label: '★ ${community.toStringAsFixed(1)}',
+                            color: const Color(0xFFF59E0B),
+                          );
+                        case SeriesRatingDisplayPref.auto:
+                          return null;
+                      }
+                    }
+
+                    final picked = pref == SeriesRatingDisplayPref.auto
+                        ? (resolve(SeriesRatingDisplayPref.global) ??
+                            resolve(SeriesRatingDisplayPref.average) ??
+                            resolve(SeriesRatingDisplayPref.community))
+                        : (resolve(pref) ??
+                            resolve(SeriesRatingDisplayPref.global) ??
+                            resolve(SeriesRatingDisplayPref.average) ??
+                            resolve(SeriesRatingDisplayPref.community));
+                    if (picked != null) {
+                      ratingLabel = picked.label;
+                      ratingColor = picked.color;
                     } else {
                       final chip = resolveTileRating(
                         personalOnFive: stats.displayRating,
                         communityOnFive: stats.communityRating,
                       );
-                      ratingLabel = chip.label.replaceFirst('★ ', '');
+                      ratingLabel = chip.label;
                       ratingColor = chip.color;
                     }
                     final status = stats.statusChip;

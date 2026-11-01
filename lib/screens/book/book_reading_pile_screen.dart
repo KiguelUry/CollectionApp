@@ -11,7 +11,14 @@ import '../book_series_detail_screen.dart';
 
 /// Pile à lire + chasseur de trous (Sprint 2).
 class BookReadingPileScreen extends StatefulWidget {
-  const BookReadingPileScreen({super.key});
+  final int initialTab;
+  final bool embedded;
+
+  const BookReadingPileScreen({
+    super.key,
+    this.initialTab = 0,
+    this.embedded = false,
+  });
 
   @override
   State<BookReadingPileScreen> createState() => _BookReadingPileScreenState();
@@ -28,7 +35,11 @@ class _BookReadingPileScreenState extends State<BookReadingPileScreen>
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 2, vsync: this);
+    _tabs = TabController(
+      length: 2,
+      vsync: this,
+      initialIndex: widget.initialTab.clamp(0, 1),
+    );
     _load();
   }
 
@@ -140,6 +151,21 @@ class _BookReadingPileScreenState extends State<BookReadingPileScreen>
   @override
   Widget build(BuildContext context) {
     const accent = BookAccent.primary;
+    final body = _loading
+        ? const Center(child: CircularProgressIndicator())
+        : TabBarView(
+            controller: _tabs,
+            children: [
+              _buildToRead(),
+              _buildHoles(),
+            ],
+          );
+    if (widget.embedded) {
+      // Hub parent choisit l'onglet via initialTab → affiche une seule vue.
+      return _loading
+          ? const Center(child: CircularProgressIndicator())
+          : (widget.initialTab == 1 ? _buildHoles() : _buildToRead());
+    }
     return Scaffold(
       appBar: AppAppBar(
         title: 'Pile à lire',
@@ -156,15 +182,7 @@ class _BookReadingPileScreenState extends State<BookReadingPileScreen>
           ],
         ),
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : TabBarView(
-              controller: _tabs,
-              children: [
-                _buildToRead(),
-                _buildHoles(),
-              ],
-            ),
+      body: body,
     );
   }
 

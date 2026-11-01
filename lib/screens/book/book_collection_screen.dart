@@ -353,8 +353,8 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
                   const SizedBox(height: 16),
                   Text(
                     avg == null
-                        ? '📊 Moyenne de mes tomes — aucune note'
-                        : '📊 ${avg.toStringAsFixed(1)} / 5 '
+                        ? 'Moyenne des tomes — aucune note'
+                        : 'Moyenne des tomes : ${avg.toStringAsFixed(1)} / 5 '
                             '(sur ${entry.stats.ratedVolumeCount} tomes)',
                     style: const TextStyle(fontWeight: FontWeight.w600),
                   ),
@@ -391,8 +391,8 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
                   const SizedBox(height: 14),
                   Text(
                     community == null
-                        ? '🌍 Note de la communauté — indisponible'
-                        : '🌍 ★ ${community.toStringAsFixed(1)} / 5',
+                        ? 'Note communauté — indisponible'
+                        : 'Note communauté : ★ ${community.toStringAsFixed(1)} / 5',
                     style: const TextStyle(
                       fontWeight: FontWeight.w600,
                       color: Color(0xFFF59E0B),

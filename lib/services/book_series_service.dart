@@ -1095,6 +1095,7 @@ class BookSeriesService {
     int maxLookups = 40,
     bool repairUnverified = true,
     void Function(int foundSinceStart)? onProgress,
+    void Function(BookSeries series)? onSeriesUpdated,
     int progressEvery = 5,
   }) async {
     var updated = 0;
@@ -1147,6 +1148,16 @@ class BookSeriesService {
           author: h['author'],
           publisher: h['publisher'],
         )) {
+          continue;
+        }
+        if (working.subcategory == BookSubcategory.novel &&
+            BookVfEdition.rejectGraphicNovelForNovel(
+              title: title,
+              subtitle: h['subtitle'],
+              description: h['description'],
+              author: h['author'],
+              expectedAuthor: seriesAuthor,
+            )) {
           continue;
         }
         final identity = BookSeriesNormalizer.catalogIdentityMatchesSeries(
@@ -1387,6 +1398,7 @@ class BookSeriesService {
     if (persistSeries) {
       try {
         await updateSeries(working);
+        onSeriesUpdated?.call(working);
       } catch (_) {}
     }
 
@@ -1515,6 +1527,7 @@ class BookSeriesService {
 
     await ProfileService().ensureCurrentUserProfile();
     final n = slot.volume.volumeNumber.ceil();
+    // Contrainte boardgames_wishlist_no_location : location_user_id DOIT être null.
     await _insertCollectionItem({
       'title': '${series.name} - Tome $n',
       'category': CollectionCategory.book.dbValue,
@@ -1524,7 +1537,7 @@ class BookSeriesService {
       'is_wishlist': true,
       'quantity': 1,
       'added_by': _userId,
-      'location_user_id': _userId,
+      'location_user_id': null,
       'metadata': {
         'wishlisted': true,
         if (slot.volume.coverUrl != null) 'image_url': slot.volume.coverUrl,
@@ -1729,27 +1742,36 @@ class BookSeriesService {
       }
       return;
     }
-    // Supprime TOUTES les lignes pour ce volume (anti 73/42).
+    // Retire la possession UNIQUEMENT — conserve Lu + Note sur book_volumes.
     final items = await fetchSeriesItems(series.id);
     final toRemove = items
         .where((i) =>
             i.volumeId == slot.volume.id && !i.isWishlist && !i.isSold)
         .toList();
-    var keepReadFlag = false;
+    var keepReadFlag = slot.volume.isRead;
     double? keepRating;
+    final rawKept = slot.volume.metadata['personal_rating'];
+    if (rawKept is num) {
+      keepRating = rawKept.toDouble();
+    } else {
+      keepRating = double.tryParse('$rawKept');
+    }
     for (final item in toRemove) {
       if (item.isRead) keepReadFlag = true;
       keepRating ??= item.rating;
+      if (item.rating != null) keepReadFlag = true;
       await removeVolumeItem(item.id);
     }
+    final meta = <String, dynamic>{};
     if (keepReadFlag || keepRating != null) {
+      meta['is_read'] = true;
       await setVolumeReadFlag(slot.volume.id, true);
     }
     if (keepRating != null) {
-      await patchVolumeMetadata(slot.volume.id, {
-        'personal_rating': keepRating,
-        'is_read': true,
-      });
+      meta['personal_rating'] = keepRating;
+    }
+    if (meta.isNotEmpty) {
+      await patchVolumeMetadata(slot.volume.id, meta);
     }
   }
 

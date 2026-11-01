@@ -249,10 +249,10 @@ void main() {
         sameDate.map((h) => h.parsed.volumeNumber).toList(),
         [null, null],
       );
-      expect(ratingColor(0).toARGB32(), 0xFF7F1D1D);
-      expect(ratingColor(0.5).toARGB32(), 0xFFDC2626);
-      expect(ratingColor(3.5).toARGB32(), 0xFF10B981);
-      expect(ratingColor(4).toARGB32(), 0xFF1D4ED8);
+      expect(ratingColor(0).toARGB32(), 0xFFEF4444);
+      expect(ratingColor(0.5).toARGB32(), 0xFFF95738);
+      expect(ratingColor(3.5).toARGB32(), 0xFF22C55E);
+      expect(ratingColor(4).toARGB32(), 0xFF10B981);
       expect(ratingColor(5).toARGB32(), 0xFF38BDF8);
       expect(numbered.length, 7);
       expect(
@@ -965,6 +965,47 @@ void main() {
       expect(
         BookSeriesNormalizer.toTitleCase('Les Sept Sœurs'),
         'Les Sept Sœurs',
+      );
+    });
+
+    test('Astérix : sous-titre album coupé', () {
+      final p = BookTitleParser.parse('Astérix - L\'Iris blanc - Tome 40');
+      expect(p.seriesName, 'Astérix');
+      expect(p.volumeNumber?.round(), 40);
+      expect(
+        BookSeriesNormalizer.displaySeriesName(
+          'Astérix - L\'Iris blanc - Tome 40',
+        ),
+        'Astérix',
+      );
+    });
+
+    test('Roman Dune rejette graphic novel / adaptateurs', () {
+      expect(
+        BookVfEdition.rejectGraphicNovelForNovel(
+          title: 'Dune: The Graphic Novel, Book 1',
+          description: 'adaptation officielle du film',
+          author: 'Lilah Sturges',
+          expectedAuthor: 'Frank Herbert',
+        ),
+        isTrue,
+      );
+      expect(
+        BookVfEdition.rejectGraphicNovelForNovel(
+          title: 'Dune',
+          author: 'Frank Herbert',
+          expectedAuthor: 'Frank Herbert',
+        ),
+        isFalse,
+      );
+    });
+
+    test('titres italiens Dungeon Crawler rejetés', () {
+      expect(
+        BookVfEdition.isRejectedCatalogTitle(
+          'Dungeon Crawler Carl - Il giorno del giudizio',
+        ),
+        isTrue,
       );
     });
 

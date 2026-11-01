@@ -329,15 +329,29 @@ abstract final class BookIntelligenceService {
   }
 
   static bool _preferHit(EnrichedBookHit a, EnrichedBookHit b) {
+    final aTitle = a.raw['title'] ?? a.displayTitle;
+    final bTitle = b.raw['title'] ?? b.displayTitle;
+    final aForeign = BookVfEdition.isRejectedCatalogTitle(
+      aTitle,
+      subtitle: a.raw['subtitle'],
+      author: a.raw['author'],
+    );
+    final bForeign = BookVfEdition.isRejectedCatalogTitle(
+      bTitle,
+      subtitle: b.raw['subtitle'],
+      author: b.raw['author'],
+    );
+    if (!aForeign && bForeign) return true;
+    if (!bForeign && aForeign) return false;
     final aCover = a.imageUrl != null && a.imageUrl!.isNotEmpty;
     final bCover = b.imageUrl != null && b.imageUrl!.isNotEmpty;
     if (aCover != bCover) return aCover;
-    final aTitle = a.displayTitle.toLowerCase();
-    final bTitle = b.displayTitle.toLowerCase();
-    final aVf = looksVfTitle(aTitle);
-    final bVf = looksVfTitle(bTitle);
-    final aEn = looksEnVolTitle(aTitle);
-    final bEn = looksEnVolTitle(bTitle);
+    final aLow = a.displayTitle.toLowerCase();
+    final bLow = b.displayTitle.toLowerCase();
+    final aVf = looksVfTitle(aLow);
+    final bVf = looksVfTitle(bLow);
+    final aEn = looksEnVolTitle(aLow);
+    final bEn = looksEnVolTitle(bLow);
     if (aVf && !bVf) return true;
     if (bVf && !aVf) return false;
     if (!aEn && bEn) return true;

@@ -1457,19 +1457,30 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
     final chapters = <EnrichedBookHit>[];
     for (final h in _hits) {
       final title = h.raw['title'] ?? h.displayTitle;
+      if (BookVfEdition.isRejectedCatalogTitle(
+        title,
+        subtitle: h.raw['subtitle'],
+        author: h.raw['author'],
+        publisher: h.raw['publisher'],
+      )) {
+        continue;
+      }
       if (BookSeriesNormalizer.looksLikeChapterOrScan(title)) {
         chapters.add(h);
       } else {
         volumes.add(h);
       }
     }
+    // Dédoublonnage final (série, tome) — garde la meilleure VF.
+    final dedupedVolumes =
+        BookIntelligenceService.dedupeBySeriesVolume(volumes);
     return [
-      if (volumes.isNotEmpty) ...[
+      if (dedupedVolumes.isNotEmpty) ...[
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
             child: Text(
-              'Tomes reliés (${volumes.length})',
+              'Tomes reliés (${dedupedVolumes.length})',
               style: TextStyle(
                 fontWeight: FontWeight.w800,
                 fontSize: 13,
@@ -1478,7 +1489,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
             ),
           ),
         ),
-        _hitsGrid(volumes, chapterBadge: false),
+        _hitsGrid(dedupedVolumes, chapterBadge: false),
       ],
       if (chapters.isNotEmpty) ...[
         SliverToBoxAdapter(

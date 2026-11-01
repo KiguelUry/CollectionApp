@@ -26,7 +26,16 @@ abstract final class BookVfEdition {
   /// Éditions étrangères repérables dans le titre (même si language manquant).
   static final foreignEditionTitleRe = RegExp(
     r'svensk\s+utg[aå]va|edizione\s+italiana|'
-    r'[æøå]|enth[uü]llt|\befsanesi\b|\bbakboek\b',
+    r'[æøå]|enth[uü]llt|\befsanesi\b|\bbakboek\b|'
+    r'\bil\s+giorno\s+del\b|\bil\s+gioco\b|\bdei\s+selvaggi\b|'
+    r'\bl.?ora\s+del\s+castigo\b|\bil\s+varco\s+degli\b',
+    caseSensitive: false,
+  );
+
+  /// Adaptations BD / graphic novels (à rejeter pour une série Roman).
+  static final graphicNovelRe = RegExp(
+    r'graphic\s*novel|roman\s+graphique|\ben\s+bd\b|bande\s+dessin[eé]e|'
+    r'adaptation\s+officielle\s+du\s+film|comic\s+adaptation',
     caseSensitive: false,
   );
 
@@ -42,6 +51,36 @@ abstract final class BookVfEdition {
     final blob = '$title ${subtitle ?? ''} ${author ?? ''} ${publisher ?? ''}';
     if (parasiteTitleRe.hasMatch(blob)) return true;
     if (foreignEditionTitleRe.hasMatch(blob)) return true;
+    return false;
+  }
+
+  /// Pour une série Roman : rejette les BD / graphic novels / adaptateurs.
+  static bool rejectGraphicNovelForNovel({
+    required String title,
+    String? subtitle,
+    String? description,
+    String? author,
+    String? expectedAuthor,
+  }) {
+    final blob =
+        '$title ${subtitle ?? ''} ${description ?? ''} ${author ?? ''}';
+    if (graphicNovelRe.hasMatch(blob)) return true;
+    final expected = (expectedAuthor ?? '').toLowerCase();
+    final hitAuthor = (author ?? '').toLowerCase();
+    if (expected.contains('frank herbert') ||
+        expected.contains('herbert, frank')) {
+      if (hitAuthor.contains('brian herbert') ||
+          hitAuthor.contains('kevin j') ||
+          hitAuthor.contains('anderson') ||
+          hitAuthor.contains('lilah sturges') ||
+          hitAuthor.contains('sturges')) {
+        return true;
+      }
+      if (RegExp(r'\bgraphic\b|\bbd\b|\bcomic\b', caseSensitive: false)
+          .hasMatch(blob)) {
+        return true;
+      }
+    }
     return false;
   }
 

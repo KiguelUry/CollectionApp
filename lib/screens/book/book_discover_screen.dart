@@ -15,7 +15,9 @@ import '../book_series_detail_screen.dart';
 
 /// Découvrir livres : prochaines sorties + tendances.
 class BookDiscoverScreen extends StatefulWidget {
-  const BookDiscoverScreen({super.key});
+  final bool embedded;
+
+  const BookDiscoverScreen({super.key, this.embedded = false});
 
   @override
   State<BookDiscoverScreen> createState() => _BookDiscoverScreenState();
@@ -136,6 +138,45 @@ class _BookDiscoverScreenState extends State<BookDiscoverScreen> {
   @override
   Widget build(BuildContext context) {
     const accent = BookAccent.primary;
+    final body = _loading
+        ? const Center(child: CircularProgressIndicator())
+        : RefreshIndicator(
+            onRefresh: _load,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 32),
+              children: [
+                const Text(
+                  '📅 Prochaines sorties de mes séries',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                if (_upcoming.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 16),
+                    child: Text('Aucune sortie planifiée pour l\'instant.'),
+                  )
+                else
+                  ..._upcoming.map(_upcomingTile),
+                const SizedBox(height: 16),
+                const Text(
+                  '🔥 Tendances Mangas / BD / Romans',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                if (_trends.isEmpty)
+                  const Text('Tendances indisponibles pour le moment.')
+                else
+                  ..._trends.map(_trendTile),
+              ],
+            ),
+          );
+    if (widget.embedded) return body;
     return Scaffold(
       appBar: AppAppBar(
         title: 'Découvrir',
@@ -149,44 +190,7 @@ class _BookDiscoverScreenState extends State<BookDiscoverScreen> {
           ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _load,
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(12, 12, 12, 32),
-                children: [
-                  const Text(
-                    '📅 Prochaines sorties de mes séries',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 16,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  if (_upcoming.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.only(bottom: 16),
-                      child: Text('Aucune sortie planifiée pour l\'instant.'),
-                    )
-                  else
-                    ..._upcoming.map(_upcomingTile),
-                  const SizedBox(height: 16),
-                  const Text(
-                    '🔥 Tendances Mangas / BD / Romans',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 16,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  if (_trends.isEmpty)
-                    const Text('Tendances indisponibles pour le moment.')
-                  else
-                    ..._trends.map(_trendTile),
-                ],
-              ),
-            ),
+      body: body,
     );
   }
 

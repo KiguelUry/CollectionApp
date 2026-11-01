@@ -8,9 +8,7 @@ import '../models/collection_category.dart';
 import '../widgets/category_collection_header.dart';
 import '../widgets/category_collection_shell.dart';
 import 'book/book_collection_screen.dart';
-import 'book/book_discover_screen.dart';
-import 'book/book_reading_pile_screen.dart';
-import 'book/user_lists_hub_screen.dart';
+import 'book/book_hub_screen.dart';
 import 'book_wishlist_tab.dart';
 import 'collection_change_history_screen.dart';
 
@@ -47,39 +45,19 @@ class _BooksCollectionScreenState extends State<BooksCollectionScreen>
     BookItemAddCoordinator(context).scanIsbn();
   }
 
-  void _openLists() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const UserListsHubScreen()),
-    );
-  }
-
   List<CategoryQuickAction> get _quickActions => [
         CategoryQuickAction(
-          label: 'Découvrir',
-          icon: Icons.auto_awesome,
+          label: 'Hub Lecture',
+          icon: Icons.explore_outlined,
           onTap: () => Navigator.push(
             context,
-            MaterialPageRoute(builder: (_) => const BookDiscoverScreen()),
-          ),
-        ),
-        CategoryQuickAction(
-          label: 'Pile à lire',
-          icon: Icons.menu_book_outlined,
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const BookReadingPileScreen()),
+            MaterialPageRoute(builder: (_) => const BookHubScreen()),
           ),
         ),
         CategoryQuickAction(
           label: 'Scanner ISBN',
           icon: Icons.qr_code_scanner_rounded,
           onTap: _scanIsbn,
-        ),
-        CategoryQuickAction(
-          label: 'Mes listes',
-          icon: Icons.list_alt_rounded,
-          onTap: _openLists,
         ),
         CategoryQuickAction(
           label: 'Modifs',
