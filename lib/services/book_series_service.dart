@@ -11,6 +11,7 @@ import '../utils/book_vf_edition.dart';
 import 'anilist_manga_service.dart';
 import 'book_catalog_service.dart';
 import 'book_intelligence_service.dart';
+import 'google_books_service.dart';
 import 'itunes_books_service.dart';
 import 'mangadex_service.dart';
 import 'open_library_service.dart';
@@ -1093,6 +1094,52 @@ class BookSeriesService {
 
   /// Couvertures : Google Books FR d'abord (écrase MangaDex), MD comble les trous.
   /// [onProgress] est appelé tous les [progressEvery] tomes trouvés (UI live).
+  static String _normalizeCoverKey(String url) {
+    var u = url.trim().replaceAll('http://', 'https://').toLowerCase();
+    // Ignore zoom/edge qui ne changent pas l'image réelle.
+    u = u
+        .replaceAll(RegExp(r'[&?]zoom=\d'), '')
+        .replaceAll(RegExp(r'[&?]edge=curl'), '')
+        .replaceAll(RegExp(r'[&?]img=\d'), '');
+    return u;
+  }
+
+  /// Même URL sur 2+ tomes → on ne garde que le mieux vérifié, on vide le reste.
+  Future<int> clearDuplicateCoverUrls(List<BookVolume> volumes) async {
+    final byUrl = <String, List<BookVolume>>{};
+    for (final v in volumes) {
+      final raw = (v.coverUrl ?? '').trim();
+      if (raw.isEmpty) continue;
+      byUrl.putIfAbsent(_normalizeCoverKey(raw), () => []).add(v);
+    }
+    var cleared = 0;
+    for (final group in byUrl.values) {
+      if (group.length < 2) continue;
+      group.sort((a, b) {
+        final aN = a.volumeNumber.round();
+        final bN = b.volumeNumber.round();
+        final aOk = a.metadata['cover_volume_verified'] == aN ? 0 : 1;
+        final bOk = b.metadata['cover_volume_verified'] == bN ? 0 : 1;
+        if (aOk != bOk) return aOk.compareTo(bOk);
+        final aTitle = (a.volumeTitle ?? '').toLowerCase();
+        final bTitle = (b.volumeTitle ?? '').toLowerCase();
+        final aMatch = aTitle.contains('tome $aN') || aTitle.contains('t$aN')
+            ? 0
+            : 1;
+        final bMatch = bTitle.contains('tome $bN') || bTitle.contains('t$bN')
+            ? 0
+            : 1;
+        if (aMatch != bMatch) return aMatch.compareTo(bMatch);
+        return a.volumeNumber.compareTo(b.volumeNumber);
+      });
+      for (final dup in group.skip(1)) {
+        await clearVolumeCover(dup.id);
+        cleared++;
+      }
+    }
+    return cleared;
+  }
+
   Future<int> enrichMissingVolumeCovers({
     required BookSeries series,
     required List<BookVolume> volumes,
@@ -1108,27 +1155,64 @@ class BookSeriesService {
     var working = series;
     var seriesAuthor = working.author;
 
-    final batch = <int, ({String coverUrl, String? publishedDate, String? language})>{};
-    var vfMax = 0;
-
-    // 1) Google Books FR = source de vérité VF (covers + dates + max tome).
-    // Jusqu'à 3×40 = 120 items pour couvrir Berserk (43+) malgré 503 partiels.
+    // 0) Interdiction des couvertures partagées + purge covers EN sur BD.
     try {
-      final expected = working.expectedVolumeCount ?? volumes.length;
-      final pagesNeeded = expected > 40 ? 3 : (expected > 20 ? 2 : 2);
-      final gb = await BookIntelligenceService.batchFetchSeriesCovers(
-        seriesName: working.name,
-        subcategory: working.subcategory,
-        authorHint: seriesAuthor,
-        maxPages: pagesNeeded.clamp(1, 3),
-      );
-      for (final e in gb.entries) {
-        batch[e.key] = e.value;
-        if (e.key > vfMax) vfMax = e.key;
+      await clearDuplicateCoverUrls(volumes);
+      if (working.subcategory == BookSubcategory.bd) {
+        for (final v in volumes) {
+          final lang = v.metadata['cover_language']?.toString();
+          if (BookVfEdition.isExplicitEnglish(lang)) {
+            await clearVolumeCover(v.id);
+          }
+        }
       }
     } catch (_) {}
+    var liveVolumes = await fetchVolumes(working.id);
 
-    // 2) Apple Books FR (nom + Tome + auteur, Glénat/Kana si manga).
+    final batch = <int, ({String coverUrl, String? publishedDate, String? language})>{};
+    final coverOwner = <String, int>{}; // URL normalisée → n° de tome
+    var vfMax = 0;
+
+    void seedExistingCovers(List<BookVolume> vols) {
+      coverOwner.clear();
+      for (final v in vols) {
+        final raw = (v.coverUrl ?? '').trim();
+        if (raw.isEmpty) continue;
+        final key = _normalizeCoverKey(raw);
+        coverOwner.putIfAbsent(key, () => v.volumeNumber.round());
+      }
+    }
+
+    bool claimCover(
+      int n,
+      String img, {
+      String? publishedDate,
+      String? language,
+      bool force = false,
+    }) {
+      if (img.isEmpty) return false;
+      final key = _normalizeCoverKey(img);
+      final owner = coverOwner[key];
+      if (owner != null && owner != n) return false;
+      if (!force && batch.containsKey(n)) {
+        // Ne remplace pas un slot déjà rempli sauf force (VF / Tome).
+        return false;
+      }
+      // Libère les anciennes URLs de ce tome (seed ou batch précédent).
+      coverOwner.removeWhere((k, v) => v == n && k != key);
+      coverOwner[key] = n;
+      batch[n] = (
+        coverUrl: img.replaceAll('http://', 'https://'),
+        publishedDate: publishedDate,
+        language: language,
+      );
+      if (n > vfMax) vfMax = n;
+      return true;
+    }
+
+    seedExistingCovers(liveVolumes);
+
+    // 1) Apple Books FR d'abord — JAMAIS Google Books en premier.
     String? tome1Synopsis;
     final frenchTomeLocked = <int>{};
     final sisterSaga = BookSeriesNormalizer.queryWords(working.name)
@@ -1141,6 +1225,7 @@ class BookSeriesService {
         working.name,
         author: seriesAuthor,
         mangaPublisherPass: working.subcategory == BookSubcategory.manga,
+        bdPublisherPass: working.subcategory == BookSubcategory.bd,
         allowAudiobook: working.subcategory == BookSubcategory.novel,
       );
       for (final h in itunes) {
@@ -1153,6 +1238,16 @@ class BookSeriesService {
           author: h['author'],
           publisher: h['publisher'],
         )) {
+          continue;
+        }
+        if (working.subcategory == BookSubcategory.bd &&
+            BookVfEdition.rejectAngloBdHit(
+              title: title,
+              subtitle: h['subtitle'],
+              language: h['language'],
+              publisher: h['publisher'],
+              description: h['description'],
+            )) {
           continue;
         }
         if (working.subcategory == BookSubcategory.novel &&
@@ -1232,9 +1327,12 @@ class BookSeriesService {
             ) ??
             sisterVol;
         // Synopsis français : Tome 1 Apple Books uniquement. Jamais un tome > 1.
+        // BD : zéro synopsis anglais (Cinebook).
         if (n == 1 || (n == null && identity)) {
           final cleaned = _cleanSynopsis(h['description']);
-          if (cleaned != null) {
+          if (cleaned != null &&
+              !(working.subcategory == BookSubcategory.bd &&
+                  BookVfEdition.looksEnglishProse(cleaned))) {
             if (n == 1) {
               tome1Synopsis = cleaned;
             } else {
@@ -1248,6 +1346,7 @@ class BookSeriesService {
             BookIntelligenceService.looksVfTitle(title);
         final frenchTome = BookTitleParser.isFrenchTomeTitle(title);
         final englishVol = BookTitleParser.isEnglishVolumeTitle(title);
+        if (working.subcategory == BookSubcategory.bd && englishVol) continue;
         final lang = frenchTome ? 'fr-tome' : (isFr ? 'fr' : h['language']);
         if (n == null || n < 1) {
           // Uniquement les tomes « sœur » sans numéro (Lune, Soleil…),
@@ -1273,14 +1372,16 @@ class BookSeriesService {
           if (englishVol && prev != null && frenchTomeLocked.contains(n)) {
             continue;
           }
-          batch[n] = (
-            coverUrl: img,
+          if (claimCover(
+            n,
+            img,
             publishedDate: h['published_date'],
             language: lang,
-          );
-          if (frenchTome) frenchTomeLocked.add(n);
+            force: frenchTome || isFr,
+          )) {
+            if (frenchTome) frenchTomeLocked.add(n);
+          }
         }
-        if (n > vfMax) vfMax = n;
       }
       // Trous sans « Tome N » dans le titre : ordre de parution (Lune → 5…).
       if (pendingByDate.isNotEmpty) {
@@ -1295,20 +1396,19 @@ class BookSeriesService {
         for (final pending in pendingByDate) {
           if (gi >= gaps.length) break;
           final slot = gaps[gi++];
-          batch.putIfAbsent(
+          if (claimCover(
             slot,
-            () => (
-              coverUrl: pending.coverUrl,
-              publishedDate: pending.publishedDate,
-              language: pending.language,
-            ),
-          );
-          if (slot > vfMax) vfMax = slot;
+            pending.coverUrl,
+            publishedDate: pending.publishedDate,
+            language: pending.language,
+          )) {
+            // ok
+          }
         }
       }
     } catch (_) {}
 
-    // 3) MangaDex comble les trous. Le français du Tome 1 passe avant MangaDex/AniList.
+    // 2) MangaDex comble les trous. Le français du Tome 1 passe avant MangaDex/AniList.
     String? mdFrenchSynopsis;
     String? mdEnglishSynopsis;
     String? anilistSynopsis;
@@ -1334,14 +1434,8 @@ class BookSeriesService {
             } catch (_) {}
           }
           for (final e in covers.entries) {
-            batch.putIfAbsent(
-              e.key,
-              () => (
-                coverUrl: e.value,
-                publishedDate: null,
-                language: null,
-              ),
-            );
+            if (batch.containsKey(e.key)) continue;
+            claimCover(e.key, e.value, language: null);
           }
           final mdVols = md.volumesPublished;
           final batchMax = batch.isEmpty
@@ -1379,8 +1473,121 @@ class BookSeriesService {
       working = (await bumpExpectedCountIfHigher(working, vfMax)) ?? working;
     }
 
+    // 3) Trous restants : Apple « Nom Tome N » (+ Le Lombard pour BD).
+    liveVolumes = await fetchVolumes(working.id);
+    final holeNums = <int>{};
+    for (final v in liveVolumes) {
+      if (v.isHorsSerie) continue;
+      final n = v.volumeNumber.round();
+      if (n < 1) continue;
+      final has = (v.coverUrl ?? '').isNotEmpty || batch.containsKey(n);
+      if (!has) holeNums.add(n);
+    }
+    // Aussi re-chercher les tomes dont on a vidé la couverture (doublons).
+    for (final v in liveVolumes) {
+      if (v.isHorsSerie) continue;
+      final n = v.volumeNumber.round();
+      if ((v.coverUrl ?? '').isEmpty && !batch.containsKey(n) && n >= 1) {
+        holeNums.add(n);
+      }
+    }
+    final holesList = holeNums.toList()..sort();
+    for (final n in holesList.take(maxLookups.clamp(1, 60))) {
+      try {
+        Map<String, String>? hit;
+        if (working.subcategory == BookSubcategory.bd) {
+          hit = await ItunesBooksService.lookupFrenchVolume(
+            working.name,
+            n,
+            publisherHint: 'Le Lombard',
+          );
+          hit ??= await ItunesBooksService.lookupFrenchVolume(
+            working.name,
+            n,
+          );
+        } else {
+          hit = await ItunesBooksService.lookupFrenchVolume(working.name, n);
+        }
+        if (hit == null) continue;
+        final title = hit['title'] ?? '';
+        if (working.subcategory == BookSubcategory.bd &&
+            BookVfEdition.rejectAngloBdHit(
+              title: title,
+              language: hit['language'],
+              publisher: hit['publisher'],
+              description: hit['description'],
+            )) {
+          continue;
+        }
+        final img = hit['image_url'] ?? '';
+        if (img.isEmpty) continue;
+        claimCover(
+          n,
+          img,
+          publishedDate: hit['published_date'],
+          language: BookTitleParser.isFrenchTomeTitle(title) ? 'fr-tome' : 'fr',
+        );
+      } catch (_) {}
+    }
+
+    // 4) Google Books UNIQUEMENT pour les trous encore vides (après Apple + MD).
+    final stillMissing = <int>{};
+    for (final v in liveVolumes) {
+      if (v.isHorsSerie) continue;
+      final n = v.volumeNumber.round();
+      if (n < 1) continue;
+      final has = (v.coverUrl ?? '').isNotEmpty || batch.containsKey(n);
+      if (!has) stillMissing.add(n);
+    }
+    if (stillMissing.isNotEmpty && !GoogleBooksService.isCircuitOpen) {
+      try {
+        final gbHits = await GoogleBooksService.searchSeriesBatched(
+          working.name,
+          author: seriesAuthor,
+          maxPages: 1,
+          langRestrict: 'fr',
+        );
+        for (final h in gbHits) {
+          final title = h['title'] ?? '';
+          if (BookVfEdition.isRejectedCatalogTitle(
+            title,
+            subtitle: h['subtitle'],
+            author: h['author'],
+            publisher: h['publisher'],
+          )) {
+            continue;
+          }
+          if (working.subcategory == BookSubcategory.bd &&
+              BookVfEdition.rejectAngloBdHit(
+                title: title,
+                subtitle: h['subtitle'],
+                language: h['language'],
+                publisher: h['publisher'],
+                description: h['description'],
+              )) {
+            continue;
+          }
+          final n = int.tryParse(h['series_volume'] ?? '') ??
+              BookTitleParser.extractVolumeNumberStrict(title);
+          if (n == null || n < 1 || !stillMissing.contains(n)) continue;
+          if (batch.containsKey(n)) continue;
+          final img = h['image_url'] ?? '';
+          if (img.isEmpty) continue;
+          claimCover(
+            n,
+            img,
+            publishedDate: h['published_date'],
+            language: 'fr',
+          );
+        }
+      } catch (_) {}
+    }
+
     final hasFrenchEdition = batch.values.any(
-      (v) => v.language == 'fr' || BookVfEdition.isFrenchLanguage(v.language),
+      (v) =>
+          v.language == 'fr' ||
+          v.language == 'fr-tome' ||
+          BookVfEdition.isFrenchLanguage(v.language),
     );
     var persistSeries = false;
     if (mangaFinished &&
@@ -1392,11 +1599,20 @@ class BookSeriesService {
       persistSeries = true;
     }
 
-    final safeSynopsis = tome1Synopsis ??
-        mdFrenchSynopsis ??
-        mdEnglishSynopsis ??
-        anilistSynopsis;
-    if (safeSynopsis != null && safeSynopsis != working.description) {
+    String? safeSynopsis = tome1Synopsis ?? mdFrenchSynopsis;
+    if (working.subcategory != BookSubcategory.bd) {
+      safeSynopsis ??= mdEnglishSynopsis ?? anilistSynopsis;
+    } else if (safeSynopsis != null &&
+        BookVfEdition.looksEnglishProse(safeSynopsis)) {
+      safeSynopsis = null;
+    }
+    // BD : purge un synopsis Cinebook / anglais déjà stocké.
+    if (working.subcategory == BookSubcategory.bd &&
+        (working.description ?? '').isNotEmpty &&
+        BookVfEdition.looksEnglishProse(working.description!)) {
+      working = working.copyWith(description: safeSynopsis ?? '');
+      persistSeries = true;
+    } else if (safeSynopsis != null && safeSynopsis != working.description) {
       working = working.copyWith(description: safeSynopsis);
       persistSeries = true;
     }
@@ -1410,6 +1626,14 @@ class BookSeriesService {
     final ordered = List<BookVolume>.from(await fetchVolumes(working.id))
       ..sort((a, b) => a.volumeNumber.compareTo(b.volumeNumber));
 
+    // Ré-ancrage des URLs déjà posées pour l'unicité à la persistance.
+    final assignedUrls = <String>{};
+    for (final vol in ordered) {
+      final raw = (vol.coverUrl ?? '').trim();
+      if (raw.isEmpty) continue;
+      assignedUrls.add(_normalizeCoverKey(raw));
+    }
+
     for (final vol in ordered) {
       if (vol.isHorsSerie) continue;
       final n = vol.volumeNumber.round();
@@ -1418,12 +1642,15 @@ class BookSeriesService {
 
       if (hit == null) continue;
 
-      final url = hit.coverUrl;
+      final url = hit.coverUrl.startsWith('http://')
+          ? 'https://${hit.coverUrl.substring(7)}'
+          : hit.coverUrl;
+      final urlKey = _normalizeCoverKey(url);
       final pub = hit.publishedDate;
       final upcoming = BookIntelligenceService.isFuturePublishedDate(pub);
       final incomingMd = isMangaDexCoverUrl(url);
       final existingMd = isMangaDexCoverUrl(vol.coverUrl);
-      final sameCover = hasCover && vol.coverUrl == url;
+      final sameCover = hasCover && _normalizeCoverKey(vol.coverUrl!) == urlKey;
       final dateMissing = pub != null &&
           pub.isNotEmpty &&
           (vol.metadata['published_date'] == null ||
@@ -1438,6 +1665,12 @@ class BookSeriesService {
           );
           updated++;
         }
+        continue;
+      }
+
+      // Interdiction absolue : URL déjà utilisée par un autre tome.
+      if (assignedUrls.contains(urlKey) &&
+          !(hasCover && _normalizeCoverKey(vol.coverUrl!) == urlKey)) {
         continue;
       }
 
@@ -1460,8 +1693,17 @@ class BookSeriesService {
         if (alreadyFr && !incomingTome) continue;
         if (alreadyTome && !incomingTome) continue;
         if (!incomingFr) continue;
+        // BD : une couverture EN existante doit céder à du FR.
+        if (working.subcategory == BookSubcategory.bd &&
+            BookVfEdition.isExplicitEnglish(existingLang) &&
+            !incomingFr) {
+          continue;
+        }
       }
 
+      if (hasCover) {
+        assignedUrls.remove(_normalizeCoverKey(vol.coverUrl!));
+      }
       await setVolumeCoverUrl(
         vol.id,
         url,
@@ -1472,6 +1714,7 @@ class BookSeriesService {
             ? 'fr-tome'
             : (incomingFr ? 'fr' : hit.language),
       );
+      assignedUrls.add(urlKey);
       updated++;
       sinceProgress++;
       if (onProgress != null &&

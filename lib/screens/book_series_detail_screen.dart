@@ -1434,9 +1434,15 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   }
 
   Widget _buildFilterMenu(Color accent) {
+    final narrow = MediaQuery.sizeOf(context).width < 420;
+    const emerald = Color(0xFF10B981);
+    const pillBg = Color(0xFF1E293B);
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-      child: Row(
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           PopupMenuButton<_VolumeFilter>(
             initialValue: _filter,
@@ -1451,51 +1457,58 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: accent.withValues(alpha: 0.12),
+                color: pillBg,
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: accent.withValues(alpha: 0.45)),
+                border: Border.all(color: emerald),
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text('🌪️ ', style: TextStyle(fontSize: 13)),
-                  Text(
-                    'Filtre : ${_filterLabel(_filter)}',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                      color: accent,
+              child: Text(
+                narrow
+                    ? 'Filtre ▾'
+                    : 'Filtre : ${_filterLabel(_filter)} ▾',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+          Material(
+            color: pillBg,
+            borderRadius: BorderRadius.circular(20),
+            child: InkWell(
+              onTap: _markRangeOwned,
+              borderRadius: BorderRadius.circular(20),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: emerald),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.checklist_rtl,
+                        size: 16, color: Colors.white),
+                    const SizedBox(width: 6),
+                    Text(
+                      narrow ? 'Par lot' : 'Sélection par lot',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                        color: Colors.white,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 4),
-                  Icon(Icons.arrow_drop_down, color: accent, size: 20),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
-          const SizedBox(width: 8),
-          OutlinedButton.icon(
-            onPressed: _markRangeOwned,
-            icon: const Icon(Icons.bolt, size: 16),
-            label: const Text('Lot / Rafale'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: accent,
-              side: BorderSide(color: accent.withValues(alpha: 0.55)),
-              visualDensity: VisualDensity.compact,
-            ),
-          ),
-          const Spacer(),
-          SegmentedButton<bool>(
-            style: ButtonStyle(
-              visualDensity: VisualDensity.compact,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            segments: const [
-              ButtonSegment(value: false, icon: Icon(Icons.grid_view, size: 16)),
-              ButtonSegment(value: true, icon: Icon(Icons.menu_book, size: 16)),
-            ],
-            selected: {_shelfView},
-            onSelectionChanged: (s) => setState(() => _shelfView = s.first),
+          _ViewModeToggle(
+            shelfView: _shelfView,
+            narrow: narrow,
+            onChanged: (v) => setState(() => _shelfView = v),
           ),
         ],
       ),
@@ -1564,7 +1577,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     final centerBg = loaned
         ? const Color(0xFFF59E0B).withValues(alpha: 0.28)
         : owned
-            ? const Color(0xFF10B981).withValues(alpha: 0.35)
+            ? const Color(0xFF047857) // Vert émeraude opaque — contraste Tx
             : const Color(0xFF1E293B);
     final border = wish
         ? const Color(0xFFA855F7)
@@ -1602,18 +1615,19 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                 ),
               ),
             ),
-            // Zone centrale = Possession / ouvrir fiche
+            // Zone centrale : clic = Possédé, appui long = fiche technique
             Expanded(
               child: Material(
                 color: centerBg,
                 child: InkWell(
-                  onTap: () => _onCardTap(slot),
+                  onTap: () => _toggleOwned(slot),
+                  onLongPress: () => _onCardTap(slot),
                   child: Center(
                     child: Text(
                       'T${slot.volume.displayNumber}',
                       style: const TextStyle(
                         fontSize: 11,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: FontWeight.bold,
                         color: Colors.white,
                       ),
                     ),
@@ -2658,6 +2672,79 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     await _service.deleteSeriesAndOwnedVolumes(series.id);
     BooksCollectionCache.instance.clear();
     if (mounted) Navigator.pop(context);
+  }
+}
+
+/// Toggle compact Grille | Étagère (pas de SegmentedButton Material / ✓).
+class _ViewModeToggle extends StatelessWidget {
+  final bool shelfView;
+  final bool narrow;
+  final ValueChanged<bool> onChanged;
+
+  const _ViewModeToggle({
+    required this.shelfView,
+    required this.narrow,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const emerald = Color(0xFF10B981);
+    const pillBg = Color(0xFF1E293B);
+    Widget seg({
+      required bool value,
+      required IconData icon,
+      required String label,
+    }) {
+      final on = shelfView == value;
+      return Material(
+        color: on ? emerald : Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          onTap: () => onChanged(value),
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: narrow ? 8 : 10,
+              vertical: 6,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 15, color: Colors.white),
+                if (!narrow) ...[
+                  const SizedBox(width: 4),
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        color: pillBg,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: emerald),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          seg(value: false, icon: Icons.grid_view, label: 'Grille'),
+          seg(value: true, icon: Icons.auto_stories, label: 'Étagère'),
+        ],
+      ),
+    );
   }
 }
 

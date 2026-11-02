@@ -539,17 +539,22 @@ abstract final class BookIntelligenceService {
       }
     }
 
-    // Apple Books FR en premier (mangas inclus). Google Books ne comble que les trous.
+    // Apple Books FR en premier. Google Books = optionnel (trous uniquement
+    // côté enrichMissingVolumeCovers — ici on le garde pour create/fuse).
     try {
       addHits(await ItunesBooksService.searchSeries(
         cleanName,
         author: authorHint,
         mangaPublisherPass: subcategory == BookSubcategory.manga,
+        bdPublisherPass: subcategory == BookSubcategory.bd,
         allowAudiobook: subcategory == BookSubcategory.novel,
       ));
     } catch (_) {}
 
-    if (!GoogleBooksService.isCircuitOpen) {
+    final itunesCoverCount =
+        hits.where((h) => (h['image_url'] ?? '').isNotEmpty).length;
+    // Google Books seulement si Apple n'a pas assez de couvertures.
+    if (!GoogleBooksService.isCircuitOpen && itunesCoverCount < 6) {
       try {
         addHits(await GoogleBooksService.searchSeriesBatched(
           cleanName,
@@ -614,6 +619,16 @@ abstract final class BookIntelligenceService {
         author: h.author,
         publisher: h.publisher,
       )) {
+        continue;
+      }
+      if (subcategory == BookSubcategory.bd &&
+          BookVfEdition.rejectAngloBdHit(
+            title: title,
+            subtitle: h.raw['subtitle'],
+            language: h.raw['language'],
+            publisher: h.publisher,
+            description: h.raw['description'],
+          )) {
         continue;
       }
       if (BookSeriesNormalizer.looksLikeChapterOrScan(title)) continue;

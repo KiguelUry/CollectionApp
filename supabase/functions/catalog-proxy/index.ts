@@ -73,15 +73,19 @@ Deno.serve(async (req) => {
     const body = await upstream.arrayBuffer();
     const contentType = upstream.headers.get("Content-Type") ??
       (isImage ? "image/jpeg" : "application/json");
+    // Jamais de Set-Cookie upstream (Cloudflare `__cf_bm` → domaine invalide Firefox).
+    const responseHeaders = new Headers({
+      ...corsHeaders,
+      "Content-Type": contentType,
+      "Cache-Control": isImage
+        ? "public, max-age=86400"
+        : "public, max-age=120",
+    });
+    responseHeaders.delete("set-cookie");
+    responseHeaders.delete("set-cookie2");
     return new Response(body, {
       status: upstream.status,
-      headers: {
-        ...corsHeaders,
-        "Content-Type": contentType,
-        "Cache-Control": isImage
-          ? "public, max-age=86400"
-          : "public, max-age=120",
-      },
+      headers: responseHeaders,
     });
   } catch (e) {
     return new Response(`Upstream error: ${e}`, {

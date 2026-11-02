@@ -24,12 +24,13 @@ class ItunesBooksService {
       {};
   static final Map<String, _CachedItunesList> _memoryCache = {};
 
-  /// Apple Books FR : d'abord « Nom Tome » + auteur ; éditeurs (Kana/Glénat)
-  /// seulement si pas assez de couvertures. Pas d'audiobook pour manga/BD/comics.
+  /// Apple Books FR : d'abord « Nom Tome » + auteur ; éditeurs (Kana/Glénat
+  /// ou Le Lombard/Dupuis) seulement si pas assez de couvertures.
   static Future<List<Map<String, String>>> searchSeries(
     String name, {
     String? author,
     bool mangaPublisherPass = false,
+    bool bdPublisherPass = false,
     bool allowAudiobook = false,
   }) async {
     final clean = name.trim();
@@ -77,6 +78,29 @@ class ItunesBooksService {
         if (covers >= 8) break;
       }
     }
+    if (bdPublisherPass) {
+      var covers =
+          out.where((h) => (h['image_url'] ?? '').isNotEmpty).length;
+      if (covers < 8) {
+        for (final publisher in const [
+          'Le Lombard',
+          'Dupuis',
+          'Dargaud',
+          'Casterman',
+        ]) {
+          absorb(
+            await search(
+              '$clean $publisher',
+              limit: 200,
+              allowAudiobook: false,
+            ),
+          );
+          covers =
+              out.where((h) => (h['image_url'] ?? '').isNotEmpty).length;
+          if (covers >= 8) break;
+        }
+      }
+    }
     return out;
   }
 
@@ -114,15 +138,18 @@ class ItunesBooksService {
     return hits.first;
   }
 
-  /// Fallback VF (Kana / Glénat / Crunchyroll) : couverture + date FR.
+  /// Fallback VF (Kana / Glénat / Le Lombard…) : couverture + date FR.
   /// Requête : `"$seriesName Tome $volume"` · country=FR.
   static Future<Map<String, String>?> lookupFrenchVolume(
     String seriesName,
-    int volume,
-  ) async {
+    int volume, {
+    String? publisherHint,
+  }) async {
     final name = seriesName.trim();
     if (name.length < 2 || volume < 1) return null;
-    final term = '$name Tome $volume';
+    final term = publisherHint != null && publisherHint.trim().isNotEmpty
+        ? '$name Tome $volume ${publisherHint.trim()}'
+        : '$name Tome $volume';
     final hits = await search(term, limit: 10, allowAudiobook: false);
     if (hits.isEmpty) return null;
 

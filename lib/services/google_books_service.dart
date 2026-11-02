@@ -519,7 +519,8 @@ class GoogleBooksService {
 
   static String _hdGoogleCover(String url) {
     if (url.isEmpty) return '';
-    var out = url.replaceFirst('http://', 'https://');
+    // Firefox Mixed Content : forcer https sur toutes les imageLinks.
+    var out = url.replaceAll('http://', 'https://');
     out = out.replaceAll('&edge=curl', '');
     out = out.replaceAll(RegExp(r'[&?]edge=curl'), '');
     if (out.contains('zoom=')) {

@@ -39,6 +39,24 @@ abstract final class BookVfEdition {
     caseSensitive: false,
   );
 
+  /// Éditions anglaises de BD franco-belge (Cinebook, Europe Comics…).
+  static final angloBdPublisherRe = RegExp(
+    r'\bcinebook\b|\beurope\s+comics\b|\btwo[\s-]?volume\s+book\b|'
+    r'\bthis\s+two[\s-]?volume\b|\bincludes\s+\w',
+    caseSensitive: false,
+  );
+
+  static final englishProseHintRe = RegExp(
+    r'\b(the|and|with|from|this|that|includes|volume|book|wild|'
+    r'inhospitable|into|their|they|which)\b',
+    caseSensitive: false,
+  );
+
+  static final frenchProseHintRe = RegExp(
+    r'\b(le|la|les|des|une|dans|pour|avec|tome|qui|que|est|sont)\b',
+    caseSensitive: false,
+  );
+
   static bool isUsVolTitle(String title) => usVolTitleRe.hasMatch(title);
 
   /// Titre, sous-titre, auteur ou éditeur à exclure (parasite ou édition IT/SV…).
@@ -52,6 +70,44 @@ abstract final class BookVfEdition {
     if (parasiteTitleRe.hasMatch(blob)) return true;
     if (foreignEditionTitleRe.hasMatch(blob)) return true;
     return false;
+  }
+
+  /// BD franco-belge : zéro anglais (Cinebook / Europe Comics / Vol. / Volume).
+  static bool rejectAngloBdHit({
+    required String title,
+    String? subtitle,
+    String? language,
+    String? publisher,
+    String? description,
+  }) {
+    if (isExplicitEnglish(language)) return true;
+    if (isUsVolTitle(title)) return true;
+    if (RegExp(r'\bvol(?:ume|\.)\s*0*\d+', caseSensitive: false)
+        .hasMatch(title)) {
+      // « Tome N » FR prime ; « Vol. N » / « Volume N » seuls = EN.
+      if (!RegExp(r'\btomes?\s*0*\d+', caseSensitive: false).hasMatch(title)) {
+        return true;
+      }
+    }
+    final blob =
+        '$title ${subtitle ?? ''} ${publisher ?? ''} ${description ?? ''}';
+    if (angloBdPublisherRe.hasMatch(blob)) return true;
+    if (description != null &&
+        description.trim().length >= 40 &&
+        looksEnglishProse(description)) {
+      return true;
+    }
+    return false;
+  }
+
+  /// Synopsis / prose clairement anglaise (heuristique légère).
+  static bool looksEnglishProse(String text) {
+    final t = text.trim();
+    if (t.isEmpty) return false;
+    if (angloBdPublisherRe.hasMatch(t)) return true;
+    final en = englishProseHintRe.allMatches(t).length;
+    final fr = frenchProseHintRe.allMatches(t).length;
+    return en >= 3 && en > fr;
   }
 
   /// Pour une série Roman : rejette les BD / graphic novels / adaptateurs.
