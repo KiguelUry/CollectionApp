@@ -266,8 +266,30 @@ class BookItemAddCoordinator {
   }
 
   Future<void> scanIsbn() async {
-    final isbn = await showIsbnScanSheet(context);
-    if (isbn == null || !context.mounted) return;
+    final outcome = await showIsbnScanSheet(
+      context,
+      onRafaleScan: _handleRafaleIsbn,
+    );
+    if (outcome == null || !context.mounted) return;
+
+    if (outcome.refreshNeeded || outcome.batchAddedCount > 0) {
+      BooksCollectionCache.instance.clear();
+      CollectionRefresh.instance.bump();
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            outcome.batchAddedCount <= 0
+                ? 'Session rafale terminée'
+                : '⚡ ${outcome.batchAddedCount} tome${outcome.batchAddedCount > 1 ? 's' : ''} ajouté${outcome.batchAddedCount > 1 ? 's' : ''}',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final isbn = outcome.singleIsbn;
+    if (isbn == null || isbn.isEmpty) return;
 
     showDialog(
       context: context,
@@ -310,6 +332,99 @@ class BookItemAddCoordinator {
       imageUrl: book['image_url']?.isNotEmpty == true ? book['image_url'] : null,
       subcategory: sub,
       metadata: BookCatalogService.metadataFromLookup(book),
+    );
+  }
+
+  /// Mode Rafale : lookup → rattache/crée la série → ✓ Possédé.
+  Future<IsbnRafaleHistoryEntry?> _handleRafaleIsbn(String isbn) async {
+    final book = await BookCatalogService.lookupByIsbn(isbn);
+    if (book == null) return null;
+
+    final title = (book['title'] ?? '').trim();
+    if (title.isEmpty) return null;
+
+    final sub = book['subcategory_hint'] != null
+        ? BookSubcategory.fromDbValue(book['subcategory_hint'])
+        : BookSubcategory.other;
+    final metadata = BookCatalogService.metadataFromLookup(book);
+    final imageUrl =
+        book['image_url']?.isNotEmpty == true ? book['image_url'] : null;
+    final author = metadata['author']?.toString();
+
+    var parsed = BookSeriesNormalizer.parse(title);
+    final metaSeries = metadata['series_title']?.toString().trim();
+    if (!parsed.hasSeries && metaSeries != null && metaSeries.length >= 2) {
+      parsed = ParsedBookTitle(
+        rawTitle: title,
+        seriesName: metaSeries,
+        volumeNumber: parsed.volumeNumber ??
+            BookTitleParser.extractVolumeNumberStrict(title)?.toDouble(),
+      );
+    }
+
+    final seriesName = BookSeriesNormalizer.displaySeriesName(
+      parsed.seriesName ?? title,
+    );
+    final volNum = (parsed.volumeNumber ??
+            BookTitleParser.extractVolumeNumberStrict(title)?.toDouble() ??
+            1)
+        .round()
+        .clamp(1, 9999);
+
+    final series = await _seriesService.findOrCreateSeries(
+      name: seriesName,
+      subcategory: sub == BookSubcategory.other ? BookSubcategory.novel : sub,
+      coverUrl: imageUrl,
+      author: author,
+    );
+
+    final volume = await _seriesService.getOrCreateVolume(
+      series.id,
+      volNum.toDouble(),
+    );
+    final item = await _seriesService.addVolumeQuick(
+      series: series,
+      volume: volume,
+    );
+    if (imageUrl != null && imageUrl.isNotEmpty) {
+      unawaited(_seriesService.setVolumeCoverUrl(
+        volume.id,
+        imageUrl,
+        coverLanguage: 'fr',
+      ));
+      unawaited(_seriesService.ensureSeriesCoverFromItem(
+        seriesId: series.id,
+        imageUrl: imageUrl,
+      ));
+    }
+    // Crée / enrichit le reste de la série en arrière-plan (Mode Rafale).
+    unawaited(() async {
+      final vols = await _seriesService.fetchVolumes(series.id);
+      await _seriesService.enrichMissingVolumeCovers(
+        series: series,
+        volumes: vols,
+      );
+    }());
+
+    final refreshed = await _seriesService.fetchSeriesById(series.id);
+    final expected = refreshed?.expectedVolumeCount;
+    final items = await _seriesService.fetchSeriesItems(series.id);
+    final ownedCount = items.where((i) => !i.isWishlist && !i.isSold).length;
+    final progress = expected != null && expected > 0
+        ? ' ($ownedCount/$expected)'
+        : ' ($ownedCount)';
+
+    final label =
+        '✅ $seriesName — Tome $volNum ajouté$progress';
+
+    return IsbnRafaleHistoryEntry(
+      isbn: isbn,
+      label: label,
+      coverUrl: imageUrl,
+      itemId: item.id,
+      onUndo: () async {
+        await _seriesService.removeVolumeItem(item.id);
+      },
     );
   }
 
@@ -421,7 +536,8 @@ class BookItemAddCoordinator {
     required double? volumeNumber,
     int? expectedVolumeCount,
   }) async {
-    final isbn = await showIsbnScanSheet(context);
+    final outcome = await showIsbnScanSheet(context);
+    final isbn = outcome?.singleIsbn;
     if (isbn == null || !context.mounted) return;
 
     showDialog(

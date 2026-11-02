@@ -93,6 +93,7 @@ class _BookDiscoverScreenState extends State<BookDiscoverScreen> {
       final apple = await ItunesBooksService.search(
         'bestseller roman français',
         limit: 12,
+        allowAudiobook: false,
       );
       for (final h in apple.take(8)) {
         final title = (h['title'] ?? '').trim();

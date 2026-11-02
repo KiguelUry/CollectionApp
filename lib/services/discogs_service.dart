@@ -19,11 +19,14 @@ class DiscogsService {
 
   static bool get isConfigured => _token != null;
 
-  static Map<String, String> get _headers => {
-        'User-Agent': _userAgent,
-        'Accept': 'application/json',
-        if (_token != null) 'Authorization': 'Discogs token=$_token',
-      };
+  static Map<String, String> get _headers {
+    final headers = <String, String>{
+      'Accept': 'application/json',
+      if (_token != null) 'Authorization': 'Discogs token=$_token',
+    };
+    if (!kIsWeb) headers['User-Agent'] = _userAgent;
+    return headers;
+  }
 
   static String? _formatParam(MediaFormat format) => switch (format) {
         MediaFormat.vinyl => 'Vinyl',

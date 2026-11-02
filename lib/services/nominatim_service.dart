@@ -21,10 +21,9 @@ class NominatimService {
         'addressdetails': '1',
         'limit': '${limit.clamp(1, 10)}',
       });
-      final response = await http.get(
-        url,
-        headers: {'User-Agent': _userAgent, 'Accept': 'application/json'},
-      );
+      final headers = <String, String>{'Accept': 'application/json'};
+      if (!kIsWeb) headers['User-Agent'] = _userAgent;
+      final response = await http.get(url, headers: headers);
       if (response.statusCode != 200) return [];
 
       final list = jsonDecode(response.body) as List<dynamic>;

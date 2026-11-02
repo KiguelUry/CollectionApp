@@ -9,36 +9,72 @@ import '../utils/book_vf_edition.dart';
 import '../utils/catalog_http.dart';
 import '../utils/web_catalog_proxy.dart';
 
+class _CachedItunesList {
+  final List<Map<String, String>> hits;
+  final DateTime at;
+  _CachedItunesList(this.hits, this.at);
+  bool get isFresh =>
+      DateTime.now().difference(at) < const Duration(minutes: 5);
+}
+
 /// Recherche livres / mangas / BD — API iTunes (couvertures HD).
 /// Sur le web : Edge Function Supabase `catalog-proxy` (CORS).
 class ItunesBooksService {
-  /// Apple Books FR : nom, « Nom Tome », auteur, et pour un manga
-  /// les passes éditeur VF (Glénat / Kana) qui portent les couvertures.
+  static final Map<String, Future<List<Map<String, String>>>> _inFlight =
+      {};
+  static final Map<String, _CachedItunesList> _memoryCache = {};
+
+  /// Apple Books FR : d'abord « Nom Tome » + auteur ; éditeurs (Kana/Glénat)
+  /// seulement si pas assez de couvertures. Pas d'audiobook pour manga/BD/comics.
   static Future<List<Map<String, String>>> searchSeries(
     String name, {
     String? author,
     bool mangaPublisherPass = false,
+    bool allowAudiobook = false,
   }) async {
     final clean = name.trim();
     if (clean.length < 2) return const [];
-    final queries = <String>[
-      clean,
+
+    final primary = <String>[
       '$clean Tome',
       if (author != null && author.trim().length >= 2) '$clean ${author.trim()}',
-      if (mangaPublisherPass) '$clean Glénat',
-      if (mangaPublisherPass) '$clean Kana',
+      clean,
       ...BookSeriesNormalizer.extraItunesQueries(clean),
     ];
+
     final lists = await Future.wait(
-      queries.map((q) => search(q, limit: 200)),
+      primary.map(
+        (q) => search(q, limit: 200, allowAudiobook: allowAudiobook),
+      ),
     );
     final seen = <String>{};
     final out = <Map<String, String>>[];
-    for (final list in lists) {
+    void absorb(List<Map<String, String>> list) {
       for (final h in list) {
         final t = (h['title'] ?? '').toLowerCase();
         if (t.isEmpty || !seen.add(t)) continue;
         out.add(h);
+      }
+    }
+
+    for (final list in lists) {
+      absorb(list);
+    }
+
+    final coverCount =
+        out.where((h) => (h['image_url'] ?? '').isNotEmpty).length;
+    if (mangaPublisherPass && coverCount < 8) {
+      for (final publisher in const ['Kana', 'Glénat']) {
+        absorb(
+          await search(
+            '$clean $publisher',
+            limit: 200,
+            allowAudiobook: false,
+          ),
+        );
+        final covers =
+            out.where((h) => (h['image_url'] ?? '').isNotEmpty).length;
+        if (covers >= 8) break;
       }
     }
     return out;
@@ -47,12 +83,15 @@ class ItunesBooksService {
   static Future<List<Map<String, String>>> search(
     String query, {
     int limit = 200,
+    bool allowAudiobook = true,
   }) async {
     final q = query.trim();
     if (q.length < 2) return [];
 
     final ebook = await _searchEntity(q, entity: 'ebook', limit: limit);
-    if (ebook.length >= 8) return ebook;
+    // Mangas / BD / Comics : jamais audiobook.
+    // Romans : audiobook uniquement si ebook a renvoyé 0 résultat.
+    if (!allowAudiobook || ebook.isNotEmpty) return ebook;
 
     final merged = <Map<String, String>>[];
     final seen = <String>{};
@@ -70,7 +109,7 @@ class ItunesBooksService {
   static Future<Map<String, String>?> lookupByIsbn(String isbn) async {
     final cleaned = isbn.replaceAll(RegExp(r'[^0-9Xx]'), '');
     if (cleaned.length < 10) return null;
-    final hits = await search(cleaned, limit: 5);
+    final hits = await search(cleaned, limit: 5, allowAudiobook: false);
     if (hits.isEmpty) return null;
     return hits.first;
   }
@@ -84,7 +123,7 @@ class ItunesBooksService {
     final name = seriesName.trim();
     if (name.length < 2 || volume < 1) return null;
     final term = '$name Tome $volume';
-    final hits = await search(term, limit: 10);
+    final hits = await search(term, limit: 10, allowAudiobook: false);
     if (hits.isEmpty) return null;
 
     Map<String, String>? best;
@@ -153,6 +192,34 @@ class ItunesBooksService {
     required String entity,
     required int limit,
   }) async {
+    final cacheKey = '$entity|$limit|${query.toLowerCase()}';
+    final cached = _memoryCache[cacheKey];
+    if (cached != null && cached.isFresh) {
+      return cached.hits.map((e) => Map<String, String>.from(e)).toList();
+    }
+
+    final inFlight = _inFlight[cacheKey];
+    if (inFlight != null) return inFlight;
+
+    final future = _fetchEntity(query, entity: entity, limit: limit);
+    _inFlight[cacheKey] = future;
+    try {
+      final hits = await future;
+      _memoryCache[cacheKey] = _CachedItunesList(
+        hits.map((e) => Map<String, String>.from(e)).toList(),
+        DateTime.now(),
+      );
+      return hits;
+    } finally {
+      _inFlight.remove(cacheKey);
+    }
+  }
+
+  static Future<List<Map<String, String>>> _fetchEntity(
+    String query, {
+    required String entity,
+    required int limit,
+  }) async {
     try {
       final itunesUri = Uri.https('itunes.apple.com', '/search', {
         'term': query,
@@ -162,6 +229,7 @@ class ItunesBooksService {
         'country': 'FR',
         'lang': 'fr_fr',
       });
+      // Sur le web : pas de User-Agent (catalogHttpHeaders l'omet déjà).
       final response = await http
           .get(
             proxiedCatalogUri(itunesUri),

@@ -90,8 +90,11 @@ class BookCatalogService {
     ];
     final itunesF = Future.wait(
       itunesQueries.map(
-        (q) => ItunesBooksService.search(q, limit: q == enhanced ? 200 : 50)
-            .timeout(t, onTimeout: () => <Map<String, String>>[]),
+        (q) => ItunesBooksService.search(
+              q,
+              limit: q == enhanced ? 200 : 50,
+              allowAudiobook: subcategory == BookSubcategory.novel,
+            ).timeout(t, onTimeout: () => <Map<String, String>>[]),
       ),
     ).then((lists) {
       final seen = <String>{};

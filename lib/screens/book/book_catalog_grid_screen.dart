@@ -901,6 +901,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
           final more = await ItunesBooksService.search(
             '$seriesQ $leadAuthor',
             limit: 50,
+            allowAudiobook: _effectiveSub == BookSubcategory.novel,
           ).timeout(srcTimeout, onTimeout: () => <Map<String, String>>[]);
           final extra = more
               .map(

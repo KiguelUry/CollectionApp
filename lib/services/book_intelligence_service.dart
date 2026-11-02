@@ -545,6 +545,7 @@ abstract final class BookIntelligenceService {
         cleanName,
         author: authorHint,
         mangaPublisherPass: subcategory == BookSubcategory.manga,
+        allowAudiobook: subcategory == BookSubcategory.novel,
       ));
     } catch (_) {}
 
@@ -580,6 +581,7 @@ abstract final class BookIntelligenceService {
         final extraIt = await ItunesBooksService.search(
           '$cleanName $author',
           limit: 200,
+          allowAudiobook: subcategory == BookSubcategory.novel,
         );
         for (final h in extraIt) {
           final t = (h['title'] ?? '').toLowerCase();

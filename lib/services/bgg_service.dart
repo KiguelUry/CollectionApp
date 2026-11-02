@@ -225,9 +225,12 @@ class BggService {
 
   static Map<String, String> get _headers {
     final headers = <String, String>{
-      'User-Agent': 'CollectionFamille/1.0',
       'Accept': 'application/xml',
     };
+    // Jamais de User-Agent sur le web (header restreint → CORS Firefox).
+    if (!kIsWeb) {
+      headers['User-Agent'] = 'CollectionFamille/1.0';
+    }
     final token = dotenv.env['BGG_APPLICATION_TOKEN']?.trim();
     if (token != null && token.isNotEmpty) {
       headers['Authorization'] = 'Bearer $token';
@@ -1453,13 +1456,9 @@ class BggService {
         'objectid': bggId,
         'objecttype': 'thing',
       });
-      final response = await http.get(
-        uri,
-        headers: {
-          'User-Agent': 'CollectionFamille/1.0',
-          'Accept': 'application/json',
-        },
-      );
+      final geekHeaders = <String, String>{'Accept': 'application/json'};
+      if (!kIsWeb) geekHeaders['User-Agent'] = 'CollectionFamille/1.0';
+      final response = await http.get(uri, headers: geekHeaders);
       if (response.statusCode != 200 || response.body.isEmpty) return {};
       final decoded = jsonDecode(response.body);
       if (decoded is! Map) return {};

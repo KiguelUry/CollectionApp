@@ -106,12 +106,13 @@ class _MediaQuickSearchSheetState extends State<_MediaQuickSearchSheet> {
   }
 
   Future<void> _scanBarcode() async {
-    final code = await showIsbnScanSheet(
+    final outcome = await showIsbnScanSheet(
       context,
       title: 'Scanner le code-barres',
       hint: 'EAN / UPC de l\'album',
       validateBookLookup: false,
     );
+    final code = outcome?.singleIsbn;
     if (code == null || !mounted) return;
 
     setState(() => _loading = true);

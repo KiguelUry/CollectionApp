@@ -914,7 +914,11 @@ class BookSeriesService {
     }
     if (onFive == null || onFive <= 0) {
       try {
-        final hits = await ItunesBooksService.search(series.name, limit: 40);
+        final hits = await ItunesBooksService.search(
+          series.name,
+          limit: 40,
+          allowAudiobook: series.subcategory == BookSubcategory.novel,
+        );
         double sum = 0;
         var n = 0;
         for (final h in hits) {
@@ -1137,6 +1141,7 @@ class BookSeriesService {
         working.name,
         author: seriesAuthor,
         mangaPublisherPass: working.subcategory == BookSubcategory.manga,
+        allowAudiobook: working.subcategory == BookSubcategory.novel,
       );
       for (final h in itunes) {
         final title = h['title'] ?? '';

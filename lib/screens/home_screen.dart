@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../models/book_subcategory.dart';
 import '../models/collection_category.dart';
 import '../models/collection_group.dart';
 import '../models/collection_item.dart';
@@ -46,7 +45,6 @@ import '../services/tag_service.dart';
 import '../widgets/category_collection_tab_pane.dart';
 import '../widgets/category_collection_header.dart';
 import '../widgets/category_collection_shell.dart';
-import '../widgets/isbn_scan_sheet.dart';
 import 'collection_change_history_screen.dart';
 import 'global_play_history_screen.dart';
 import '../widgets/add_item_manual_dialog.dart';
@@ -69,7 +67,6 @@ import '../services/offline_mode.dart';
 import '../services/supabase_capacity.dart';
 import '../widgets/offline_banner.dart';
 import '../utils/catalog_hit_metadata.dart';
-import '../widgets/book_subcategory_picker.dart';
 import '../widgets/catalog_search_sheet.dart';
 import '../widgets/bgg_category_import_prompt.dart';
 import '../widgets/videogame_platform_picker.dart';
@@ -544,61 +541,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _scanIsbnAndAdd() async {
-    final isbn = await showIsbnScanSheet(context);
-    if (isbn == null || !mounted) return;
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => const PopScope(
-        canPop: false,
-        child: AlertDialog(
-          content: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(width: 20),
-              Flexible(child: Text('Recherche du livre…')),
-            ],
-          ),
-        ),
-      ),
-    );
-
-    final book = await BookCatalogService.lookupByIsbn(isbn);
-
-    if (!mounted) return;
-    Navigator.pop(context);
-
-    if (book == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Livre introuvable pour cet ISBN (essaie la recherche manuelle)',
-          ),
-        ),
-      );
-      return;
-    }
-
-    final suggested = book['subcategory_hint'] != null
-        ? BookSubcategory.fromDbValue(book['subcategory_hint'])
-        : BookSubcategory.other;
-
-    final subcategory = await showBookSubcategoryPicker(
-      context,
-      suggested: suggested,
-    );
-    if (!mounted || subcategory == null) return;
-
-    _showOptionsDialog(
-      title: book['title']!,
-      imageUrl: book['image_url']?.isNotEmpty == true
-          ? book['image_url']
-          : null,
-      subcategory: subcategory.dbValue,
-      metadata: BookCatalogService.metadataFromLookup(book),
-    );
+    await BookItemAddCoordinator(context).scanIsbn();
   }
 
   List<Map<String, dynamic>> _scopeRows(List<Map<String, dynamic>> rows) {

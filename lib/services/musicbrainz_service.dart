@@ -8,6 +8,12 @@ import 'package:http/http.dart' as http;
 class MusicbrainzService {
   static const _userAgent = 'Collectingo/1.0 (collection-app; contact@collectingo.app)';
 
+  static Map<String, String> get _headers {
+    final headers = <String, String>{'Accept': 'application/json'};
+    if (!kIsWeb) headers['User-Agent'] = _userAgent;
+    return headers;
+  }
+
   static Future<List<Map<String, String>>> searchReleases(
     String query, {
     int limit = 20,
@@ -21,10 +27,7 @@ class MusicbrainzService {
         'fmt': 'json',
         'limit': '$limit',
       });
-      final response = await http.get(
-        url,
-        headers: {'User-Agent': _userAgent, 'Accept': 'application/json'},
-      );
+      final response = await http.get(url, headers: _headers);
       if (response.statusCode != 200) return [];
 
       final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -52,10 +55,7 @@ class MusicbrainzService {
         'fmt': 'json',
         'limit': '5',
       });
-      final response = await http.get(
-        url,
-        headers: {'User-Agent': _userAgent, 'Accept': 'application/json'},
-      );
+      final response = await http.get(url, headers: _headers);
       if (response.statusCode != 200) return null;
 
       final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -114,10 +114,9 @@ class MusicbrainzService {
         'coverartarchive.org',
         '/release/$releaseId/front',
       );
-      final response = await http.head(
-        url,
-        headers: {'User-Agent': _userAgent},
-      );
+      final headHeaders = <String, String>{};
+      if (!kIsWeb) headHeaders['User-Agent'] = _userAgent;
+      final response = await http.head(url, headers: headHeaders);
       if (response.statusCode == 307 || response.statusCode == 200) {
         return response.headers['location'] ??
             'https://coverartarchive.org/release/$releaseId/front-500';
