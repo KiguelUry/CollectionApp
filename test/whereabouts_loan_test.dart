@@ -11,6 +11,8 @@ CollectionItem _item({
   String? locationUserId,
   String? locationLabel,
   Map<String, dynamic>? metadata,
+  String? loanedToName,
+  DateTime? loanedAt,
 }) =>
     CollectionItem(
       id: 'x',
@@ -20,6 +22,8 @@ CollectionItem _item({
       locationUserId: locationUserId,
       locationLabel: locationLabel,
       metadata: metadata,
+      loanedToName: loanedToName,
+      loanedAt: loanedAt,
     );
 
 void main() {
@@ -60,30 +64,49 @@ void main() {
     });
   });
 
+  group('isOnLoan', () {
+    test('date seule suffit (saisie du nom en cours)', () {
+      expect(
+        _item(loanedAt: DateTime(2026, 11, 4)).isOnLoan,
+        isTrue,
+      );
+    });
+
+    test('nom seul suffit', () {
+      expect(_item(loanedToName: 'Noé').isOnLoan, isTrue);
+    });
+  });
+
   group('applyTemporaryLoan', () {
-    test('prêt à un membre : id + nom sans préfixe + date', () {
+    test('prêt avec emprunteur explicite (pas le lieu)', () {
       final date = DateTime(2026, 10, 1);
       final loaned = applyTemporaryLoan(
-        _item(locationUserId: 'lou', locationLabel: 'Chez Lou'),
+        _item(
+          locationUserId: 'lou',
+          locationLabel: 'Chez Lou',
+          metadata: {'holder_label': 'Braine-l\'Alleud'},
+        ),
         isLoan: true,
         loanedAt: date,
         meUserId: _me,
+        borrowerName: 'Noé Niche',
       );
       expect(loaned.isOnLoan, isTrue);
-      expect(loaned.loanedToId, 'lou');
-      expect(loaned.loanedToName, 'Lou');
+      expect(loaned.loanedToName, 'Noé Niche');
       expect(loaned.loanedAt, date);
+      // Ne doit PAS recopier le lieu dans « Prêté à ».
+      expect(loaned.loanedToName, isNot(contains('Braine')));
     });
 
-    test('prêt hors app (lieu libre) : pas d\'id', () {
+    test('sans emprunteur : pas de nom inventé depuis le lieu', () {
       final loaned = applyTemporaryLoan(
-        _item(locationLabel: 'Chez Max', metadata: {'holder_label': 'Max'}),
+        _item(locationLabel: 'Braine-l\'Alleud'),
         isLoan: true,
         meUserId: _me,
       );
-      expect(loaned.loanedToId, isNull);
-      expect(loaned.loanedToName, 'Max');
       expect(loaned.loanedAt, isNotNull);
+      expect(loaned.loanedToName, isNull);
+      expect(loaned.isOnLoan, isTrue);
     });
 
     test('désactivation efface le prêt', () {
@@ -91,6 +114,8 @@ void main() {
         _item(locationUserId: 'lou', locationLabel: 'Chez Lou'),
         isLoan: true,
         meUserId: _me,
+        borrowerName: 'Lou',
+        borrowerId: 'lou',
       );
       final back = applyTemporaryLoan(loaned, isLoan: false);
       expect(back.isOnLoan, isFalse);
@@ -104,12 +129,29 @@ void main() {
 
     test('loanDbFields sérialise la date en UTC ISO', () {
       final loaned = applyTemporaryLoan(
-        _item(locationUserId: 'lou', locationLabel: 'Chez Lou'),
+        _item(),
         isLoan: true,
         loanedAt: DateTime.utc(2026, 10, 1),
         meUserId: _me,
+        borrowerName: 'Lou',
       );
       expect(loanDbFields(loaned)['loaned_at'], '2026-10-01T00:00:00.000Z');
+    });
+
+    test('changement de date conserve l\'emprunteur', () {
+      final first = applyTemporaryLoan(
+        _item(),
+        isLoan: true,
+        loanedAt: DateTime(2026, 10, 1),
+        borrowerName: 'Noé',
+      );
+      final next = applyTemporaryLoan(
+        first,
+        isLoan: true,
+        loanedAt: DateTime(2026, 10, 15),
+      );
+      expect(next.loanedToName, 'Noé');
+      expect(next.loanedAt, DateTime(2026, 10, 15));
     });
   });
 
@@ -122,7 +164,7 @@ void main() {
               body: TemporaryLoanToggle(
                 isLoan: isLoan,
                 loanedAt: DateTime(2026, 10, 15),
-                onChanged: (v, _) => lastValue = v,
+                onChanged: (v, _, {borrowerName}) => lastValue = v,
               ),
             ),
           );
@@ -131,8 +173,8 @@ void main() {
       expect(find.text('C\'est un prêt temporaire'), findsOneWidget);
       expect(find.byKey(const ValueKey('temporary_loan_date')), findsNothing);
 
-      await tester.tap(find.byKey(const ValueKey('temporary_loan_switch')));
-      expect(lastValue, isTrue);
+      // L'activation ouvre un pop-up — on vérifie juste l'état actif.
+      expect(lastValue, isNull);
 
       await tester.pumpWidget(build(true));
       expect(find.text('Prêté le 15/10/2026'), findsOneWidget);

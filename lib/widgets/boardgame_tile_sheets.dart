@@ -554,59 +554,63 @@ class _BoardgameTileLocationSheetState
                   label: const Text('Foyers & lieux liés'),
                 ),
               ),
-              const SizedBox(height: 4),
-              if (multi)
-                ItemCopyUnitsPanel(
-                  item: _item,
-                  groups: widget.groups,
-                  selectedGroupIds: groupIds,
-                  readOnly: widget.readOnly,
-                  mode: ItemCopyUnitsMode.whereabouts,
-                  onItemChanged: (next) {
-                    setState(() {
-                      _item = next;
-                      _groupSel = _groupIdsFromItem(next);
-                    });
-                    _saveDebounce?.cancel();
-                    _saveDebounce = Timer(
-                      const Duration(milliseconds: 350),
-                      _persistCopies,
-                    );
-                  },
-                )
-              else if (widget.readOnly)
-                Text(
-                  currentLabel == null || currentLabel.isEmpty
-                      ? 'Non renseignée'
-                      : currentLabel,
-                  style: const TextStyle(fontSize: 15),
-                )
-              else
-                CompactWhereaboutsDropdown(
-                  groups: widget.groups,
-                  selectedGroupIds: groupIds,
-                  locationUserId: _item.locationUserId,
-                  holderLabel: _item.locationLabel,
-                  readOnly: false,
-                  applyDefaultIfEmpty: false,
-                  loanActive: _item.isOnLoan,
-                  onChanged: ({
-                    locationUserId,
-                    holderLabel,
-                    clearHolder = false,
-                    manualHolder = false,
-                  }) {
-                    _applyWhereabouts(
-                      locationUserId: locationUserId,
-                      holderLabel: holderLabel,
-                      clearHolder: clearHolder,
-                      manualHolder: manualHolder,
-                    );
-                    if (manualHolder || locationUserId != null) {
-                      _schedulePersist();
-                    }
-                  },
-                ),
+              // Pendant un prêt : masquer « Chez qui ? » (lieu/personne/saisie)
+              // jusqu'au bloc date / « Prêté à ».
+              if (!_item.isOnLoan) ...[
+                const SizedBox(height: 4),
+                if (multi)
+                  ItemCopyUnitsPanel(
+                    item: _item,
+                    groups: widget.groups,
+                    selectedGroupIds: groupIds,
+                    readOnly: widget.readOnly,
+                    mode: ItemCopyUnitsMode.whereabouts,
+                    onItemChanged: (next) {
+                      setState(() {
+                        _item = next;
+                        _groupSel = _groupIdsFromItem(next);
+                      });
+                      _saveDebounce?.cancel();
+                      _saveDebounce = Timer(
+                        const Duration(milliseconds: 350),
+                        _persistCopies,
+                      );
+                    },
+                  )
+                else if (widget.readOnly)
+                  Text(
+                    currentLabel == null || currentLabel.isEmpty
+                        ? 'Non renseignée'
+                        : currentLabel,
+                    style: const TextStyle(fontSize: 15),
+                  )
+                else
+                  CompactWhereaboutsDropdown(
+                    groups: widget.groups,
+                    selectedGroupIds: groupIds,
+                    locationUserId: _item.locationUserId,
+                    holderLabel: _item.locationLabel,
+                    readOnly: false,
+                    applyDefaultIfEmpty: false,
+                    loanActive: false,
+                    onChanged: ({
+                      locationUserId,
+                      holderLabel,
+                      clearHolder = false,
+                      manualHolder = false,
+                    }) {
+                      _applyWhereabouts(
+                        locationUserId: locationUserId,
+                        holderLabel: holderLabel,
+                        clearHolder: clearHolder,
+                        manualHolder: manualHolder,
+                      );
+                      if (manualHolder || locationUserId != null) {
+                        _schedulePersist();
+                      }
+                    },
+                  ),
+              ],
               // Prêt rapide toujours visible (même « Chez moi »).
               // Si déjà prêté : pas de switch (bandeau « Rendre » suffit).
               if (!multi && !widget.readOnly) ...[
@@ -626,13 +630,14 @@ class _BoardgameTileLocationSheetState
                     });
                     _schedulePersist();
                   },
-                  onChanged: (isLoan, date) {
+                  onChanged: (isLoan, date, {borrowerName}) {
                     setState(() {
                       _item = applyTemporaryLoan(
                         _item,
                         isLoan: isLoan,
                         loanedAt: date,
                         meUserId: _meUserId,
+                        borrowerName: borrowerName,
                       );
                       _dirty = true;
                     });

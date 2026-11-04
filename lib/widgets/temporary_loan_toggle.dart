@@ -13,7 +13,9 @@ class TemporaryLoanToggle extends StatefulWidget {
   final bool enabled;
   /// Si true et prêt actif : pas de switch (le parent a déjà « Rendre »).
   final bool hideSwitchWhenActive;
-  final void Function(bool isLoan, DateTime loanedAt) onChanged;
+  /// [borrowerName] fourni au moment de l'activation (après pop-up).
+  final void Function(bool isLoan, DateTime loanedAt, {String? borrowerName})
+      onChanged;
   final ValueChanged<String>? onBorrowerChanged;
 
   const TemporaryLoanToggle({
@@ -33,6 +35,7 @@ class TemporaryLoanToggle extends StatefulWidget {
 
 class _TemporaryLoanToggleState extends State<TemporaryLoanToggle> {
   late final TextEditingController _who;
+  final _whoFocus = FocusNode();
   List<Map<String, dynamic>> _friends = const [];
 
   @override
@@ -45,13 +48,21 @@ class _TemporaryLoanToggleState extends State<TemporaryLoanToggle> {
   @override
   void didUpdateWidget(covariant TemporaryLoanToggle oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // Ne pas écraser la saisie en cours (sinon focus / curseur sautent).
+    if (_whoFocus.hasFocus) return;
     final next = widget.borrowerName ?? '';
-    if (next != _who.text && next.isNotEmpty) _who.text = next;
+    if (next != _who.text) {
+      _who.value = TextEditingValue(
+        text: next,
+        selection: TextSelection.collapsed(offset: next.length),
+      );
+    }
   }
 
   @override
   void dispose() {
     _who.dispose();
+    _whoFocus.dispose();
     super.dispose();
   }
 
@@ -79,12 +90,12 @@ class _TemporaryLoanToggleState extends State<TemporaryLoanToggle> {
     if (picked != null) widget.onChanged(true, picked);
   }
 
-  Future<void> _pickFriend() async {
+  Future<String?> _pickFriendName() async {
     if (_friends.isEmpty) {
       await _loadFriends();
     }
-    if (!mounted) return;
-    final chosen = await showModalBottomSheet<String>(
+    if (!mounted) return null;
+    return showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
       builder: (ctx) {
@@ -124,9 +135,77 @@ class _TemporaryLoanToggleState extends State<TemporaryLoanToggle> {
         );
       },
     );
+  }
+
+  Future<void> _pickFriendIntoField() async {
+    final chosen = await _pickFriendName();
     if (chosen == null || !mounted) return;
     _who.text = chosen;
     widget.onBorrowerChanged?.call(chosen.trim());
+  }
+
+  /// Pop-up au moment où on coche le prêt : désigner l'emprunteur.
+  Future<String?> _promptBorrower() async {
+    final ctrl = TextEditingController(text: '');
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('À qui le prêtes-tu ?'),
+          content: TextField(
+            controller: ctrl,
+            autofocus: true,
+            textInputAction: TextInputAction.done,
+            decoration: InputDecoration(
+              labelText: 'Prêté à',
+              hintText: 'Ami ou nom libre',
+              prefixIcon: const Icon(Icons.person_outline),
+              suffixIcon: IconButton(
+                tooltip: 'Choisir un ami',
+                onPressed: () async {
+                  final chosen = await _pickFriendName();
+                  if (chosen != null) ctrl.text = chosen;
+                },
+                icon: Icon(Icons.group_outlined, color: Colors.blue.shade700),
+              ),
+              border: const OutlineInputBorder(),
+            ),
+            onSubmitted: (v) {
+              final t = v.trim();
+              if (t.isNotEmpty) Navigator.pop(ctx, t);
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Annuler'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final t = ctrl.text.trim();
+                if (t.isEmpty) return;
+                Navigator.pop(ctx, t);
+              },
+              child: const Text('Prêter'),
+            ),
+          ],
+        );
+      },
+    );
+    ctrl.dispose();
+    return name;
+  }
+
+  Future<void> _onSwitch(bool enable) async {
+    if (!enable) {
+      widget.onChanged(false, DateTime.now());
+      return;
+    }
+    final name = await _promptBorrower();
+    if (name == null || !mounted) return;
+    _who.text = name;
+    widget.onChanged(true, DateTime.now(), borrowerName: name);
+    widget.onBorrowerChanged?.call(name);
   }
 
   @override
@@ -146,9 +225,7 @@ class _TemporaryLoanToggleState extends State<TemporaryLoanToggle> {
                 Icon(Icons.handshake_outlined, color: Colors.blue.shade700),
             title: const Text('C\'est un prêt temporaire'),
             value: widget.isLoan,
-            onChanged: widget.enabled
-                ? (v) => widget.onChanged(v, DateTime.now())
-                : null,
+            onChanged: widget.enabled ? _onSwitch : null,
           ),
         if (widget.isLoan) ...[
           Align(
@@ -164,6 +241,7 @@ class _TemporaryLoanToggleState extends State<TemporaryLoanToggle> {
           TextField(
             key: const ValueKey('temporary_loan_who'),
             controller: _who,
+            focusNode: _whoFocus,
             enabled: widget.enabled,
             decoration: InputDecoration(
               labelText: 'Prêté à',
@@ -172,7 +250,7 @@ class _TemporaryLoanToggleState extends State<TemporaryLoanToggle> {
               prefixIcon: const Icon(Icons.person_outline),
               suffixIcon: IconButton(
                 tooltip: 'Choisir un ami',
-                onPressed: widget.enabled ? _pickFriend : null,
+                onPressed: widget.enabled ? _pickFriendIntoField : null,
                 icon: Icon(Icons.group_outlined, color: Colors.blue.shade700),
               ),
               border: const OutlineInputBorder(),

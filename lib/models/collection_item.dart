@@ -89,7 +89,10 @@ class CollectionItem {
 
   bool get isGroupOwned => groupId != null;
 
+  /// Actif dès qu'une date de prêt existe (même si le nom est encore en cours
+  /// de saisie) — sinon vider « Prêté à » faisait sortir du mode prêt.
   bool get isOnLoan =>
+      loanedAt != null ||
       loanedToId != null ||
       (loanedToName != null && loanedToName!.trim().isNotEmpty);
 

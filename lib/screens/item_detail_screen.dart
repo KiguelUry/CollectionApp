@@ -1980,7 +1980,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
               _saveNow();
             },
           )
-        else
+        else if (!_item.isOnLoan)
           CompactWhereaboutsDropdown(
             groups: _groups,
             selectedGroupIds: _selectedGroupIds,
@@ -2020,17 +2020,13 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
               }
             },
           ),
-        if (!ro &&
-            !multi &&
-            isAwayFromHome(
-              _item,
-              meUserId: Supabase.instance.client.auth.currentUser?.id,
-            )) ...[
+        if (!ro && !multi) ...[
           const SizedBox(height: 8),
           TemporaryLoanToggle(
             isLoan: _item.isOnLoan,
             loanedAt: _item.loanedAt,
             borrowerName: _item.loanedToName,
+            hideSwitchWhenActive: _item.isOnLoan,
             onBorrowerChanged: (name) {
               setState(() {
                 _item = _item.copyWith(
@@ -2039,13 +2035,14 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
               });
               _scheduleSave();
             },
-            onChanged: (isLoan, date) {
+            onChanged: (isLoan, date, {borrowerName}) {
               setState(() {
                 _item = applyTemporaryLoan(
                   _item,
                   isLoan: isLoan,
                   loanedAt: date,
                   meUserId: Supabase.instance.client.auth.currentUser?.id,
+                  borrowerName: borrowerName,
                 );
               });
               _saveNow();

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../models/item_condition.dart';
 import '../services/collection_refresh.dart';
@@ -52,7 +51,6 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
   List<CollectionItem> _owned = [];
   List<CollectionItem> _loans = [];
   bool _loading = true;
-  CollectionCategory? _categoryFilter;
 
   String? get _meUserId {
     try {
@@ -61,12 +59,6 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
       return null;
     }
   }
-
-  bool _matchesFilter(CollectionItem item) =>
-      _categoryFilter == null || item.category == _categoryFilter;
-
-  List<CollectionItem> get _filteredLoans =>
-      _loans.where(_matchesFilter).toList();
 
   @override
   void initState() {
@@ -91,18 +83,12 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
   }
 
   List<GroupedCollectionItem> get _duplicates => CollectionGridGrouper.group(
-        _owned
-            .where((i) => !i.isWishlist && !i.isSold && _matchesFilter(i))
-            .toList(),
+        _owned.where((i) => !i.isWishlist && !i.isSold).toList(),
       ).where((g) => g.hasDuplicates).toList();
 
   List<CollectionItem> get _forSale => _owned
       .where(
-        (i) =>
-            !i.isSold &&
-            !i.isWishlist &&
-            _matchesFilter(i) &&
-            (i.isForSale || itemWantsTrade(i)),
+        (i) => !i.isSold && !i.isWishlist && (i.isForSale || itemWantsTrade(i)),
       )
       .toList()
     ..sort((a, b) => a.title.compareTo(b.title));
@@ -215,213 +201,121 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
   Widget build(BuildContext context) {
     final duplicates = _duplicates;
     final forSale = _forSale;
-    final loans = _filteredLoans;
-    final narrow = MediaQuery.sizeOf(context).width < 700;
-    final categories = <CollectionCategory>{
-      for (final i in [..._loans, ..._owned]) i.category,
-    }.toList()
-      ..sort((a, b) => a.label.compareTo(b.label));
-
-    return Scaffold(
-      appBar: AppAppBar(
-        title: 'Prêts & échanges',
-        actions: [
-          IconButton(
-            tooltip: 'Hôtel des ventes',
-            icon: const Icon(Icons.storefront_outlined),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const MarketplaceScreen()),
-            ),
-          ),
-        ],
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _load,
-              child: Align(
-                alignment: Alignment.topCenter,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 860),
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 32),
-                    children: [
-                      if (categories.length > 1) ...[
-                        Text(
-                          'Filtrer par collection',
-                          style: Theme.of(context).textTheme.labelLarge,
-                        ),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
-                          children: [
-                            FilterChip(
-                              label: const Text('Toutes'),
-                              selected: _categoryFilter == null,
-                              onSelected: (_) =>
-                                  setState(() => _categoryFilter = null),
-                            ),
-                            for (final c in categories)
-                              FilterChip(
-                                avatar: Icon(c.icon, size: 16),
-                                label: Text(c.label),
-                                selected: _categoryFilter == c,
-                                onSelected: (_) => setState(
-                                  () => _categoryFilter =
-                                      _categoryFilter == c ? null : c,
-                                ),
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                      ],
-                      if (narrow) ...[
-                        _BentoSection(
-                          icon: Icons.handshake_outlined,
-                          title: 'Prêts en cours',
-                          count: loans.length,
-                          color: Colors.blue.shade700,
-                          child: _buildLoansList(loans),
-                        ),
-                        const SizedBox(height: 12),
-                        _BentoSection(
-                          icon: Icons.copy_all_outlined,
-                          title: 'Doublons',
-                          count: duplicates.length,
-                          color: Colors.teal.shade700,
-                          child: _buildDuplicatesList(duplicates),
-                        ),
-                        const SizedBox(height: 12),
-                        _BentoSection(
-                          icon: Icons.storefront_outlined,
-                          title: 'À vendre',
-                          count: forSale.length,
-                          color: Colors.orange.shade800,
-                          child: _buildForSaleList(forSale),
-                        ),
-                      ] else
-                        DefaultTabController(
-                          length: 3,
-                          initialIndex: widget.initialTab.clamp(0, 2),
-                          child: Column(
-                            children: [
-                              TabBar(
-                                tabs: [
-                                  Tab(
-                                    text: _tabLabel(
-                                      'Prêts en cours',
-                                      loans.length,
-                                    ),
-                                  ),
-                                  Tab(
-                                    text: _tabLabel(
-                                      'Doublons',
-                                      duplicates.length,
-                                    ),
-                                  ),
-                                  Tab(
-                                    text: _tabLabel(
-                                      'À vendre',
-                                      forSale.length,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              SizedBox(
-                                height:
-                                    MediaQuery.sizeOf(context).height * 0.7,
-                                child: TabBarView(
-                                  children: [
-                                    _buildLoansList(loans),
-                                    _buildDuplicatesList(duplicates),
-                                    _buildForSaleList(forSale),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
+    return DefaultTabController(
+      length: 3,
+      initialIndex: widget.initialTab.clamp(0, 2),
+      child: Scaffold(
+        appBar: AppAppBar(
+          title: 'Prêts & échanges',
+          actions: [
+            IconButton(
+              tooltip: 'Hôtel des ventes',
+              icon: const Icon(Icons.storefront_outlined),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const MarketplaceScreen()),
               ),
             ),
+          ],
+          bottom: TabBar(
+            tabs: [
+              Tab(text: _tabLabel('Prêts', _loans.length)),
+              Tab(text: _tabLabel('Doublons', duplicates.length)),
+              Tab(text: _tabLabel('À vendre', forSale.length)),
+            ],
+          ),
+        ),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : TabBarView(
+                children: [
+                  _wrap(_buildLoans()),
+                  _wrap(_buildDuplicates(duplicates)),
+                  _wrap(_buildForSale(forSale)),
+                ],
+              ),
+      ),
     );
   }
 
   String _tabLabel(String label, int count) =>
       _loading || count == 0 ? label : '$label ($count)';
 
+  Widget _wrap(Widget child) => RefreshIndicator(
+        onRefresh: _load,
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 860),
+            child: child,
+          ),
+        ),
+      );
+
   // ---------------------------------------------------------------- Prêts
 
-  Widget _buildLoansList(List<CollectionItem> loans) {
-    if (loans.isEmpty) {
+  Widget _buildLoans() {
+    if (_loans.isEmpty) {
       return _empty(
         icon: Icons.handshake_outlined,
         title: 'Aucun prêt en cours',
-        hint: 'Depuis la fiche d\'un objet, active « prêt temporaire » pour '
-            'suivre qui a ton jeu, ton manga…',
+        hint: 'Depuis la fiche d\'un objet, « Prêter » pour suivre qui a ton '
+            'jeu, ton manga…',
       );
     }
-    return Column(
-      children: [
-        for (final item in loans) ...[
-          Builder(
-            builder: (context) {
-              final days = item.loanedAt == null
-                  ? null
-                  : DateTime.now().difference(item.loanedAt!).inDays;
-              final accent = days == null
-                  ? Colors.blue.shade600
-                  : days >= 30
-                      ? Colors.red.shade700
-                      : days >= 14
-                          ? Colors.orange.shade800
-                          : Colors.blue.shade600;
-              return _ItemCard(
-                item: item,
-                onTap: () => _openItem(item),
-                subtitle: '→ ${item.loaneeDisplayName}',
-                trailing: FilledButton.tonalIcon(
-                  onPressed: () => _returnLoan(item),
-                  icon: const Icon(Icons.undo, size: 16),
-                  label: const Text('Rendu'),
-                ),
-                footer: Row(
-                  children: [
-                    _Tag(
-                      icon: Icons.schedule,
-                      label: days == null
-                          ? 'Date inconnue'
-                          : days < 1
-                              ? 'Depuis aujourd\'hui'
-                              : 'Depuis $days j',
-                      color: accent,
-                    ),
-                    if (days != null && days >= 30) ...[
-                      const SizedBox(width: 6),
-                      _Tag(
-                        icon: Icons.notifications_active_outlined,
-                        label: 'À relancer',
-                        color: accent,
-                      ),
-                    ],
-                  ],
-                ),
-              );
-            },
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 32),
+      itemCount: _loans.length,
+      itemBuilder: (context, i) {
+        final item = _loans[i];
+        final days = item.loanedAt == null
+            ? null
+            : DateTime.now().difference(item.loanedAt!).inDays;
+        final accent = days == null
+            ? Colors.blue.shade600
+            : days >= 30
+                ? Colors.red.shade700
+                : days >= 14
+                    ? Colors.orange.shade800
+                    : Colors.blue.shade600;
+        return _ItemCard(
+          item: item,
+          onTap: () => _openItem(item),
+          subtitle: '→ ${item.loaneeDisplayName}',
+          trailing: FilledButton.tonalIcon(
+            onPressed: () => _returnLoan(item),
+            icon: const Icon(Icons.undo, size: 16),
+            label: const Text('Rendu'),
           ),
-          const SizedBox(height: 8),
-        ],
-      ],
+          footer: Row(
+            children: [
+              _Tag(
+                icon: Icons.schedule,
+                label: days == null
+                    ? 'Date inconnue'
+                    : days < 1
+                        ? 'Depuis aujourd\'hui'
+                        : 'Depuis $days j',
+                color: accent,
+              ),
+              if (days != null && days >= 30) ...[
+                const SizedBox(width: 6),
+                _Tag(
+                  icon: Icons.notifications_active_outlined,
+                  label: 'À relancer',
+                  color: accent,
+                ),
+              ],
+            ],
+          ),
+        );
+      },
     );
   }
 
   // ------------------------------------------------------------- Doublons
 
-  Widget _buildDuplicatesList(List<GroupedCollectionItem> duplicates) {
+  Widget _buildDuplicates(List<GroupedCollectionItem> duplicates) {
     if (duplicates.isEmpty) {
       return _empty(
         icon: Icons.copy_all,
@@ -429,60 +323,52 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
         hint: 'Les objets possédés en plusieurs exemplaires apparaîtront ici.',
       );
     }
-    return Column(
-      children: [
-        for (final group in duplicates) ...[
-          Builder(
-            builder: (context) {
-              final item = group.item;
-              final copies = _copiesFor(group);
-              final market = marketSecondhandPriceFromMetadata(item.metadata);
-              final anyForSale = copies.any((c) => c.item.isForSale);
-              return _ItemCard(
-                item: item,
-                onTap: () => _openItem(item),
-                subtitle: [
-                  '${group.totalQuantity} exemplaires',
-                  item.category.label,
-                  if (market != null) 'occasion ≈ ${formatEuroChip(market)}',
-                ].join(' · '),
-                trailing: PopupMenuButton<String>(
-                  onSelected: (action) {
-                    if (action == 'sale') _setForSale(item, !anyForSale);
-                    if (action == 'detail') _openItem(item);
-                  },
-                  itemBuilder: (_) => [
-                    PopupMenuItem(
-                      value: 'sale',
-                      child: Text(
-                        anyForSale
-                            ? 'Retirer de la vente'
-                            : 'Mettre un exemplaire en vente',
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: 'detail',
-                      child: Text('Voir la fiche'),
-                    ),
-                  ],
-                ),
-                footer: Column(
-                  children: [for (final c in copies) _CopyRow(copy: c)],
-                ),
-              );
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 32),
+      itemCount: duplicates.length,
+      itemBuilder: (context, i) {
+        final group = duplicates[i];
+        final item = group.item;
+        final copies = _copiesFor(group);
+        final market = marketSecondhandPriceFromMetadata(item.metadata);
+        final anyForSale = copies.any((c) => c.item.isForSale);
+        return _ItemCard(
+          item: item,
+          onTap: () => _openItem(item),
+          subtitle: [
+            '${group.totalQuantity} exemplaires',
+            item.category.label,
+            if (market != null) 'occasion ≈ ${formatEuroChip(market)}',
+          ].join(' · '),
+          trailing: PopupMenuButton<String>(
+            onSelected: (action) {
+              if (action == 'sale') _setForSale(item, !anyForSale);
+              if (action == 'detail') _openItem(item);
             },
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'sale',
+                child: Text(
+                  anyForSale ? 'Retirer de la vente' : 'Mettre un exemplaire en vente',
+                ),
+              ),
+              const PopupMenuItem(value: 'detail', child: Text('Voir la fiche')),
+            ],
           ),
-          const SizedBox(height: 8),
-        ],
-      ],
+          footer: Column(
+            children: [for (final c in copies) _CopyRow(copy: c)],
+          ),
+        );
+      },
     );
   }
 
   // ------------------------------------------------------------- À vendre
 
-  Widget _buildForSaleList(List<CollectionItem> forSale) {
-    final sold = _sold.where(_matchesFilter).toList();
-    return Column(
+  Widget _buildForSale(List<CollectionItem> forSale) {
+    final sold = _sold;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 32),
       children: [
         Card(
           elevation: 0,
@@ -513,12 +399,9 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
             shrink: true,
           )
         else
-          for (final item in forSale) ...[
-            _forSaleCard(item),
-            const SizedBox(height: 8),
-          ],
+          for (final item in forSale) _forSaleCard(item),
         if (sold.isNotEmpty) ...[
-          const SizedBox(height: 8),
+          const SizedBox(height: 16),
           ExpansionTile(
             tilePadding: const EdgeInsets.symmetric(horizontal: 8),
             leading: const Icon(Icons.history),
@@ -594,77 +477,29 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
     required String hint,
     bool shrink = false,
   }) {
-    return Padding(
-      padding: EdgeInsets.all(shrink ? 16 : 24),
+    final content = Padding(
+      padding: const EdgeInsets.all(32),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: shrink ? 36 : 48, color: Colors.grey.shade400),
-          const SizedBox(height: 10),
+          Icon(icon, size: 56, color: Colors.grey.shade400),
+          const SizedBox(height: 16),
           Text(
             title,
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           Text(
             hint,
             textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+            style: TextStyle(color: Colors.grey.shade600),
           ),
         ],
       ),
     );
-  }
-}
-
-class _BentoSection extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final int count;
-  final Color color;
-  final Widget child;
-
-  const _BentoSection({
-    required this.icon,
-    required this.title,
-    required this.count,
-    required this.color,
-    required this.child,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
-      borderRadius: BorderRadius.circular(16),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Icon(icon, color: color, size: 22),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    count > 0 ? '$title ($count)' : title,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 16,
-                      color: color,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            child,
-          ],
-        ),
-      ),
-    );
+    if (shrink) return content;
+    // ListView pour que le tirer-pour-rafraîchir marche aussi à vide.
+    return ListView(children: [const SizedBox(height: 60), content]);
   }
 }
 

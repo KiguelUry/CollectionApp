@@ -74,24 +74,29 @@ String? loaneeNameFromWhereabouts(CollectionItem item) {
   return plain.isEmpty ? null : plain;
 }
 
-/// Active / coupe le « prêt temporaire » vers la personne du lieu actuel.
+/// Active / coupe le « prêt temporaire ».
+///
+/// Le lieu (« Braine-l'Alleud », etc.) n'est **pas** recopié dans « Prêté à » :
+/// l'emprunteur est fourni explicitement ([borrowerName] / [borrowerId]).
 CollectionItem applyTemporaryLoan(
   CollectionItem item, {
   required bool isLoan,
   DateTime? loanedAt,
   String? meUserId,
+  String? borrowerName,
+  String? borrowerId,
 }) {
   if (!isLoan) return item.copyWith(clearLoan: true);
-  final holder = item.locationUserId;
-  final memberId =
-      holder != null && holder.isNotEmpty && holder != meUserId ? holder : null;
-  return item.copyWith(
-    clearLoan: true,
-  ).copyWith(
-    loanedToId: memberId,
-    loanedToName: loaneeNameFromWhereabouts(item) ?? 'Emprunteur',
-    loanedAt: loanedAt ?? DateTime.now(),
-  );
+  final name = borrowerName?.trim();
+  final explicitName = name != null && name.isNotEmpty ? name : null;
+  // Mise à jour date seule : conserver l'emprunteur déjà saisi.
+  final keepName = explicitName ?? item.loanedToName;
+  final keepId = borrowerId ?? item.loanedToId;
+  return item.copyWith(clearLoan: true).copyWith(
+        loanedToId: keepId,
+        loanedToName: keepName,
+        loanedAt: loanedAt ?? item.loanedAt ?? DateTime.now(),
+      );
 }
 
 /// Colonnes Supabase du prêt (null = pas de prêt).
