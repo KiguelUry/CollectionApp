@@ -1,6 +1,7 @@
 /// <reference path="../deno.d.ts" />
-// Proxy CORS pour Flutter Web — JSON only (MangaDex API + iTunes + Google Books).
-// JAMAIS d'images : 0 Mo d'Egress couverture sur Supabase.
+// Proxy CORS pour Flutter Web :
+// - JSON : MangaDex API + iTunes + Google Books + Open Library
+// - Images : UNIQUEMENT uploads.mangadex.org (miniatures .256/.512.jpg)
 // Déployer : supabase functions deploy catalog-proxy --no-verify-jwt
 
 const corsHeaders: Record<string, string> = {
@@ -10,8 +11,8 @@ const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Methods": "GET, OPTIONS",
 };
 
-/** Hosts JSON uniquement — pas de CDN images. */
-const ALLOWED_HOSTS = new Set([
+/** Hosts JSON uniquement. */
+const ALLOWED_JSON_HOSTS = new Set([
   "api.mangadex.org",
   "itunes.apple.com",
   "www.googleapis.com",
@@ -20,20 +21,42 @@ const ALLOWED_HOSTS = new Set([
 
 const IMAGE_EXT_RE = /\.(jpe?g|png|webp|gif|avif|bmp|svg)(\?|$)/i;
 
-function isImageTarget(target: URL): boolean {
+/** Seul CDN image autorisé (MangaDex anti-hotlink + CORS). */
+const ALLOWED_IMAGE_HOST = "uploads.mangadex.org";
+
+function isBlockedImageHost(target: URL): boolean {
   const host = target.hostname.toLowerCase();
+  if (host === ALLOWED_IMAGE_HOST) return false;
   if (
-    host === "uploads.mangadex.org" ||
     host === "covers.openlibrary.org" ||
     host.includes("mzstatic.com") ||
     host.includes("geekdo-images.com") ||
     host.includes("googleusercontent.com") ||
+    host.includes("anilist.co") ||
+    host.includes("image.tmdb.org") ||
+    host.includes("rawg.io") ||
     (host.includes("books.google.") && target.pathname.includes("/content"))
   ) {
     return true;
   }
-  if (IMAGE_EXT_RE.test(target.pathname)) return true;
+  if (IMAGE_EXT_RE.test(target.pathname) && host !== ALLOWED_IMAGE_HOST) {
+    return true;
+  }
   return false;
+}
+
+/** Force miniature MangaDex (~30 Ko) : .256.jpg ou .512.jpg. */
+function forceMangaDexThumb(target: URL, prefer512 = true): URL {
+  const size = prefer512 ? "512" : "256";
+  let path = target.pathname;
+  path = path.replace(/\.(256|512)\.jpe?g$/i, ".jpg");
+  if (/\.jpe?g$/i.test(path)) {
+    path = path.replace(/\.jpe?g$/i, `.${size}.jpg`);
+  }
+  const out = new URL(target.toString());
+  out.protocol = "https:";
+  out.pathname = path;
+  return out;
 }
 
 Deno.serve(async (req) => {
@@ -60,15 +83,54 @@ Deno.serve(async (req) => {
     return new Response("HTTP(S) only", { status: 400, headers: corsHeaders });
   }
 
-  if (isImageTarget(target)) {
+  if (target.protocol === "http:") {
+    target = new URL(target.toString().replace(/^http:/i, "https:"));
+  }
+
+  const host = target.hostname.toLowerCase();
+
+  // --- Images MangaDex uniquement ---
+  if (host === ALLOWED_IMAGE_HOST) {
+    target = forceMangaDexThumb(target, true);
+    try {
+      const upstream = await fetch(target.toString(), {
+        headers: {
+          Accept: "image/*,*/*;q=0.8",
+          "User-Agent": "Collectingo/1.1",
+          // Pas de Referer navigateur → évite le 403 hotlink MangaDex.
+        },
+        redirect: "follow",
+      });
+      const body = await upstream.arrayBuffer();
+      const contentType = upstream.headers.get("Content-Type") ?? "image/jpeg";
+      const responseHeaders = new Headers({
+        ...corsHeaders,
+        "Content-Type": contentType,
+        // Cache disque navigateur 1 an : ne jamais re-télécharger la même couverture.
+        "Cache-Control": "public, max-age=31536000, immutable",
+      });
+      responseHeaders.delete("set-cookie");
+      responseHeaders.delete("set-cookie2");
+      return new Response(body, {
+        status: upstream.status,
+        headers: responseHeaders,
+      });
+    } catch (e) {
+      return new Response(`Upstream image error: ${e}`, {
+        status: 502,
+        headers: corsHeaders,
+      });
+    }
+  }
+
+  if (isBlockedImageHost(target)) {
     return new Response(
-      "Images are blocked on catalog-proxy (use wsrv.nl). Zero image egress.",
+      "Images blocked on catalog-proxy (except uploads.mangadex.org).",
       { status: 400, headers: corsHeaders },
     );
   }
 
-  const host = target.hostname.toLowerCase();
-  if (!ALLOWED_HOSTS.has(host)) {
+  if (!ALLOWED_JSON_HOSTS.has(host)) {
     return new Response(`Host not allowed: ${host}`, {
       status: 403,
       headers: corsHeaders,
@@ -81,9 +143,6 @@ Deno.serve(async (req) => {
       const booksKey = Deno.env.get("GOOGLE_BOOKS_API_KEY")?.trim() ?? "";
       if (booksKey.length > 0) target.searchParams.set("key", booksKey);
     }
-    if (target.protocol === "http:") {
-      target = new URL(target.toString().replace(/^http:/i, "https:"));
-    }
     const upstream = await fetch(target.toString(), {
       headers: {
         Accept: "application/json",
@@ -94,7 +153,6 @@ Deno.serve(async (req) => {
     const body = await upstream.arrayBuffer();
     const contentType = upstream.headers.get("Content-Type") ??
       "application/json";
-    // Jamais de Set-Cookie upstream (Cloudflare `__cf_bm` → domaine invalide Firefox).
     const responseHeaders = new Headers({
       ...corsHeaders,
       "Content-Type": contentType,

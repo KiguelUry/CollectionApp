@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -7,13 +9,20 @@ import '../utils/metadata_slim.dart';
 
 /// Purge one-shot des blobs metadata déjà stockés (base64, stores_prices, etc.).
 class MetadataPurgeService {
-  static const _prefsKey = 'metadata_slim_purged_v1';
+  static const _prefsKey = 'metadata_slim_purged_v2';
 
   /// À appeler après login : 1 SELECT léger + updates batchées si nécessaire.
   static Future<void> runOnceIfNeeded() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      if (prefs.getBool(_prefsKey) == true) return;
+      if (prefs.getBool(_prefsKey) == true) {
+        if (kDebugMode) {
+          debugPrint(
+            '[SUPABASE AUDIT] Purge metadata déjà effectuée (skip).',
+          );
+        }
+        return;
+      }
       final userId = CollectionItemScope.currentUserId;
       if (userId == null) return;
 
@@ -23,12 +32,16 @@ class MetadataPurgeService {
         userId: userId,
       );
       final patches = <Map<String, dynamic>>[];
+      var bytesBefore = 0;
+      var bytesAfter = 0;
       for (final raw in rows as List) {
         final row = Map<String, dynamic>.from(raw as Map);
         final id = row['id']?.toString();
         if (id == null || id.isEmpty) continue;
         final before = Map<String, dynamic>.from(row['metadata'] as Map? ?? {});
         final after = slimMetadata(before);
+        bytesBefore += utf8.encode(jsonEncode(before)).length;
+        bytesAfter += utf8.encode(jsonEncode(after)).length;
         if (!_mapsEqual(before, after)) {
           patches.add({'id': id, 'metadata': after});
         }
@@ -58,6 +71,8 @@ class MetadataPurgeService {
         if (id == null || id.isEmpty) continue;
         final before = Map<String, dynamic>.from(row['metadata'] as Map? ?? {});
         final after = slimMetadata(before);
+        bytesBefore += utf8.encode(jsonEncode(before)).length;
+        bytesAfter += utf8.encode(jsonEncode(after)).length;
         if (!_mapsEqual(before, after)) {
           seriesPatches.add({'id': id, 'metadata': after});
         }
@@ -74,14 +89,19 @@ class MetadataPurgeService {
       }
 
       await prefs.setBool(_prefsKey, true);
+      final savedKb = ((bytesBefore - bytesAfter) / 1024).toStringAsFixed(1);
+      final totalCleaned = patches.length + seriesPatches.length;
       if (kDebugMode) {
         debugPrint(
-          'MetadataPurge: ${patches.length} items, '
-          '${seriesPatches.length} series slimmed',
+          '[SUPABASE AUDIT] Purge metadata terminée : '
+          '$totalCleaned items nettoyés '
+          '(~${savedKb} Ko de JSON retirés côté client).',
         );
       }
     } catch (e) {
-      if (kDebugMode) debugPrint('MetadataPurge skipped: $e');
+      if (kDebugMode) {
+        debugPrint('[SUPABASE AUDIT] Purge metadata échouée : $e');
+      }
     }
   }
 

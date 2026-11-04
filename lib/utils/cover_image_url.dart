@@ -23,55 +23,24 @@ String openLibraryAuthorPhotoUrl(String authorOlid, {CoverSize size = CoverSize.
 
 /// Choisit une URL plus nette pour l'affichage (listes vs fiche détail).
 String coverUrlForDisplay(String url, {required bool large}) =>
-    coverUrlForWeb(resolveCoverSourceUrl(url, large: large));
+    coverUrlForWeb(
+      resolveCoverSourceUrl(url, large: large),
+      width: large ? 1000 : 600,
+    );
 
 const kThumbnailCdnHost = 'wsrv.nl';
 const kThumbnailSize = 260;
 
-/// Vignette de grille : 260 px WebP via wsrv.nl (`w=260&q=80&output=webp`).
-/// La taille est plafonnée pour limiter les textures WebGL de Firefox.
-/// Le décodage se fait en octets (HttpGet), pas via une balise HTML.
-/// Renvoie [url] inchangée si elle n'est pas transformable.
+/// Vignette de grille : routage intelligent via [proxyImageUrl]
+/// (direct CORS / wsrv BGG-Discogs / catalog-proxy MangaDex).
 String gridThumbnailUrl(
   String url, {
   bool crop = false,
   int size = kThumbnailSize,
 }) {
-  var src = resolveCoverSourceUrl(url, large: size > 320).trim();
-  if (src.startsWith('//')) src = 'https:$src';
+  final src = resolveCoverSourceUrl(url, large: size > 320).trim();
   if (src.isEmpty) return url;
-
-  final uri = Uri.tryParse(src);
-  if (uri == null ||
-      (uri.scheme != 'https' && uri.scheme != 'http') ||
-      uri.host.isEmpty) {
-    return url;
-  }
-  final host = uri.host.toLowerCase();
-  if (host == kThumbnailCdnHost ||
-      host == 'localhost' ||
-      host.startsWith('127.') ||
-      // wsrv renvoie 400 sur AniList, et 404 (amont 403) sur Fandom/Wikia.
-      host.contains('anilist.co') ||
-      host.contains('wikia.') ||
-      host.contains('fandom.com') ||
-      host.contains('nocookie.net') ||
-      host.contains('brickset.com')) {
-    return src;
-  }
-  // Stockage Supabase : seules les URLs publiques sont stables.
-  if (uri.path.contains('/storage/v1/object/') &&
-      !uri.path.contains('/storage/v1/object/public/')) {
-    return src;
-  }
-  // URL absolue https + wsrv (MangaDex inclus — 0 Egress Supabase).
-  final absolute = uri.replace(scheme: 'https').toString();
-  final q = StringBuffer(
-    'https://$kThumbnailCdnHost/?url=${Uri.encodeComponent(absolute)}'
-    '&w=$size&h=$size'
-    '&fit=${crop ? 'cover' : 'inside'}&we&output=webp&q=80',
-  );
-  return q.toString();
+  return proxyImageUrl(src, width: size, crop: crop);
 }
 
 /// Photo de matériel BGG. On garde l'URL geekdo telle quelle (`imageurl_lg`) :
@@ -92,8 +61,7 @@ String bggMaterialPhotoUrl(
     params['output'] = 'webp';
     return uri.replace(queryParameters: params).toString();
   }
-  return 'https://wsrv.nl/?url=${Uri.encodeComponent(url)}'
-      '&w=$width&q=$quality&output=webp';
+  return proxyImageUrl(url, width: width);
 }
 
 /// URL source normalisée (taille adaptée), sans proxy web.

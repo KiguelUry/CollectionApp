@@ -6,6 +6,9 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import '../utils/cover_image_url.dart';
 
+/// Coupe-circuit anti-boucle : une URL en 400/403 n'est plus jamais redemandée.
+final Set<String> kFailedImageUrls = <String>{};
+
 /// Couverture nette (cache disque + mémoire, ratio livre, URLs adaptées).
 ///
 /// Sur Flutter Web, les grilles utilisent [Image.network] (pas CachedNetworkImage)
@@ -37,6 +40,14 @@ class CollectionCoverImage extends StatelessWidget {
     this.placeholder,
   });
 
+  void _markFailed(String failed) {
+    if (failed.isEmpty) return;
+    kFailedImageUrls.add(failed);
+  }
+
+  bool _isFailed(String candidate) =>
+      candidate.isNotEmpty && kFailedImageUrls.contains(candidate);
+
   @override
   Widget build(BuildContext context) {
     final padded = bookCover || boxedCover;
@@ -53,9 +64,12 @@ class CollectionCoverImage extends StatelessWidget {
           )
         : url;
 
+    if (_isFailed(thumb) || _isFailed(url)) {
+      return _wrap(padded, _fallback());
+    }
+
     Widget image;
     if (kIsWeb && compact) {
-      // Image.network charge dès le build (pas de keepAlive / RepaintBoundary).
       image = Image.network(
         thumb,
         key: ValueKey(thumb),
@@ -63,20 +77,13 @@ class CollectionCoverImage extends StatelessWidget {
         height: h,
         fit: imageFit,
         filterQuality: FilterQuality.low,
-        // false : évite d'afficher l'image précédente (tuile voisine) pendant le load.
         gaplessPlayback: false,
         cacheWidth: kThumbnailSize,
-        errorBuilder: (_, _, _) => Image.network(
-          // Repli : URL directe si le proxy wsrv échoue (Lego, Brickset…).
-          resolveCoverSourceUrl(url, large: false),
-          width: w,
-          height: h,
-          fit: imageFit,
-          filterQuality: FilterQuality.low,
-          gaplessPlayback: false,
-          cacheWidth: kThumbnailSize,
-          errorBuilder: (_, _, _) => _fallback(),
-        ),
+        errorBuilder: (_, _, _) {
+          // Pas de 2ᵉ Image.network : évite la boucle requestAnimationFrame.
+          _markFailed(thumb);
+          return _fallback();
+        },
         loadingBuilder: (context, child, progress) {
           if (progress == null) return child;
           return _fallback(
@@ -107,19 +114,26 @@ class CollectionCoverImage extends StatelessWidget {
         fadeInDuration: const Duration(milliseconds: 180),
         fadeOutDuration: Duration.zero,
         placeholder: (_, _) => _fallback(child: const SizedBox.shrink()),
-        errorWidget: (context, _, _) => _buildOriginal(context, imageFit),
+        errorWidget: (context, failedUrl, _) {
+          _markFailed(failedUrl);
+          _markFailed(thumb);
+          return _fallback();
+        },
       );
     } else {
       image = _buildOriginal(context, imageFit);
     }
 
+    return _wrap(padded, image);
+  }
+
+  Widget _wrap(bool padded, Widget image) {
     if (padded) {
       image = ColoredBox(
         color: Colors.grey.shade100,
         child: image,
       );
     }
-
     return ClipRRect(
       borderRadius: BorderRadius.circular(padded ? 6 : 8),
       child: image,
@@ -128,6 +142,8 @@ class CollectionCoverImage extends StatelessWidget {
 
   Widget _buildOriginal(BuildContext context, BoxFit imageFit) {
     final displayUrl = coverUrlForDisplay(url, large: largeSource);
+    if (_isFailed(displayUrl)) return _fallback();
+
     final dpr = MediaQuery.devicePixelRatioOf(context);
     final w = width;
     final h = height;
@@ -136,9 +152,10 @@ class CollectionCoverImage extends StatelessWidget {
 
     if (kIsWeb) {
       final proxied = gridThumbnailUrl(
-        displayUrl,
+        url,
         size: largeSource ? 1000 : 600,
       );
+      if (_isFailed(proxied)) return _fallback();
       return Image.network(
         proxied,
         key: ValueKey(proxied),
@@ -148,14 +165,10 @@ class CollectionCoverImage extends StatelessWidget {
         filterQuality: compact ? FilterQuality.low : FilterQuality.medium,
         gaplessPlayback: true,
         cacheWidth: largeSource ? 1000 : 600,
-        errorBuilder: (_, _, _) => Image.network(
-          displayUrl,
-          width: w,
-          height: h,
-          fit: imageFit,
-          gaplessPlayback: true,
-          errorBuilder: (_, _, _) => _fallback(),
-        ),
+        errorBuilder: (_, _, _) {
+          _markFailed(proxied);
+          return _fallback();
+        },
         loadingBuilder: (context, child, progress) {
           if (progress == null) return child;
           return _fallback(
@@ -199,7 +212,11 @@ class CollectionCoverImage extends StatelessWidget {
           ),
         ),
       ),
-      errorWidget: (_, _, _) => _fallback(),
+      errorWidget: (_, failedUrl, _) {
+        _markFailed(failedUrl);
+        _markFailed(displayUrl);
+        return _fallback();
+      },
     );
   }
 

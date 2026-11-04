@@ -29,18 +29,23 @@ bool _looksLikeImageUri(Uri target) {
 }
 
 /// Sur le web, route les API CORS-bloquées (MangaDex, iTunes) via l'Edge Function
-/// Supabase `catalog-proxy` — **JSON uniquement, jamais d'images**.
+/// Supabase `catalog-proxy`. Images : uniquement `uploads.mangadex.org`
+/// (voir [proxyImageUrl]) — les autres CDN images restent en direct.
 Uri proxiedCatalogUri(Uri target) {
   if (!kIsWeb) return target;
-  // Filet client : aucune image via catalog-proxy (Egress).
-  if (_looksLikeImageUri(target)) return target;
 
   final host = target.host.toLowerCase();
-  // openlibrary.org : CORS natif → appel direct (pas de proxy / 502).
+  // Autres images (hors MangaDex) : jamais via catalog-proxy.
+  if (host != 'uploads.mangadex.org' && _looksLikeImageUri(target)) {
+    return target;
+  }
+
+  // openlibrary.org JSON : CORS natif → appel direct.
   const allowed = {
     'api.mangadex.org',
     'itunes.apple.com',
     'www.googleapis.com',
+    'uploads.mangadex.org',
   };
   if (!allowed.contains(host)) return target;
 
