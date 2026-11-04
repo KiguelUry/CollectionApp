@@ -76,10 +76,11 @@ class _TemporaryLoanToggleState extends State<TemporaryLoanToggle> {
     super.dispose();
   }
 
+  /// Limite la longueur sans trim : un trim pendant la saisie
+  /// empêchait d'écrire des espaces (« Noé_ » → « Noé »).
   static String _clampName(String raw) {
-    final t = raw.trimRight();
-    if (t.length <= kLoanBorrowerNameMaxLength) return t;
-    return t.substring(0, kLoanBorrowerNameMaxLength);
+    if (raw.length <= kLoanBorrowerNameMaxLength) return raw;
+    return raw.substring(0, kLoanBorrowerNameMaxLength);
   }
 
   Future<void> _loadFriends() async {
@@ -238,7 +239,9 @@ class _TemporaryLoanToggleState extends State<TemporaryLoanToggle> {
         selection: TextSelection.collapsed(offset: clipped.length),
       );
     }
-    widget.onBorrowerChanged?.call(clipped.trim());
+    // Ne pas trimmer ici : on garde les espaces en cours de frappe.
+    // Le parent peut trimmer aux extrémités à la persistance.
+    widget.onBorrowerChanged?.call(clipped);
   }
 
   @override

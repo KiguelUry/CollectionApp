@@ -2030,7 +2030,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
             onBorrowerChanged: (name) {
               setState(() {
                 _item = _item.copyWith(
-                  loanedToName: name.isEmpty ? null : name,
+                  loanedToName: name.trim().isEmpty ? null : name,
                 );
               });
               _scheduleSave();

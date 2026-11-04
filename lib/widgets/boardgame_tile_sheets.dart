@@ -630,9 +630,10 @@ class _BoardgameTileLocationSheetState
                   hideSwitchWhenActive: true,
                   onBorrowerChanged: (name) {
                     // Maj bandeau « Prêté à … » sans couper la saisie.
+                    // Garder les espaces internes/en cours (pas de trim).
                     setState(() {
                       _item = _item.copyWith(
-                        loanedToName: name.isEmpty ? null : name,
+                        loanedToName: name.trim().isEmpty ? null : name,
                       );
                       _dirty = true;
                     });
