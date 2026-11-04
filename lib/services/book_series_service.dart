@@ -8,6 +8,7 @@ import '../models/collection_category.dart';
 import '../utils/book_series_normalizer.dart';
 import '../utils/book_title_parser.dart';
 import '../utils/book_vf_edition.dart';
+import '../utils/metadata_slim.dart';
 import 'anilist_manga_service.dart';
 import 'book_catalog_service.dart';
 import 'book_intelligence_service.dart';
@@ -173,6 +174,7 @@ class BookSeriesService {
     }
 
     final series = BookSeries.fromJson(row);
+    invalidateSeriesCache();
     if (expectedVolumeCount != null && expectedVolumeCount > 0) {
       await ensureVolumeSlots(series.id, expectedVolumeCount);
     }
@@ -197,6 +199,10 @@ class BookSeriesService {
 
   Future<void> updateSeries(BookSeries series) async {
     final payload = series.toUpdateJson();
+    final meta = payload['metadata'];
+    if (meta is Map) {
+      payload['metadata'] = slimMetadata(Map<String, dynamic>.from(meta));
+    }
     try {
       await _client
           .from('book_series')
@@ -214,9 +220,11 @@ class BookSeriesService {
           .eq('id', series.id)
           .eq('owner_id', _userId);
     }
+    invalidateSeriesCache();
   }
 
   Future<void> deleteSeries(String id) async {
+    invalidateSeriesCache();
     await _client
         .from('book_series')
         .delete()
@@ -288,7 +296,26 @@ class BookSeriesService {
     return u.contains('mangadex');
   }
 
-  /// Applique couvertures + dates VF (GB écrase MangaDex).
+  /// Upsert batch de métadonnées volume — **jamais** dans une boucle HTTP.
+  Future<void> _batchUpsertVolumeMetadata(List<BookVolume> volumes) async {
+    if (volumes.isEmpty) return;
+    await _client.from('book_volumes').upsert(
+      [
+        for (final v in volumes)
+          {
+            'id': v.id,
+            'series_id': v.seriesId,
+            'volume_number': v.volumeNumber,
+            'sort_index': v.sortIndex,
+            'label': v.label,
+            'metadata': v.metadata,
+          },
+      ],
+      onConflict: 'id',
+    );
+  }
+
+  /// Applique couvertures + dates VF (GB écrase MangaDex) en **un seul** upsert.
   Future<int> applyVolumeCoversFromMap({
     required String seriesId,
     required Map<int, String> coverByVolume,
@@ -299,7 +326,7 @@ class BookSeriesService {
       return 0;
     }
     final volumes = await fetchVolumes(seriesId);
-    var n = 0;
+    final patched = <BookVolume>[];
     for (final v in volumes) {
       final num = v.volumeNumber.round();
       final url = coverByVolume[num];
@@ -322,27 +349,39 @@ class BookSeriesService {
           url.isNotEmpty &&
           url != v.coverUrl &&
           (!hasCover || (existingMd && !incomingMd));
+      final meta = Map<String, dynamic>.from(v.metadata);
+      var changed = false;
       if (allowCover && (!hasVerified || overwriteWithCatalog || existingMd)) {
-        await setVolumeCoverUrl(
-          v.id,
-          url,
-          verifiedVolume: num,
-          publishedDate: pub,
-          upcoming: pub != null ? upcoming : null,
-        );
-        n++;
-        continue;
+        var cover = url;
+        if (cover.startsWith('http://')) {
+          cover = 'https://${cover.substring(7)}';
+        }
+        meta['cover_url'] = cover;
+        meta['cover_volume_verified'] = num;
+        if (pub != null && pub.isNotEmpty) {
+          meta['published_date'] = pub;
+          if (upcoming) {
+            meta['is_upcoming'] = true;
+          } else {
+            meta.remove('is_upcoming');
+          }
+        }
+        changed = true;
+      } else if (pub != null && pub.isNotEmpty) {
+        meta['published_date'] = pub;
+        if (upcoming) {
+          meta['is_upcoming'] = true;
+        } else {
+          meta.remove('is_upcoming');
+        }
+        changed = true;
       }
-      if (pub != null && pub.isNotEmpty) {
-        await patchVolumePublishedDate(
-          v.id,
-          publishedDate: pub,
-          upcoming: upcoming,
-        );
-        n++;
+      if (changed) {
+        patched.add(v.copyWith(metadata: meta));
       }
     }
-    return n;
+    await _batchUpsertVolumeMetadata(patched);
+    return patched.length;
   }
 
   Future<void> patchVolumePublishedDate(
@@ -352,21 +391,19 @@ class BookSeriesService {
   }) async {
     final row = await _client
         .from('book_volumes')
-        .select('metadata')
+        .select('id, series_id, volume_number, sort_index, label, metadata')
         .eq('id', volumeId)
         .maybeSingle();
     if (row == null) return;
-    final meta = Map<String, dynamic>.from(row['metadata'] as Map? ?? {});
+    final vol = BookVolume.fromJson(Map<String, dynamic>.from(row));
+    final meta = Map<String, dynamic>.from(vol.metadata);
     meta['published_date'] = publishedDate;
     if (upcoming) {
       meta['is_upcoming'] = true;
     } else {
       meta.remove('is_upcoming');
     }
-    await _client
-        .from('book_volumes')
-        .update({'metadata': meta})
-        .eq('id', volumeId);
+    await _batchUpsertVolumeMetadata([vol.copyWith(metadata: meta)]);
   }
 
   /// Met à jour expected_volume_count si de nouveaux tomes sont détectés.
@@ -1112,7 +1149,7 @@ class BookSeriesService {
       if (raw.isEmpty) continue;
       byUrl.putIfAbsent(_normalizeCoverKey(raw), () => []).add(v);
     }
-    var cleared = 0;
+    final patched = <BookVolume>[];
     for (final group in byUrl.values) {
       if (group.length < 2) continue;
       group.sort((a, b) {
@@ -1133,11 +1170,14 @@ class BookSeriesService {
         return a.volumeNumber.compareTo(b.volumeNumber);
       });
       for (final dup in group.skip(1)) {
-        await clearVolumeCover(dup.id);
-        cleared++;
+        final meta = Map<String, dynamic>.from(dup.metadata)
+          ..remove('cover_url')
+          ..remove('cover_volume_verified');
+        patched.add(dup.copyWith(metadata: meta));
       }
     }
-    return cleared;
+    await _batchUpsertVolumeMetadata(patched);
+    return patched.length;
   }
 
   static const enrichCoversTtl = Duration(hours: 24);
@@ -1187,12 +1227,17 @@ class BookSeriesService {
     try {
       await clearDuplicateCoverUrls(volumes);
       if (working.subcategory == BookSubcategory.bd) {
+        final clearedEn = <BookVolume>[];
         for (final v in volumes) {
           final lang = v.metadata['cover_language']?.toString();
           if (BookVfEdition.isExplicitEnglish(lang)) {
-            await clearVolumeCover(v.id);
+            final meta = Map<String, dynamic>.from(v.metadata)
+              ..remove('cover_url')
+              ..remove('cover_volume_verified');
+            clearedEn.add(v.copyWith(metadata: meta));
           }
         }
+        await _batchUpsertVolumeMetadata(clearedEn);
       }
     } catch (_) {}
     var liveVolumes = await fetchVolumes(working.id);
@@ -1662,6 +1707,7 @@ class BookSeriesService {
       assignedUrls.add(_normalizeCoverKey(raw));
     }
 
+    final persistBatch = <BookVolume>[];
     for (final vol in ordered) {
       if (vol.isHorsSerie) continue;
       final n = vol.volumeNumber.round();
@@ -1686,11 +1732,14 @@ class BookSeriesService {
 
       if (sameCover) {
         if (dateMissing) {
-          await patchVolumePublishedDate(
-            vol.id,
-            publishedDate: pub,
-            upcoming: upcoming,
-          );
+          final meta = Map<String, dynamic>.from(vol.metadata);
+          meta['published_date'] = pub;
+          if (upcoming) {
+            meta['is_upcoming'] = true;
+          } else {
+            meta.remove('is_upcoming');
+          }
+          persistBatch.add(vol.copyWith(metadata: meta));
           updated++;
         }
         continue;
@@ -1732,16 +1781,27 @@ class BookSeriesService {
       if (hasCover) {
         assignedUrls.remove(_normalizeCoverKey(vol.coverUrl!));
       }
-      await setVolumeCoverUrl(
-        vol.id,
-        url,
-        verifiedVolume: n,
-        publishedDate: pub,
-        upcoming: upcoming,
-        coverLanguage: incomingTome
-            ? 'fr-tome'
-            : (incomingFr ? 'fr' : hit.language),
-      );
+      final meta = Map<String, dynamic>.from(vol.metadata);
+      meta['cover_url'] = url;
+      meta['cover_volume_verified'] = n;
+      if (pub != null && pub.isNotEmpty) {
+        meta['published_date'] = pub;
+        if (upcoming) {
+          meta['is_upcoming'] = true;
+        } else {
+          meta.remove('is_upcoming');
+        }
+      }
+      if (incomingTome) {
+        meta['cover_language'] = 'fr-tome';
+      } else if (incomingFr) {
+        meta['cover_language'] = 'fr';
+      } else if ((hit.language ?? '').trim().isNotEmpty) {
+        final lang = hit.language!.toLowerCase();
+        meta['cover_language'] =
+            lang.startsWith('en') ? 'en' : lang;
+      }
+      persistBatch.add(vol.copyWith(metadata: meta));
       assignedUrls.add(urlKey);
       updated++;
       sinceProgress++;
@@ -1751,6 +1811,7 @@ class BookSeriesService {
         onProgress(updated);
       }
     }
+    await _batchUpsertVolumeMetadata(persistBatch);
 
     // Couverture série = Tome 1 seulement si vide / non verrouillée.
     final fresh = await fetchSeriesById(working.id);
@@ -1855,19 +1916,63 @@ class BookSeriesService {
     }).eq('id', itemId);
   }
 
+  static const _seriesCacheTtl = Duration(minutes: 5);
+  static List<BookSeries>? _rootSeriesCache;
+  static DateTime? _rootSeriesCacheAt;
+  static String? _rootSeriesCacheUserId;
+  static Future<List<BookSeries>>? _rootSeriesInFlight;
+
+  static void invalidateSeriesCache() {
+    _rootSeriesCache = null;
+    _rootSeriesCacheAt = null;
+    _rootSeriesCacheUserId = null;
+    _rootSeriesInFlight = null;
+  }
+
   Future<List<BookSeries>> fetchAllRootSeries({
     bool includeHidden = false,
+    bool force = false,
   }) async {
     final userId = _client.auth.currentUser?.id;
     if (userId == null || userId.isEmpty) return const [];
-    final rows = await _client
-        .from('book_series')
-        .select()
-        .eq('owner_id', userId)
-        .filter('parent_series_id', 'is', null)
-        .order('name');
-    final all = _seriesList(rows);
-    return includeHidden ? all : _visibleSeries(all);
+
+    final now = DateTime.now();
+    if (!force &&
+        _rootSeriesCache != null &&
+        _rootSeriesCacheUserId == userId &&
+        _rootSeriesCacheAt != null &&
+        now.difference(_rootSeriesCacheAt!) < _seriesCacheTtl) {
+      final all = _rootSeriesCache!;
+      return includeHidden ? all : _visibleSeries(all);
+    }
+    if (!force &&
+        _rootSeriesInFlight != null &&
+        _rootSeriesCacheUserId == userId) {
+      final all = await _rootSeriesInFlight!;
+      return includeHidden ? all : _visibleSeries(all);
+    }
+
+    final future = () async {
+      final rows = await _client
+          .from('book_series')
+          .select()
+          .eq('owner_id', userId)
+          .filter('parent_series_id', 'is', null)
+          .order('name');
+      final all = _seriesList(rows);
+      _rootSeriesCache = all;
+      _rootSeriesCacheAt = DateTime.now();
+      _rootSeriesCacheUserId = userId;
+      return all;
+    }();
+    _rootSeriesInFlight = future;
+    _rootSeriesCacheUserId = userId;
+    try {
+      final all = await future;
+      return includeHidden ? all : _visibleSeries(all);
+    } finally {
+      if (identical(_rootSeriesInFlight, future)) _rootSeriesInFlight = null;
+    }
   }
 
   List<BookSeries> _seriesList(dynamic rows) {
@@ -2613,7 +2718,8 @@ class BookSeriesService {
       for (final i in items)
         if (i.volumeId != null && !i.isWishlist && !i.isSold) i.volumeId!: i,
     };
-    var n = 0;
+    final itemIds = <String>[];
+    final volumePatches = <BookVolume>[];
     for (final vol in volumes) {
       if (vol.isHorsSerie) continue;
       final num = vol.volumeNumber.round();
@@ -2621,16 +2727,20 @@ class BookSeriesService {
       final item = byVolId[vol.id];
       if (ownedOnly && item == null) continue;
       if (item != null) {
-        if (!item.isRead) {
-          await setItemRead(item.id, true);
-          n++;
-        }
-      } else {
-        await setVolumeReadFlag(vol.id, true);
-        n++;
+        if (!item.isRead) itemIds.add(item.id);
+      } else if (!vol.isRead) {
+        final meta = Map<String, dynamic>.from(vol.metadata)..['is_read'] = true;
+        volumePatches.add(vol.copyWith(metadata: meta));
       }
     }
-    return n;
+    if (itemIds.isNotEmpty) {
+      await _client
+          .from('collection_items')
+          .update({'is_read': true})
+          .inFilter('id', itemIds);
+    }
+    await _batchUpsertVolumeMetadata(volumePatches);
+    return itemIds.length + volumePatches.length;
   }
 
   /// Marque une liste de numéros de tomes (sélection multiple).
@@ -2662,15 +2772,19 @@ class BookSeriesService {
       for (final i in existing)
         if (i.volumeId != null) i.volumeId!: i,
     };
+    final volumes = await fetchVolumes(series.id);
+    final byNum = {
+      for (final v in volumes)
+        if (!v.isHorsSerie) v.volumeNumber.round(): v,
+    };
 
-    var created = 0;
+    final toInsert = <Map<String, dynamic>>[];
     for (final n in unique) {
-      final vol = await getOrCreateVolume(series.id, n.toDouble());
+      final vol = byNum[n];
+      if (vol == null) continue;
       if (byVolumeId.containsKey(vol.id)) continue;
-
-      final title = '${series.name} - Tome $n';
-      await _insertCollectionItem({
-        'title': title,
+      toInsert.add(_itemPayload({
+        'title': '${series.name} - Tome $n',
         'category': CollectionCategory.book.dbValue,
         'subcategory': series.subcategory.dbValue,
         'series_id': series.id,
@@ -2681,10 +2795,33 @@ class BookSeriesService {
         'added_by': _userId,
         'location_user_id': _userId,
         'metadata': {},
-      });
-      created++;
+      }));
     }
-    return created;
+    if (toInsert.isEmpty) return 0;
+    // Un seul INSERT batch — jamais une boucle d'upserts HTTP.
+    try {
+      await _client.from('collection_items').insert(toInsert);
+    } on PostgrestException catch (e) {
+      if (_isSubcategoryCheckFailure(e)) {
+        final fallback = switch (series.subcategory.dbValue) {
+          'comics' => 'comic',
+          'roman' => 'novel',
+          'bd' => 'comic',
+          _ => null,
+        };
+        if (fallback != null) {
+          for (final row in toInsert) {
+            row['subcategory'] = fallback;
+          }
+          await _client.from('collection_items').insert(toInsert);
+        } else {
+          rethrow;
+        }
+      } else {
+        rethrow;
+      }
+    }
+    return toInsert.length;
   }
 
   Future<void> recomputeSeriesValues(String seriesId) async {
@@ -2828,6 +2965,8 @@ class BookSeriesService {
       maxPages: 2,
     );
 
+    final patched = <BookVolume>[];
+    String? fusedLabel;
     for (final ph in placeholders) {
       final hit = batch[ph.volumeNumber.round()];
       final cover = hit?.coverUrl;
@@ -2837,15 +2976,15 @@ class BookSeriesService {
       meta
         ..remove('is_manual_placeholder')
         ..['cover_url'] = cover;
-
-      await _client.from('book_volumes').update({
-        'metadata': meta,
-        if (ph.volumeTitle != null) 'label': ph.volumeTitle,
-      }).eq('id', ph.id);
-
-      return 'Hé, on dirait qu\'un nouveau tome officiel est sorti ! '
+      patched.add(ph.copyWith(
+        metadata: meta,
+        label: ph.volumeTitle ?? ph.label,
+      ));
+      fusedLabel ??= 'Hé, on dirait qu\'un nouveau tome officiel est sorti ! '
           'Ton exemplaire (T.${ph.displayNumber}) a été fusionné.';
+      break;
     }
-    return null;
+    await _batchUpsertVolumeMetadata(patched);
+    return fusedLabel;
   }
 }

@@ -163,6 +163,9 @@ Map<String, dynamic> mergeMarketMetadataPatch(
 ) {
   final merged = Map<String, dynamic>.from(existing ?? {});
   merged.addAll(patch);
+  // Ne jamais réécrire les listes lourdes (Egress SELECT *).
+  merged.remove(kStoresPrices);
+  merged.remove(kMarketPriceHistory);
   return merged;
 }
 

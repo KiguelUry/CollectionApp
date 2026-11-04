@@ -6,6 +6,7 @@ import '../models/collection_item.dart';
 import '../utils/collection_grid_grouper.dart';
 import '../utils/collection_grid_layout.dart';
 import '../utils/collection_item_filters.dart';
+import '../services/collection_refresh.dart';
 import '../services/group_service.dart';
 import '../services/item_group_service.dart';
 import '../models/collection_list_filters.dart';
@@ -44,7 +45,6 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
   final _collectionSearch = TextEditingController();
   final _wishlistSearch = TextEditingController();
   late CollectionGroup _group;
-  late final Stream<List<Map<String, dynamic>>> _stream;
   late final TabController _scopeTabController;
   /// Les objets du groupe ont tous un `group_id` : éviter le filtre « Personnel » par défaut.
   late CollectionListFilters _collectionFilters;
@@ -54,7 +54,9 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
   bool _categorySynced = false;
   List<StorageLocation> _locations = [];
   List<ItemTag> _tags = [];
-  Set<String> _junctionItemIds = {};
+  List<CollectionItem>? _items;
+  Object? _loadError;
+  int _loadGen = 0;
 
   @override
   void initState() {
@@ -63,40 +65,50 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
     _collectionFilters = CollectionListFilters();
     _wishlistFilters = CollectionListFilters();
     _scopeTabController = TabController(length: 3, vsync: this);
-    _stream = Supabase.instance.client
-        .from('collection_items')
-        .stream(primaryKey: ['id'])
-        .eq('group_id', _group.id);
+    CollectionRefresh.instance.addListener(_reloadItems);
     _loadFilterData();
-    _loadJunctionItemIds();
+    _reloadItems();
   }
 
-  Future<void> _loadJunctionItemIds() async {
-    final ids = await _itemGroupService.fetchItemIdsForGroup(_group.id);
-    if (mounted) setState(() => _junctionItemIds = ids);
-  }
-
-  Future<List<Map<String, dynamic>>> _fetchExtraJunctionRows(
-    Iterable<String> streamIds,
-  ) async {
-    final streamSet = streamIds.toSet();
-    final extra = _junctionItemIds
-        .where((id) => !streamSet.contains(id))
-        .toList();
-    if (extra.isEmpty) return [];
+  Future<void> _reloadItems() async {
+    final gen = ++_loadGen;
     try {
-      final rows = await Supabase.instance.client
+      final ids = await _itemGroupService.fetchItemIdsForGroup(_group.id);
+      final legacy = await Supabase.instance.client
           .from('collection_items')
           .select()
-          .inFilter('id', extra);
-      return List<Map<String, dynamic>>.from(rows);
-    } catch (_) {
-      return [];
+          .eq('group_id', _group.id);
+      final legacyRows = List<Map<String, dynamic>>.from(legacy as List);
+      final byId = {
+        for (final r in legacyRows) r['id'] as String: r,
+      };
+      final missing = ids.where((id) => !byId.containsKey(id)).toList();
+      if (missing.isNotEmpty) {
+        final extra = await Supabase.instance.client
+            .from('collection_items')
+            .select()
+            .inFilter('id', missing);
+        for (final r in List<Map<String, dynamic>>.from(extra as List)) {
+          byId[r['id'] as String] = r;
+        }
+      }
+      final enriched = await _tagService.enrichItems(
+        byId.values.map(CollectionItem.fromJson).toList(),
+      );
+      if (!mounted || gen != _loadGen) return;
+      setState(() {
+        _items = enriched;
+        _loadError = null;
+      });
+    } catch (e) {
+      if (!mounted || gen != _loadGen) return;
+      setState(() => _loadError = e);
     }
   }
 
   @override
   void dispose() {
+    CollectionRefresh.instance.removeListener(_reloadItems);
     _scopeTabController.dispose();
     _collectionSearch.dispose();
     _wishlistSearch.dispose();
@@ -276,103 +288,77 @@ class _GroupDetailScreenState extends State<GroupDetailScreen>
         alignment: Alignment.topCenter,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 950),
-          child: StreamBuilder<List<Map<String, dynamic>>>(
-        stream: _stream,
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return Center(child: Text('Erreur : ${snapshot.error}'));
-          }
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          return FutureBuilder<List<Map<String, dynamic>>>(
-            future: _fetchExtraJunctionRows(
-              snapshot.data!.map((r) => r['id'] as String),
-            ),
-            builder: (context, extraSnap) {
-              final mergedRows = [
-                ...snapshot.data!,
-                ...?extraSnap.data,
-              ];
-              return FutureBuilder<List<CollectionItem>>(
-                future: _tagService.enrichItems(
-                  mergedRows
-                      .map((j) => CollectionItem.fromJson(j))
-                      .toList(),
-                ),
-                builder: (context, enriched) {
-                  final all = enriched.data ?? [];
-                  final collection = all
-                      .where((i) => !i.isWishlist && isActiveCollectionItem(i))
-                      .toList();
-                  final wishlist = all.where((i) => i.isWishlist).toList();
-                  _pickInitialCategory(collection);
-
-                  return Column(
-                    children: [
-                      GroupStatsBanner(
-                        collectionItems: collection,
-                        wishlistItems: wishlist,
-                        accent: accent,
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                        child: FilledButton.icon(
-                          onPressed: () async {
-                            final members =
-                                await _groupService.fetchMembers(_group.id);
-                            if (!context.mounted) return;
-                            await showGroupGameNightSheet(
-                              context,
-                              group: _group,
-                              memberCount:
-                                  members.isEmpty ? 1 : members.length,
-                            );
-                          },
-                          icon: const Text('🎲'),
-                          label: const Text('On joue à quoi ce soir ?'),
-                        ),
-                      ),
-                      Expanded(
-                        child: TabBarView(
-                          controller: _scopeTabController,
-                          children: [
-                            _buildScopePane(
-                              items: collection,
-                              isWishlist: false,
-                              filters: _collectionFilters,
-                              searchController: _collectionSearch,
-                              onFiltersChanged: (f) =>
-                                  setState(() => _collectionFilters = f),
-                              emptyHint: 'Aucun objet partagé dans ce groupe.',
-                            ),
-                            _buildScopePane(
-                              items: wishlist,
-                              isWishlist: true,
-                              filters: _wishlistFilters,
-                              searchController: _wishlistSearch,
-                              onFiltersChanged: (f) =>
-                                  setState(() => _wishlistFilters = f),
-                              emptyHint: 'Rien en wishlist pour ce groupe.',
-                            ),
-                            GroupWantedBoard(
-                              groupId: _group.id,
-                              accent: accent,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  );
-                },
-              );
-            },
-          );
-        },
-      ),
+          child: _buildBody(accent),
         ),
       ),
+    );
+  }
+
+  Widget _buildBody(Color accent) {
+    if (_loadError != null) {
+      return Center(child: Text('Erreur : $_loadError'));
+    }
+    final all = _items;
+    if (all == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    final collection = all
+        .where((i) => !i.isWishlist && isActiveCollectionItem(i))
+        .toList();
+    final wishlist = all.where((i) => i.isWishlist).toList();
+    _pickInitialCategory(collection);
+
+    return Column(
+      children: [
+        GroupStatsBanner(
+          collectionItems: collection,
+          wishlistItems: wishlist,
+          accent: accent,
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          child: FilledButton.icon(
+            onPressed: () async {
+              final members = await _groupService.fetchMembers(_group.id);
+              if (!mounted) return;
+              await showGroupGameNightSheet(
+                context,
+                group: _group,
+                memberCount: members.isEmpty ? 1 : members.length,
+              );
+            },
+            icon: const Text('🎲'),
+            label: const Text('On joue à quoi ce soir ?'),
+          ),
+        ),
+        Expanded(
+          child: TabBarView(
+            controller: _scopeTabController,
+            children: [
+              _buildScopePane(
+                items: collection,
+                isWishlist: false,
+                filters: _collectionFilters,
+                searchController: _collectionSearch,
+                onFiltersChanged: (f) => setState(() => _collectionFilters = f),
+                emptyHint: 'Aucun objet partagé dans ce groupe.',
+              ),
+              _buildScopePane(
+                items: wishlist,
+                isWishlist: true,
+                filters: _wishlistFilters,
+                searchController: _wishlistSearch,
+                onFiltersChanged: (f) => setState(() => _wishlistFilters = f),
+                emptyHint: 'Rien en wishlist pour ce groupe.',
+              ),
+              GroupWantedBoard(
+                groupId: _group.id,
+                accent: accent,
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 

@@ -17,7 +17,6 @@ import '../utils/shop_query_normalize.dart';
 class BoardgameMarketService {
   static const marketPricesTtl = Duration(hours: 24);
   static const _siteName = 'collectingo.app';
-  static const _historyMax = 40;
   static const outlierFloorRatio = 0.45;
   /// Fallback historique (courant) — préférer [secondhandRatioForStock].
   static const secondhandOfMedian = 0.58;
@@ -104,24 +103,14 @@ class BoardgameMarketService {
     } else if (market.secondhandEstimateEur != null) {
       patch[kMarketSecondhandPrice] = market.secondhandEstimateEur;
     }
-    if (market.stores.isNotEmpty) {
-      patch[kStoresPrices] = market.stores.map((e) => e.toJson()).toList();
-    }
+    // Intentionnellement PAS de stores_prices / market_price_history :
+    // ces listes gonflaient chaque SELECT * (Egress PostgREST).
     if (market.languages.isNotEmpty) {
-      patch[kBggLanguages] = market.languages.toList();
+      patch[kBggLanguages] = market.languages.take(8).toList();
     }
     patch[kMarketPricesFetchedAt] = DateTime.now().toIso8601String();
-
-    final history = marketHistoryFromMetadata(existing);
-    final nextHistory = _appendHistory(
-      history,
-      secondhand: summary?.secondhand ?? market.secondhandEstimateEur,
-      newMin: summary?.min ?? market.newMinEur,
-    );
-    if (nextHistory.isNotEmpty) {
-      patch[kMarketPriceHistory] = nextHistory.map((e) => e.toJson()).toList();
-    }
-
+    patch.remove(kStoresPrices);
+    patch.remove(kMarketPriceHistory);
     return patch;
   }
 
@@ -161,7 +150,7 @@ class BoardgameMarketService {
         .from('collection_items')
         .update({'metadata': meta})
         .eq('id', item.id);
-    CollectionRefresh.instance.bump();
+    // Pas de CollectionRefresh.bump() : évite un re-fetch complet de la grille.
   }
 
   /// Enrichit les jeux possédés sans prix marché (tâche de fond, lot limité).
@@ -561,33 +550,6 @@ class BoardgameMarketService {
   static double? _toDouble(dynamic raw) {
     if (raw is num) return raw.toDouble();
     return double.tryParse('$raw');
-  }
-
-  static List<MarketPriceHistoryPoint> _appendHistory(
-    List<MarketPriceHistoryPoint> existing, {
-    double? secondhand,
-    double? newMin,
-  }) {
-    if (secondhand == null && newMin == null) return existing;
-    final today = DateTime.now();
-    final dayKey = DateTime(today.year, today.month, today.day);
-    final withoutToday = existing.where((p) {
-      final at = p.at;
-      if (at == null) return true;
-      final d = DateTime(at.year, at.month, at.day);
-      return d != dayKey;
-    }).toList();
-    withoutToday.add(
-      MarketPriceHistoryPoint(
-        at: dayKey,
-        secondhandEur: secondhand,
-        newMinEur: newMin,
-      ),
-    );
-    if (withoutToday.length > _historyMax) {
-      return withoutToday.sublist(withoutToday.length - _historyMax);
-    }
-    return withoutToday;
   }
 }
 

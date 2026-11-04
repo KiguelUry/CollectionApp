@@ -171,13 +171,26 @@ class BookVolume {
     return 'Tome $displayNumber';
   }
 
-  BookVolume copyWithMetadata(Map<String, dynamic> patch) {
+  BookVolume copyWith({
+    String? id,
+    String? seriesId,
+    double? volumeNumber,
+    String? label,
+    double? sortIndex,
+    Map<String, dynamic>? metadata,
+  }) {
     return BookVolume(
-      id: id,
-      seriesId: seriesId,
-      volumeNumber: volumeNumber,
-      label: label,
-      sortIndex: sortIndex,
+      id: id ?? this.id,
+      seriesId: seriesId ?? this.seriesId,
+      volumeNumber: volumeNumber ?? this.volumeNumber,
+      label: label ?? this.label,
+      sortIndex: sortIndex ?? this.sortIndex,
+      metadata: metadata ?? this.metadata,
+    );
+  }
+
+  BookVolume copyWithMetadata(Map<String, dynamic> patch) {
+    return copyWith(
       metadata: {
         ...metadata,
         ...patch,

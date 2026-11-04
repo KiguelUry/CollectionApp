@@ -18,7 +18,8 @@ class NotificationService extends ChangeNotifier {
   static final instance = NotificationService._();
 
   static const _table = 'app_notifications';
-  static const _pollInterval = Duration(seconds: 60);
+  /// Polling rare : évite une lecture SQL toutes les minutes en arrière-plan.
+  static const _pollInterval = Duration(minutes: 5);
   static const _fetchLimit = 80;
 
   SupabaseClient get _client => Supabase.instance.client;

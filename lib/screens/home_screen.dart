@@ -118,8 +118,6 @@ class _HomeScreenState extends State<HomeScreen>
   late final TabController _tabController;
 
   late final String _userId;
-  late final Stream<List<Map<String, dynamic>>> _itemsStream;
-  StreamSubscription<List<Map<String, dynamic>>>? _itemsSub;
   List<Map<String, dynamic>> _itemRows = [];
   bool _itemsLoading = true;
   int _enrichGeneration = 0;
@@ -140,7 +138,8 @@ class _HomeScreenState extends State<HomeScreen>
   int _gridMobileColumns = 3;
   bool _modifsUnseen = false;
   final _reloadDebounce = DebouncedRunner();
-  static const _reloadDebounceDelay = Duration(milliseconds: 300);
+  /// Debounce plus long : évite une tempête de SELECT * après chaque bump.
+  static const _reloadDebounceDelay = Duration(milliseconds: 900);
 
   void _scheduleReloadItemsFromDb() {
     _reloadDebounce.run(
@@ -165,12 +164,8 @@ class _HomeScreenState extends State<HomeScreen>
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _userId = Supabase.instance.client.auth.currentUser!.id;
-    final rawStream = Supabase.instance.client
-        .from('collection_items')
-        .stream(primaryKey: ['id'])
-        .eq('category', widget.category.dbValue);
-    _itemsStream = rawStream.map(_filterAndScopeRows);
-    _itemsSub = _itemsStream.listen((_) => _scheduleReloadItemsFromDb());
+    // Pas de Realtime `.stream()` ici : chaque event relançait un SELECT *
+    // (Egress + Log Ingestion). Refresh uniquement via CollectionRefresh.
     CollectionRefresh.instance.addListener(_scheduleReloadItemsFromDb);
     HouseholdService.instance.addListener(_onHouseholdsChanged);
     final cachedRows = CollectionLocalCache.peek(_userId, _cacheScope);
@@ -290,7 +285,6 @@ class _HomeScreenState extends State<HomeScreen>
     if (widget.category == CollectionCategory.boardgame) {
       _tabController.removeListener(_onTabChanged);
     }
-    _itemsSub?.cancel();
     _reloadDebounce.dispose();
     CollectionRefresh.instance.removeListener(_scheduleReloadItemsFromDb);
     HouseholdService.instance.removeListener(_onHouseholdsChanged);

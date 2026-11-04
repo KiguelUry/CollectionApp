@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../models/collection_category.dart';
 import '../../models/collection_item.dart';
+import '../../services/collection_refresh.dart';
 import '../../widgets/category_hub_header.dart';
 import '../../widgets/collection_item_tile.dart';
 import 'restaurant_map_screen.dart';
@@ -88,63 +89,99 @@ class _RestaurantCollectionScreenState extends State<RestaurantCollectionScreen>
   }
 }
 
-class _RestaurantListTab extends StatelessWidget {
+class _RestaurantListTab extends StatefulWidget {
   final bool wishlist;
 
   const _RestaurantListTab({required this.wishlist});
 
   @override
+  State<_RestaurantListTab> createState() => _RestaurantListTabState();
+}
+
+class _RestaurantListTabState extends State<_RestaurantListTab> {
+  List<CollectionItem>? _items;
+  Object? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    CollectionRefresh.instance.addListener(_reload);
+    _reload();
+  }
+
+  @override
+  void dispose() {
+    CollectionRefresh.instance.removeListener(_reload);
+    super.dispose();
+  }
+
+  Future<void> _reload() async {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+    try {
+      final rows = await Supabase.instance.client
+          .from('collection_items')
+          .select()
+          .eq('category', CollectionCategory.restaurant.dbValue);
+      final items = (rows as List)
+          .map((r) => CollectionItem.fromJson(Map<String, dynamic>.from(r)))
+          .where((i) {
+            final mine = i.addedBy == userId || i.locationUserId == userId;
+            return mine && i.isWishlist == widget.wishlist && !i.isSold;
+          })
+          .toList();
+      if (!mounted) return;
+      setState(() {
+        _items = items;
+        _error = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final userId = Supabase.instance.client.auth.currentUser!.id;
-    final stream = Supabase.instance.client
-        .from('collection_items')
-        .stream(primaryKey: ['id'])
-        .eq('category', CollectionCategory.restaurant.dbValue);
+    if (_error != null) {
+      return Center(child: Text('Erreur : $_error'));
+    }
+    final items = _items;
+    if (items == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
 
-    return StreamBuilder<List<Map<String, dynamic>>>(
-      stream: stream,
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final items = snapshot.data!
-            .map((r) => CollectionItem.fromJson(r))
-            .where((i) {
-          final mine = i.addedBy == userId || i.locationUserId == userId;
-          return mine && i.isWishlist == wishlist && !i.isSold;
-        }).toList();
+    if (items.isEmpty) {
+      return Center(
+        child: Text(
+          widget.wishlist
+              ? 'Aucun resto en wishlist.'
+              : 'Aucune visite enregistrée.',
+          style: TextStyle(color: Colors.grey.shade600),
+        ),
+      );
+    }
 
-        if (items.isEmpty) {
-          return Center(
-            child: Text(
-              wishlist ? 'Aucun resto en wishlist.' : 'Aucune visite enregistrée.',
-              style: TextStyle(color: Colors.grey.shade600),
+    return GridView.builder(
+      padding: const EdgeInsets.all(12),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        childAspectRatio: 0.75,
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 10,
+      ),
+      itemCount: items.length,
+      itemBuilder: (context, i) {
+        final item = items[i];
+        return CollectionItemTile(
+          item: item,
+          category: CollectionCategory.restaurant,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ItemDetailScreen(item: item),
             ),
-          );
-        }
-
-        return GridView.builder(
-          padding: const EdgeInsets.all(12),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            childAspectRatio: 0.75,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
           ),
-          itemCount: items.length,
-          itemBuilder: (context, i) {
-            final item = items[i];
-            return CollectionItemTile(
-              item: item,
-              category: CollectionCategory.restaurant,
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => ItemDetailScreen(item: item),
-                ),
-              ),
-            );
-          },
         );
       },
     );

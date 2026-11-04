@@ -1,6 +1,7 @@
 import '../models/collection_item.dart';
-import 'whereabouts_apply.dart';
 import 'holder_label_utils.dart';
+import 'metadata_slim.dart';
+import 'whereabouts_apply.dart';
 
 /// Fusionne `group_ids` sans écraser le reste du metadata (dont `holder_label`).
 Map<String, dynamic> metadataWithGroupIds(
@@ -58,17 +59,19 @@ Map<String, dynamic> finalizeMetadataPayload(
   CollectionItem item,
   Map<String, dynamic> metadata,
 ) {
-  if (item.locationUserId != null) return metadata;
-  final fromMeta = item.metadata?['holder_label']?.toString().trim();
-  if (fromMeta != null && fromMeta.isNotEmpty) {
-    metadata['holder_label'] = fromMeta;
-    return metadata;
+  var meta = Map<String, dynamic>.from(metadata);
+  if (item.locationUserId == null) {
+    final fromMeta = item.metadata?['holder_label']?.toString().trim();
+    if (fromMeta != null && fromMeta.isNotEmpty) {
+      meta['holder_label'] = fromMeta;
+    } else {
+      final fromLabel = item.locationLabel?.trim();
+      if (fromLabel != null && fromLabel.isNotEmpty && fromLabel != '—') {
+        meta['holder_label'] = holderLabelStorageValue(fromLabel);
+      }
+    }
   }
-  final fromLabel = item.locationLabel?.trim();
-  if (fromLabel != null && fromLabel.isNotEmpty && fromLabel != '—') {
-    metadata['holder_label'] = holderLabelStorageValue(fromLabel);
-  }
-  return metadata;
+  return slimMetadata(meta);
 }
 
 bool itemHasManualHolder(CollectionItem item) {
