@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../models/item_condition.dart';
 import '../services/collection_refresh.dart';
@@ -16,6 +17,27 @@ import '../widgets/bgg_network_image.dart';
 import '../widgets/item_condition_pill.dart';
 import 'item_detail_screen.dart';
 import 'marketplace/marketplace_screen.dart';
+
+enum _LoanSort {
+  dateDesc,
+  dateAsc,
+  durationDesc,
+  title,
+  borrower,
+}
+
+enum _LoanAgeFilter {
+  all,
+  recent, // < 14 j
+  aging, // ≥ 14 j
+  overdue, // ≥ 30 j
+}
+
+enum _LoanAudienceFilter {
+  all,
+  friends,
+  external,
+}
 
 /// Prêts en cours, doublons (détail par exemplaire) et objets à vendre.
 class ExchangesScreen extends StatefulWidget {
@@ -52,6 +74,11 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
   List<CollectionItem> _loans = [];
   bool _loading = true;
 
+  CollectionCategory? _categoryFilter;
+  _LoanSort _loanSort = _LoanSort.dateDesc;
+  _LoanAgeFilter _loanAge = _LoanAgeFilter.all;
+  _LoanAudienceFilter _loanAudience = _LoanAudienceFilter.all;
+
   String? get _meUserId {
     try {
       return Supabase.instance.client.auth.currentUser?.id;
@@ -59,6 +86,15 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
       return null;
     }
   }
+
+  bool get _filtersActive =>
+      _categoryFilter != null ||
+      _loanSort != _LoanSort.dateDesc ||
+      _loanAge != _LoanAgeFilter.all ||
+      _loanAudience != _LoanAudienceFilter.all;
+
+  bool _matchesCategory(CollectionItem item) =>
+      _categoryFilter == null || item.category == _categoryFilter;
 
   @override
   void initState() {
@@ -82,19 +118,87 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
     if (mounted) setState(() => _loading = false);
   }
 
+  List<CollectionCategory> get _availableCategories {
+    final set = <CollectionCategory>{
+      for (final i in [..._loans, ..._owned])
+        if (!i.isWishlist) i.category,
+    };
+    return set.toList()..sort((a, b) => a.label.compareTo(b.label));
+  }
+
+  List<CollectionItem> get _filteredLoans {
+    final list = _loans.where((item) {
+      if (!_matchesCategory(item)) return false;
+      final days = item.loanedAt == null
+          ? null
+          : DateTime.now().difference(item.loanedAt!).inDays;
+      switch (_loanAge) {
+        case _LoanAgeFilter.all:
+          break;
+        case _LoanAgeFilter.recent:
+          if (days == null || days >= 14) return false;
+        case _LoanAgeFilter.aging:
+          if (days == null || days < 14) return false;
+        case _LoanAgeFilter.overdue:
+          if (days == null || days < 30) return false;
+      }
+      switch (_loanAudience) {
+        case _LoanAudienceFilter.all:
+          break;
+        case _LoanAudienceFilter.friends:
+          if (item.loanedToId == null) return false;
+        case _LoanAudienceFilter.external:
+          if (item.loanedToId != null) return false;
+      }
+      return true;
+    }).toList();
+
+    int daysOf(CollectionItem i) => i.loanedAt == null
+        ? -1
+        : DateTime.now().difference(i.loanedAt!).inDays;
+
+    list.sort((a, b) {
+      switch (_loanSort) {
+        case _LoanSort.dateDesc:
+          return (b.loanedAt ?? DateTime(1970))
+              .compareTo(a.loanedAt ?? DateTime(1970));
+        case _LoanSort.dateAsc:
+          return (a.loanedAt ?? DateTime(1970))
+              .compareTo(b.loanedAt ?? DateTime(1970));
+        case _LoanSort.durationDesc:
+          return daysOf(b).compareTo(daysOf(a));
+        case _LoanSort.title:
+          return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+        case _LoanSort.borrower:
+          return a.loaneeDisplayName
+              .toLowerCase()
+              .compareTo(b.loaneeDisplayName.toLowerCase());
+      }
+    });
+    return list;
+  }
+
   List<GroupedCollectionItem> get _duplicates => CollectionGridGrouper.group(
-        _owned.where((i) => !i.isWishlist && !i.isSold).toList(),
+        _owned
+            .where(
+              (i) => !i.isWishlist && !i.isSold && _matchesCategory(i),
+            )
+            .toList(),
       ).where((g) => g.hasDuplicates).toList();
 
   List<CollectionItem> get _forSale => _owned
       .where(
-        (i) => !i.isSold && !i.isWishlist && (i.isForSale || itemWantsTrade(i)),
+        (i) =>
+            !i.isSold &&
+            !i.isWishlist &&
+            _matchesCategory(i) &&
+            (i.isForSale || itemWantsTrade(i)),
       )
       .toList()
     ..sort((a, b) => a.title.compareTo(b.title));
 
   List<CollectionItem> get _sold =>
-      _owned.where((i) => i.isSold).toList()
+      _owned.where((i) => i.isSold && _matchesCategory(i)).toList()
         ..sort((a, b) => a.title.compareTo(b.title));
 
   List<_CopyView> _copiesFor(GroupedCollectionItem group) {
@@ -197,10 +301,157 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
     }
   }
 
+  Future<void> _openFilters() async {
+    final categories = _availableCategories;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheet) {
+            void apply(VoidCallback fn) {
+              setSheet(fn);
+              setState(fn);
+            }
+
+            Widget sectionTitle(String t) => Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 12, 4, 6),
+                  child: Text(
+                    t,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                    ),
+                  ),
+                );
+
+            return SafeArea(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'Filtres & tri',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 18,
+                            ),
+                          ),
+                        ),
+                        if (_filtersActive)
+                          TextButton(
+                            onPressed: () => apply(() {
+                              _categoryFilter = null;
+                              _loanSort = _LoanSort.dateDesc;
+                              _loanAge = _LoanAgeFilter.all;
+                              _loanAudience = _LoanAudienceFilter.all;
+                            }),
+                            child: const Text('Réinitialiser'),
+                          ),
+                      ],
+                    ),
+                    if (categories.isNotEmpty) ...[
+                      sectionTitle('Collection'),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          FilterChip(
+                            label: const Text('Toutes'),
+                            selected: _categoryFilter == null,
+                            onSelected: (_) =>
+                                apply(() => _categoryFilter = null),
+                          ),
+                          for (final c in categories)
+                            FilterChip(
+                              avatar: Icon(c.icon, size: 16),
+                              label: Text(c.label),
+                              selected: _categoryFilter == c,
+                              onSelected: (_) => apply(
+                                () => _categoryFilter =
+                                    _categoryFilter == c ? null : c,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                    sectionTitle('Tri des prêts'),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        for (final e in const [
+                          (_LoanSort.dateDesc, 'Plus récents'),
+                          (_LoanSort.dateAsc, 'Plus anciens'),
+                          (_LoanSort.durationDesc, 'Durée (longs d\'abord)'),
+                          (_LoanSort.title, 'Titre A→Z'),
+                          (_LoanSort.borrower, 'Emprunteur A→Z'),
+                        ])
+                          ChoiceChip(
+                            label: Text(e.$2),
+                            selected: _loanSort == e.$1,
+                            onSelected: (_) =>
+                                apply(() => _loanSort = e.$1),
+                          ),
+                      ],
+                    ),
+                    sectionTitle('Ancienneté du prêt'),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        for (final e in const [
+                          (_LoanAgeFilter.all, 'Tous'),
+                          (_LoanAgeFilter.recent, 'Récents (< 14 j)'),
+                          (_LoanAgeFilter.aging, 'À surveiller (≥ 14 j)'),
+                          (_LoanAgeFilter.overdue, 'À relancer (≥ 30 j)'),
+                        ])
+                          ChoiceChip(
+                            label: Text(e.$2),
+                            selected: _loanAge == e.$1,
+                            onSelected: (_) =>
+                                apply(() => _loanAge = e.$1),
+                          ),
+                      ],
+                    ),
+                    sectionTitle('Emprunteur'),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        for (final e in const [
+                          (_LoanAudienceFilter.all, 'Tous'),
+                          (_LoanAudienceFilter.friends, 'Amis (app)'),
+                          (_LoanAudienceFilter.external, 'Hors app'),
+                        ])
+                          ChoiceChip(
+                            label: Text(e.$2),
+                            selected: _loanAudience == e.$1,
+                            onSelected: (_) =>
+                                apply(() => _loanAudience = e.$1),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final duplicates = _duplicates;
     final forSale = _forSale;
+    final loans = _filteredLoans;
     return DefaultTabController(
       length: 3,
       initialIndex: widget.initialTab.clamp(0, 2),
@@ -208,6 +459,15 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
         appBar: AppAppBar(
           title: 'Prêts & échanges',
           actions: [
+            IconButton(
+              tooltip: 'Filtres & tri',
+              onPressed: _loading ? null : _openFilters,
+              icon: Badge(
+                isLabelVisible: _filtersActive,
+                smallSize: 8,
+                child: const Icon(Icons.tune),
+              ),
+            ),
             IconButton(
               tooltip: 'Hôtel des ventes',
               icon: const Icon(Icons.storefront_outlined),
@@ -219,7 +479,7 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
           ],
           bottom: TabBar(
             tabs: [
-              Tab(text: _tabLabel('Prêts', _loans.length)),
+              Tab(text: _tabLabel('Prêts', loans.length)),
               Tab(text: _tabLabel('Doublons', duplicates.length)),
               Tab(text: _tabLabel('À vendre', forSale.length)),
             ],
@@ -229,7 +489,7 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
             ? const Center(child: CircularProgressIndicator())
             : TabBarView(
                 children: [
-                  _wrap(_buildLoans()),
+                  _wrap(_buildLoans(loans)),
                   _wrap(_buildDuplicates(duplicates)),
                   _wrap(_buildForSale(forSale)),
                 ],
@@ -254,7 +514,7 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
 
   // ---------------------------------------------------------------- Prêts
 
-  Widget _buildLoans() {
+  Widget _buildLoans(List<CollectionItem> loans) {
     if (_loans.isEmpty) {
       return _empty(
         icon: Icons.handshake_outlined,
@@ -263,11 +523,18 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
             'jeu, ton manga…',
       );
     }
+    if (loans.isEmpty) {
+      return _empty(
+        icon: Icons.filter_alt_off,
+        title: 'Aucun prêt avec ces filtres',
+        hint: 'Ouvre l\'icône filtres (réglages) pour élargir la recherche.',
+      );
+    }
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 32),
-      itemCount: _loans.length,
+      itemCount: loans.length,
       itemBuilder: (context, i) {
-        final item = _loans[i];
+        final item = loans[i];
         final days = item.loanedAt == null
             ? null
             : DateTime.now().difference(item.loanedAt!).inDays;

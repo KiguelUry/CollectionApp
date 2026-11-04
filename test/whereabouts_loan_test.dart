@@ -179,5 +179,9 @@ void main() {
       await tester.pumpWidget(build(true));
       expect(find.text('Prêté le 15/10/2026'), findsOneWidget);
     });
+
+    test('limite de nom = 40 caractères', () {
+      expect(kLoanBorrowerNameMaxLength, 40);
+    });
   });
 }

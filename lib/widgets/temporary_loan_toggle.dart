@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../services/friend_service.dart';
 import 'profile_avatar.dart';
+
+/// Longueur max d'un nom d'emprunteur (pop-up + champ « Prêté à »).
+const int kLoanBorrowerNameMaxLength = 40;
 
 /// Interrupteur « C'est un prêt temporaire » + date + à qui.
 /// Pas de liste de noms sous le champ : icône amis à droite de la saisie.
@@ -38,19 +42,25 @@ class _TemporaryLoanToggleState extends State<TemporaryLoanToggle> {
   final _whoFocus = FocusNode();
   List<Map<String, dynamic>> _friends = const [];
 
+  static final _nameLimiters = <TextInputFormatter>[
+    LengthLimitingTextInputFormatter(kLoanBorrowerNameMaxLength),
+  ];
+
   @override
   void initState() {
     super.initState();
-    _who = TextEditingController(text: widget.borrowerName ?? '');
+    _who = TextEditingController(
+      text: _clampName(widget.borrowerName ?? ''),
+    );
     _loadFriends();
   }
 
   @override
   void didUpdateWidget(covariant TemporaryLoanToggle oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Ne pas écraser la saisie en cours (sinon focus / curseur sautent).
+    // Ne jamais écraser la saisie en cours (bandeau parent peut se maj).
     if (_whoFocus.hasFocus) return;
-    final next = widget.borrowerName ?? '';
+    final next = _clampName(widget.borrowerName ?? '');
     if (next != _who.text) {
       _who.value = TextEditingValue(
         text: next,
@@ -64,6 +74,12 @@ class _TemporaryLoanToggleState extends State<TemporaryLoanToggle> {
     _who.dispose();
     _whoFocus.dispose();
     super.dispose();
+  }
+
+  static String _clampName(String raw) {
+    final t = raw.trimRight();
+    if (t.length <= kLoanBorrowerNameMaxLength) return t;
+    return t.substring(0, kLoanBorrowerNameMaxLength);
   }
 
   Future<void> _loadFriends() async {
@@ -140,8 +156,9 @@ class _TemporaryLoanToggleState extends State<TemporaryLoanToggle> {
   Future<void> _pickFriendIntoField() async {
     final chosen = await _pickFriendName();
     if (chosen == null || !mounted) return;
-    _who.text = chosen;
-    widget.onBorrowerChanged?.call(chosen.trim());
+    final name = _clampName(chosen);
+    _who.text = name;
+    widget.onBorrowerChanged?.call(name.trim());
   }
 
   /// Pop-up au moment où on coche le prêt : désigner l'emprunteur.
@@ -156,22 +173,27 @@ class _TemporaryLoanToggleState extends State<TemporaryLoanToggle> {
             controller: ctrl,
             autofocus: true,
             textInputAction: TextInputAction.done,
+            maxLength: kLoanBorrowerNameMaxLength,
+            inputFormatters: _nameLimiters,
             decoration: InputDecoration(
               labelText: 'Prêté à',
               hintText: 'Ami ou nom libre',
+              counterText: '',
               prefixIcon: const Icon(Icons.person_outline),
               suffixIcon: IconButton(
                 tooltip: 'Choisir un ami',
                 onPressed: () async {
                   final chosen = await _pickFriendName();
-                  if (chosen != null) ctrl.text = chosen;
+                  if (chosen != null) {
+                    ctrl.text = _clampName(chosen);
+                  }
                 },
                 icon: Icon(Icons.group_outlined, color: Colors.blue.shade700),
               ),
               border: const OutlineInputBorder(),
             ),
             onSubmitted: (v) {
-              final t = v.trim();
+              final t = _clampName(v).trim();
               if (t.isNotEmpty) Navigator.pop(ctx, t);
             },
           ),
@@ -182,7 +204,7 @@ class _TemporaryLoanToggleState extends State<TemporaryLoanToggle> {
             ),
             FilledButton(
               onPressed: () {
-                final t = ctrl.text.trim();
+                final t = _clampName(ctrl.text).trim();
                 if (t.isEmpty) return;
                 Navigator.pop(ctx, t);
               },
@@ -206,6 +228,17 @@ class _TemporaryLoanToggleState extends State<TemporaryLoanToggle> {
     _who.text = name;
     widget.onChanged(true, DateTime.now(), borrowerName: name);
     widget.onBorrowerChanged?.call(name);
+  }
+
+  void _onWhoChanged(String raw) {
+    final clipped = _clampName(raw);
+    if (clipped != raw) {
+      _who.value = TextEditingValue(
+        text: clipped,
+        selection: TextSelection.collapsed(offset: clipped.length),
+      );
+    }
+    widget.onBorrowerChanged?.call(clipped.trim());
   }
 
   @override
@@ -238,15 +271,19 @@ class _TemporaryLoanToggleState extends State<TemporaryLoanToggle> {
             ),
           ),
           const SizedBox(height: 8),
+          // Ne jamais passer enabled:false ici : ça retire le focus clavier
+          // dès qu'une sauvegarde démarre (bandeau Rendre peut se maj).
           TextField(
             key: const ValueKey('temporary_loan_who'),
             controller: _who,
             focusNode: _whoFocus,
-            enabled: widget.enabled,
+            maxLength: kLoanBorrowerNameMaxLength,
+            inputFormatters: _nameLimiters,
             decoration: InputDecoration(
               labelText: 'Prêté à',
               hintText: 'Ami ou nom libre',
               isDense: true,
+              counterText: '',
               prefixIcon: const Icon(Icons.person_outline),
               suffixIcon: IconButton(
                 tooltip: 'Choisir un ami',
@@ -255,7 +292,7 @@ class _TemporaryLoanToggleState extends State<TemporaryLoanToggle> {
               ),
               border: const OutlineInputBorder(),
             ),
-            onChanged: (v) => widget.onBorrowerChanged?.call(v.trim()),
+            onChanged: _onWhoChanged,
           ),
         ],
       ],

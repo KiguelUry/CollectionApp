@@ -359,14 +359,19 @@ class _BoardgameTileLocationSheetState
     _schedulePersist();
   }
 
-  void _schedulePersist() {
+  void _schedulePersist({bool quiet = false}) {
     _saveDebounce?.cancel();
-    _saveDebounce = Timer(const Duration(milliseconds: 250), _persist);
+    _saveDebounce = Timer(
+      Duration(milliseconds: quiet ? 550 : 250),
+      () => _persist(quiet: quiet),
+    );
   }
 
-  Future<void> _persist() async {
+  Future<void> _persist({bool quiet = false}) async {
     if (widget.readOnly) return;
-    setState(() => _saving = true);
+    // quiet = saisie « Prêté à » : maj DB + bandeau sans barre _saving
+    // (sinon enabled/rebuild coupe le focus clavier).
+    if (!quiet && mounted) setState(() => _saving = true);
     try {
       final groupIds = _groupIdsFromItem(_item).toList();
       final whereabouts = buildWhereaboutsDbFields(
@@ -401,7 +406,7 @@ class _BoardgameTileLocationSheetState
         );
       }
     } finally {
-      if (mounted) setState(() => _saving = false);
+      if (mounted && _saving) setState(() => _saving = false);
     }
   }
 
@@ -619,16 +624,19 @@ class _BoardgameTileLocationSheetState
                   isLoan: _item.isOnLoan,
                   loanedAt: _item.loanedAt,
                   borrowerName: _item.loanedToName,
+                  // Switch / date seulement : le champ « Prêté à » reste
+                  // focusable pendant la sauvegarde (sinon le clavier se ferme).
                   enabled: !_saving,
                   hideSwitchWhenActive: true,
                   onBorrowerChanged: (name) {
+                    // Maj bandeau « Prêté à … » sans couper la saisie.
                     setState(() {
                       _item = _item.copyWith(
                         loanedToName: name.isEmpty ? null : name,
                       );
                       _dirty = true;
                     });
-                    _schedulePersist();
+                    _schedulePersist(quiet: true);
                   },
                   onChanged: (isLoan, date, {borrowerName}) {
                     setState(() {
