@@ -89,7 +89,93 @@ class _CompactWhereaboutsDropdownState
     _manualController = TextEditingController();
     _meUserId = _personalUserId;
     _seedFromCache();
+    _syncPaneFromProps();
     unawaited(_loadRemote());
+  }
+
+  @override
+  void didUpdateWidget(covariant CompactWhereaboutsDropdown oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.locationUserId != widget.locationUserId ||
+        oldWidget.holderLabel != widget.holderLabel ||
+        oldWidget.loanActive != widget.loanActive) {
+      _syncPaneFromProps();
+    }
+  }
+
+  /// Infère Personne / Lieu / Chez moi depuis les props (ex. « Braine l'Alleud »).
+  void _syncPaneFromProps() {
+    if (widget.loanActive) return;
+    final me = _meUserId;
+    if (widget.locationUserId != null &&
+        me != null &&
+        widget.locationUserId == me) {
+      _pane = null;
+      _manualMode = false;
+      return;
+    }
+    if (widget.locationUserId != null &&
+        me != null &&
+        widget.locationUserId != me) {
+      _pane = _WhoPane.person;
+      _manualMode = false;
+      return;
+    }
+    final label = (widget.holderLabel ?? '').trim();
+    if (label.isEmpty || label == '—') {
+      _pane = null;
+      return;
+    }
+    final lower = label.toLowerCase();
+    if (lower == 'chez moi') {
+      _pane = null;
+      _manualMode = false;
+      return;
+    }
+    if (RegExp(r'^(à|a|en|au)\s+', caseSensitive: false).hasMatch(label) ||
+        _homes.any((h) => _normPlace(h.place) == _normPlace(label)) ||
+        _placeSuggestions.any((p) => _normPlace(p) == _normPlace(label))) {
+      _pane = _WhoPane.place;
+      _manualMode = true;
+      return;
+    }
+    if (lower.startsWith('chez ') ||
+        _people.any(
+          (p) =>
+              p.label.toLowerCase() == lower ||
+              p.label.toLowerCase() ==
+                  holderLabelStorageValue(label).toLowerCase(),
+        )) {
+      _pane = _WhoPane.person;
+      _manualMode = true;
+      return;
+    }
+    // Libellé libre sans préfixe (ex. ville) → Lieu.
+    _pane = _WhoPane.place;
+    _manualMode = true;
+  }
+
+  String? get _destinationArrowLabel {
+    if (widget.loanActive) return null;
+    final me = _meUserId;
+    if (widget.locationUserId != null &&
+        me != null &&
+        widget.locationUserId == me) {
+      return null;
+    }
+    if (widget.locationUserId != null &&
+        me != null &&
+        widget.locationUserId != me) {
+      final match = _people.where((p) => p.userId == widget.locationUserId);
+      if (match.isNotEmpty) return match.first.label;
+      final hl = (widget.holderLabel ?? '').trim();
+      return hl.isEmpty ? null : holderLabelStorageValue(hl);
+    }
+    final label = (widget.holderLabel ?? '').trim();
+    if (label.isEmpty || label == '—' || label.toLowerCase() == 'chez moi') {
+      return null;
+    }
+    return holderLabelStorageValue(label);
   }
 
   static bool _isJunkPlace(String raw) {
@@ -197,6 +283,7 @@ class _CompactWhereaboutsDropdownState
       _people = people.values.toList()
         ..sort((a, b) => a.label.compareTo(b.label));
       _homes = [...HouseholdService.instance.homes];
+      _syncPaneFromProps();
     });
     _maybeApplyDefault();
   }
@@ -318,12 +405,46 @@ class _CompactWhereaboutsDropdownState
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final dest = _destinationArrowLabel;
+    final chezMoiSelected = !widget.loanActive &&
+        _meUserId != null &&
+        _isSelectedUser(_meUserId!) &&
+        _pane == null;
+    final personSelected = !widget.loanActive && _pane == _WhoPane.person;
+    final placeSelected = !widget.loanActive && _pane == _WhoPane.place;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'Chez qui ?',
-          style: Theme.of(context).textTheme.labelLarge,
+        Row(
+          children: [
+            Text(
+              'Chez qui ?',
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+            if (dest != null && dest.isNotEmpty) ...[
+              const SizedBox(width: 10),
+              Icon(
+                Icons.arrow_forward_rounded,
+                size: 18,
+                color: scheme.primary,
+              ),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  dest,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                    color: scheme.primary,
+                  ),
+                ),
+              ),
+            ],
+          ],
         ),
         const SizedBox(height: 8),
         Wrap(
@@ -334,8 +455,7 @@ class _CompactWhereaboutsDropdownState
               FilterChip(
                 avatar: const Icon(Icons.home_outlined, size: 16),
                 label: const Text('Chez moi'),
-                selected:
-                    !widget.loanActive && _isSelectedUser(_meUserId!),
+                selected: chezMoiSelected,
                 onSelected: widget.readOnly
                     ? null
                     : (_) {
@@ -356,7 +476,7 @@ class _CompactWhereaboutsDropdownState
             FilterChip(
               avatar: const Icon(Icons.person_outline, size: 16),
               label: const Text('Personne'),
-              selected: !widget.loanActive && _pane == _WhoPane.person,
+              selected: personSelected,
               onSelected: widget.readOnly
                   ? null
                   : (_) => setState(() {
@@ -367,7 +487,7 @@ class _CompactWhereaboutsDropdownState
             FilterChip(
               avatar: const Icon(Icons.place_outlined, size: 16),
               label: const Text('Lieu'),
-              selected: !widget.loanActive && _pane == _WhoPane.place,
+              selected: placeSelected,
               onSelected: widget.readOnly
                   ? null
                   : (_) => setState(() {

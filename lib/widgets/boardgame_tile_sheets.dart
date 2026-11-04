@@ -479,34 +479,42 @@ class _BoardgameTileLocationSheetState
               if (!multi && _item.isOnLoan) ...[
                 const SizedBox(height: 12),
                 Material(
-                  color: Colors.blue.withValues(alpha: 0.14),
+                  color: const Color(0xFF1D4ED8),
                   borderRadius: BorderRadius.circular(12),
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+                    padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
                     child: Row(
                       children: [
-                        Icon(Icons.handshake_outlined,
-                            color: Colors.blue.shade700, size: 22),
+                        const Icon(Icons.handshake_outlined,
+                            color: Colors.white, size: 22),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             'Prêté à ${_item.loaneeDisplayName}',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
                               fontSize: 14,
-                              color: Colors.blue.shade800,
+                              color: Colors.white,
                             ),
                           ),
                         ),
-                        FilledButton.tonal(
+                        FilledButton(
                           onPressed: widget.readOnly || _saving
                               ? null
                               : _returnLoan,
                           style: FilledButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: const Color(0xFF1D4ED8),
                             visualDensity: VisualDensity.compact,
-                            foregroundColor: Colors.blue.shade900,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
                           ),
-                          child: const Text('Rendre'),
+                          child: const Text(
+                            'Rendre',
+                            style: TextStyle(fontWeight: FontWeight.w800),
+                          ),
                         ),
                       ],
                     ),
@@ -599,16 +607,16 @@ class _BoardgameTileLocationSheetState
                     }
                   },
                 ),
-              if (!multi &&
-                  !widget.readOnly &&
-                  (_item.isOnLoan ||
-                      isAwayFromHome(_item, meUserId: _meUserId))) ...[
+              // Prêt rapide toujours visible (même « Chez moi »).
+              // Si déjà prêté : pas de switch (bandeau « Rendre » suffit).
+              if (!multi && !widget.readOnly) ...[
                 const SizedBox(height: 8),
                 TemporaryLoanToggle(
                   isLoan: _item.isOnLoan,
                   loanedAt: _item.loanedAt,
                   borrowerName: _item.loanedToName,
                   enabled: !_saving,
+                  hideSwitchWhenActive: true,
                   onBorrowerChanged: (name) {
                     setState(() {
                       _item = _item.copyWith(

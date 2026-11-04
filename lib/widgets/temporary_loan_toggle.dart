@@ -5,11 +5,14 @@ import '../services/friend_service.dart';
 import 'profile_avatar.dart';
 
 /// Interrupteur « C'est un prêt temporaire » + date + à qui.
+/// Pas de liste de noms sous le champ : icône amis à droite de la saisie.
 class TemporaryLoanToggle extends StatefulWidget {
   final bool isLoan;
   final DateTime? loanedAt;
   final String? borrowerName;
   final bool enabled;
+  /// Si true et prêt actif : pas de switch (le parent a déjà « Rendre »).
+  final bool hideSwitchWhenActive;
   final void Function(bool isLoan, DateTime loanedAt) onChanged;
   final ValueChanged<String>? onBorrowerChanged;
 
@@ -21,6 +24,7 @@ class TemporaryLoanToggle extends StatefulWidget {
     this.borrowerName,
     this.onBorrowerChanged,
     this.enabled = true,
+    this.hideSwitchWhenActive = false,
   });
 
   @override
@@ -35,7 +39,7 @@ class _TemporaryLoanToggleState extends State<TemporaryLoanToggle> {
   void initState() {
     super.initState();
     _who = TextEditingController(text: widget.borrowerName ?? '');
-    if (widget.isLoan) _loadFriends();
+    _loadFriends();
   }
 
   @override
@@ -43,7 +47,6 @@ class _TemporaryLoanToggleState extends State<TemporaryLoanToggle> {
     super.didUpdateWidget(oldWidget);
     final next = widget.borrowerName ?? '';
     if (next != _who.text && next.isNotEmpty) _who.text = next;
-    if (widget.isLoan && !oldWidget.isLoan) _loadFriends();
   }
 
   @override
@@ -76,28 +79,77 @@ class _TemporaryLoanToggleState extends State<TemporaryLoanToggle> {
     if (picked != null) widget.onChanged(true, picked);
   }
 
-  void _setBorrower(String name) {
-    _who.text = name;
-    widget.onBorrowerChanged?.call(name.trim());
+  Future<void> _pickFriend() async {
+    if (_friends.isEmpty) {
+      await _loadFriends();
+    }
+    if (!mounted) return;
+    final chosen = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        if (_friends.isEmpty) {
+          return const SafeArea(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Text('Aucun ami dans ton carnet.'),
+            ),
+          );
+        }
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: Text(
+                  'Choisir un ami',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+                ),
+              ),
+              for (final friend in _friends)
+                ListTile(
+                  leading: ProfileAvatar(
+                    avatarUrl: friend['avatar_url'] as String?,
+                    accentColorHex: friend['accent_color'] as String?,
+                    fallbackInitial: friend['username'] as String? ?? '?',
+                    radius: 18,
+                  ),
+                  title: Text(friend['username'] as String),
+                  onTap: () =>
+                      Navigator.pop(ctx, friend['username'] as String),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+    if (chosen == null || !mounted) return;
+    _who.text = chosen;
+    widget.onBorrowerChanged?.call(chosen.trim());
   }
 
   @override
   Widget build(BuildContext context) {
     final date = widget.loanedAt ?? DateTime.now();
+    final showSwitch =
+        !(widget.hideSwitchWhenActive && widget.isLoan);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SwitchListTile(
-          key: const ValueKey('temporary_loan_switch'),
-          contentPadding: EdgeInsets.zero,
-          dense: true,
-          secondary: Icon(Icons.handshake_outlined, color: Colors.blue.shade700),
-          title: const Text('C\'est un prêt temporaire'),
-          value: widget.isLoan,
-          onChanged: widget.enabled
-              ? (v) => widget.onChanged(v, DateTime.now())
-              : null,
-        ),
+        if (showSwitch)
+          SwitchListTile(
+            key: const ValueKey('temporary_loan_switch'),
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            secondary:
+                Icon(Icons.handshake_outlined, color: Colors.blue.shade700),
+            title: const Text('C\'est un prêt temporaire'),
+            value: widget.isLoan,
+            onChanged: widget.enabled
+                ? (v) => widget.onChanged(v, DateTime.now())
+                : null,
+          ),
         if (widget.isLoan) ...[
           Align(
             alignment: Alignment.centerLeft,
@@ -113,39 +165,20 @@ class _TemporaryLoanToggleState extends State<TemporaryLoanToggle> {
             key: const ValueKey('temporary_loan_who'),
             controller: _who,
             enabled: widget.enabled,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'Prêté à',
-              hintText: 'Ami, membre ou nom libre',
+              hintText: 'Ami ou nom libre',
               isDense: true,
-              prefixIcon: Icon(Icons.person_outline),
-              border: OutlineInputBorder(),
+              prefixIcon: const Icon(Icons.person_outline),
+              suffixIcon: IconButton(
+                tooltip: 'Choisir un ami',
+                onPressed: widget.enabled ? _pickFriend : null,
+                icon: Icon(Icons.group_outlined, color: Colors.blue.shade700),
+              ),
+              border: const OutlineInputBorder(),
             ),
             onChanged: (v) => widget.onBorrowerChanged?.call(v.trim()),
           ),
-          if (_friends.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                for (final friend in _friends.take(12))
-                  FilterChip(
-                    avatar: ProfileAvatar(
-                      avatarUrl: friend['avatar_url'] as String?,
-                      accentColorHex: friend['accent_color'] as String?,
-                      fallbackInitial: friend['username'] as String? ?? '?',
-                      radius: 12,
-                    ),
-                    label: Text(friend['username'] as String),
-                    selected: _who.text.trim().toLowerCase() ==
-                        (friend['username'] as String).toLowerCase(),
-                    onSelected: widget.enabled
-                        ? (_) => _setBorrower(friend['username'] as String)
-                        : null,
-                  ),
-              ],
-            ),
-          ],
         ],
       ],
     );
