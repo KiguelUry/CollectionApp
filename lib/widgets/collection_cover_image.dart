@@ -5,15 +5,15 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 import '../utils/cover_image_url.dart';
+import 'fail_safe_network_image.dart';
 
-/// Coupe-circuit anti-boucle : une URL en 400/403 n'est plus jamais redemandée.
-final Set<String> kFailedImageUrls = <String>{};
+export 'fail_safe_network_image.dart' show kFailedImageUrls;
 
 /// Couverture nette (cache disque + mémoire, ratio livre, URLs adaptées).
 ///
-/// Sur Flutter Web, les grilles utilisent [Image.network] (pas CachedNetworkImage)
+/// Sur Flutter Web, les grilles utilisent [FailSafeNetworkImage]
 /// pour éviter le crash de textures WebGL Firefox au scroll
-/// (`tex(Sub)Image… Resource has no data`).
+/// et les boucles `requestAnimationFrame` sur CORS / 400.
 class CollectionCoverImage extends StatelessWidget {
   final String url;
   final double? width;
@@ -40,14 +40,6 @@ class CollectionCoverImage extends StatelessWidget {
     this.placeholder,
   });
 
-  void _markFailed(String failed) {
-    if (failed.isEmpty) return;
-    kFailedImageUrls.add(failed);
-  }
-
-  bool _isFailed(String candidate) =>
-      candidate.isNotEmpty && kFailedImageUrls.contains(candidate);
-
   @override
   Widget build(BuildContext context) {
     final padded = bookCover || boxedCover;
@@ -60,37 +52,32 @@ class CollectionCoverImage extends StatelessWidget {
         ? gridThumbnailUrl(
             url,
             crop: !padded && fit == BoxFit.cover,
-            size: thumbSize,
+            size: thumbSize.clamp(64, compact ? 300 : 600),
           )
         : url;
 
-    if (_isFailed(thumb) || _isFailed(url)) {
+    if (kFailedImageUrls.contains(thumb) || kFailedImageUrls.contains(url)) {
       return _wrap(padded, _fallback());
     }
 
     Widget image;
-    if (kIsWeb && compact) {
-      image = Image.network(
-        thumb,
-        key: ValueKey(thumb),
+    if (kIsWeb) {
+      image = FailSafeNetworkImage(
+        url: thumb,
         width: w,
         height: h,
         fit: imageFit,
-        filterQuality: FilterQuality.low,
-        gaplessPlayback: false,
-        cacheWidth: kThumbnailSize,
-        errorBuilder: (_, _, _) {
-          // Pas de 2ᵉ Image.network : évite la boucle requestAnimationFrame.
-          _markFailed(thumb);
-          return _fallback();
-        },
+        filterQuality: compact ? FilterQuality.low : FilterQuality.medium,
+        gaplessPlayback: !compact,
+        cacheWidth: compact ? kThumbnailSize : (largeSource ? 600 : 400),
+        placeholder: (_) => _fallback(),
         loadingBuilder: (context, child, progress) {
           if (progress == null) return child;
           return _fallback(
             child: Center(
               child: SizedBox(
-                width: 18,
-                height: 18,
+                width: compact ? 18 : 22,
+                height: compact ? 18 : 22,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
                   color: Colors.grey.shade500,
@@ -115,8 +102,8 @@ class CollectionCoverImage extends StatelessWidget {
         fadeOutDuration: Duration.zero,
         placeholder: (_, _) => _fallback(child: const SizedBox.shrink()),
         errorWidget: (context, failedUrl, _) {
-          _markFailed(failedUrl);
-          _markFailed(thumb);
+          kFailedImageUrls.add(failedUrl);
+          kFailedImageUrls.add(thumb);
           return _fallback();
         },
       );
@@ -142,50 +129,13 @@ class CollectionCoverImage extends StatelessWidget {
 
   Widget _buildOriginal(BuildContext context, BoxFit imageFit) {
     final displayUrl = coverUrlForDisplay(url, large: largeSource);
-    if (_isFailed(displayUrl)) return _fallback();
+    if (kFailedImageUrls.contains(displayUrl)) return _fallback();
 
     final dpr = MediaQuery.devicePixelRatioOf(context);
     final w = width;
     final h = height;
     final cacheW = _cachePixelSize(w, dpr);
     final cacheH = _cachePixelSize(h, dpr);
-
-    if (kIsWeb) {
-      final proxied = gridThumbnailUrl(
-        url,
-        size: largeSource ? 1000 : 600,
-      );
-      if (_isFailed(proxied)) return _fallback();
-      return Image.network(
-        proxied,
-        key: ValueKey(proxied),
-        width: w,
-        height: h,
-        fit: imageFit,
-        filterQuality: compact ? FilterQuality.low : FilterQuality.medium,
-        gaplessPlayback: true,
-        cacheWidth: largeSource ? 1000 : 600,
-        errorBuilder: (_, _, _) {
-          _markFailed(proxied);
-          return _fallback();
-        },
-        loadingBuilder: (context, child, progress) {
-          if (progress == null) return child;
-          return _fallback(
-            child: Center(
-              child: SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.grey.shade500,
-                ),
-              ),
-            ),
-          );
-        },
-      );
-    }
 
     return CachedNetworkImage(
       imageUrl: displayUrl,
@@ -213,8 +163,8 @@ class CollectionCoverImage extends StatelessWidget {
         ),
       ),
       errorWidget: (_, failedUrl, _) {
-        _markFailed(failedUrl);
-        _markFailed(displayUrl);
+        kFailedImageUrls.add(failedUrl);
+        kFailedImageUrls.add(displayUrl);
         return _fallback();
       },
     );

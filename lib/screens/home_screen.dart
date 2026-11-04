@@ -11,8 +11,6 @@ import '../models/category_metadata.dart';
 import '../models/media_format_ui.dart';
 import '../services/boardgame_collection_preferences.dart';
 import '../services/collection_display_preferences.dart';
-import '../services/boardgame_market_service.dart';
-import '../utils/wishlist_market_metadata.dart';
 import '../services/bgg_service.dart';
 import '../coordinators/book_item_add_coordinator.dart';
 import '../services/book_catalog_service.dart';
@@ -65,6 +63,7 @@ import '../widgets/watch_quick_search_sheet.dart';
 import '../services/collection_local_cache.dart';
 import '../services/offline_mode.dart';
 import '../services/supabase_capacity.dart';
+import '../services/supabase_read_cache.dart';
 import '../widgets/offline_banner.dart';
 import '../utils/catalog_hit_metadata.dart';
 import '../widgets/catalog_search_sheet.dart';
@@ -132,8 +131,6 @@ class _HomeScreenState extends State<HomeScreen>
   Set<String> _myGroupIds = {};
   bool _groupsReady = false;
   bool _bggRatingEnrichInFlight = false;
-  bool _wishlistMarketEnrichInFlight = false;
-  bool _ownedMarketPrefetchInFlight = false;
   bool _showOwnedExpansions = false;
   int _gridMobileColumns = 3;
   bool _modifsUnseen = false;
@@ -196,14 +193,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void _onTabChanged() {
-    if (!_tabController.indexIsChanging &&
-        _tabController.index == 1 &&
-        widget.category == CollectionCategory.boardgame) {
-      final wishlist = _filterHubScope(
-        _parseItems(_itemRows),
-      ).where((i) => i.isWishlist).toList();
-      unawaited(_enrichWishlistMarketData(wishlist));
-    }
+    // Pas d'enrichissement prix BGG en arrière-plan (Egress + PATCH en boucle).
   }
 
   Future<void> _loadGridDisplayPrefs() async {
@@ -311,15 +301,23 @@ class _HomeScreenState extends State<HomeScreen>
     _onItemRows(_filterAndScopeRows(rows));
   }
 
-  Future<void> _reloadItemsFromDb() async {
+  Future<void> _reloadItemsFromDb({bool force = false}) async {
     try {
-      var query = Supabase.instance.client
-          .from('collection_items')
-          .select(SupabaseEmbeds.collectionItemList)
-          .eq('category', widget.category.dbValue);
-      final data = await query;
+      final cacheKey =
+          'collection_items_cat:${widget.category.dbValue}:$_userId';
+      final rows =
+          await SupabaseReadCache.getOrFetch<List<Map<String, dynamic>>>(
+        key: cacheKey,
+        force: force,
+        loader: () async {
+          final data = await Supabase.instance.client
+              .from('collection_items')
+              .select(SupabaseEmbeds.collectionItemList)
+              .eq('category', widget.category.dbValue);
+          return List<Map<String, dynamic>>.from(data as List);
+        },
+      );
       if (!mounted) return;
-      final rows = List<Map<String, dynamic>>.from(data);
       _syncedFromDb = true;
       final scoped = _filterAndScopeRows(rows);
       CollectionLocalCache.write(_userId, _cacheScope, scoped);
@@ -338,9 +336,7 @@ class _HomeScreenState extends State<HomeScreen>
   void _scheduleEnrich() {
     final gen = ++_enrichGeneration;
     final parsed = _parseItems(_itemRows);
-    if (widget.category == CollectionCategory.boardgame) {
-      unawaited(_prefetchOwnedMarketPrices(parsed));
-    }
+    // Prix BGG : uniquement à l'ouverture d'une fiche / puce prix — jamais en lot.
     _tagService.enrichItems(parsed).then((items) {
       if (!mounted || gen != _enrichGeneration) return;
       OwnedCatalogIndex.rebuild(items);
@@ -383,57 +379,6 @@ class _HomeScreenState extends State<HomeScreen>
         playingTime: item.playingTime ?? base.playingTime,
       );
     }).toList();
-  }
-
-  Future<void> _prefetchOwnedMarketPrices(List<CollectionItem> items) async {
-    if (_ownedMarketPrefetchInFlight) return;
-    final queue = items.where((i) {
-      if (i.isWishlist || i.isSold) return false;
-      final bgg = i.metadata?['bgg_id']?.toString();
-      if (bgg == null || bgg.isEmpty) return false;
-      if (BoardgameMarketService.cachedPricesNeedRefresh(i.metadata)) {
-        return true;
-      }
-      return marketSecondhandPriceFromMetadata(i.metadata) == null &&
-          marketNewPriceMinFromMetadata(i.metadata) == null;
-    }).toList();
-    if (queue.isEmpty) return;
-    _ownedMarketPrefetchInFlight = true;
-    try {
-      for (var i = 0; i < queue.length; i += 8) {
-        if (!mounted) break;
-        final slice = queue.skip(i).take(8).toList();
-        final done = await BoardgameMarketService.enrichOwnedBatch(
-          slice,
-          maxItems: 8,
-        );
-        if (done > 0 && mounted) _scheduleReloadItemsFromDb();
-        await Future<void>.delayed(const Duration(milliseconds: 400));
-      }
-    } finally {
-      _ownedMarketPrefetchInFlight = false;
-    }
-  }
-
-  Future<void> _enrichWishlistMarketData(List<CollectionItem> items) async {
-    if (_wishlistMarketEnrichInFlight || items.isEmpty) return;
-    _wishlistMarketEnrichInFlight = true;
-    try {
-      final missing = items
-          .where(
-            (i) =>
-                (i.metadata?['market_prices_fetched_at'] == null ||
-                    i.metadata?['bgg_expansion_count'] == null) &&
-                (i.metadata?['bgg_id']?.toString().isNotEmpty ?? false),
-          )
-          .take(12)
-          .toList();
-      if (missing.isEmpty) return;
-      await BoardgameMarketService.enrichWishlistBatch(missing);
-      if (mounted) _scheduleReloadItemsFromDb();
-    } finally {
-      _wishlistMarketEnrichInFlight = false;
-    }
   }
 
   bool get _addingToWishlist => _tabController.index == 1;

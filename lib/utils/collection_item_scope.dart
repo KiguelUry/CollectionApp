@@ -1,5 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../services/supabase_read_cache.dart';
+
 /// Filtres pour n'afficher que la collection personnelle de l'utilisateur connecté.
 class CollectionItemScope {
   CollectionItemScope._();
@@ -29,12 +31,17 @@ class CollectionItemScope {
     return query.or(personalOrFilter(userId));
   }
 
-  /// Identifiants des groupes dont l'utilisateur est membre.
-  static Future<List<String>> myGroupIds(String userId) async {
-    final rows = await Supabase.instance.client
-        .from('group_members')
-        .select('group_id')
-        .eq('profile_id', userId);
-    return (rows as List).map((r) => r['group_id'] as String).toList();
+  /// Identifiants des groupes dont l'utilisateur est membre (TTL 10 min).
+  static Future<List<String>> myGroupIds(String userId) {
+    return SupabaseReadCache.getOrFetch<List<String>>(
+      key: 'group_members:$userId',
+      loader: () async {
+        final rows = await Supabase.instance.client
+            .from('group_members')
+            .select('group_id')
+            .eq('profile_id', userId);
+        return (rows as List).map((r) => r['group_id'] as String).toList();
+      },
+    );
   }
 }

@@ -11,7 +11,7 @@ class InventoryService {
   final _client = Supabase.instance.client;
 
   static const _select = SupabaseEmbeds.collectionItem;
-  static const _ttl = Duration(minutes: 5);
+  static const _ttl = Duration(minutes: 10);
 
   static List<CollectionItem>? _cache;
   static DateTime? _cacheAt;

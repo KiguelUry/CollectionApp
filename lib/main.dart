@@ -12,7 +12,6 @@ import 'screens/category_selection_screen.dart';
 import 'screens/friends_screen.dart';
 import 'screens/groups_screen.dart';
 import 'screens/friend_collection_screen.dart';
-import 'services/metadata_purge_service.dart';
 import 'services/profile_cache_service.dart';
 import 'services/social_directory_cache.dart';
 import 'screens/settings_screen.dart';
@@ -75,7 +74,7 @@ class _MyAppState extends State<MyApp> {
     _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
       if (data.session != null) {
         unawaited(SocialDirectoryCache.instance.warm());
-        unawaited(MetadataPurgeService.runOnceIfNeeded());
+        // Pas de MetadataPurgeService au login : upsert 403 + DB déjà propre.
       }
       if (data.event == AuthChangeEvent.passwordRecovery) {
         WidgetsBinding.instance.addPostFrameCallback((_) {

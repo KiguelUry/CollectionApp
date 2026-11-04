@@ -4,7 +4,6 @@ import '../config/app_env.dart';
 import '../config/supabase_public_config.dart';
 
 /// CDN images gratuit (Cloudflare) — CORS CanvasKit + WebP léger.
-/// **Uniquement** pour BGG / Discogs (bloquent le CORS navigateur).
 const kWsrvHost = 'wsrv.nl';
 
 /// Sur le web, route les couvertures selon le domaine (direct / wsrv / catalog-proxy).
@@ -12,11 +11,7 @@ String coverUrlForWeb(String url, {int width = 360}) =>
     proxyImageUrl(url, width: width);
 
 bool _isDirectCorsHost(String host) {
-  return host.contains('mzstatic.com') ||
-      host.contains('books.google.') ||
-      host.contains('googleapis.com') ||
-      host.contains('googleusercontent.com') ||
-      host.contains('anilist.co') ||
+  return host.contains('anilist.co') ||
       host.contains('image.tmdb.org') ||
       host.contains('openlibrary.org') ||
       host.contains('rawg.io') ||
@@ -29,8 +24,14 @@ bool _isDirectCorsHost(String host) {
       host.contains('ygoprodeck.com');
 }
 
+/// Domaines qui passent par wsrv (CORS CanvasKit et/ou rate-limit amont).
 bool _needsWsrv(String host) {
-  return host.contains('geekdo-images.com') || host.contains('discogs.com');
+  return host.contains('geekdo-images.com') ||
+      host.contains('discogs.com') ||
+      host.contains('mzstatic.com') ||
+      host.contains('books.google.') ||
+      host.contains('googleapis.com') ||
+      host.contains('googleusercontent.com');
 }
 
 bool _isMangaDexUploads(String host) =>
@@ -56,11 +57,19 @@ String mangaDexThumbnailUrl(String url, {int width = 360}) {
   return u;
 }
 
-String _appleBooksLarger(String url) {
-  return url
-      .replaceAll('100x100bb', '400x400bb')
-      .replaceAll('60x60bb', '400x400bb')
-      .replaceAll('130x130bb', '400x400bb');
+/// Apple : source raisonnable (évite 44× `600x600bb` → ERR_CONNECTION_CLOSED).
+String _appleSourceForWsrv(String url) {
+  return url.replaceAll(RegExp(r'\d+x\d+bb'), '300x300bb');
+}
+
+/// Google Books : https + retire `edge=curl` (CORS / cache).
+String _googleBooksClean(String url) {
+  var u = url.replaceAll(RegExp(r'[&?]edge=curl'), '');
+  u = u.replaceAll('?&', '?').replaceAll('&&', '&');
+  if (u.endsWith('?') || u.endsWith('&')) {
+    u = u.substring(0, u.length - 1);
+  }
+  return u;
 }
 
 String _catalogProxyImageUrl(String httpsUrl) {
@@ -78,9 +87,9 @@ String _catalogProxyImageUrl(String httpsUrl) {
 
 /// Helper central de routage d'images.
 ///
-/// 1. CDN CORS-friendly → HTTPS direct (jamais wsrv / catalog-proxy)
-/// 2. BGG / Discogs → wsrv.nl uniquement
-/// 3. MangaDex uploads → catalog-proxy (web) + miniature `.256`/`.512` — **jamais** wsrv
+/// - MangaDex uploads → catalog-proxy (jamais wsrv)
+/// - BGG / Discogs / Apple mzstatic / Google Books → wsrv.nl
+/// - Autres CDN CORS-friendly → HTTPS direct
 String proxyImageUrl(
   String url, {
   int width = 360,
@@ -106,7 +115,7 @@ String proxyImageUrl(
     return src;
   }
 
-  final https = uri.replace(scheme: 'https').toString();
+  var https = uri.replace(scheme: 'https').toString();
 
   // MangaDex : JAMAIS wsrv (403 amont → 400 wsrv en boucle).
   if (_isMangaDexUploads(host)) {
@@ -115,18 +124,24 @@ String proxyImageUrl(
     return thumb;
   }
 
-  // CORS navigateur OK → direct.
-  if (_isDirectCorsHost(host)) {
-    if (host.contains('mzstatic.com')) return _appleBooksLarger(https);
-    return https;
-  }
-
-  // BGG / Discogs : wsrv (CORS bloqué côté navigateur).
   if (_needsWsrv(host)) {
+    if (host.contains('mzstatic.com')) {
+      https = _appleSourceForWsrv(https);
+      // Plafonne la sortie wsrv pour ne pas surcharger Apple en amont.
+      return _wsrv(https, width: width.clamp(64, 300), crop: crop);
+    }
+    if (host.contains('books.google.') ||
+        host.contains('googleapis.com') ||
+        host.contains('googleusercontent.com')) {
+      https = _googleBooksClean(https);
+    }
     return _wsrv(https, width: width, crop: crop);
   }
 
-  // Défaut : HTTPS direct (pas de proxy aveugle).
+  if (_isDirectCorsHost(host)) {
+    return https;
+  }
+
   return https;
 }
 
@@ -143,6 +158,6 @@ String _wsrv(
   if (crop) {
     q.write('&h=$w&fit=cover&we');
   }
-  q.write('&output=webp&q=82');
+  q.write('&output=webp&q=80');
   return q.toString();
 }

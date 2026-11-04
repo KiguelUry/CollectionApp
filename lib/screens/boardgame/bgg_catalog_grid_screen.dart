@@ -1,16 +1,12 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../../models/bgg_catalog_game.dart';
 import '../../services/boardgame_discovery_service.dart';
-import '../../services/boardgame_market_service.dart';
 import '../../services/user_boardgame_collection_service.dart';
 import '../../utils/boardgame_cover.dart';
 import '../../utils/boardgame_bulk_add.dart';
 import '../../utils/boardgame_quick_add.dart';
 import '../../utils/collection_grid_layout.dart';
-import '../../utils/wishlist_market_metadata.dart';
 import '../../widgets/app_app_bar.dart';
 import '../../widgets/catalog/catalog_item_tile.dart';
 import '../../widgets/ui/empty_state.dart';
@@ -100,36 +96,6 @@ class _BggCatalogGridScreenState extends State<BggCatalogGridScreen> {
     return null;
   }
 
-  Future<void> _prefetchMarketHints(List<BggCatalogGame> games) async {
-    for (final game in games.take(12)) {
-      if (_marketHints.containsKey(game.bggId)) continue;
-      final parts = <String>[];
-      final sub = game.subtitle;
-      if (sub != null) {
-        for (final part in sub.split('·')) {
-          if (part.contains('★')) {
-            parts.add(part.trim());
-            break;
-          }
-        }
-      }
-      try {
-        final patch = await BoardgameMarketService.fetchMarketPatch(
-          bggId: game.bggId,
-          includeExpansionCount: false,
-        );
-        final used = patch[kMarketSecondhandPrice];
-        if (used is num && used > 0) {
-          parts.add('~${used.round()}€ occ.');
-        }
-      } catch (_) {}
-      if (parts.isEmpty) continue;
-      if (!mounted) return;
-      setState(() => _marketHints[game.bggId] = parts.join(' · '));
-      await Future<void>.delayed(const Duration(milliseconds: 220));
-    }
-  }
-
   List<BggCatalogGame> get _filteredGames {
     if (!_hideOwnedAndWishlist) return _allGames;
     return _allGames.where((g) {
@@ -213,7 +179,7 @@ class _BggCatalogGridScreenState extends State<BggCatalogGridScreen> {
         _wishlistKeys = results[2] as Set<String>;
         _loading = false;
       });
-      unawaited(_prefetchMarketHints(_allGames));
+      // Pas de prefetch prix BGG en lot (uniquement fiche / puce prix).
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -242,7 +208,6 @@ class _BggCatalogGridScreenState extends State<BggCatalogGridScreen> {
         _allGames = games;
         _loading = false;
       });
-      unawaited(_prefetchMarketHints(games));
     } catch (e) {
       if (!mounted) return;
       setState(() {

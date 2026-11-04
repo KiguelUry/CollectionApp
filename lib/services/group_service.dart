@@ -4,8 +4,10 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/collection_group.dart';
+import '../utils/collection_item_scope.dart';
 import '../utils/supabase_embeds.dart';
 import 'profile_service.dart';
+import 'supabase_read_cache.dart';
 
 class GroupService {
   final _client = Supabase.instance.client;
@@ -13,27 +15,26 @@ class GroupService {
 
   String? get _userId => _client.auth.currentUser?.id;
 
-  Future<List<CollectionGroup>> fetchMyGroups() async {
+  Future<List<CollectionGroup>> fetchMyGroups({bool force = false}) async {
     final userId = _userId;
     if (userId == null) return [];
 
-    final memberRows = await _client
-        .from('group_members')
-        .select('group_id')
-        .eq('profile_id', userId);
-    final ids = (memberRows as List)
-        .map((r) => r['group_id'] as String)
-        .toList();
-    if (ids.isEmpty) return [];
-
-    final groups = await _client
-        .from('groups')
-        .select()
-        .inFilter('id', ids)
-        .order('name');
-    return (groups as List)
-        .map((g) => CollectionGroup.fromJson(Map<String, dynamic>.from(g)))
-        .toList();
+    return SupabaseReadCache.getOrFetch<List<CollectionGroup>>(
+      key: 'my_groups:$userId',
+      force: force,
+      loader: () async {
+        final ids = await CollectionItemScope.myGroupIds(userId);
+        if (ids.isEmpty) return <CollectionGroup>[];
+        final groups = await _client
+            .from('groups')
+            .select()
+            .inFilter('id', ids)
+            .order('name');
+        return (groups as List)
+            .map((g) => CollectionGroup.fromJson(Map<String, dynamic>.from(g)))
+            .toList();
+      },
+    );
   }
 
   /// Nombre de jeux de société uniques par groupe (table `collection_item_groups`).
@@ -41,13 +42,7 @@ class GroupService {
     final userId = _userId;
     if (userId == null) return {};
     try {
-      final memberRows = await _client
-          .from('group_members')
-          .select('group_id')
-          .eq('profile_id', userId);
-      final ids = (memberRows as List)
-          .map((r) => r['group_id'] as String)
-          .toList();
+      final ids = await CollectionItemScope.myGroupIds(userId);
       if (ids.isEmpty) return {};
 
       final rows = await _client

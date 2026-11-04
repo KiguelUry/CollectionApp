@@ -10,6 +10,7 @@ import '../utils/book_title_parser.dart';
 import '../utils/book_vf_edition.dart';
 import '../utils/metadata_slim.dart';
 import 'anilist_manga_service.dart';
+import 'supabase_read_cache.dart';
 import 'book_catalog_service.dart';
 import 'book_intelligence_service.dart';
 import 'google_books_service.dart';
@@ -240,13 +241,32 @@ class BookSeriesService {
         .eq('owner_id', _userId);
   }
 
-  Future<List<BookVolume>> fetchVolumes(String seriesId) async {
-    final rows = await _client
-        .from('book_volumes')
-        .select()
-        .eq('series_id', seriesId)
-        .order('sort_index');
-    return _volumeList(rows);
+  Future<List<BookVolume>> fetchVolumes(
+    String seriesId, {
+    bool force = false,
+  }) async {
+    return SupabaseReadCache.getOrFetch<List<BookVolume>>(
+      key: 'book_volumes:$seriesId',
+      force: force,
+      loader: () async {
+        final rows = await _client
+            .from('book_volumes')
+            .select()
+            .eq('series_id', seriesId)
+            .order('sort_index');
+        return _volumeList(rows);
+      },
+    );
+  }
+
+  static void invalidateVolumeCache([String? seriesId]) {
+    if (seriesId == null) {
+      SupabaseReadCache.invalidate('book_volumes:');
+      SupabaseReadCache.invalidate('book_series_items:');
+    } else {
+      SupabaseReadCache.invalidate('book_volumes:$seriesId');
+      SupabaseReadCache.invalidate('book_series_items:$seriesId');
+    }
   }
 
   /// Charge séries + volumes + items en 3 requêtes (plus de N+1).
@@ -313,6 +333,8 @@ class BookSeriesService {
       ],
       onConflict: 'id',
     );
+    // Pas d'invalidation ici : l'enrichissement batche plusieurs upserts ;
+    // le caller invalide une fois à la fin.
   }
 
   /// Applique couvertures + dates VF (GB écrase MangaDex) en **un seul** upsert.
@@ -602,20 +624,30 @@ class BookSeriesService {
     }
     if (toInsert.isNotEmpty) {
       await _client.from('book_volumes').insert(toInsert);
+      invalidateVolumeCache(seriesId);
     }
   }
 
-  Future<List<CollectionItem>> fetchSeriesItems(String seriesId) async {
-    final rows = await _client
-        .from('collection_items')
-        .select()
-        .eq('category', 'book')
-        .eq('series_id', seriesId);
-    return List<Map<String, dynamic>>.from(rows)
-        .map(CollectionItem.fromJson)
-        .where((i) =>
-            i.addedBy == _userId || i.locationUserId == _userId)
-        .toList();
+  Future<List<CollectionItem>> fetchSeriesItems(
+    String seriesId, {
+    bool force = false,
+  }) async {
+    return SupabaseReadCache.getOrFetch<List<CollectionItem>>(
+      key: 'book_series_items:$seriesId',
+      force: force,
+      loader: () async {
+        final rows = await _client
+            .from('collection_items')
+            .select()
+            .eq('category', 'book')
+            .eq('series_id', seriesId);
+        return List<Map<String, dynamic>>.from(rows)
+            .map(CollectionItem.fromJson)
+            .where((i) =>
+                i.addedBy == _userId || i.locationUserId == _userId)
+            .toList();
+      },
+    );
   }
 
   Future<BookSeries> findOrCreateStandaloneSeries({
@@ -1240,7 +1272,7 @@ class BookSeriesService {
         await _batchUpsertVolumeMetadata(clearedEn);
       }
     } catch (_) {}
-    var liveVolumes = await fetchVolumes(working.id);
+    var liveVolumes = await fetchVolumes(working.id, force: true);
 
     final batch = <int, ({String coverUrl, String? publishedDate, String? language})>{};
     final coverOwner = <String, int>{}; // URL normalisée → n° de tome
@@ -1547,7 +1579,7 @@ class BookSeriesService {
     }
 
     // 3) Trous restants : Apple « Nom Tome N » (+ Le Lombard pour BD).
-    liveVolumes = await fetchVolumes(working.id);
+    liveVolumes = await fetchVolumes(working.id, force: true);
     final holeNums = <int>{};
     for (final v in liveVolumes) {
       if (v.isHorsSerie) continue;
@@ -1696,8 +1728,9 @@ class BookSeriesService {
       } catch (_) {}
     }
 
-    final ordered = List<BookVolume>.from(await fetchVolumes(working.id))
-      ..sort((a, b) => a.volumeNumber.compareTo(b.volumeNumber));
+    final ordered =
+        List<BookVolume>.from(await fetchVolumes(working.id, force: true))
+          ..sort((a, b) => a.volumeNumber.compareTo(b.volumeNumber));
 
     // Ré-ancrage des URLs déjà posées pour l'unicité à la persistance.
     final assignedUrls = <String>{};
@@ -1815,7 +1848,7 @@ class BookSeriesService {
 
     // Couverture série = Tome 1 seulement si vide / non verrouillée.
     final fresh = await fetchSeriesById(working.id);
-    final refreshed = await fetchVolumes(working.id);
+    final refreshed = await fetchVolumes(working.id, force: true);
     String? tome1;
     for (final v in refreshed) {
       if (v.volumeNumber >= 0.99 &&
@@ -1836,6 +1869,7 @@ class BookSeriesService {
     }
     final stamped = await fetchSeriesById(working.id) ?? working;
     await _markSeriesEnriched(stamped);
+    invalidateVolumeCache(working.id);
     onSeriesUpdated?.call(
       stamped.copyWith(
         metadata: {
@@ -1916,7 +1950,7 @@ class BookSeriesService {
     }).eq('id', itemId);
   }
 
-  static const _seriesCacheTtl = Duration(minutes: 5);
+  static const _seriesCacheTtl = Duration(minutes: 10);
   static List<BookSeries>? _rootSeriesCache;
   static DateTime? _rootSeriesCacheAt;
   static String? _rootSeriesCacheUserId;

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../models/collection_item.dart';
-import '../../services/boardgame_market_service.dart';
 import '../../services/owned_catalog_index.dart';
 import '../../utils/boardgame_display.dart';
 import '../../utils/wishlist_market_metadata.dart';
@@ -25,39 +24,6 @@ class WishlistTileMetaIcons extends StatefulWidget {
 
 class _WishlistTileMetaIconsState extends State<WishlistTileMetaIcons> {
   static const _rowHeight = 20.0;
-  bool _fetchingMeta = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _prefetchMissingMetadata();
-  }
-
-  @override
-  void didUpdateWidget(covariant WishlistTileMetaIcons oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.item.id != widget.item.id ||
-        oldWidget.item.metadata != widget.item.metadata) {
-      _prefetchMissingMetadata();
-    }
-  }
-
-  Future<void> _prefetchMissingMetadata() async {
-    if (_fetchingMeta) return;
-    final missingPrices =
-        marketSecondhandPriceFromMetadata(widget.item.metadata) == null &&
-            marketNewPriceMinFromMetadata(widget.item.metadata) == null;
-    final missingExt =
-        bggExpansionCountFromMetadata(widget.item.metadata) == null;
-    if (!missingPrices && !missingExt) return;
-    _fetchingMeta = true;
-    try {
-      await BoardgameMarketService.enrichItemMetadata(widget.item);
-    } catch (_) {
-    } finally {
-      _fetchingMeta = false;
-    }
-  }
 
   String get _valueChipLabel {
     final avg = marketPriceAvgFromMetadata(widget.item.metadata);

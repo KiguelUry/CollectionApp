@@ -136,7 +136,11 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
           },
         );
         if (n > 0) any = true;
-        if (any && mounted) await _load(silent: true);
+        // Une seule relecture post-enrich (cache invalidé une fois).
+        if (any && mounted) {
+          BookSeriesService.invalidateVolumeCache(seriesForBg.id);
+          await _load(silent: true);
+        }
       });
     } catch (e) {
       if (!mounted) return;

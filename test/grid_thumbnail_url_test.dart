@@ -16,15 +16,33 @@ void main() {
       expect(uri.queryParameters['url'], contains('/fit-in/320x320/'));
     });
 
-    test('Discogs : wsrv.nl', () {
-      final out = proxyImageUrl(
-        'https://i.discogs.com/abc/image.jpg',
-        width: 360,
+    test('Discogs / Apple / Google Books : wsrv.nl', () {
+      expect(
+        Uri.parse(proxyImageUrl('https://i.discogs.com/abc/image.jpg')).host,
+        'wsrv.nl',
       );
-      expect(Uri.parse(out).host, 'wsrv.nl');
+      final apple = Uri.parse(
+        proxyImageUrl(
+          'https://is1-ssl.mzstatic.com/image/thumb/Publication/600x600bb.jpg',
+          width: 400,
+        ),
+      );
+      expect(apple.host, 'wsrv.nl');
+      expect(apple.queryParameters['w'], '300'); // plafonné
+      expect(apple.queryParameters['url'], contains('300x300bb'));
+      expect(apple.queryParameters['url'], isNot(contains('600x600bb')));
+
+      final google = Uri.parse(
+        proxyImageUrl(
+          'http://books.google.com/books/content?id=1&edge=curl&printsec=frontcover',
+        ),
+      );
+      expect(google.host, 'wsrv.nl');
+      expect(google.queryParameters['url'], startsWith('https://'));
+      expect(google.queryParameters['url'], isNot(contains('edge=curl')));
     });
 
-    test('Open Library / AniList / Apple / Google : HTTPS direct (pas wsrv)', () {
+    test('Open Library / AniList / TMDB : HTTPS direct (pas wsrv)', () {
       expect(
         Uri.parse(gridThumbnailUrl('https://covers.openlibrary.org/b/id/1-M.jpg'))
             .host,
@@ -34,20 +52,6 @@ void main() {
         Uri.parse(proxyImageUrl('https://s4.anilist.co/file/anilistcdn/x.jpg'))
             .host,
         's4.anilist.co',
-      );
-      expect(
-        Uri.parse(
-          proxyImageUrl(
-            'https://is1-ssl.mzstatic.com/image/thumb/100x100bb.jpg',
-          ),
-        ).path,
-        contains('400x400bb'),
-      );
-      expect(
-        Uri.parse(
-          proxyImageUrl('http://books.google.com/books/content?id=1'),
-        ).scheme,
-        'https',
       );
       expect(
         Uri.parse(proxyImageUrl('https://image.tmdb.org/t/p/w500/x.jpg')).host,
@@ -61,7 +65,6 @@ void main() {
       final out = mangaDexThumbnailUrl(src, width: 360);
       expect(out, endsWith('.512.jpg'));
       expect(out, isNot(contains('wsrv.nl')));
-      // Hors web (tests) : URL directe miniature, pas catalog-proxy.
       final routed = proxyImageUrl(src, width: 360);
       expect(routed, isNot(contains('wsrv.nl')));
       expect(routed, contains('uploads.mangadex.org'));
@@ -90,10 +93,6 @@ void main() {
       const src =
           'https://static.wikia.nocookie.net/lego/images/4/48/75403_alt1.png/revision/latest';
       expect(gridThumbnailUrl(src), src);
-      expect(
-        gridThumbnailUrl('https://lego.fandom.com/wiki/Special:FilePath/x.png'),
-        'https://lego.fandom.com/wiki/Special:FilePath/x.png',
-      );
     });
 
     test('stockage Supabase public : HTTPS direct (pas wsrv)', () {

@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import 'book_series_service.dart';
 import 'inventory_service.dart';
+import 'supabase_read_cache.dart';
 
 /// Notifie les écrans collection qu'un ajout/suppression a eu lieu.
 class CollectionRefresh extends ChangeNotifier {
@@ -11,6 +12,10 @@ class CollectionRefresh extends ChangeNotifier {
   void bump() {
     InventoryService.invalidateCache();
     BookSeriesService.invalidateSeriesCache();
+    BookSeriesService.invalidateVolumeCache();
+    SupabaseReadCache.invalidate('collection_items_cat:');
+    SupabaseReadCache.invalidate('my_groups:');
+    SupabaseReadCache.invalidate('group_members:');
     notifyListeners();
   }
 }
