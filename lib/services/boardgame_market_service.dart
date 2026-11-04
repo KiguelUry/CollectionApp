@@ -367,7 +367,10 @@ class BoardgameMarketService {
   }
 
   static String amazonFrSearchUrl(String title) {
-    final q = encodeShopQuery('${normalizeShopQuery(title)} jeu de societe');
+    final name = normalizeShopQuery(title);
+    // Guillemets autour du titre : limite le correcteur Amazon
+    // (« Legacy of Yu » → « Legacy of You »).
+    final q = Uri.encodeQueryComponent('"$name" jeu de societe');
     return 'https://www.amazon.fr/s?k=$q';
   }
 
@@ -391,13 +394,13 @@ class BoardgameMarketService {
 
   static String culturaSearchUrl(String title) {
     final q = encodeShopQuery(title);
-    return 'https://www.cultura.com/search/results?searchterm=$q';
+    return 'https://www.cultura.com/search/results?search_query=$q';
   }
 
+  /// Ludum : `/rechercher?s=` (pas l’ancienne URL PrestaShop `/recherche`).
   static String ludumSearchUrl(String title) {
     final q = encodeShopQuery(title);
-    return 'https://www.ludum.fr/recherche?controller=search&orderby=position'
-        '&orderway=desc&search_query=$q&submit_search=';
+    return 'https://www.ludum.fr/rechercher?s=$q';
   }
 
   static String okkazeoSearchUrl(String title) =>

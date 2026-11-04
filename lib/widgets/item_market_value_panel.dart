@@ -131,31 +131,15 @@ class _ItemMarketValuePanelState extends State<ItemMarketValuePanel> {
     );
 
     if (_bggId == null) {
-      return Text(
-        'Pas de référence BoardGameGeek : estimation impossible.',
-        style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-      );
-    }
-
-    if (!_hasPrices) {
-      return Row(
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: Text(
-              _loading
-                  ? 'Recherche des prix…'
-                  : (_error ?? 'Aucun prix trouvé pour ce jeu.'),
-              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-            ),
+          Text(
+            'Pas de référence BoardGameGeek : estimation impossible.',
+            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
           ),
-          if (_loading)
-            const SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          else if (!widget.readOnly)
-            TextButton(onPressed: _refresh, child: const Text('Réessayer')),
+          const SizedBox(height: 12),
+          _ShopSearchLinks(title: _item.title),
         ],
       );
     }
@@ -165,86 +149,133 @@ class _ItemMarketValuePanelState extends State<ItemMarketValuePanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'Prix neuf constatés',
-          style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                fontWeight: FontWeight.w800,
-              ),
-        ),
-        const SizedBox(height: 6),
-        Row(
-          children: [
-            if (hasRange) ...[
-              Expanded(child: _Figure(label: 'Min', value: rangeMin, color: Colors.teal)),
+        if (!_hasPrices) ...[
+          Row(
+            children: [
               Expanded(
-                child: _Figure(
-                  label: 'Moyenne',
-                  value: rangeAvg,
-                  color: Colors.teal.shade800,
-                  big: true,
+                child: Text(
+                  _loading
+                      ? 'Recherche des prix…'
+                      : (_error ?? 'Aucun prix trouvé pour ce jeu.'),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
               ),
-              Expanded(child: _Figure(label: 'Max', value: rangeMax, color: Colors.indigo)),
-            ] else
+              if (_loading)
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else if (!widget.readOnly)
+                TextButton(
+                  onPressed: _refresh,
+                  child: const Text('Réessayer'),
+                ),
+            ],
+          ),
+        ] else ...[
+          Text(
+            'Prix neuf constatés',
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              if (hasRange) ...[
+                Expanded(
+                  child: _Figure(
+                    label: 'Min',
+                    value: rangeMin,
+                    color: Colors.teal,
+                  ),
+                ),
+                Expanded(
+                  child: _Figure(
+                    label: 'Moyenne',
+                    value: rangeAvg,
+                    color: Colors.teal.shade800,
+                    big: true,
+                  ),
+                ),
+                Expanded(
+                  child: _Figure(
+                    label: 'Max',
+                    value: rangeMax,
+                    color: Colors.indigo,
+                  ),
+                ),
+              ] else
+                Expanded(
+                  child: _Figure(
+                    label: 'Neuf dès',
+                    value: newMin,
+                    color: Colors.indigo,
+                    big: true,
+                  ),
+                ),
               Expanded(
-                child: _Figure(label: 'Neuf dès', value: newMin, color: Colors.indigo, big: true),
+                child: _Figure(
+                  label: paid.length > 1 ? 'Payé (moy.)' : 'Payé',
+                  value: avgPaid,
+                  color: Colors.orange.shade800,
+                ),
               ),
-            Expanded(
-              child: _Figure(
-                label: paid.length > 1 ? 'Payé (moy.)' : 'Payé',
-                value: avgPaid,
-                color: Colors.orange.shade800,
+            ],
+          ),
+          const SizedBox(height: 10),
+          Card(
+            elevation: 0,
+            color: Colors.teal.withValues(alpha: 0.08),
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Estimation seconde main (occasion)',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  Text(
+                    formatEuroChip(second, compact: false),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontSize: 18,
+                      color: Colors.teal.shade800,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _PriceGauge(
+            newMin: hasRange ? rangeMax : newMin,
+            secondhand: hasRange ? rangeMin : second,
+            paid: hasRange ? rangeAvg : avgPaid,
+            lowLabel: hasRange ? 'Min' : 'Occasion',
+            highLabel: hasRange ? 'Max' : 'Neuf',
+            paidLabel: hasRange ? 'Moy.' : 'Payé',
+          ),
+          if (delta != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              delta >= 0
+                  ? 'Ton exemplaire vaut environ ${formatEuroChip(delta, compact: false)} de plus que ce que tu l\'as payé.'
+                  : 'Ton exemplaire vaut environ ${formatEuroChip(-delta, compact: false)} de moins que ce que tu l\'as payé.',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: delta >= 0 ? Colors.green.shade700 : scheme.error,
               ),
             ),
           ],
-        ),
-        const SizedBox(height: 10),
-        Card(
-          elevation: 0,
-          color: Colors.teal.withValues(alpha: 0.08),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            child: Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    'Estimation seconde main (occasion)',
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                ),
-                Text(
-                  formatEuroChip(second, compact: false),
-                  style: TextStyle(
-                    fontWeight: FontWeight.w900,
-                    fontSize: 18,
-                    color: Colors.teal.shade800,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        _PriceGauge(
-          newMin: hasRange ? rangeMax : newMin,
-          secondhand: hasRange ? rangeMin : second,
-          paid: hasRange ? rangeAvg : avgPaid,
-          lowLabel: hasRange ? 'Min' : 'Occasion',
-          highLabel: hasRange ? 'Max' : 'Neuf',
-          paidLabel: hasRange ? 'Moy.' : 'Payé',
-        ),
-        if (delta != null) ...[
-          const SizedBox(height: 8),
-          Text(
-            delta >= 0
-                ? 'Ton exemplaire vaut environ ${formatEuroChip(delta, compact: false)} de plus que ce que tu l\'as payé.'
-                : 'Ton exemplaire vaut environ ${formatEuroChip(-delta, compact: false)} de moins que ce que tu l\'as payé.',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: delta >= 0 ? Colors.green.shade700 : scheme.error,
-            ),
-          ),
         ],
         const SizedBox(height: 8),
         _ShopSearchLinks(title: _item.title),
@@ -254,14 +285,17 @@ class _ItemMarketValuePanelState extends State<ItemMarketValuePanel> {
             Expanded(
               child: Text(
                 [
-                  'Estimation indicative (BoardGamePrices)',
-                  if (fetchedAt != null)
-                    'mise à jour ${_ago(fetchedAt)}',
-                ].join(' · '),
-                style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
+                  if (_hasPrices)
+                    'Estimation indicative (BoardGamePrices)',
+                  if (fetchedAt != null) 'mise à jour ${_ago(fetchedAt)}',
+                ].where((s) => s.isNotEmpty).join(' · '),
+                style: TextStyle(
+                  fontSize: 10,
+                  color: scheme.onSurfaceVariant,
+                ),
               ),
             ),
-            if (!widget.readOnly)
+            if (!widget.readOnly && _hasPrices)
               _loading
                   ? const SizedBox(
                       width: 16,

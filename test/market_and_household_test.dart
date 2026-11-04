@@ -85,12 +85,16 @@ void main() {
       contains('amazon.fr/s'),
     );
     expect(
+      BoardgameMarketService.amazonFrSearchUrl('Legacy of Yu'),
+      contains(Uri.encodeQueryComponent('"Legacy of Yu"')),
+    );
+    expect(
       BoardgameMarketService.culturaSearchUrl('Catan'),
-      contains('cultura.com/search'),
+      'https://www.cultura.com/search/results?search_query=Catan',
     );
     expect(
       BoardgameMarketService.ludumSearchUrl('Catan'),
-      contains('ludum.fr/recherche'),
+      'https://www.ludum.fr/rechercher?s=Catan',
     );
 
     expect(
