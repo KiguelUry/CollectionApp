@@ -584,7 +584,8 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
         if ((cover == null || cover.isEmpty) &&
             mdCover != null &&
             mdCover.trim().isNotEmpty) {
-          cover = coverUrlForWeb(mdCover);
+          // Stocker l'URL MangaDex brute (.512.jpg) — wsrv au display.
+          cover = mdCover;
           source = 'mangadex';
         }
         if (cover != null &&
@@ -639,7 +640,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
               'series_title': md.title,
               'series_volume': '$n',
               if (md.author != null) 'author': md.author!,
-              'image_url': coverUrlForWeb(mdCover),
+              'image_url': mdCover,
               'source': 'mangadex',
             },
             parsed: BookSeriesNormalizer.parse('${md.title} - Tome $n'),

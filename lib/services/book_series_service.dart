@@ -1140,6 +1140,34 @@ class BookSeriesService {
     return cleared;
   }
 
+  static const enrichCoversTtl = Duration(hours: 24);
+
+  /// Vrai si un enrichissement auto est encore utile (trous ou TTL dépassé).
+  bool shouldAutoEnrichCovers({
+    required BookSeries series,
+    required List<BookVolume> volumes,
+  }) {
+    final raw = series.metadata['last_enriched_at']?.toString();
+    final at = raw == null ? null : DateTime.tryParse(raw);
+    if (at != null && DateTime.now().difference(at) < enrichCoversTtl) {
+      return false;
+    }
+    for (final v in volumes) {
+      if (v.volumeNumber < 0.5) continue;
+      if ((v.coverUrl ?? '').trim().isEmpty) return true;
+    }
+    if (volumes.any((v) => (v.coverUrl ?? '').trim().isNotEmpty)) {
+      return false;
+    }
+    return true;
+  }
+
+  Future<void> _markSeriesEnriched(BookSeries series) async {
+    final meta = Map<String, dynamic>.from(series.metadata);
+    meta['last_enriched_at'] = DateTime.now().toUtc().toIso8601String();
+    await updateSeries(series.copyWith(metadata: meta));
+  }
+
   Future<int> enrichMissingVolumeCovers({
     required BookSeries series,
     required List<BookVolume> volumes,
@@ -1745,6 +1773,16 @@ class BookSeriesService {
       await updateSeries(fresh.copyWith(coverUrl: tome1));
       updated++;
     }
+    final stamped = await fetchSeriesById(working.id) ?? working;
+    await _markSeriesEnriched(stamped);
+    onSeriesUpdated?.call(
+      stamped.copyWith(
+        metadata: {
+          ...stamped.metadata,
+          'last_enriched_at': DateTime.now().toUtc().toIso8601String(),
+        },
+      ),
+    );
     return updated;
   }
 

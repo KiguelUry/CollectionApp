@@ -1,6 +1,7 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../constants/book_accent.dart';
 import '../constants/rating_colors.dart';
@@ -14,7 +15,9 @@ import '../services/book_series_service.dart';
 import '../services/books_collection_cache.dart';
 import '../services/group_service.dart';
 import '../utils/book_series_normalizer.dart';
+import '../utils/book_series_value.dart';
 import '../utils/book_vf_edition.dart';
+import '../utils/wishlist_market_metadata.dart' show formatEuroChip;
 import '../widgets/app_app_bar.dart';
 import '../widgets/boardgame_tile_sheets.dart';
 import '../widgets/collection_cover_image.dart';
@@ -110,6 +113,14 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
           final hydrated =
               await _service.hydrateCommunityRating(seriesForBg);
           if (hydrated.communityRating != null) any = true;
+        }
+        // Pas de recalcul auto si couvertures OK ou enrichi < 24 h.
+        if (!_service.shouldAutoEnrichCovers(
+          series: seriesForBg,
+          volumes: volumesForBg,
+        )) {
+          if (any && mounted) await _load(silent: true);
+          return;
         }
         final n = await _service.enrichMissingVolumeCovers(
           series: seriesForBg,
@@ -1015,6 +1026,20 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                     );
                   },
                 ),
+                if (stats.ownedCount > 0)
+                  Builder(
+                    builder: (_) {
+                      final value = BookSeriesValue.summarize(
+                        series: series,
+                        slots: _physicalSlots,
+                      );
+                      return _ratingBadge(
+                        '💶 ~${formatEuroChip(value.ownedValueNew)}',
+                        const Color(0xFF059669),
+                        onTap: () => _showSeriesValueSheet(series, value),
+                      );
+                    },
+                  ),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -1260,6 +1285,75 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         pick(SeriesRatingDisplayPref.average) ??
         pick(SeriesRatingDisplayPref.community) ??
         (label: '★ Noter', color: const Color(0xFF38BDF8));
+  }
+
+  Future<void> _showSeriesValueSheet(
+    BookSeries series,
+    BookSeriesValueSummary value,
+  ) async {
+    final title = BookSeriesNormalizer.displaySeriesName(series.name);
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Valeur — $title',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Valeur de mes ${value.ownedCount} tomes possédés '
+                  '(~${formatEuroChip(value.ownedValueNew, compact: false)})',
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Valeur estimée en occasion (~60 %) : '
+                  '~${formatEuroChip(value.ownedValueUsed, compact: false)}',
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  value.missingCount == 0
+                      ? 'Série complète — rien à compléter.'
+                      : 'Budget pour compléter les ${value.missingCount} tomes '
+                          'manquants (~${formatEuroChip(value.completeBudget, compact: false)})',
+                ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final e in [
+                      ('Fnac', BookSeriesValue.fnacSearchUrl(title)),
+                      ('Cultura', BookSeriesValue.culturaSearchUrl(title)),
+                      ('Lireka', BookSeriesValue.lirekaSearchUrl(title)),
+                      ('Vinted', BookSeriesValue.vintedSearchUrl(title)),
+                    ])
+                      ActionChip(
+                        avatar: const Icon(Icons.open_in_new, size: 16),
+                        label: Text(e.$1),
+                        onPressed: () => launchUrl(
+                          Uri.parse(e.$2),
+                          mode: LaunchMode.externalApplication,
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Widget _ratingBadge(String label, Color color, {VoidCallback? onTap}) {

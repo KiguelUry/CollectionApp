@@ -19,8 +19,33 @@ class BoardgameMarketService {
   static const _siteName = 'collectingo.app';
   static const _historyMax = 40;
   static const outlierFloorRatio = 0.45;
-  static const secondhandOfMedian = 0.65;
+  /// Fallback historique (courant) — préférer [secondhandRatioForStock].
+  static const secondhandOfMedian = 0.58;
+  static const secondhandLimitedStock = 0.75;
+  static const secondhandOutOfPrintLow = 0.95;
+  static const secondhandOutOfPrintHigh = 1.10;
   static const _preferredCountries = {'FR', 'BE', 'NL', 'DE', 'GB', 'ES', 'IT'};
+  static const kMarketRareBadge = 'market_rare_out_of_print';
+  static const kMarketEstimateFlag = 'market_price_estimated';
+
+  /// Coefficient d'occasion selon le stock neuf (boutiques BGP en stock).
+  static double secondhandRatioForStock(int inStockShops) {
+    if (inStockShops <= 0) {
+      // Épuisé : 95–110 % (milieu de fourchette).
+      return (secondhandOutOfPrintLow + secondhandOutOfPrintHigh) / 2;
+    }
+    if (inStockShops <= 2) return secondhandLimitedStock;
+    return secondhandOfMedian;
+  }
+
+  /// Estimation indicative par gabarit BGG (weight) quand BGP est vide.
+  static double? estimateNewFromWeight(double? weight) {
+    if (weight == null || weight <= 0) return null;
+    if (weight < 1.5) return 16;
+    if (weight < 2.6) return 32;
+    if (weight < 3.3) return 48;
+    return 68;
+  }
 
   static bool get _webProxyReady =>
       AppEnv.supabaseUrl.isNotEmpty && AppEnv.supabaseAnonKey.isNotEmpty;
@@ -43,28 +68,44 @@ class BoardgameMarketService {
 
     final market = await _fetchStorePrices(bggId);
     if (market == null) {
+      // Fallback gabarit BGG (weight) si pas d'offre BGP.
+      final weight = _weightFromMeta(existing);
+      final estimated = estimateNewFromWeight(weight);
+      if (estimated != null) {
+        patch[kMarketNewPriceMin] = estimated;
+        patch[kMarketPriceAvg] = estimated;
+        patch[kMarketPriceMin] = estimated;
+        patch[kMarketPriceMax] = estimated;
+        patch[kMarketSecondhandPrice] =
+            ((estimated * secondhandOfMedian) * 10).round() / 10;
+        patch[kMarketEstimateFlag] = true;
+      }
       patch[kMarketPricesFetchedAt] = DateTime.now().toIso8601String();
       return patch;
     }
 
+    final inStock = market.stores.where((s) => s.inStock).length;
+    final summary = summarizePositivePrices(
+      market.stores.map((s) => s.productEur ?? s.priceEur),
+      inStockShops: inStock,
+    );
+
     if (market.newMinEur != null) {
       patch[kMarketNewPriceMin] = market.newMinEur;
     }
-    if (market.secondhandEstimateEur != null) {
+    if (summary != null) {
+      patch[kMarketPriceMin] = summary.min;
+      patch[kMarketPriceMax] = summary.max;
+      patch[kMarketPriceAvg] = summary.avg;
+      patch[kMarketNewPriceMin] = summary.min;
+      patch[kMarketSecondhandPrice] = summary.secondhand;
+      patch[kMarketRareBadge] = summary.rareOutOfPrint;
+      patch.remove(kMarketEstimateFlag);
+    } else if (market.secondhandEstimateEur != null) {
       patch[kMarketSecondhandPrice] = market.secondhandEstimateEur;
     }
     if (market.stores.isNotEmpty) {
       patch[kStoresPrices] = market.stores.map((e) => e.toJson()).toList();
-      final summary = summarizePositivePrices(
-        market.stores.map((s) => s.productEur ?? s.priceEur),
-      );
-      if (summary != null) {
-        patch[kMarketPriceMin] = summary.min;
-        patch[kMarketPriceMax] = summary.max;
-        patch[kMarketPriceAvg] = summary.avg;
-        patch[kMarketNewPriceMin] = summary.min;
-        patch[kMarketSecondhandPrice] = summary.secondhand;
-      }
     }
     if (market.languages.isNotEmpty) {
       patch[kBggLanguages] = market.languages.toList();
@@ -74,14 +115,25 @@ class BoardgameMarketService {
     final history = marketHistoryFromMetadata(existing);
     final nextHistory = _appendHistory(
       history,
-      secondhand: market.secondhandEstimateEur,
-      newMin: market.newMinEur,
+      secondhand: summary?.secondhand ?? market.secondhandEstimateEur,
+      newMin: summary?.min ?? market.newMinEur,
     );
     if (nextHistory.isNotEmpty) {
       patch[kMarketPriceHistory] = nextHistory.map((e) => e.toJson()).toList();
     }
 
     return patch;
+  }
+
+  static double? _weightFromMeta(Map<String, dynamic>? meta) {
+    if (meta == null) return null;
+    for (final key in ['bgg_weight', 'weight', 'averageweight', 'complexity']) {
+      final raw = meta[key];
+      if (raw is num) return raw.toDouble();
+      final p = double.tryParse('$raw');
+      if (p != null && p > 0) return p;
+    }
+    return null;
   }
 
   static Future<void> enrichItemMetadata(CollectionItem item) async {
@@ -277,8 +329,10 @@ class BoardgameMarketService {
       uniqueStores = filteredStores;
     }
 
+    final inStockCount = uniqueStores.where((s) => s.inStock).length;
     final summary = summarizePositivePrices(
       uniqueStores.map((s) => s.productEur ?? s.priceEur),
+      inStockShops: inStockCount,
     );
     if (summary == null) return null;
     final floor = summary.median * outlierFloorRatio;
@@ -295,8 +349,11 @@ class BoardgameMarketService {
   }
 
   /// Médiane, puis retrait des offres sous 45 % de cette médiane.
-  /// L'occasion vaut ~65 % de la médiane des offres gardées.
-  static MarketPriceSummary? summarizePositivePrices(Iterable<double> raw) {
+  /// Occasion : ratio selon stock neuf (épuisé / limité / courant).
+  static MarketPriceSummary? summarizePositivePrices(
+    Iterable<double> raw, {
+    int inStockShops = 3,
+  }) {
     final prices = raw.where((p) => p > 0).toList()..sort();
     if (prices.isEmpty) return null;
     final median = _median(prices);
@@ -305,12 +362,16 @@ class BoardgameMarketService {
     final use = kept.isEmpty ? <double>[median] : kept;
     final avg = use.reduce((a, b) => a + b) / use.length;
     final med = _median(use);
+    final ratio = secondhandRatioForStock(inStockShops);
+    final rare = inStockShops <= 0;
     return MarketPriceSummary(
       min: use.first,
       avg: (avg * 10).round() / 10,
       max: use.last,
       median: med,
-      secondhand: ((med * secondhandOfMedian) * 10).round() / 10,
+      secondhand: ((med * ratio) * 10).round() / 10,
+      rareOutOfPrint: rare,
+      inStockShops: inStockShops,
     );
   }
 
@@ -339,8 +400,13 @@ class BoardgameMarketService {
   }
 
   static String vintedSearchUrl(String title) {
-    final q = 'jeu de societe ${title.trim()}'.replaceAll(RegExp(r'\s+'), '+');
-    return 'https://www.vinted.be/catalog?search_text=$q';
+    final q = Uri.encodeQueryComponent(title.trim());
+    return 'https://www.vinted.fr/catalog?search_text=$q';
+  }
+
+  static String deuxiemeMainSearchUrl(String title) {
+    final slug = Uri.encodeComponent(title.trim().toLowerCase());
+    return 'https://www.2ememain.be/q/$slug/';
   }
 
   /// Case Départ : la barre interne génère un token de session opaque
@@ -368,10 +434,9 @@ class BoardgameMarketService {
 
   static String amazonFrSearchUrl(String title) {
     final name = normalizeShopQuery(title);
-    // Guillemets autour du titre : limite le correcteur Amazon
-    // (« Legacy of Yu » → « Legacy of You »).
+    // Guillemets + nb_sb_noss=1 : bloque le correcteur (« Yu » → « You »).
     final q = Uri.encodeQueryComponent('"$name" jeu de societe');
-    return 'https://www.amazon.fr/s?k=$q';
+    return 'https://www.amazon.fr/s?k=$q&nb_sb_noss=1';
   }
 
   static String philibertSearchUrl(String title) =>
@@ -404,7 +469,7 @@ class BoardgameMarketService {
   }
 
   static String okkazeoSearchUrl(String title) =>
-      'https://www.okkazeo.com/jeux/resultats?rech_nom=${encodeShopQuery(title)}';
+      'https://www.okkazeo.com/annonces/list?motcle=${Uri.encodeQueryComponent(title.trim())}';
 
   static String leboncoinSearchUrl(String title) {
     final q = encodeShopQuery(title);
@@ -532,6 +597,8 @@ class MarketPriceSummary {
   final double max;
   final double median;
   final double secondhand;
+  final bool rareOutOfPrint;
+  final int inStockShops;
 
   const MarketPriceSummary({
     required this.min,
@@ -539,6 +606,8 @@ class MarketPriceSummary {
     required this.max,
     required this.median,
     required this.secondhand,
+    this.rareOutOfPrint = false,
+    this.inStockShops = 3,
   });
 }
 

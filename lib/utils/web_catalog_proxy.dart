@@ -9,10 +9,32 @@ String _catalogAnonKey() {
   return SupabasePublicConfig.anonKey;
 }
 
+final _imagePathRe = RegExp(
+  r'\.(jpe?g|png|webp|gif|avif|bmp|svg)(\?|$)',
+  caseSensitive: false,
+);
+
+bool _looksLikeImageUri(Uri target) {
+  final host = target.host.toLowerCase();
+  if (host == 'uploads.mangadex.org' ||
+      host == 'covers.openlibrary.org' ||
+      host.contains('mzstatic.com') ||
+      host.contains('geekdo-images.com') ||
+      host.contains('googleusercontent.com') ||
+      (host.contains('books.google.') &&
+          target.path.toLowerCase().contains('/content'))) {
+    return true;
+  }
+  return _imagePathRe.hasMatch(target.path);
+}
+
 /// Sur le web, route les API CORS-bloquées (MangaDex, iTunes) via l'Edge Function
-/// Supabase `catalog-proxy` — plus fiable que allorigins / codetabs (520/522).
+/// Supabase `catalog-proxy` — **JSON uniquement, jamais d'images**.
 Uri proxiedCatalogUri(Uri target) {
   if (!kIsWeb) return target;
+  // Filet client : aucune image via catalog-proxy (Egress).
+  if (_looksLikeImageUri(target)) return target;
+
   final host = target.host.toLowerCase();
   // openlibrary.org : CORS natif → appel direct (pas de proxy / 502).
   const allowed = {

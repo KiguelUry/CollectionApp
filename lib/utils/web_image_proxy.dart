@@ -1,76 +1,60 @@
 import 'package:flutter/foundation.dart';
 
-import '../config/app_env.dart';
-import '../config/supabase_public_config.dart';
+/// CDN images gratuit (Cloudflare) — CORS CanvasKit + WebP léger.
+/// **0 octet d'Egress Supabase** (remplace `functions/v1/image-proxy`).
+const kWsrvHost = 'wsrv.nl';
 
-/// Hôtes chargés en direct sur le web (<img> natif, CORS OK — pas le proxy).
-const _directWebImageHosts = {
-  'cf.geekdo-images.com',
-  'boardgamegeek.com',
-  'images.ygoprodeck.com',
-  'assets.tcgdex.net',
-  'cards.lorcast.io',
-  'cdn.riftscribe.gg',
-  'www.optcgapi.com',
-  // AniList CDN : OK en <img>.
-  's4.anilist.co',
-  'anilist.co',
-  // uploads.mangadex.org : JAMAIS en direct (hotlink → bannière blanche).
-};
+/// Sur le web, route les couvertures externes via [wsrv.nl]
+/// (`w` / WebP) — jamais via `catalog-proxy` ni `image-proxy`.
+String coverUrlForWeb(String url, {int width = 360}) =>
+    proxyImageUrl(url, width: width);
 
-const _proxiedHosts = {
-  'covers.openlibrary.org',
-  'api.tcgdex.net',
-  'images.pokemontcg.io',
-  'i.discogs.com',
-  'img.discogs.com',
-  'st.discogs.com',
-  'image.tmdb.org',
-  'media.rawg.io',
-  'cdn.cloudflare.steamstatic.com',
-  'cdn.rebrickable.com',
-  'images.brickset.com',
-  'm.media-amazon.com',
-  'books.google.com',
-  'lh3.googleusercontent.com',
-  'uploads.mangadex.org',
-};
+/// Helper central : images externes → wsrv.nl (web), sinon URL https.
+///
+/// - Force `http://` → `https://`
+/// - N'encode jamais une URL déjà sur wsrv.nl
+/// - **Aucune** image ne passe par `functions/v1/catalog-proxy`
+String proxyImageUrl(String url, {int width = 360}) {
+  var src = url.trim();
+  if (src.isEmpty) return src;
+  if (src.startsWith('//')) src = 'https:$src';
 
-/// Sur le web, route les couvertures externes via l'Edge Function (CORS / anti-hotlink).
-String coverUrlForWeb(String url) {
-  if (!kIsWeb) {
-    // Mobile aussi : MangaDex bloque parfois selon Referer WebView.
-    final uri = Uri.tryParse(url);
-    if (uri != null &&
-        uri.host.toLowerCase() == 'uploads.mangadex.org') {
-      return _supabaseImageProxy(url);
-    }
-    return url;
-  }
+  final uri = Uri.tryParse(src);
+  if (uri == null || uri.host.isEmpty) return src;
 
-  final uri = Uri.tryParse(url);
-  if (uri == null || !uri.hasScheme) return url;
   final host = uri.host.toLowerCase();
-  if (_directWebImageHosts.contains(host)) return url;
-  if (!_proxiedHosts.contains(host)) {
-    // MangaDex hors liste explicite → forcer proxy si host mangadex.
-    if (host.endsWith('mangadex.org')) return _supabaseImageProxy(url);
-    return url;
+  if (host == kWsrvHost ||
+      host == 'localhost' ||
+      host.startsWith('127.')) {
+    return src;
   }
 
-  return _supabaseImageProxy(url);
+  // Stockage privé Supabase : laisser tel quel (auth requise).
+  if (uri.path.contains('/storage/v1/object/') &&
+      !uri.path.contains('/storage/v1/object/public/')) {
+    return src;
+  }
+
+  final https = uri.replace(scheme: 'https').toString();
+
+  // Hors web : MangaDex / Google Books / Apple peuvent charger en direct
+  // (sauf hotlink MD parfois) — wsrv reste utile pour compresser partout.
+  if (!kIsWeb) {
+    // Mobile : wsrv pour MangaDex (anti-hotlink Referer) + gros JPG.
+    if (host.contains('mangadex.org') ||
+        host.contains('books.google.') ||
+        host.contains('googleusercontent.com') ||
+        host.contains('mzstatic.com')) {
+      return _wsrv(https, width: width);
+    }
+    return https;
+  }
+
+  return _wsrv(https, width: width);
 }
 
-String _supabaseImageProxy(String url) {
-  final base = (AppEnv.supabaseUrl.isNotEmpty
-          ? AppEnv.supabaseUrl
-          : SupabasePublicConfig.url)
-      .replaceAll(RegExp(r'/+$'), '');
-  final anon = AppEnv.supabaseAnonKey.trim().isNotEmpty
-      ? AppEnv.supabaseAnonKey.trim()
-      : SupabasePublicConfig.anonKey;
-  final qp = StringBuffer('url=${Uri.encodeComponent(url)}');
-  qp.write('&apikey=${Uri.encodeComponent(anon)}');
-  // image-proxy (images) ; fallback wsrv si besoin côté caller.
-  return '$base/functions/v1/image-proxy?$qp';
+String _wsrv(String httpsUrl, {required int width}) {
+  final w = width.clamp(64, 1600);
+  return 'https://$kWsrvHost/?url=${Uri.encodeComponent(httpsUrl)}'
+      '&w=$w&output=webp&q=82';
 }

@@ -17,12 +17,23 @@ void main() {
     expect(summary.secondhand, lessThan(12));
   });
 
-  test('l\'occasion vaut environ 65 % de la médiane neuve', () {
+  test('l\'occasion vaut ~58 % si stock courant (3+ boutiques)', () {
     final summary = BoardgameMarketService.summarizePositivePrices(
       [20, 22, 24],
+      inStockShops: 3,
     );
     expect(summary!.median, 22);
-    expect(summary.secondhand, 14.3);
+    expect(summary.secondhand, 12.8); // 22 * 0.58
+    expect(summary.rareOutOfPrint, isFalse);
+  });
+
+  test('jeu épuisé : occasion ~102.5 % + badge rare', () {
+    final summary = BoardgameMarketService.summarizePositivePrices(
+      [40, 42, 44],
+      inStockShops: 0,
+    );
+    expect(summary!.rareOutOfPrint, isTrue);
+    expect(summary.secondhand, 43.1); // 42 * 1.025 rounded to 1 décimale
   });
 
   test('Annecy est un lieu quand on choisit Lieu', () {
@@ -89,17 +100,24 @@ void main() {
       contains(Uri.encodeQueryComponent('"Legacy of Yu"')),
     );
     expect(
+      BoardgameMarketService.amazonFrSearchUrl('Legacy of Yu'),
+      contains('nb_sb_noss=1'),
+    );
+    expect(
+      BoardgameMarketService.okkazeoSearchUrl('Catan'),
+      contains('okkazeo.com/annonces/list'),
+    );
+    expect(
+      BoardgameMarketService.deuxiemeMainSearchUrl('Catan'),
+      contains('2ememain.be/q/'),
+    );
+    expect(
       BoardgameMarketService.culturaSearchUrl('Catan'),
       'https://www.cultura.com/search/results?search_query=Catan',
     );
     expect(
       BoardgameMarketService.ludumSearchUrl('Catan'),
       'https://www.ludum.fr/rechercher?s=Catan',
-    );
-
-    expect(
-      BoardgameMarketService.okkazeoSearchUrl('Catan'),
-      'https://www.okkazeo.com/jeux/resultats?rech_nom=Catan',
     );
   });
 

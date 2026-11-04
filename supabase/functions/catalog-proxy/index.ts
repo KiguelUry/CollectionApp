@@ -1,5 +1,6 @@
 /// <reference path="../deno.d.ts" />
-// Proxy CORS pour Flutter Web — MangaDex + iTunes (allorigins/codetabs tombent en 520/522).
+// Proxy CORS pour Flutter Web — JSON only (MangaDex API + iTunes + Google Books).
+// JAMAIS d'images : 0 Mo d'Egress couverture sur Supabase.
 // Déployer : supabase functions deploy catalog-proxy --no-verify-jwt
 
 const corsHeaders: Record<string, string> = {
@@ -9,14 +10,31 @@ const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Methods": "GET, OPTIONS",
 };
 
+/** Hosts JSON uniquement — pas de CDN images. */
 const ALLOWED_HOSTS = new Set([
   "api.mangadex.org",
   "itunes.apple.com",
   "www.googleapis.com",
-  "uploads.mangadex.org",
   "openlibrary.org",
-  "covers.openlibrary.org",
 ]);
+
+const IMAGE_EXT_RE = /\.(jpe?g|png|webp|gif|avif|bmp|svg)(\?|$)/i;
+
+function isImageTarget(target: URL): boolean {
+  const host = target.hostname.toLowerCase();
+  if (
+    host === "uploads.mangadex.org" ||
+    host === "covers.openlibrary.org" ||
+    host.includes("mzstatic.com") ||
+    host.includes("geekdo-images.com") ||
+    host.includes("googleusercontent.com") ||
+    (host.includes("books.google.") && target.pathname.includes("/content"))
+  ) {
+    return true;
+  }
+  if (IMAGE_EXT_RE.test(target.pathname)) return true;
+  return false;
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -38,8 +56,15 @@ Deno.serve(async (req) => {
     return new Response("Invalid url", { status: 400, headers: corsHeaders });
   }
 
-  if (target.protocol !== "https:") {
-    return new Response("HTTPS only", { status: 400, headers: corsHeaders });
+  if (target.protocol !== "https:" && target.protocol !== "http:") {
+    return new Response("HTTP(S) only", { status: 400, headers: corsHeaders });
+  }
+
+  if (isImageTarget(target)) {
+    return new Response(
+      "Images are blocked on catalog-proxy (use wsrv.nl). Zero image egress.",
+      { status: 400, headers: corsHeaders },
+    );
   }
 
   const host = target.hostname.toLowerCase();
@@ -51,35 +76,29 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const isImage = host === "uploads.mangadex.org";
     if (host === "www.googleapis.com" && target.pathname.includes("/books/")) {
       target.searchParams.delete("key");
       const booksKey = Deno.env.get("GOOGLE_BOOKS_API_KEY")?.trim() ?? "";
       if (booksKey.length > 0) target.searchParams.set("key", booksKey);
     }
+    if (target.protocol === "http:") {
+      target = new URL(target.toString().replace(/^http:/i, "https:"));
+    }
     const upstream = await fetch(target.toString(), {
-      // Pas de Referer → évite le hotlink MangaDex « You can read this at MANGADEX ».
-      headers: isImage
-        ? {
-          "User-Agent": "Collectingo/1.1",
-          Accept: "image/*,*/*",
-        }
-        : {
-          Accept: "application/json",
-          "User-Agent": "Collectingo/1.1",
-        },
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "Collectingo/1.1",
+      },
       redirect: "follow",
     });
     const body = await upstream.arrayBuffer();
     const contentType = upstream.headers.get("Content-Type") ??
-      (isImage ? "image/jpeg" : "application/json");
+      "application/json";
     // Jamais de Set-Cookie upstream (Cloudflare `__cf_bm` → domaine invalide Firefox).
     const responseHeaders = new Headers({
       ...corsHeaders,
       "Content-Type": contentType,
-      "Cache-Control": isImage
-        ? "public, max-age=86400"
-        : "public, max-age=120",
+      "Cache-Control": "public, max-age=86400, s-maxage=86400",
     });
     responseHeaders.delete("set-cookie");
     responseHeaders.delete("set-cookie2");

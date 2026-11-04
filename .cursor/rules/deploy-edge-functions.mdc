@@ -1,0 +1,19 @@
+---
+description: Déployer les Edge Functions Supabase après une modification
+globs: supabase/functions/**/*
+alwaysApply: false
+---
+
+# Déploiement des Edge Functions
+
+Quand tu modifies une fonction dans `supabase/functions/` (en particulier `bgg-api`), déploie-la toi-même avant de conclure, sans demander confirmation.
+
+Depuis la racine du projet :
+
+```bash
+supabase functions deploy <nom-de-la-fonction> --no-verify-jwt
+```
+
+Le projet est déjà lié (`jfudrneoblsiingjqsio`). Docker local n'est pas requis : un avertissement « Docker is not running » n'empêche pas le déploiement.
+
+Ne déploie que les fonctions dont le code a changé dans la session. Si le déploiement échoue (CLI absente, session expirée), dis-le clairement et donne la commande exacte.

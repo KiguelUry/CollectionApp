@@ -114,9 +114,15 @@ class _ItemMarketValuePanelState extends State<ItemMarketValuePanel> {
     final scheme = Theme.of(context).colorScheme;
     final meta = _item.metadata;
     final storedStores = storesPricesFromMetadata(meta);
+    final inStock = storedStores.where((s) => s.inStock).length;
     final summary = BoardgameMarketService.summarizePositivePrices(
       storedStores.map((s) => s.productEur ?? s.priceEur),
+      inStockShops: inStock,
     );
+    final rare = summary?.rareOutOfPrint == true ||
+        meta?[BoardgameMarketService.kMarketRareBadge] == true;
+    final estimated =
+        meta?[BoardgameMarketService.kMarketEstimateFlag] == true;
     final newMin = summary?.min ?? marketNewPriceMinFromMetadata(meta);
     final second = summary?.secondhand ?? marketSecondhandPriceFromMetadata(meta);
     final rangeMin = summary?.min ?? marketPriceMinFromMetadata(meta);
@@ -177,12 +183,48 @@ class _ItemMarketValuePanelState extends State<ItemMarketValuePanel> {
             ],
           ),
         ] else ...[
-          Text(
-            'Prix neuf constatés',
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  fontWeight: FontWeight.w800,
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  estimated
+                      ? 'Estimation indicative (gabarit)'
+                      : 'Prix neuf constatés',
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
                 ),
+              ),
+              if (rare)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.orange.shade700),
+                  ),
+                  child: const Text(
+                    '🔥 Rare / Épuisé',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+            ],
           ),
+          if (estimated && newMin != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              '~${formatEuroChip(newMin, compact: false)} (estimé)',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ],
           const SizedBox(height: 6),
           Row(
             children: [
@@ -488,8 +530,9 @@ class _ShopSearchLinks extends StatelessWidget {
       ('Amazon', BoardgameMarketService.amazonFrSearchUrl(title)),
     ];
     final second = <(String, String)>[
-      ('Vinted', BoardgameMarketService.vintedSearchUrl(title)),
       ('Okkazeo', BoardgameMarketService.okkazeoSearchUrl(title)),
+      ('Vinted', BoardgameMarketService.vintedSearchUrl(title)),
+      ('2ememain', BoardgameMarketService.deuxiemeMainSearchUrl(title)),
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -502,7 +545,10 @@ class _ShopSearchLinks extends StatelessWidget {
           children: [for (final s in shops) _link(s.$1, s.$2)],
         ),
         const SizedBox(height: 8),
-        Text('Seconde main', style: Theme.of(context).textTheme.labelMedium),
+        Text(
+          'Marché de l\'occasion',
+          style: Theme.of(context).textTheme.labelMedium,
+        ),
         const SizedBox(height: 4),
         Wrap(
           spacing: 6,

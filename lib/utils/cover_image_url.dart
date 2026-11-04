@@ -59,20 +59,19 @@ String gridThumbnailUrl(
       host.contains('brickset.com')) {
     return src;
   }
-  // MangaDex : jamais en direct (Referer → bannière anti-hotlink).
-  if (host.contains('mangadex.org')) {
-    return coverUrlForWeb(src);
-  }
   // Stockage Supabase : seules les URLs publiques sont stables.
   if (uri.path.contains('/storage/v1/object/') &&
       !uri.path.contains('/storage/v1/object/public/')) {
     return src;
   }
-  // URL absolue https canonique avant encode (évite ERR_NAME_NOT_RESOLVED).
+  // URL absolue https + wsrv (MangaDex inclus — 0 Egress Supabase).
   final absolute = uri.replace(scheme: 'https').toString();
-  return 'https://$kThumbnailCdnHost/?url=${Uri.encodeComponent(absolute)}'
-      '&w=$size&h=$size'
-      '&fit=${crop ? 'cover' : 'inside'}&we&output=webp&q=80';
+  final q = StringBuffer(
+    'https://$kThumbnailCdnHost/?url=${Uri.encodeComponent(absolute)}'
+    '&w=$size&h=$size'
+    '&fit=${crop ? 'cover' : 'inside'}&we&output=webp&q=80',
+  );
+  return q.toString();
 }
 
 /// Photo de matériel BGG. On garde l'URL geekdo telle quelle (`imageurl_lg`) :
