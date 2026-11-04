@@ -140,10 +140,15 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
   int? _newPlayerColorIndex;
   late int _revision;
   bool _hideTotals = false;
+  /// false = joueurs en colonnes (défaut) ; true = joueurs en lignes.
+  bool _playersAsRows = false;
   TextEditingController? _firstPlayer;
   int? _drawHighlight;
   bool _drawingFirst = false;
   double _minColWidth = 72;
+  final _gridHScroll = ScrollController();
+  final _gridVScroll = ScrollController();
+  bool _gridPointerDragging = false;
 
   @override
   void initState() {
@@ -162,6 +167,8 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     _newPlayerController.dispose();
     _newTeamController.dispose();
     _newDefinedTeamController.dispose();
+    _gridHScroll.dispose();
+    _gridVScroll.dispose();
     _disposeControllers();
     super.dispose();
   }
@@ -1307,15 +1314,42 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
         // ── Bloc 5 : grille de score ──
         if (widget.showScoreTable && _hasTableContent) ...[
           const SizedBox(height: 16),
-          Text(
-            'Grille de score',
-            style: Theme.of(
-              context,
-            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Grille de score',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                ),
+              ),
+              if (widget.enabled)
+                TextButton.icon(
+                  onPressed: () =>
+                      setState(() => _playersAsRows = !_playersAsRows),
+                  icon: Icon(
+                    _playersAsRows
+                        ? Icons.view_column_outlined
+                        : Icons.table_rows_outlined,
+                    size: 18,
+                  ),
+                  label: Text(
+                    _playersAsRows ? 'Joueurs → colonnes' : 'Joueurs → lignes',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+            ],
           ),
           const SizedBox(height: 10),
+          if (_playersAsRows)
+            _buildTransposedScoreTable(scheme, grid, sharedTeams, teamTotals,
+                winners, labelW, colCount)
+          else
           SingleChildScrollView(
+            controller: _gridHScroll,
             scrollDirection: Axis.horizontal,
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1585,6 +1619,142 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     );
   }
 
+  /// Joueurs en lignes, tours en colonnes — mêmes contrôleurs / couleurs / scores.
+  Widget _buildTransposedScoreTable(
+    ColorScheme scheme,
+    BoardgameScoreGrid grid,
+    bool sharedTeams, // réservé mode équipes (layout simple ici)
+    Map<String, int> teamTotals,
+    Set<int> winners,
+    double labelW,
+    int colCount,
+  ) {
+    // Mode équipes partagées : totaux équipe déjà calculés côté parent.
+    // ignore: unused_local_variable
+    final _ = (sharedTeams, teamTotals);
+    final roundCount = _roundLabelControllers.length;
+    final roundW = _minColWidth;
+    final playerLabelW = (labelW + 24).clamp(96.0, 140.0);
+    final maxH = (MediaQuery.sizeOf(context).height * 0.42).clamp(220.0, 420.0);
+
+    Widget table = Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _stretchRow([
+            _cornerLabel(
+              'Joueurs \\ Tours',
+              playerLabelW,
+              scheme,
+              bg: scheme.primaryContainer.withValues(alpha: 0.25),
+              bold: true,
+            ),
+            for (var r = 0; r < roundCount; r++)
+              SizedBox(
+                width: roundW,
+                child: _roundLabelCell(r, scheme, roundW),
+              ),
+            _cornerLabel(
+              widget.winCondition == BoardgameWinCondition.cooperative
+                  ? 'Score'
+                  : 'Total',
+              roundW,
+              scheme,
+              bg: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+              bold: true,
+            ),
+          ]),
+          for (var p = 0; p < colCount; p++) ...[
+            _stretchRow([
+              _playerHeaderCell(p, scheme, playerLabelW),
+              for (var r = 0; r < roundCount; r++)
+                _scoreCell(r, p, scheme, roundW),
+              Builder(
+                builder: (_) {
+                  final totals = grid.columnTotals();
+                  final hasName = _playerControllers[p].text.trim().isNotEmpty;
+                  String text = '—';
+                  if (_hideTotals && hasName && grid.hasScores) {
+                    text = '?';
+                  } else if (hasName && grid.hasScores) {
+                    text = '${p < totals.length ? totals[p] : 0}';
+                  }
+                  final isWinner = !_hideTotals &&
+                      winners.contains(p) &&
+                      widget.winCondition !=
+                          BoardgameWinCondition.cooperative;
+                  return _totalCell(text, roundW, scheme, isWinner: isWinner);
+                },
+              ),
+            ]),
+          ],
+        ],
+      ),
+    );
+
+    return SizedBox(
+      height: maxH,
+      child: Scrollbar(
+        controller: _gridVScroll,
+        thumbVisibility: true,
+        child: SingleChildScrollView(
+          controller: _gridVScroll,
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
+          child: Scrollbar(
+            controller: _gridHScroll,
+            thumbVisibility: true,
+            notificationPredicate: (n) => n.depth == 0,
+            child: SingleChildScrollView(
+              controller: _gridHScroll,
+              scrollDirection: Axis.horizontal,
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  table,
+                  if (widget.enabled)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4),
+                      child: IconButton(
+                        onPressed: () =>
+                            setState(() => _hideTotals = !_hideTotals),
+                        icon: Icon(
+                          _hideTotals
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _panGridFromPointer(Offset delta) {
+    if (_gridHScroll.hasClients) {
+      final h = _gridHScroll.position;
+      _gridHScroll.jumpTo(
+        (h.pixels - delta.dx).clamp(0.0, h.maxScrollExtent),
+      );
+    }
+    if (_gridVScroll.hasClients) {
+      final v = _gridVScroll.position;
+      _gridVScroll.jumpTo(
+        (v.pixels - delta.dy).clamp(0.0, v.maxScrollExtent),
+      );
+    }
+  }
+
   Widget _cornerLabel(
     String text,
     double width,
@@ -1694,35 +1864,48 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
         ),
       );
     }
-    return SizedBox(
-      width: width,
-      child: Padding(
-        padding: const EdgeInsets.all(4),
-        child: TextField(
-          key: ValueKey('cell_${row}_$col'),
-          controller: _cellControllers[row][col],
-          textAlign: TextAlign.center,
-          keyboardType: const TextInputType.numberWithOptions(signed: true),
-          inputFormatters: [
-            FilteringTextInputFormatter.allow(RegExp(r'-?\d*')),
-          ],
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-          decoration: InputDecoration(
-            isDense: true,
-            hintText: '·',
-            filled: true,
-            fillColor: color,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-            contentPadding: const EdgeInsets.symmetric(vertical: 10),
-          ),
-          onChanged: (v) {
-            if (syncIndices != null) {
-              for (final i in syncIndices) {
-                if (i != col) _cellControllers[row][i].text = v;
+    // Listener : pan horizontal/vertical même pendant la saisie (GSM).
+    return Listener(
+      onPointerMove: (e) {
+        if (e.delta.distanceSquared < 1.5) return;
+        _gridPointerDragging = true;
+        _panGridFromPointer(e.delta);
+      },
+      onPointerUp: (_) => _gridPointerDragging = false,
+      onPointerCancel: (_) => _gridPointerDragging = false,
+      child: SizedBox(
+        width: width,
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: TextField(
+            key: ValueKey('cell_${row}_$col'),
+            controller: _cellControllers[row][col],
+            textAlign: TextAlign.center,
+            keyboardType: const TextInputType.numberWithOptions(signed: true),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'-?\d*')),
+            ],
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+            scrollPadding: const EdgeInsets.all(72),
+            decoration: InputDecoration(
+              isDense: true,
+              hintText: '·',
+              filled: true,
+              fillColor: color,
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              contentPadding: const EdgeInsets.symmetric(vertical: 10),
+            ),
+            onChanged: (v) {
+              if (_gridPointerDragging) return;
+              if (syncIndices != null) {
+                for (final i in syncIndices) {
+                  if (i != col) _cellControllers[row][i].text = v;
+                }
               }
-            }
-            _localRefresh();
-          },
+              _localRefresh();
+            },
+          ),
         ),
       ),
     );

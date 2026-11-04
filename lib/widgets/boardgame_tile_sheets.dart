@@ -233,9 +233,11 @@ class _BoardgameTileLocationSheetState
     extends State<_BoardgameTileLocationSheet> {
   final _groupService = ItemGroupService();
   late CollectionItem _item;
+  late CollectionItem _initialSnapshot;
   late Set<String> _groupSel;
   bool _saving = false;
   bool _closing = false;
+  bool _dirty = false;
   Timer? _saveDebounce;
 
   String? get _meUserId => Supabase.instance.client.auth.currentUser?.id;
@@ -246,6 +248,7 @@ class _BoardgameTileLocationSheetState
   void initState() {
     super.initState();
     _item = widget.item;
+    _initialSnapshot = widget.item;
     _groupSel = _groupIdsFromItem(_item);
     if (!_multi) _loadGroups();
   }
@@ -267,6 +270,7 @@ class _BoardgameTileLocationSheetState
         metadata: metadataWithGroupIds(_item.metadata, next.toList()),
       );
       _saving = true;
+      _dirty = true;
     });
     try {
       await _groupService.syncItemGroupsWithItem(_item, next.toList());
@@ -326,7 +330,33 @@ class _BoardgameTileLocationSheetState
         clearHolder: clearHolder,
         manualHolder: manualHolder,
       );
+      _dirty = true;
     });
+  }
+
+  void _returnLoan() {
+    setState(() {
+      _item = applyTemporaryLoan(
+        _item,
+        isLoan: false,
+        meUserId: _meUserId,
+      );
+      // Retour à domicile mémorisé (Chez moi) si le lieu n'était pas renseigné.
+      if (_item.locationUserId == null &&
+          (_item.locationLabel == null ||
+              _item.locationLabel!.trim().isEmpty)) {
+        final me = _meUserId;
+        if (me != null) {
+          _item = applyWhereaboutsChange(
+            _item,
+            locationUserId: me,
+            holderLabel: 'Chez moi',
+          );
+        }
+      }
+      _dirty = true;
+    });
+    _schedulePersist();
   }
 
   void _schedulePersist() {
@@ -388,9 +418,9 @@ class _BoardgameTileLocationSheetState
     if (_closing) return;
     _closing = true;
     _saveDebounce?.cancel();
-    // Persiste sans 2e confirmation : le choix via ✓ / puce suffit.
-    if (!widget.readOnly) {
-      final before = _whereLabel(widget.item);
+    // Rien modifié → fermeture immédiate (pas de barre de chargement).
+    if (!widget.readOnly && _dirty) {
+      final before = _whereLabel(_initialSnapshot);
       await _persist();
       final after = _whereLabel(_item);
       if (before != after) {
@@ -446,6 +476,43 @@ class _BoardgameTileLocationSheetState
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
+              if (!multi && _item.isOnLoan) ...[
+                const SizedBox(height: 12),
+                Material(
+                  color: Colors.blue.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+                    child: Row(
+                      children: [
+                        Icon(Icons.handshake_outlined,
+                            color: Colors.blue.shade700, size: 22),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Prêté à ${_item.loaneeDisplayName}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14,
+                              color: Colors.blue.shade800,
+                            ),
+                          ),
+                        ),
+                        FilledButton.tonal(
+                          onPressed: widget.readOnly || _saving
+                              ? null
+                              : _returnLoan,
+                          style: FilledButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            foregroundColor: Colors.blue.shade900,
+                          ),
+                          child: const Text('Rendre'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 16),
               if (!multi && widget.groups.isNotEmpty) ...[
                 Text(
@@ -514,6 +581,7 @@ class _BoardgameTileLocationSheetState
                   holderLabel: _item.locationLabel,
                   readOnly: false,
                   applyDefaultIfEmpty: false,
+                  loanActive: _item.isOnLoan,
                   onChanged: ({
                     locationUserId,
                     holderLabel,
@@ -533,7 +601,8 @@ class _BoardgameTileLocationSheetState
                 ),
               if (!multi &&
                   !widget.readOnly &&
-                  isAwayFromHome(_item, meUserId: _meUserId)) ...[
+                  (_item.isOnLoan ||
+                      isAwayFromHome(_item, meUserId: _meUserId))) ...[
                 const SizedBox(height: 8),
                 TemporaryLoanToggle(
                   isLoan: _item.isOnLoan,
@@ -545,6 +614,7 @@ class _BoardgameTileLocationSheetState
                       _item = _item.copyWith(
                         loanedToName: name.isEmpty ? null : name,
                       );
+                      _dirty = true;
                     });
                     _schedulePersist();
                   },
@@ -556,6 +626,7 @@ class _BoardgameTileLocationSheetState
                         loanedAt: date,
                         meUserId: _meUserId,
                       );
+                      _dirty = true;
                     });
                     _schedulePersist();
                   },

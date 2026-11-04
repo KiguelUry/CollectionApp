@@ -7,7 +7,12 @@ import '../screens/all_collection_screen.dart';
 import '../screens/exchanges_screen.dart';
 import '../screens/stats_screen.dart';
 import '../services/auth_service.dart';
+import '../services/exchanges_badge_service.dart';
+import '../services/inventory_service.dart';
+import '../services/loan_service.dart';
 import '../services/profile_cache_service.dart';
+import '../utils/collection_grid_grouper.dart';
+import '../utils/marketplace_status.dart';
 import 'profile_avatar.dart';
 import 'share_collection_sheet.dart';
 
@@ -20,6 +25,7 @@ class MainDrawer extends StatefulWidget {
 
 class _MainDrawerState extends State<MainDrawer> {
   final _cache = ProfileCacheService.instance;
+  int _exchangesBadge = 0;
 
   @override
   void initState() {
@@ -28,6 +34,7 @@ class _MainDrawerState extends State<MainDrawer> {
     if (_cache.profile == null) {
       _cache.refresh();
     }
+    _refreshExchangesBadge();
   }
 
   @override
@@ -38,6 +45,34 @@ class _MainDrawerState extends State<MainDrawer> {
 
   void _onCacheChanged() {
     if (mounted) setState(() {});
+  }
+
+  Future<void> _refreshExchangesBadge() async {
+    try {
+      final results = await Future.wait([
+        InventoryService().fetchOwnedItems(),
+        LoanService().fetchActiveLoans(),
+      ]);
+      final owned = results[0];
+      final loans = results[1];
+      final duplicates = CollectionGridGrouper.group(
+        owned.where((i) => !i.isWishlist && !i.isSold).toList(),
+      ).where((g) => g.hasDuplicates).length;
+      final forSale = owned
+          .where(
+            (i) =>
+                !i.isSold && !i.isWishlist && (i.isForSale || itemWantsTrade(i)),
+          )
+          .length;
+      final n = await ExchangesBadgeService.instance.computeBadgeCount(
+        loans: loans,
+        duplicatesCount: duplicates,
+        forSaleCount: forSale,
+      );
+      if (mounted) setState(() => _exchangesBadge = n);
+    } catch (_) {
+      if (mounted) setState(() => _exchangesBadge = 0);
+    }
   }
 
   Future<void> _openProfile() async {
@@ -72,10 +107,20 @@ class _MainDrawerState extends State<MainDrawer> {
     required IconData icon,
     required String label,
     required VoidCallback onTap,
+    int badgeCount = 0,
   }) {
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
-      leading: Icon(icon, size: 22),
+      leading: badgeCount > 0
+          ? Badge(
+              label: Text(
+                badgeCount > 99 ? '99+' : '$badgeCount',
+                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800),
+              ),
+              backgroundColor: const Color(0xFFDC2626),
+              child: Icon(icon, size: 22),
+            )
+          : Icon(icon, size: 22),
       title: Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
       onTap: onTap,
     );
@@ -180,8 +225,9 @@ class _MainDrawerState extends State<MainDrawer> {
                     },
                   ),
                   _item(
-                    icon: Icons.swap_horiz_rounded,
-                    label: 'Échanges & Doublons',
+                    icon: Icons.handshake_outlined,
+                    label: 'Prêts & échanges',
+                    badgeCount: _exchangesBadge,
                     onTap: () => _closeAndPush(const ExchangesScreen()),
                   ),
                   const Divider(height: 20),

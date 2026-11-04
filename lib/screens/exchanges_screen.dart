@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_item.dart';
 import '../models/item_condition.dart';
 import '../services/collection_refresh.dart';
+import '../services/exchanges_badge_service.dart';
 import '../services/inventory_service.dart';
 import '../services/loan_service.dart';
 import '../utils/collection_grid_grouper.dart';
@@ -73,6 +74,7 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
       ]);
       _owned = results[0];
       _loans = results[1];
+      await ExchangesBadgeService.instance.markVisited(_loans);
     } catch (_) {
       _owned = [];
       _loans = [];
@@ -204,7 +206,7 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
       initialIndex: widget.initialTab.clamp(0, 2),
       child: Scaffold(
         appBar: AppAppBar(
-          title: 'Échanges & Doublons',
+          title: 'Prêts & échanges',
           actions: [
             IconButton(
               tooltip: 'Hôtel des ventes',

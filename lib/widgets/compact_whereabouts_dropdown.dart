@@ -21,6 +21,8 @@ class CompactWhereaboutsDropdown extends StatefulWidget {
   final String? holderLabel;
   final bool readOnly;
   final bool applyDefaultIfEmpty;
+  /// Prêt actif : ne pas cocher « Chez moi » (domicile mémorisé, objet ailleurs).
+  final bool loanActive;
   final void Function({
     String? locationUserId,
     String? holderLabel,
@@ -36,6 +38,7 @@ class CompactWhereaboutsDropdown extends StatefulWidget {
     required this.holderLabel,
     required this.readOnly,
     this.applyDefaultIfEmpty = false,
+    this.loanActive = false,
     required this.onChanged,
   });
 
@@ -331,7 +334,8 @@ class _CompactWhereaboutsDropdownState
               FilterChip(
                 avatar: const Icon(Icons.home_outlined, size: 16),
                 label: const Text('Chez moi'),
-                selected: _isSelectedUser(_meUserId!),
+                selected:
+                    !widget.loanActive && _isSelectedUser(_meUserId!),
                 onSelected: widget.readOnly
                     ? null
                     : (_) {
@@ -339,10 +343,20 @@ class _CompactWhereaboutsDropdownState
                         _selectUser(_meUserId!, 'Chez moi');
                       },
               ),
+            if (widget.loanActive)
+              FilterChip(
+                avatar: Icon(Icons.handshake_outlined,
+                    size: 16, color: Colors.blue.shade700),
+                label: const Text('Prêté'),
+                selected: true,
+                selectedColor: Colors.blue.withValues(alpha: 0.22),
+                checkmarkColor: Colors.blue.shade700,
+                onSelected: null,
+              ),
             FilterChip(
               avatar: const Icon(Icons.person_outline, size: 16),
               label: const Text('Personne'),
-              selected: _pane == _WhoPane.person,
+              selected: !widget.loanActive && _pane == _WhoPane.person,
               onSelected: widget.readOnly
                   ? null
                   : (_) => setState(() {
@@ -353,7 +367,7 @@ class _CompactWhereaboutsDropdownState
             FilterChip(
               avatar: const Icon(Icons.place_outlined, size: 16),
               label: const Text('Lieu'),
-              selected: _pane == _WhoPane.place,
+              selected: !widget.loanActive && _pane == _WhoPane.place,
               onSelected: widget.readOnly
                   ? null
                   : (_) => setState(() {
