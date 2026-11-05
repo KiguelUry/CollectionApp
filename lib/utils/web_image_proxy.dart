@@ -37,24 +37,34 @@ bool _needsWsrv(String host) {
 bool _isMangaDexUploads(String host) =>
     host == 'uploads.mangadex.org' || host.endsWith('.mangadex.org');
 
-/// Force miniature MangaDex (~30 Ko) : `.256.jpg` ou `.512.jpg`.
+/// Force miniature MangaDex officielle (~18 Ko).
+///
+/// MangaDex exige d'**append** `.256.jpg` / `.512.jpg` au nom de fichier
+/// (`uuid.jpg` → `uuid.jpg.256.jpg`), pas de remplacer l'extension
+/// (`uuid.256.jpg` sert l'original ~200 Ko+).
 String mangaDexThumbnailUrl(String url, {int width = 360}) {
   var u = url.trim();
   if (u.isEmpty) return u;
-  final size = width <= 280 ? '256' : '512';
+  // Grilles / listes : toujours 256. Détail large : 512.
+  final size = width > 600 ? '512' : '256';
+
+  // Retire un suffixe qualité déjà présent (formes append OU replace erronée).
+  // append : file.jpg.512.jpg → file.jpg
+  u = u.replaceFirstMapped(
+    RegExp(r'\.(jpe?g|png|webp)\.(256|512)\.jpe?g$', caseSensitive: false),
+    (m) => '.${m.group(1)}',
+  );
+  // replace erronée : file.512.jpg → file.jpg (récupération best-effort)
   u = u.replaceFirst(
     RegExp(r'\.(256|512)\.jpe?g$', caseSensitive: false),
     '.jpg',
   );
-  if (RegExp(r'\.jpe?g$', caseSensitive: false).hasMatch(u)) {
-    u = u.replaceFirst(
-      RegExp(r'\.jpe?g$', caseSensitive: false),
-      '.$size.jpg',
-    );
-  } else if (!u.contains('.$size.jpg')) {
-    u = '$u.$size.jpg';
+
+  // Append officiel MangaDex.
+  if (RegExp(r'\.(jpe?g|png|webp)$', caseSensitive: false).hasMatch(u)) {
+    return '$u.$size.jpg';
   }
-  return u;
+  return '$u.$size.jpg';
 }
 
 /// Apple : source raisonnable (évite 44× `600x600bb` → ERR_CONNECTION_CLOSED).

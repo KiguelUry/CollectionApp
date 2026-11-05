@@ -45,13 +45,22 @@ function isBlockedImageHost(target: URL): boolean {
   return false;
 }
 
-/** Force miniature MangaDex (~30 Ko) : .256.jpg ou .512.jpg. */
-function forceMangaDexThumb(target: URL, prefer512 = true): URL {
+/**
+ * Force miniature MangaDex officielle (~18 Ko).
+ * Append `.256.jpg` / `.512.jpg` au filename (docs MangaDex) —
+ * NE PAS remplacer `.jpg` par `.256.jpg` (sert l'original ~200 Ko+).
+ */
+function forceMangaDexThumb(target: URL, prefer512 = false): URL {
   const size = prefer512 ? "512" : "256";
   let path = target.pathname;
+  // append existant : file.jpg.512.jpg → file.jpg
+  path = path.replace(/\.(jpe?g|png|webp)\.(256|512)\.jpe?g$/i, ".$1");
+  // forme replace erronée : file.512.jpg → file.jpg
   path = path.replace(/\.(256|512)\.jpe?g$/i, ".jpg");
-  if (/\.jpe?g$/i.test(path)) {
-    path = path.replace(/\.jpe?g$/i, `.${size}.jpg`);
+  if (/\.(jpe?g|png|webp)$/i.test(path)) {
+    path = `${path}.${size}.jpg`;
+  } else {
+    path = `${path}.${size}.jpg`;
   }
   const out = new URL(target.toString());
   out.protocol = "https:";
@@ -91,7 +100,8 @@ Deno.serve(async (req) => {
 
   // --- Images MangaDex uniquement ---
   if (host === ALLOWED_IMAGE_HOST) {
-    target = forceMangaDexThumb(target, true);
+    // Toujours .256.jpg via proxy (Egress) — le client peut demander 512 en query plus tard.
+    target = forceMangaDexThumb(target, false);
     try {
       const upstream = await fetch(target.toString(), {
         headers: {

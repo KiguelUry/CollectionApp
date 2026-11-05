@@ -52,6 +52,20 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   bool _shelfView = false;
   /// `enrichMissingVolumeCovers` : une seule fois par ouverture d’écran.
   bool _hasEnrichedThisSession = false;
+  /// true si Possédé/Lu/Note/Wishlist/couvertures ont changé en DB.
+  bool _hasMutatedData = false;
+
+  void _markDirty() => _hasMutatedData = true;
+
+  Future<void> _reloadAfterMutation({bool silent = true}) async {
+    _markDirty();
+    if (mounted) await _load(silent: silent);
+  }
+
+  void _popWithDirtyFlag() {
+    if (!mounted) return;
+    Navigator.pop(context, _hasMutatedData);
+  }
 
   @override
   void initState() {
@@ -135,7 +149,10 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
             }
           },
         );
-        if (n > 0) any = true;
+        if (n > 0) {
+          any = true;
+          _markDirty();
+        }
         // Une seule relecture post-enrich (cache invalidé une fois).
         if (any && mounted) {
           BookSeriesService.invalidateVolumeCache(seriesForBg.id);
@@ -263,13 +280,13 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         slot: slot,
         wishlist: next,
       );
-      if (mounted) await _load(silent: true);
+      await _reloadAfterMutation();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('$e')),
         );
-        await _load(silent: true);
+        await _reloadAfterMutation();
       }
     }
   }
@@ -471,12 +488,13 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         slot: live,
         owned: next,
       );
+      _markDirty();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Erreur: $e')),
         );
-        await _load(silent: true);
+        await _reloadAfterMutation();
       }
     }
   }
@@ -488,8 +506,9 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     try {
       final refreshed = _slots.firstWhere((s) => s.volume.id == slot.volume.id);
       await _service.toggleVolumeRead(slot: refreshed, read: next);
+      _markDirty();
     } catch (e) {
-      if (mounted) await _load(silent: true);
+      if (mounted) await _reloadAfterMutation();
     }
   }
 
@@ -500,8 +519,9 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         volumeId: slot.volume.id,
         language: language,
       );
+      _markDirty();
     } catch (e) {
-      if (mounted) await _load(silent: true);
+      if (mounted) await _reloadAfterMutation();
     }
   }
 
@@ -512,8 +532,9 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         volumeId: slot.volume.id,
         edition: edition,
       );
+      _markDirty();
     } catch (e) {
-      if (mounted) await _load(silent: true);
+      if (mounted) await _reloadAfterMutation();
     }
   }
 
@@ -594,7 +615,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
           toVolume: total > 0 ? total : 1,
         );
       }
-      await _load(silent: true);
+      await _reloadAfterMutation();
     } finally {
       fromCtrl.dispose();
       toCtrl.dispose();
@@ -795,13 +816,19 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   @override
   Widget build(BuildContext context) {
     if (_loading && _series == null) {
-      return Scaffold(
-        appBar: AppAppBar(
-          title: 'Série',
-          backgroundColor: BookAccent.primary,
-          foregroundColor: Colors.white,
+      return PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) _popWithDirtyFlag();
+        },
+        child: Scaffold(
+          appBar: AppAppBar(
+            title: 'Série',
+            backgroundColor: BookAccent.primary,
+            foregroundColor: Colors.white,
+          ),
+          body: const Center(child: CircularProgressIndicator()),
         ),
-        body: const Center(child: CircularProgressIndicator()),
       );
     }
 
@@ -811,7 +838,12 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     final physical = _physicalSlots;
     final chapters = _chapterSlots;
 
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _popWithDirtyFlag();
+      },
+      child: Scaffold(
       appBar: AppAppBar(
         title: BookSeriesNormalizer.displaySeriesName(series.name),
         backgroundColor: accent,
@@ -898,6 +930,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
             if (chapters.isNotEmpty) _buildChaptersSection(chapters, accent),
           ],
         ),
+      ),
       ),
     );
   }
@@ -2769,7 +2802,8 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     if (ok != true || !mounted) return;
     await _service.deleteSeriesAndOwnedVolumes(series.id);
     BooksCollectionCache.instance.clear();
-    if (mounted) Navigator.pop(context);
+    _markDirty();
+    if (mounted) Navigator.pop(context, true);
   }
 }
 

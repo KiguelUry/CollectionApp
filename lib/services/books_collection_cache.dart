@@ -7,10 +7,17 @@ class BooksCollectionCache {
   BooksCollectionCache._();
   static final instance = BooksCollectionCache._();
 
+  static const ttl = Duration(minutes: 10);
+
   List<CachedSeriesEntry>? entries;
   DateTime? loadedAt;
 
   bool get hasData => entries != null && entries!.isNotEmpty;
+
+  bool get isFresh =>
+      hasData &&
+      loadedAt != null &&
+      DateTime.now().difference(loadedAt!) < ttl;
 
   void put(List<CachedSeriesEntry> list) {
     entries = list;
@@ -20,6 +27,20 @@ class BooksCollectionCache {
   void clear() {
     entries = null;
     loadedAt = null;
+  }
+
+  /// Garde les données affichables mais force un refresh réseau au prochain `_load`.
+  void markStale() {
+    loadedAt = null;
+  }
+
+  CachedSeriesEntry? entryFor(String seriesId) {
+    final list = entries;
+    if (list == null) return null;
+    for (final e in list) {
+      if (e.series.id == seriesId) return e;
+    }
+    return null;
   }
 
   void updateSeries({

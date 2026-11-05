@@ -59,16 +59,35 @@ void main() {
       );
     });
 
-    test('MangaDex : jamais wsrv ; miniature .512.jpg', () {
+    test('MangaDex : append officiel .jpg.256.jpg (jamais replace .256.jpg)', () {
       const src =
-          'https://uploads.mangadex.org/covers/aaa/bbb.png.jpg';
+          'https://uploads.mangadex.org/covers/aaa/bbb.jpg';
       final out = mangaDexThumbnailUrl(src, width: 360);
-      expect(out, endsWith('.512.jpg'));
+      // Docs MangaDex : append, pas replace → .../bbb.jpg.256.jpg
+      expect(out, endsWith('bbb.jpg.256.jpg'));
+      expect(out, isNot(contains('bbb.256.jpg')));
       expect(out, isNot(contains('wsrv.nl')));
+
+      // PNG brut → png.256.jpg
+      expect(
+        mangaDexThumbnailUrl(
+          'https://uploads.mangadex.org/covers/aaa/ccc.png',
+          width: 260,
+        ),
+        endsWith('ccc.png.256.jpg'),
+      );
+
+      // Déjà suffixé → renormalisé en .256
+      expect(
+        mangaDexThumbnailUrl(
+          'https://uploads.mangadex.org/covers/aaa/bbb.jpg.512.jpg',
+          width: 260,
+        ),
+        endsWith('bbb.jpg.256.jpg'),
+      );
+
       final routed = proxyImageUrl(src, width: 360);
       expect(routed, isNot(contains('wsrv.nl')));
-      expect(routed, contains('uploads.mangadex.org'));
-      expect(routed, endsWith('.512.jpg'));
     });
 
     test('URL protocole-relatif BGG normalisée en https via wsrv', () {

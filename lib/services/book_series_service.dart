@@ -267,6 +267,7 @@ class BookSeriesService {
       SupabaseReadCache.invalidate('book_volumes:$seriesId');
       SupabaseReadCache.invalidate('book_series_items:$seriesId');
     }
+    SupabaseReadCache.invalidate('book_collection_bundle:');
   }
 
   /// Charge séries + volumes + items en 3 requêtes (plus de N+1).
@@ -275,38 +276,52 @@ class BookSeriesService {
         List<BookSeries> series,
         Map<String, List<BookVolume>> volumesBySeries,
         Map<String, List<CollectionItem>> itemsBySeries,
-      })> fetchCollectionBundle() async {
-    final series = await fetchAllRootSeries();
-    if (series.isEmpty) {
+      })> fetchCollectionBundle({bool force = false}) async {
+    final userId = _client.auth.currentUser?.id;
+    if (userId == null || userId.isEmpty) {
       return (
-        series: series,
+        series: <BookSeries>[],
         volumesBySeries: <String, List<BookVolume>>{},
         itemsBySeries: <String, List<CollectionItem>>{},
       );
     }
-    final ids = series.map((s) => s.id).toList();
+    return SupabaseReadCache.getOrFetch(
+      key: 'book_collection_bundle:$userId',
+      force: force,
+      loader: () async {
+        final series = await fetchAllRootSeries(force: force);
+        if (series.isEmpty) {
+          return (
+            series: series,
+            volumesBySeries: <String, List<BookVolume>>{},
+            itemsBySeries: <String, List<CollectionItem>>{},
+          );
+        }
+        final ids = series.map((s) => s.id).toList();
 
-    final volRows = await _client
-        .from('book_volumes')
-        .select()
-        .inFilter('series_id', ids)
-        .order('sort_index');
-    final volumesBySeries = <String, List<BookVolume>>{};
-    for (final v in _volumeList(volRows)) {
-      volumesBySeries.putIfAbsent(v.seriesId, () => []).add(v);
-    }
+        final volRows = await _client
+            .from('book_volumes')
+            .select()
+            .inFilter('series_id', ids)
+            .order('sort_index');
+        final volumesBySeries = <String, List<BookVolume>>{};
+        for (final v in _volumeList(volRows)) {
+          volumesBySeries.putIfAbsent(v.seriesId, () => []).add(v);
+        }
 
-    final itemRows = await _client
-        .from('collection_items')
-        .select()
-        .eq('category', 'book')
-        .inFilter('series_id', ids);
-    final itemsBySeries = _bookItemsBySeries(itemRows);
+        final itemRows = await _client
+            .from('collection_items')
+            .select()
+            .eq('category', 'book')
+            .inFilter('series_id', ids);
+        final itemsBySeries = _bookItemsBySeries(itemRows);
 
-    return (
-      series: series,
-      volumesBySeries: volumesBySeries,
-      itemsBySeries: itemsBySeries,
+        return (
+          series: series,
+          volumesBySeries: volumesBySeries,
+          itemsBySeries: itemsBySeries,
+        );
+      },
     );
   }
 

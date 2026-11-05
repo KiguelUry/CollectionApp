@@ -76,7 +76,7 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
     super.initState();
     CollectionRefresh.instance.addListener(_onCollectionRefresh);
     _loadGroups();
-    // Affiche le cache immédiatement si dispo, puis refresh silencieux.
+    // Cache frais → 0 requête. Sinon charge (ou refresh silencieux si périmé).
     final cached = _cache.entries;
     if (cached != null && cached.isNotEmpty) {
       _entries = cached
@@ -90,14 +90,40 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
           )
           .toList();
       _loading = false;
-      _load(silent: true);
+      if (!_cache.isFresh) {
+        _load(silent: true);
+      }
     } else {
       _load();
     }
   }
 
   void _onCollectionRefresh() {
-    if (mounted) _load(silent: true);
+    // Soft refresh uniquement si une mutation a invalidé le cache.
+    if (mounted && !_cache.isFresh) _load(silent: true);
+  }
+
+  void _applySeriesFromMemoryCache(String seriesId) {
+    final hit = _cache.entryFor(seriesId);
+    if (hit == null) {
+      _load(silent: true);
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      final i = _entries.indexWhere((e) => e.series.id == seriesId);
+      final next = _SeriesEntry(
+        series: hit.series,
+        volumes: hit.volumes,
+        stats: hit.stats,
+        items: hit.items,
+      );
+      if (i >= 0) {
+        _entries[i] = next;
+      } else {
+        _entries = [..._entries, next];
+      }
+    });
   }
 
   @override
@@ -907,7 +933,7 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
       );
     }
     Future<void> openSeries(_SeriesEntry entry) async {
-      await Navigator.push(
+      final mutated = await Navigator.push<bool>(
         context,
         MaterialPageRoute(
           builder: (ctx) => BookSeriesDetailScreen(
@@ -915,7 +941,11 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
           ),
         ),
       );
-      if (mounted) _load();
+      // Pas de re-fetch 42 kB si aucune mutation — maj mémoire seule sinon.
+      if (!mounted) return;
+      if (mutated == true) {
+        _applySeriesFromMemoryCache(entry.series.id);
+      }
     }
 
     if (_layout == _BookLayoutMode.list) {
@@ -1161,21 +1191,24 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
 
   Future<void> _openBook(CollectionItem item) async {
     if (item.seriesId != null) {
-      await Navigator.push(
+      final mutated = await Navigator.push<bool>(
         context,
         MaterialPageRoute(
           builder: (ctx) => BookSeriesDetailScreen(seriesId: item.seriesId!),
         ),
       );
-    } else {
-      await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (ctx) => ItemDetailScreen(item: item),
-        ),
-      );
+      if (mounted && mutated == true) {
+        _applySeriesFromMemoryCache(item.seriesId!);
+      }
+      return;
     }
-    if (mounted) _load();
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (ctx) => ItemDetailScreen(item: item),
+      ),
+    );
+    if (mounted) _load(silent: true);
   }
 }
 

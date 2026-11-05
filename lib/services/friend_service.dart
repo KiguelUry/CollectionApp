@@ -6,6 +6,7 @@ import '../utils/collection_item_filters.dart';
 import '../utils/supabase_embeds.dart';
 import '../utils/search_relevance.dart';
 import 'group_service.dart';
+import 'supabase_read_cache.dart';
 
 class FriendService {
   final _client = Supabase.instance.client;
@@ -34,7 +35,11 @@ class FriendService {
     return ids;
   }
 
-  void invalidateFriendCache() => _cachedFriendIds = null;
+  void invalidateFriendCache() {
+    _cachedFriendIds = null;
+    SupabaseReadCache.invalidate('friendships:');
+    SupabaseReadCache.invalidate('profile_privacy:');
+  }
 
   Future<List<String>> listFriendProfileIds() async {
     return (await _myFriendIds()).toList();
@@ -213,52 +218,58 @@ class FriendService {
     invalidateFriendCache();
   }
 
-  Future<List<Map<String, dynamic>>> fetchFriends() async {
+  Future<List<Map<String, dynamic>>> fetchFriends({bool force = false}) async {
     final userId = _client.auth.currentUser!.id;
-    final rows = await _client
-        .from('friendships')
-        .select('id, share_collections, requester_id, addressee_id')
-        .eq('status', 'accepted')
-        .or('requester_id.eq.$userId,addressee_id.eq.$userId');
+    return SupabaseReadCache.getOrFetch<List<Map<String, dynamic>>>(
+      key: 'friendships:list:$userId',
+      force: force,
+      loader: () async {
+        final rows = await _client
+            .from('friendships')
+            .select('id, share_collections, requester_id, addressee_id')
+            .eq('status', 'accepted')
+            .or('requester_id.eq.$userId,addressee_id.eq.$userId');
 
-    final list = rows as List;
-    if (list.isEmpty) return [];
+        final list = rows as List;
+        if (list.isEmpty) return <Map<String, dynamic>>[];
 
-    final otherIds = list
-        .map(
-          (row) => row['requester_id'] == userId
-              ? row['addressee_id'] as String
-              : row['requester_id'] as String,
-        )
-        .toList();
+        final otherIds = list
+            .map(
+              (row) => row['requester_id'] == userId
+                  ? row['addressee_id'] as String
+                  : row['requester_id'] as String,
+            )
+            .toList();
 
-    final profiles = await _client
-        .from('profiles')
-        .select('id, username, avatar_url, accent_color')
-        .inFilter('id', otherIds);
+        final profiles = await _client
+            .from('profiles')
+            .select('id, username, avatar_url, accent_color')
+            .inFilter('id', otherIds);
 
-    final byId = {
-      for (final p in profiles as List)
-        p['id'] as String: Map<String, dynamic>.from(p),
-    };
+        final byId = {
+          for (final p in profiles as List)
+            p['id'] as String: Map<String, dynamic>.from(p),
+        };
 
-    return [
-      for (final row in list)
-        () {
-          final pid = row['requester_id'] == userId
-              ? row['addressee_id'] as String
-              : row['requester_id'] as String;
-          final p = byId[pid];
-          return {
-            'friendship_id': row['id'],
-            'profile_id': pid,
-            'username': p?['username'] as String? ?? 'Ami',
-            'avatar_url': p?['avatar_url'],
-            'accent_color': p?['accent_color'],
-            'share_collections': row['share_collections'],
-          };
-        }(),
-    ];
+        return [
+          for (final row in list)
+            () {
+              final pid = row['requester_id'] == userId
+                  ? row['addressee_id'] as String
+                  : row['requester_id'] as String;
+              final p = byId[pid];
+              return {
+                'friendship_id': row['id'],
+                'profile_id': pid,
+                'username': p?['username'] as String? ?? 'Ami',
+                'avatar_url': p?['avatar_url'],
+                'accent_color': p?['accent_color'],
+                'share_collections': row['share_collections'],
+              };
+            }(),
+        ];
+      },
+    );
   }
 
   Future<void> setShareCollections(String friendshipId, bool share) async {
@@ -266,6 +277,7 @@ class FriendService {
         .from('friendships')
         .update({'share_collections': share})
         .eq('id', friendshipId);
+    invalidateFriendCache();
   }
 
   /// Filtre local des amis déjà ajoutés (par pseudo).
@@ -298,18 +310,22 @@ class FriendService {
     final userId = _client.auth.currentUser?.id;
     if (userId == null) return null;
 
-    final row = await _client
-        .from('friendships')
-        .select('id, share_collections, requester_id, addressee_id')
-        .eq('status', 'accepted')
-        .or(
-          'and(requester_id.eq.$userId,addressee_id.eq.$friendProfileId),'
-          'and(requester_id.eq.$friendProfileId,addressee_id.eq.$userId)',
-        )
-        .maybeSingle();
-
-    if (row == null) return null;
-    return Map<String, dynamic>.from(row);
+    return SupabaseReadCache.getOrFetch<Map<String, dynamic>?>(
+      key: 'friendships:with:$userId:$friendProfileId',
+      loader: () async {
+        final row = await _client
+            .from('friendships')
+            .select('id, share_collections, requester_id, addressee_id')
+            .eq('status', 'accepted')
+            .or(
+              'and(requester_id.eq.$userId,addressee_id.eq.$friendProfileId),'
+              'and(requester_id.eq.$friendProfileId,addressee_id.eq.$userId)',
+            )
+            .maybeSingle();
+        if (row == null) return null;
+        return Map<String, dynamic>.from(row);
+      },
+    );
   }
 
   Future<bool> canViewFriendCollection(String friendProfileId) async {
@@ -320,13 +336,18 @@ class FriendService {
     if (friendship == null) return false;
     if (friendship['share_collections'] != true) return false;
 
-    final profile = await _client
-        .from('profiles')
-        .select('hide_collection_from_friends')
-        .eq('id', friendProfileId)
-        .maybeSingle();
-    if (profile?['hide_collection_from_friends'] == true) return false;
-    return true;
+    final hide = await SupabaseReadCache.getOrFetch<bool>(
+      key: 'profile_privacy:hide_friends:$friendProfileId',
+      loader: () async {
+        final profile = await _client
+            .from('profiles')
+            .select('hide_collection_from_friends')
+            .eq('id', friendProfileId)
+            .maybeSingle();
+        return profile?['hide_collection_from_friends'] == true;
+      },
+    );
+    return !hide;
   }
 
   /// Un objet précis chez un ami (fil d'activité, lien direct).
