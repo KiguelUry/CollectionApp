@@ -45,27 +45,81 @@ function isBlockedImageHost(target: URL): boolean {
   return false;
 }
 
+/** Retire tout suffixe .256/.512 (append officiel OU replace erroné). */
+function stripMangaDexThumb(path: string): string {
+  let p = path;
+  p = p.replace(/\.(jpe?g|png|webp)\.(256|512)\.jpe?g$/i, ".$1");
+  p = p.replace(/\.(256|512)\.jpe?g$/i, ".jpg");
+  return p;
+}
+
 /**
- * Force miniature MangaDex officielle (~18 Ko).
+ * Force miniature MangaDex officielle.
  * Append `.256.jpg` / `.512.jpg` au filename (docs MangaDex) —
- * NE PAS remplacer `.jpg` par `.256.jpg` (sert l'original ~200 Ko+).
+ * NE PAS remplacer `.jpg` par `.256.jpg` (sert l'original ~2 Mo).
  */
-function forceMangaDexThumb(target: URL, prefer512 = false): URL {
-  const size = prefer512 ? "512" : "256";
-  let path = target.pathname;
-  // append existant : file.jpg.512.jpg → file.jpg
-  path = path.replace(/\.(jpe?g|png|webp)\.(256|512)\.jpe?g$/i, ".$1");
-  // forme replace erronée : file.512.jpg → file.jpg
-  path = path.replace(/\.(256|512)\.jpe?g$/i, ".jpg");
-  if (/\.(jpe?g|png|webp)$/i.test(path)) {
-    path = `${path}.${size}.jpg`;
-  } else {
-    path = `${path}.${size}.jpg`;
-  }
+function withMangaDexThumb(target: URL, size: "256" | "512" | "full"): URL {
   const out = new URL(target.toString());
   out.protocol = "https:";
+  let path = stripMangaDexThumb(out.pathname);
+  if (size !== "full") {
+    if (/\.(jpe?g|png|webp)$/i.test(path)) {
+      path = `${path}.${size}.jpg`;
+    } else {
+      path = `${path}.${size}.jpg`;
+    }
+  }
   out.pathname = path;
   return out;
+}
+
+async function fetchMangaDexImage(url: string): Promise<Response | null> {
+  try {
+    const upstream = await fetch(url, {
+      headers: {
+        Accept: "image/*,*/*;q=0.8",
+        "User-Agent": "Collectingo/1.2",
+      },
+      redirect: "follow",
+    });
+    if (!upstream.ok) {
+      // Ne consomme pas le body sur 404/403 — on essaie le fallback.
+      try {
+        await upstream.body?.cancel();
+      } catch {
+        /* ignore */
+      }
+      return null;
+    }
+    const contentType = upstream.headers.get("Content-Type") ?? "";
+    if (contentType && !contentType.startsWith("image/")) {
+      try {
+        await upstream.body?.cancel();
+      } catch {
+        /* ignore */
+      }
+      return null;
+    }
+    return upstream;
+  } catch {
+    return null;
+  }
+}
+
+function imageResponse(
+  body: ArrayBuffer,
+  contentType: string,
+  status = 200,
+): Response {
+  const responseHeaders = new Headers({
+    ...corsHeaders,
+    "Content-Type": contentType || "image/jpeg",
+    // Cache navigateur 1 an — après 1er load, 0 octet Supabase.
+    "Cache-Control": "public, max-age=31536000, immutable",
+  });
+  responseHeaders.delete("set-cookie");
+  responseHeaders.delete("set-cookie2");
+  return new Response(body, { status, headers: responseHeaders });
 }
 
 Deno.serve(async (req) => {
@@ -80,7 +134,8 @@ Deno.serve(async (req) => {
     });
   }
 
-  const raw = new URL(req.url).searchParams.get("url")?.trim() ?? "";
+  const reqUrl = new URL(req.url);
+  const raw = reqUrl.searchParams.get("url")?.trim() ?? "";
   let target: URL;
   try {
     target = new URL(raw);
@@ -100,37 +155,54 @@ Deno.serve(async (req) => {
 
   // --- Images MangaDex uniquement ---
   if (host === ALLOWED_IMAGE_HOST) {
-    // Toujours .256.jpg via proxy (Egress) — le client peut demander 512 en query plus tard.
-    target = forceMangaDexThumb(target, false);
-    try {
-      const upstream = await fetch(target.toString(), {
+    // Cache Edge (Cloudflare) : 2e hit = 0 fetch MangaDex + moins d'Egress.
+    const cache = (globalThis as { caches?: { default: Cache } }).caches
+      ?.default;
+    const cacheKey = new Request(reqUrl.toString(), { method: "GET" });
+    if (cache) {
+      const hit = await cache.match(cacheKey);
+      if (hit) return hit;
+    }
+
+    // Chaîne : .256 → .512 → original (couvertures manquantes / rate-limit).
+    const candidates = [
+      withMangaDexThumb(target, "256").toString(),
+      withMangaDexThumb(target, "512").toString(),
+      withMangaDexThumb(target, "full").toString(),
+    ];
+    // Déduplique si l'URL était déjà en .256
+    const seen = new Set<string>();
+    let upstream: Response | null = null;
+    for (const u of candidates) {
+      if (seen.has(u)) continue;
+      seen.add(u);
+      upstream = await fetchMangaDexImage(u);
+      if (upstream) break;
+      // Petit backoff si MangaDex refuse sous charge.
+      await new Promise((r) => setTimeout(r, 40));
+    }
+
+    if (!upstream) {
+      return new Response("MangaDex cover unavailable", {
+        status: 404,
         headers: {
-          Accept: "image/*,*/*;q=0.8",
-          "User-Agent": "Collectingo/1.1",
-          // Pas de Referer navigateur → évite le 403 hotlink MangaDex.
+          ...corsHeaders,
+          "Cache-Control": "public, max-age=60",
         },
-        redirect: "follow",
-      });
-      const body = await upstream.arrayBuffer();
-      const contentType = upstream.headers.get("Content-Type") ?? "image/jpeg";
-      const responseHeaders = new Headers({
-        ...corsHeaders,
-        "Content-Type": contentType,
-        // Cache disque navigateur 1 an : ne jamais re-télécharger la même couverture.
-        "Cache-Control": "public, max-age=31536000, immutable",
-      });
-      responseHeaders.delete("set-cookie");
-      responseHeaders.delete("set-cookie2");
-      return new Response(body, {
-        status: upstream.status,
-        headers: responseHeaders,
-      });
-    } catch (e) {
-      return new Response(`Upstream image error: ${e}`, {
-        status: 502,
-        headers: corsHeaders,
       });
     }
+
+    const body = await upstream.arrayBuffer();
+    const contentType = upstream.headers.get("Content-Type") ?? "image/jpeg";
+    const res = imageResponse(body, contentType, 200);
+    if (cache) {
+      try {
+        await cache.put(cacheKey, res.clone());
+      } catch {
+        /* quota / unsupported — ignore */
+      }
+    }
+    return res;
   }
 
   if (isBlockedImageHost(target)) {
@@ -156,7 +228,7 @@ Deno.serve(async (req) => {
     const upstream = await fetch(target.toString(), {
       headers: {
         Accept: "application/json",
-        "User-Agent": "Collectingo/1.1",
+        "User-Agent": "Collectingo/1.2",
       },
       redirect: "follow",
     });

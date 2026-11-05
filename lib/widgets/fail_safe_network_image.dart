@@ -1,7 +1,42 @@
 import 'package:flutter/material.dart';
 
-/// Coupe-circuit anti-boucle : une URL en échec n'est plus jamais redemandée.
-final Set<String> kFailedImageUrls = <String>{};
+/// Coupe-circuit anti-boucle : URL en échec non redemandée pendant un TTL.
+/// Les 502 MangaDex/proxy sont souvent transitoires (rafale) → TTL court.
+final Map<String, DateTime> _failedUntil = <String, DateTime>{};
+
+const _kHardFailTtl = Duration(hours: 6);
+const _kSoftFailTtl = Duration(seconds: 45);
+
+void markImageUrlFailed(String url, {bool soft = false}) {
+  _failedUntil[url] = DateTime.now().add(soft ? _kSoftFailTtl : _kHardFailTtl);
+}
+
+bool isImageUrlFailed(String url) {
+  final until = _failedUntil[url];
+  if (until == null) return false;
+  if (DateTime.now().isAfter(until)) {
+    _failedUntil.remove(url);
+    return false;
+  }
+  return true;
+}
+
+/// Compat historique : API [Set]-like pour les checks existants.
+final kFailedImageUrls = _FailedUrlFacade();
+
+class _FailedUrlFacade {
+  bool contains(Object? element) {
+    if (element is! String) return false;
+    return isImageUrlFailed(element);
+  }
+
+  bool add(String value) {
+    markImageUrlFailed(value, soft: false);
+    return true;
+  }
+
+  void clear() => _failedUntil.clear();
+}
 
 /// [Image.network] avec coupe-circuit : dès le 1er échec, plus aucun
 /// `ImageProvider` / XHR aux frames suivantes (fini le spam CanvasKit).
@@ -45,22 +80,20 @@ class _FailSafeNetworkImageState extends State<FailSafeNetworkImage> {
   @override
   void initState() {
     super.initState();
-    _failed = kFailedImageUrls.contains(widget.url);
+    _failed = isImageUrlFailed(widget.url);
   }
 
   @override
   void didUpdateWidget(covariant FailSafeNetworkImage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.url != widget.url) {
-      _failed = kFailedImageUrls.contains(widget.url);
+      _failed = isImageUrlFailed(widget.url);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_failed ||
-        widget.url.isEmpty ||
-        kFailedImageUrls.contains(widget.url)) {
+    if (_failed || widget.url.isEmpty || isImageUrlFailed(widget.url)) {
       return widget.placeholder(context);
     }
 
@@ -75,8 +108,8 @@ class _FailSafeNetworkImageState extends State<FailSafeNetworkImage> {
       cacheWidth: widget.cacheWidth,
       cacheHeight: widget.cacheHeight,
       errorBuilder: (_, _, _) {
-        // Marque immédiatement (avant le prochain frame) pour bloquer tout retry.
-        kFailedImageUrls.add(widget.url);
+        // Soft : laisse réessayer après 45s (502 proxy / rate-limit).
+        markImageUrlFailed(widget.url, soft: true);
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted && !_failed) setState(() => _failed = true);
         });

@@ -911,23 +911,31 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
       body: RefreshIndicator(
         onRefresh: () => _load(silent: true),
         color: accent,
-        child: ListView(
+        // CustomScrollView + SliverGrid : ne charge que les covers visibles
+        // (évite 100+ catalog-proxy d’un coup sur One Piece → 502 + 9 Mo).
+        child: CustomScrollView(
           controller: _scroll,
-          padding: const EdgeInsets.only(bottom: 32),
-          children: [
-            _buildHero(series, stats, accent),
-            _buildSynopsis(series),
+          slivers: [
+            SliverToBoxAdapter(child: _buildHero(series, stats, accent)),
+            SliverToBoxAdapter(child: _buildSynopsis(series)),
             if (!_isOneShotView(series, physical)) ...[
-              _buildFilterMenu(accent),
-              _buildHybridFrise(physical, accent),
+              SliverToBoxAdapter(child: _buildFilterMenu(accent)),
+              SliverToBoxAdapter(child: _buildHybridFrise(physical, accent)),
             ],
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-              child: _shelfView
-                  ? _buildShelfView(physical)
-                  : _buildCoverGrid(physical, accent),
-            ),
-            if (chapters.isNotEmpty) _buildChaptersSection(chapters, accent),
+            if (_shelfView)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                  child: _buildShelfView(physical),
+                ),
+              )
+            else
+              _buildCoverGrid(physical, accent, asSliver: true),
+            if (chapters.isNotEmpty)
+              SliverToBoxAdapter(
+                child: _buildChaptersSection(chapters, accent),
+              ),
+            const SliverToBoxAdapter(child: SizedBox(height: 32)),
           ],
         ),
       ),
@@ -1900,9 +1908,10 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     List<BookVolumeSlot> slots,
     Color accent, {
     bool chapterBadge = false,
+    bool asSliver = false,
   }) {
     if (slots.isEmpty) {
-      return Padding(
+      final empty = Padding(
         padding: const EdgeInsets.all(24),
         child: Text(
           'Aucun tome pour ce filtre.',
@@ -1910,20 +1919,18 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
           textAlign: TextAlign.center,
         ),
       );
+      return asSliver ? SliverToBoxAdapter(child: empty) : empty;
     }
 
-    final vf = _vfExtent();
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: slots.length,
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 150,
-        childAspectRatio: 0.52,
-        mainAxisSpacing: 12,
-        crossAxisSpacing: 12,
-      ),
-      itemBuilder: (ctx, i) {
+    const delegate = SliverGridDelegateWithMaxCrossAxisExtent(
+      maxCrossAxisExtent: 150,
+      childAspectRatio: 0.52,
+      mainAxisSpacing: 12,
+      crossAxisSpacing: 12,
+    );
+
+    Widget tileBuilder(BuildContext ctx, int i) {
+        final vf = _vfExtent();
         final slot = slots[i];
         final owned = _slotOwned(slot);
         final read = _slotRead(slot);
@@ -1994,6 +2001,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                                 ? CollectionCoverImage(
                                     url: coverUrl,
                                     bookCover: true,
+                                    compact: true,
                                     fit: BoxFit.cover,
                                   )
                                 : ColoredBox(
@@ -2248,7 +2256,28 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
             ],
           ),
         );
-      },
+    }
+
+    if (asSliver) {
+      return SliverPadding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+        sliver: SliverGrid(
+          gridDelegate: delegate,
+          delegate: SliverChildBuilderDelegate(
+            tileBuilder,
+            childCount: slots.length,
+            addAutomaticKeepAlives: false,
+          ),
+        ),
+      );
+    }
+
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: slots.length,
+      gridDelegate: delegate,
+      itemBuilder: tileBuilder,
     );
   }
 
