@@ -1,7 +1,6 @@
 import 'package:flutter/foundation.dart';
 
-import '../config/app_env.dart';
-import '../config/supabase_public_config.dart';
+import '../config/catalog_proxy_config.dart';
 
 /// CDN images gratuit (Cloudflare) — CORS CanvasKit + WebP léger.
 const kWsrvHost = 'wsrv.nl';
@@ -82,18 +81,8 @@ String _googleBooksClean(String url) {
   return u;
 }
 
-String _catalogProxyImageUrl(String httpsUrl) {
-  final base = AppEnv.supabaseUrl.replaceAll(RegExp(r'/+$'), '');
-  final anon = AppEnv.supabaseAnonKey.trim().isNotEmpty
-      ? AppEnv.supabaseAnonKey.trim()
-      : SupabasePublicConfig.anonKey;
-  return Uri.parse('$base/functions/v1/catalog-proxy').replace(
-    queryParameters: {
-      'url': httpsUrl,
-      'apikey': anon,
-    },
-  ).toString();
-}
+String _catalogProxyImageUrl(String httpsUrl) =>
+    buildCatalogProxyUri(httpsUrl).toString();
 
 /// Helper central de routage d'images.
 ///

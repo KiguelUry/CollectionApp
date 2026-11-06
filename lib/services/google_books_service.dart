@@ -5,7 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_env.dart';
-import '../config/supabase_public_config.dart';
+import '../config/catalog_proxy_config.dart';
 import '../utils/book_series_normalizer.dart';
 import '../utils/book_title_parser.dart';
 import '../utils/book_vf_edition.dart';
@@ -167,31 +167,14 @@ class GoogleBooksService {
   static Future<http.Response?> _viaProxy(Map<String, String> p) async {
     if (_isLocked) return null;
     try {
-      // La clé n'est jamais dans l'URL du client : catalog-proxy l'ajoute
-      // via Deno.env.get('GOOGLE_BOOKS_API_KEY').
+      // La clé n'est jamais dans l'URL du client : le Worker / Edge l'ajoute
+      // via GOOGLE_BOOKS_API_KEY (secret Cloudflare ou Deno.env).
       final target = _volumesUri(p, withKey: false);
       await _pace();
-      final proxied = proxiedCatalogUri(target);
-      final anon = AppEnv.supabaseAnonKey.trim().isNotEmpty
-          ? AppEnv.supabaseAnonKey.trim()
-          : SupabasePublicConfig.anonKey;
-      final uri = kIsWeb
-          ? proxied
-          : Uri.parse(
-              '${AppEnv.supabaseUrl.replaceAll(RegExp(r'/+$'), '')}'
-              '/functions/v1/catalog-proxy'
-              '?url=${Uri.encodeComponent(target.toString())}'
-              '&apikey=${Uri.encodeComponent(anon)}',
-            );
+      final uri =
+          kIsWeb ? proxiedCatalogUri(target) : buildCatalogProxyUri(target.toString());
       return await http
-          .get(
-            uri,
-            headers: {
-              'Accept': 'application/json',
-              'apikey': anon,
-              'Authorization': 'Bearer $anon',
-            },
-          )
+          .get(uri, headers: proxiedCatalogHeaders())
           .timeout(const Duration(seconds: 10));
     } catch (e) {
       if (kDebugMode) debugPrint('Google Books proxy: $e');

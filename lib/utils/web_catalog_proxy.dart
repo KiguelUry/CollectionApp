@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../config/app_env.dart';
+import '../config/catalog_proxy_config.dart';
 import '../config/supabase_public_config.dart';
 
 String _catalogAnonKey() {
@@ -28,19 +29,17 @@ bool _looksLikeImageUri(Uri target) {
   return _imagePathRe.hasMatch(target.path);
 }
 
-/// Sur le web, route les API CORS-bloquées (MangaDex, iTunes) via l'Edge Function
-/// Supabase `catalog-proxy`. Images : uniquement `uploads.mangadex.org`
-/// (voir [proxyImageUrl]) — les autres CDN images restent en direct.
+/// Sur le web, route les API CORS-bloquées (MangaDex, iTunes) via le proxy
+/// catalogue (Cloudflare Worker si configuré, sinon Edge Function Supabase).
+/// Images : uniquement `uploads.mangadex.org` (voir [proxyImageUrl]).
 Uri proxiedCatalogUri(Uri target) {
   if (!kIsWeb) return target;
 
   final host = target.host.toLowerCase();
-  // Autres images (hors MangaDex) : jamais via catalog-proxy.
   if (host != 'uploads.mangadex.org' && _looksLikeImageUri(target)) {
     return target;
   }
 
-  // openlibrary.org JSON : CORS natif → appel direct.
   const allowed = {
     'api.mangadex.org',
     'itunes.apple.com',
@@ -49,22 +48,18 @@ Uri proxiedCatalogUri(Uri target) {
   };
   if (!allowed.contains(host)) return target;
 
-  final base = AppEnv.supabaseUrl.replaceAll(RegExp(r'/+$'), '');
-  final anon = _catalogAnonKey();
-  return Uri.parse('$base/functions/v1/catalog-proxy').replace(
-    queryParameters: {
-      'url': target.toString(),
-      'apikey': anon,
-    },
-  );
+  return buildCatalogProxyUri(target.toString());
 }
 
+/// Headers HTTP pour les appels JSON via proxy.
+/// Cloudflare : aucun header custom (évite OPTIONS preflight).
+/// Supabase : apikey + Authorization.
 Map<String, String> proxiedCatalogHeaders([Map<String, String>? extra]) {
   final headers = <String, String>{
     'Accept': 'application/json',
     ...?extra,
   };
-  if (kIsWeb) {
+  if (!usesCloudflareCatalogProxy) {
     final anon = _catalogAnonKey();
     headers['apikey'] = anon;
     headers['Authorization'] = 'Bearer $anon';

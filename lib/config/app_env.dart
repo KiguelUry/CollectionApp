@@ -34,6 +34,15 @@ abstract final class AppEnv {
     return null;
   }
 
+  /// URL Cloudflare Worker catalog-proxy (ex: https://paloma-catalog-proxy.xxx.workers.dev).
+  static String? get catalogProxyUrl {
+    const fromDefine = String.fromEnvironment('CATALOG_PROXY_URL');
+    if (fromDefine.trim().isNotEmpty) return fromDefine.trim();
+    final v = _env('CATALOG_PROXY_URL');
+    if (v != null && v.isNotEmpty) return v;
+    return null;
+  }
+
   static String? _env(String key) {
     try {
       final v = dotenv.env[key]?.trim();
