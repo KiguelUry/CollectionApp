@@ -12,7 +12,8 @@ import 'supabase_public_config.dart';
 ///
 /// Vide → fallback Edge Function Supabase (avec apikey).
 /// Renseigné → Cloudflare, **sans** apikey (0 preflight OPTIONS).
-const String kCloudflareCatalogProxyUrl = '';
+const String kCloudflareCatalogProxyUrl =
+    'https://paloma-catalog-proxy.kilian-ury.workers.dev';
 
 /// URL de base du proxy actif (Cloudflare si configuré, sinon Supabase).
 String catalogProxyBaseUrl() {
