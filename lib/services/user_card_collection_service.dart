@@ -4,6 +4,7 @@ import '../models/card_subcategory.dart';
 import '../models/collection_category.dart';
 import '../models/pokemon_card_lang.dart';
 import '../models/tcg_set_info.dart';
+import 'supabase_read_cache.dart';
 
 /// Cartes déjà dans la collection (pour badges « possédé »).
 class UserCardCollectionService {
@@ -49,43 +50,66 @@ class UserCardCollectionService {
     return card.id;
   }
 
-  Future<Set<String>> ownedCatalogIds(CardSubcategory sub) async {
+  /// Une seule lecture metadata par (sub, wishlist) — TTL + inFlight.
+  Future<List<Map<String, dynamic>>> _cardMetaRows(
+    CardSubcategory sub, {
+    required bool wishlist,
+  }) async {
     final userId = _userId;
-    if (userId == null) return {};
+    if (userId == null) return [];
 
-    final rows = await _client
-        .from('collection_items')
-        .select('metadata')
-        .eq('category', CollectionCategory.card.dbValue)
-        .eq('subcategory', sub.dbValue)
-        .eq('is_wishlist', false)
-        .or('added_by.eq.$userId,location_user_id.eq.$userId');
+    return SupabaseReadCache.getOrFetch<List<Map<String, dynamic>>>(
+      key: 'card_meta:$userId:${sub.dbValue}:$wishlist',
+      loader: () async {
+        var query = _client
+            .from('collection_items')
+            .select('id, metadata')
+            .eq('category', CollectionCategory.card.dbValue)
+            .eq('subcategory', sub.dbValue)
+            .eq('is_wishlist', wishlist);
+        query = wishlist
+            ? query.eq('added_by', userId)
+            : query.or('added_by.eq.$userId,location_user_id.eq.$userId');
+        final rows = await query;
+        return [
+          for (final row in rows as List)
+            Map<String, dynamic>.from(row as Map),
+        ];
+      },
+    );
+  }
 
+  void _invalidateCardMeta(CardSubcategory sub) {
+    final userId = _userId;
+    if (userId == null) return;
+    SupabaseReadCache.invalidate('card_meta:$userId:${sub.dbValue}:');
+  }
+
+  Future<Set<String>> ownedCatalogIds(CardSubcategory sub) async {
+    final rows = await _cardMetaRows(sub, wishlist: false);
     final ids = <String>{};
-    for (final row in rows as List) {
-      final meta = row['metadata'] as Map<String, dynamic>?;
-      final id = catalogIdFromMetadata(meta, sub);
+    for (final row in rows) {
+      final id = catalogIdFromMetadata(
+        row['metadata'] is Map
+            ? Map<String, dynamic>.from(row['metadata'] as Map)
+            : null,
+        sub,
+      );
       if (id != null) ids.add(id);
     }
     return ids;
   }
 
   Future<Set<String>> wishlistCatalogIds(CardSubcategory sub) async {
-    final userId = _userId;
-    if (userId == null) return {};
-
-    final rows = await _client
-        .from('collection_items')
-        .select('metadata')
-        .eq('category', CollectionCategory.card.dbValue)
-        .eq('subcategory', sub.dbValue)
-        .eq('is_wishlist', true)
-        .eq('added_by', userId);
-
+    final rows = await _cardMetaRows(sub, wishlist: true);
     final ids = <String>{};
-    for (final row in rows as List) {
-      final meta = row['metadata'] as Map<String, dynamic>?;
-      final id = catalogIdFromMetadata(meta, sub);
+    for (final row in rows) {
+      final id = catalogIdFromMetadata(
+        row['metadata'] is Map
+            ? Map<String, dynamic>.from(row['metadata'] as Map)
+            : null,
+        sub,
+      );
       if (id != null) ids.add(id);
     }
     return ids;
@@ -96,21 +120,15 @@ class UserCardCollectionService {
     CardSubcategory sub,
     String catalogId,
   ) async {
-    final userId = _userId;
-    if (userId == null || catalogId.isEmpty) return false;
-
-    final rows = await _client
-        .from('collection_items')
-        .select('id, metadata')
-        .eq('category', CollectionCategory.card.dbValue)
-        .eq('subcategory', sub.dbValue)
-        .eq('is_wishlist', true)
-        .eq('added_by', userId);
-
-    for (final row in rows as List) {
-      final meta = row['metadata'] as Map<String, dynamic>?;
+    if (catalogId.isEmpty) return false;
+    final rows = await _cardMetaRows(sub, wishlist: true);
+    for (final row in rows) {
+      final meta = row['metadata'] is Map
+          ? Map<String, dynamic>.from(row['metadata'] as Map)
+          : null;
       if (catalogIdFromMetadata(meta, sub) == catalogId) {
         await _client.from('collection_items').delete().eq('id', row['id']);
+        _invalidateCardMeta(sub);
         return true;
       }
     }
@@ -121,21 +139,15 @@ class UserCardCollectionService {
     CardSubcategory sub,
     String catalogId,
   ) async {
-    final userId = _userId;
-    if (userId == null || catalogId.isEmpty) return false;
-
-    final rows = await _client
-        .from('collection_items')
-        .select('id, metadata')
-        .eq('category', CollectionCategory.card.dbValue)
-        .eq('subcategory', sub.dbValue)
-        .eq('is_wishlist', false)
-        .or('added_by.eq.$userId,location_user_id.eq.$userId');
-
-    for (final row in rows as List) {
-      final meta = row['metadata'] as Map<String, dynamic>?;
+    if (catalogId.isEmpty) return false;
+    final rows = await _cardMetaRows(sub, wishlist: false);
+    for (final row in rows) {
+      final meta = row['metadata'] is Map
+          ? Map<String, dynamic>.from(row['metadata'] as Map)
+          : null;
       if (catalogIdFromMetadata(meta, sub) == catalogId) {
         await _client.from('collection_items').delete().eq('id', row['id']);
+        _invalidateCardMeta(sub);
         return true;
       }
     }
@@ -144,22 +156,13 @@ class UserCardCollectionService {
 
   /// Nombre de cartes possédées par set (`set_id` / `set_code`).
   Future<Map<String, int>> ownedCountsBySet(CardSubcategory sub) async {
-    final userId = _userId;
-    if (userId == null) return {};
-
-    final rows = await _client
-        .from('collection_items')
-        .select('metadata')
-        .eq('category', CollectionCategory.card.dbValue)
-        .eq('subcategory', sub.dbValue)
-        .eq('is_wishlist', false)
-        .or('added_by.eq.$userId,location_user_id.eq.$userId');
-
+    final rows = await _cardMetaRows(sub, wishlist: false);
     final counts = <String, int>{};
-    for (final row in rows as List) {
-      final meta = row['metadata'] as Map<String, dynamic>?;
-      final setId = meta?['set_id']?.toString();
-      final setCode = meta?['set_code']?.toString();
+    for (final row in rows) {
+      final meta = row['metadata'];
+      if (meta is! Map) continue;
+      final setId = meta['set_id']?.toString();
+      final setCode = meta['set_code']?.toString();
       if (setId != null && setId.isNotEmpty) {
         counts[setId] = (counts[setId] ?? 0) + 1;
       }
@@ -177,22 +180,13 @@ class UserCardCollectionService {
   }
 
   Future<Set<String>> ownedSetCodes(CardSubcategory sub) async {
-    final userId = _userId;
-    if (userId == null) return {};
-
-    final rows = await _client
-        .from('collection_items')
-        .select('metadata')
-        .eq('category', CollectionCategory.card.dbValue)
-        .eq('subcategory', sub.dbValue)
-        .eq('is_wishlist', false)
-        .or('added_by.eq.$userId,location_user_id.eq.$userId');
-
+    final rows = await _cardMetaRows(sub, wishlist: false);
     final codes = <String>{};
-    for (final row in rows as List) {
-      final meta = row['metadata'] as Map<String, dynamic>?;
-      final setId = meta?['set_id']?.toString();
-      final setCode = meta?['set_code']?.toString();
+    for (final row in rows) {
+      final meta = row['metadata'];
+      if (meta is! Map) continue;
+      final setId = meta['set_id']?.toString();
+      final setCode = meta['set_code']?.toString();
       if (setId != null && setId.isNotEmpty) codes.add(setId);
       if (setCode != null && setCode.isNotEmpty) codes.add(setCode);
     }

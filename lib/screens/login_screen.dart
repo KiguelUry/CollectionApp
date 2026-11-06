@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../config/dev_auth_config.dart';
 import '../services/auth_service.dart';
+import '../utils/supabase_error_messages.dart';
 import '../widgets/password_text_field.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -59,7 +60,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
       await _showInfoDialog(
         title: 'Connexion impossible',
-        message: '$e',
+        message: humanizeSupabaseError(e),
       );
     }
   }
@@ -110,7 +111,7 @@ class _LoginScreenState extends State<LoginScreen> {
       await _showInfoDialog(
         title: 'Envoi impossible',
         message:
-            'Impossible d’envoyer l’e-mail de réinitialisation.\n\n$e\n\n'
+            '${humanizeSupabaseError(e)}\n\n'
             'Vérifie que l’adresse est la bonne, puis réessaie.',
       );
     } finally {

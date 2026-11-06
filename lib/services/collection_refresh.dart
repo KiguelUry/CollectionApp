@@ -20,6 +20,7 @@ class CollectionRefresh extends ChangeNotifier {
     SupabaseReadCache.invalidate('group_members:');
     SupabaseReadCache.invalidate('friendships:');
     SupabaseReadCache.invalidate('profile_privacy:');
+    SupabaseReadCache.invalidate('card_meta:');
     notifyListeners();
   }
 }

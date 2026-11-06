@@ -8,6 +8,7 @@ import '../models/collection_category.dart';
 import '../utils/boardgame_genres.dart';
 import '../services/bgg_service.dart';
 import '../services/friend_boardgame_feed_service.dart';
+import '../services/inventory_service.dart';
 
 /// Genres BGG courants pour la découverte par tuile.
 /// Liste complète BGG : boardgamegeek.com/browse/boardgamecategory
@@ -185,20 +186,13 @@ class BoardgameDiscoveryService {
   }
 
   Future<List<String>> _myTopGenres() async {
-    final userId = _client.auth.currentUser?.id;
-    if (userId == null) return [];
-
-    final rows = await _client
-        .from('collection_items')
-        .select('metadata')
-        .eq('category', CollectionCategory.boardgame.dbValue)
-        .eq('is_wishlist', false)
-        .or('added_by.eq.$userId,location_user_id.eq.$userId');
-
+    // Réutilise InventoryService (0 SQL supplémentaire si déjà chargé au hub).
+    final items = await InventoryService().fetchOwnedItems();
     final scores = <String, int>{};
-    for (final row in rows as List) {
-      final meta = row['metadata'] as Map<String, dynamic>?;
-      for (final g in boardgameGenresFromMetadata(meta)) {
+    for (final item in items) {
+      if (item.category != CollectionCategory.boardgame) continue;
+      if (item.isWishlist || item.isSold) continue;
+      for (final g in boardgameGenresFromMetadata(item.metadata)) {
         scores[g] = (scores[g] ?? 0) + 1;
       }
     }

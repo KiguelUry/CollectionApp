@@ -25,7 +25,6 @@ class _StatsScreenState extends State<StatsScreen> {
   double _musicMarketValue = 0;
   List<Recommendation> _recommendations = [];
   bool _loading = true;
-  bool _ownedEnrichStarted = false;
 
   @override
   void initState() {
@@ -47,21 +46,7 @@ class _StatsScreenState extends State<StatsScreen> {
       if (mounted) setState(() => _loading = false);
     }
     _loadExtras();
-    _scheduleOwnedEnrichOnce();
-  }
-
-  void _scheduleOwnedEnrichOnce() {
-    if (_ownedEnrichStarted) return;
-    _ownedEnrichStarted = true;
-    unawaited(
-      _stats.enrichOwnedBggEstimatesInBackground().then((_) async {
-        if (!mounted) return;
-        try {
-          final dashboard = await _stats.fetchDashboard();
-          if (mounted) setState(() => _dashboard = dashboard);
-        } catch (_) {}
-      }),
-    );
+    // Plus d'enrichissement prix BGG en lot (no-op + re-fetch dashboard inutile).
   }
 
   Future<void> _loadExtras() async {
