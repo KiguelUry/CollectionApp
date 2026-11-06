@@ -5,12 +5,23 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_item.dart';
 import '../utils/collection_grid_grouper.dart';
 import '../utils/collection_item_scope.dart';
-import '../utils/supabase_embeds.dart';
 
+/// Source unique de lecture `collection_items` (hub, drawer, prêts, social…).
+///
+/// Un seul GET réseau + `inFlight` : les compteurs / wishlists / doublons /
+/// labels de lieux se dérivent en mémoire.
 class InventoryService {
   final _client = Supabase.instance.client;
 
-  static const _select = SupabaseEmbeds.collectionItem;
+  /// Colonnes hub + metadata + label lieu (1 GET, pas de select=metadata séparé).
+  static const hubSelect =
+      'id, title, quantity, category, subcategory, is_wishlist, is_sold, '
+      'is_for_sale, is_expansion, parent_game_id, added_by, group_id, '
+      'location_id, location_user_id, loaned_to_id, loaned_to_name, loaned_at, '
+      'image_url, metadata, games_played, purchase_price, min_players, '
+      'max_players, playing_time, rating, series_id, volume_id, created_at, '
+      'locations(label)';
+
   static const _ttl = Duration(minutes: 10);
 
   static List<CollectionItem>? _cache;
@@ -26,8 +37,7 @@ class InventoryService {
     _inFlight = null;
   }
 
-  /// Tous les objets dont je suis propriétaire ou détenteur (groupes inclus).
-  /// Cache mémoire 5 min + dédoublonnage in-flight (onglets Accueil / Prêts…).
+  /// Tous les objets perso + groupes (1 requête collection_items).
   Future<List<CollectionItem>> fetchOwnedItems({bool force = false}) =>
       _fetchAll(force: force);
 
@@ -43,18 +53,34 @@ class InventoryService {
         now.difference(_cacheAt!) < _ttl) {
       return _cache!;
     }
+    // Déduplique strictement avant la 1re réponse.
     if (!force && _inFlight != null && _cacheUserId == userId) {
       return _inFlight!;
     }
 
+    _cacheUserId = userId;
     final future = () async {
-      final rows = await CollectionItemScope.ownedByUser(
-        _client.from('collection_items').select(_select),
-        userId: userId,
-      );
-      final items = (rows as List)
-          .map((r) => CollectionItem.fromJson(Map<String, dynamic>.from(r)))
-          .toList();
+      final groupIds = await CollectionItemScope.myGroupIds(userId);
+      final filter = groupIds.isEmpty
+          ? CollectionItemScope.personalOrFilter(userId)
+          : '${CollectionItemScope.personalOrFilter(userId)},'
+              'group_id.in.(${groupIds.join(',')})';
+
+      final rows = await _client
+          .from('collection_items')
+          .select(hubSelect)
+          .or(filter);
+
+      final seen = <String>{};
+      final items = <CollectionItem>[];
+      for (final row in rows as List) {
+        try {
+          final map = Map<String, dynamic>.from(row as Map);
+          final id = map['id']?.toString() ?? '';
+          if (id.isNotEmpty && !seen.add(id)) continue;
+          items.add(CollectionItem.fromJson(map));
+        } catch (_) {}
+      }
       _cache = items;
       _cacheAt = DateTime.now();
       _cacheUserId = userId;

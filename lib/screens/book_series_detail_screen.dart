@@ -791,6 +791,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                   child: CollectionCoverImage(
                     url: url,
                     bookCover: true,
+                    largeSource: true,
                     width: 420,
                     height: 640,
                     fit: BoxFit.contain,

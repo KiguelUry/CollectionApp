@@ -86,6 +86,12 @@ void main() {
         endsWith('bbb.jpg.256.jpg'),
       );
 
+      // Lightbox seul (≥900) → .512.jpg
+      expect(
+        mangaDexThumbnailUrl(src, width: 1000),
+        endsWith('bbb.jpg.512.jpg'),
+      );
+
       final routed = proxyImageUrl(src, width: 360);
       expect(routed, isNot(contains('wsrv.nl')));
     });

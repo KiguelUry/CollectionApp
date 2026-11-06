@@ -22,13 +22,13 @@ import 'watch_collection_screen.dart';
 import '../theme/app_theme.dart';
 import '../utils/app_haptics.dart';
 import '../utils/category_hub_order.dart';
-import '../utils/collection_item_scope.dart';
 import '../models/collection_item.dart';
 import '../utils/boardgame_expansions.dart';
 import '../utils/active_categories.dart';
 import '../utils/hub_owned_count.dart';
 import '../utils/hub_category_visibility.dart';
 import '../utils/hub_greeting.dart';
+import '../services/inventory_service.dart';
 import '../services/offline_mode.dart';
 import '../widgets/offline_banner.dart';
 import '../widgets/onboarding/onboarding_flow.dart';
@@ -188,79 +188,40 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
         if (mounted) setState(() => _loadingCounts = false);
         return;
       }
-      const hubSelect =
-          'id, title, quantity, category, subcategory, is_wishlist, is_sold, '
-          'is_expansion, parent_game_id, added_by, metadata';
-      final rows = await CollectionItemScope.ownedByUser(
-        Supabase.instance.client
-            .from('collection_items')
-            .select(hubSelect),
-        userId: userId,
-      );
+
+      // 1 seul GET collection_items (inFlight partagé avec drawer / social).
+      final allItems = await InventoryService().fetchOwnedItems();
 
       final boardgameRows = <Map<String, dynamic>>[];
-      final seenIds = <String>{};
-      final ownedMaps = <Map<String, dynamic>>[];
+      final ownedItems = <CollectionItem>[];
 
-      void collectOwned(Map<String, dynamic> map) {
-        final id = map['id']?.toString() ?? '';
-        if (id.isNotEmpty && !seenIds.add(id)) return;
-        if (_hubRowFlag(map, 'is_wishlist') || _hubRowFlag(map, 'is_sold')) {
-          return;
-        }
-        ownedMaps.add(map);
-        if (CollectionCategory.fromDbValue(map['category']?.toString() ?? '') ==
-            CollectionCategory.boardgame) {
-          boardgameRows.add(map);
-        }
-      }
-
-      for (final row in rows is List ? rows : const []) {
-        if (row is! Map) continue;
-        try {
-          final map = Map<String, dynamic>.from(row);
-          if (_hubRowFlag(map, 'is_wishlist') && !_hubRowIsExpansion(map)) {
-            final cat =
-                CollectionCategory.fromDbValue(map['category']?.toString() ?? '');
-            if (cat != CollectionCategory.custom) {
-              wishCounts[cat] = (wishCounts[cat] ?? 0) + 1;
-            }
+      for (final item in allItems) {
+        if (item.isWishlist && !item.isExpansion) {
+          if (item.category != CollectionCategory.custom) {
+            wishCounts[item.category] = (wishCounts[item.category] ?? 0) + 1;
           }
-          collectOwned(map);
-        } catch (_) {}
+        }
+        if (item.isWishlist || item.isSold) continue;
+        ownedItems.add(item);
+        if (item.category == CollectionCategory.boardgame) {
+          boardgameRows.add({
+            'id': item.id,
+            'title': item.title,
+            'quantity': item.quantity,
+            'category': item.category.dbValue,
+            'is_wishlist': item.isWishlist,
+            'is_sold': item.isSold,
+            'is_expansion': item.isExpansion,
+            'parent_game_id': item.parentGameId,
+            'added_by': item.addedBy,
+            'metadata': item.metadata,
+          });
+        }
       }
 
       boardgameExpansionCount = countUniqueOwnedExpansions(boardgameRows);
 
-      try {
-        final groupIds = await CollectionItemScope.myGroupIds(userId);
-        if (groupIds.isNotEmpty) {
-          final gRows = await Supabase.instance.client
-              .from('collection_items')
-              .select(hubSelect)
-              .inFilter('group_id', groupIds);
-          final rawGroups = gRows as dynamic;
-          for (final row in rawGroups is List ? rawGroups : const []) {
-            if (row is! Map) continue;
-            try {
-              collectOwned(Map<String, dynamic>.from(row));
-            } catch (_) {}
-          }
-          boardgameExpansionCount = countUniqueOwnedExpansions(boardgameRows);
-        }
-      } catch (_) {
-        // group_members RLS : compteurs perso OK, groupes ignorés
-      }
-
-      final parsed = <CollectionItem>[];
-      for (final map in ownedMaps) {
-        try {
-          final item = CollectionItem.fromJson(map);
-          if (item.id.isEmpty) continue;
-          parsed.add(item);
-        } catch (_) {}
-      }
-      final visible = visibleOwnedLikeGrid(parsed);
+      final visible = visibleOwnedLikeGrid(ownedItems);
       final byCategory = <CollectionCategory, List<CollectionItem>>{};
       for (final item in visible) {
         if (item.category == CollectionCategory.custom) {
@@ -952,17 +913,4 @@ class _HubSnapshot {
   });
 
   static _HubSnapshot? current;
-}
-
-bool _hubRowFlag(Map<String, dynamic> map, String key) {
-  final v = map[key];
-  return v == true || v == 'true' || v == 1;
-}
-
-bool _hubRowIsExpansion(Map<String, dynamic> map) {
-  if (_hubRowFlag(map, 'is_expansion')) return true;
-  final parent = map['parent_game_id']?.toString();
-  if (parent != null && parent.isNotEmpty) return true;
-  final meta = map['metadata'];
-  return meta is Map && meta['bgg_is_expansion'] == true;
 }

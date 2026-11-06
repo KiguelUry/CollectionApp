@@ -164,10 +164,9 @@ Deno.serve(async (req) => {
       if (hit) return hit;
     }
 
-    // Chaîne : .256 → .512 → original (couvertures manquantes / rate-limit).
+    // Toujours tenter .256.jpg d'abord (Egress). Fallback original si absent.
     const candidates = [
       withMangaDexThumb(target, "256").toString(),
-      withMangaDexThumb(target, "512").toString(),
       withMangaDexThumb(target, "full").toString(),
     ];
     // Déduplique si l'URL était déjà en .256

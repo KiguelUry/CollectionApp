@@ -45,8 +45,8 @@ bool _isMangaDexUploads(String host) =>
 String mangaDexThumbnailUrl(String url, {int width = 360}) {
   var u = url.trim();
   if (u.isEmpty) return u;
-  // Grilles / listes : toujours 256. Détail large : 512.
-  final size = width > 600 ? '512' : '256';
+  // Grilles / cartes : toujours .256.jpg. Lightbox plein écran seul : .512.jpg.
+  final size = width >= 900 ? '512' : '256';
 
   // Retire un suffixe qualité déjà présent (formes append OU replace erronée).
   // append : file.jpg.512.jpg → file.jpg

@@ -7,6 +7,7 @@ import 'friend_service.dart';
 import 'group_service.dart';
 import 'holder_place_history_service.dart';
 import 'household_service.dart';
+import 'inventory_service.dart';
 
 /// Amis, groupes, lieux et personnes en RAM pour ouvrir les feuilles sans attente.
 class SocialDirectoryCache extends ChangeNotifier {
@@ -84,19 +85,13 @@ class SocialDirectoryCache extends ChangeNotifier {
       }
 
       try {
-        // Pas de colonne location_label sur collection_items (prod) :
-        // le lieu libre vit dans metadata.holder_label / metadata.location_label.
-        final rows = await Supabase.instance.client
-            .from('collection_items')
-            .select('metadata')
-            .or('added_by.eq.$userId,location_user_id.eq.$userId')
-            .limit(400);
-        for (final row in rows as List) {
-          final meta = row['metadata'];
-          if (meta is Map) {
-            _addPlace(placeSet, peopleSet, meta['holder_label']?.toString());
-            _addPlace(placeSet, peopleSet, meta['location_label']?.toString());
-          }
+        // Réutilise le cache InventoryService (0 requête SQL supplémentaire).
+        final items = await InventoryService().fetchOwnedItems();
+        for (final item in items) {
+          final meta = item.metadata;
+          if (meta == null) continue;
+          _addPlace(placeSet, peopleSet, meta['holder_label']?.toString());
+          _addPlace(placeSet, peopleSet, meta['location_label']?.toString());
         }
       } catch (_) {}
 
