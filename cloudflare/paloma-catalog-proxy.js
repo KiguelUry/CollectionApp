@@ -132,12 +132,48 @@ export default {
     }
 
     const reqUrl = new URL(request.url);
+
+    // Healthcheck simple (monitoring / smoke test)
+    if (reqUrl.searchParams.get("health") === "1") {
+      return new Response(JSON.stringify({ ok: true, service: "paloma-catalog-proxy" }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const raw = reqUrl.searchParams.get("url")?.trim() ?? "";
+    // URL nue sans ?url= → pas un bug : le proxy exige une cible (garde-fou anti-abus).
+    if (!raw) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error: "missing_url",
+          message:
+            "Ajoute ?url=https://… (ex: cover MangaDex). L'app Flutter le fait automatiquement.",
+          example:
+            "/?url=" +
+            encodeURIComponent(
+              "https://uploads.mangadex.org/covers/8f3e1818-a015-491d-bd81-3addc4d7d56a/26dd2770-d383-42e9-a42b-32765a4d99c8.png",
+            ),
+        }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
     let target;
     try {
       target = new URL(raw);
     } catch (_) {
-      return new Response("Invalid url", { status: 400, headers: corsHeaders });
+      return new Response(
+        JSON.stringify({ ok: false, error: "invalid_url", message: "Paramètre url invalide" }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
     }
 
     if (target.protocol !== "https:" && target.protocol !== "http:") {
