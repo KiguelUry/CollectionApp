@@ -82,17 +82,29 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   Future<void> _load({bool silent = false}) async {
     if (!silent) setState(() => _loading = true);
     try {
-      var series = await _service.fetchSeriesById(widget.seriesId);
-      if (series == null) throw Exception('Série introuvable');
-      // Reloads silencieux : lecture seule (sinon enrich → PATCH → _load infini).
-      if (!silent) {
-        series = await _service.sanitizeSeriesName(series);
-        await _service.dedupeVolumeItems(series.id);
-        // Pas de Google Books ici : seulement AniList/MangaDex pour reclasser.
-        series = await _service.reclassifyAsMangaIfConfirmed(series);
+      final cached = BooksCollectionCache.instance;
+      final hit = cached.entryFor(widget.seriesId);
+      final BookSeries series;
+      final List<BookVolume> volumes;
+      final List<CollectionItem> items;
+      if (!silent && !_hasMutatedData && cached.isFresh && hit != null) {
+        series = hit.series;
+        volumes = hit.volumes;
+        items = hit.items;
+      } else {
+        var loaded = await _service.fetchSeriesById(widget.seriesId);
+        if (loaded == null) throw Exception('Série introuvable');
+        // Reloads silencieux : lecture seule (sinon enrich → PATCH → _load infini).
+        if (!silent) {
+          loaded = await _service.sanitizeSeriesName(loaded);
+          await _service.dedupeVolumeItems(loaded.id);
+          // Pas de Google Books ici : seulement AniList/MangaDex pour reclasser.
+          loaded = await _service.reclassifyAsMangaIfConfirmed(loaded);
+        }
+        series = loaded;
+        volumes = await _service.fetchVolumes(series.id);
+        items = await _service.fetchSeriesItems(series.id);
       }
-      final volumes = await _service.fetchVolumes(series.id);
-      final items = await _service.fetchSeriesItems(series.id);
       final stats = _service.computeStats(
         series: series,
         volumes: volumes,

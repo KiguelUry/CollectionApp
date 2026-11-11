@@ -544,7 +544,8 @@ class BoardgameRankingStats {
   }) {
     if (sessionScores.isEmpty) return {};
     if (condition == BoardgameWinCondition.cooperative ||
-        condition == BoardgameWinCondition.noScore) {
+        condition == BoardgameWinCondition.noScore ||
+        condition == BoardgameWinCondition.customTemplate) {
       return {};
     }
 
@@ -561,6 +562,12 @@ class BoardgameRankingStats {
       });
     } else if (condition == BoardgameWinCondition.lowest) {
       sorted.sort((a, b) => a.value.compareTo(b.value));
+    } else if (condition == BoardgameWinCondition.minimumThreshold) {
+      final target = targetScore;
+      if (target == null) return {};
+      sorted.removeWhere((e) => e.value < target);
+      if (sorted.isEmpty) return {};
+      sorted.sort((a, b) => b.value.compareTo(a.value));
     } else {
       sorted.sort((a, b) => b.value.compareTo(a.value));
     }

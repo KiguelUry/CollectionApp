@@ -100,6 +100,18 @@ class _BoardgamePlayHistoryPanelState extends State<BoardgamePlayHistoryPanel> {
     final meta = Map<String, dynamic>.from(widget.item.metadata ?? {});
     meta['boardgame_plays'] = sessions.map((s) => s.toJson()).toList();
     meta['games_played'] = sessions.length;
+    BoardgameScoreTemplate? template;
+    DateTime? stamp;
+    for (final s in sessions) {
+      final t = s.scoreTemplate;
+      if (t == null) continue;
+      final at = s.createdAt ?? s.date;
+      if (stamp == null || at.isAfter(stamp)) {
+        stamp = at;
+        template = t;
+      }
+    }
+    if (template != null) meta['score_template'] = template.toJson();
     widget.onMetadataChanged(meta);
   }
 
@@ -423,9 +435,9 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
   final _gridKey = GlobalKey<BoardgameScoreGridEditorState>();
   final _friendService = FriendService();
   late DateTime _date;
-  late bool _trackScores;
   late bool _useTeams;
   late BoardgameWinCondition _winCondition;
+  late BoardgameScoreTemplate _template;
   late BoardgameConfrontationType _confrontation;
   late BoardgamePlayStatus _status;
   late BoardgameScoreGrid _initialGrid;
@@ -447,7 +459,6 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     final t = widget.template;
     final seed = s ?? t;
     _date = s?.date ?? DateTime.now();
-    _trackScores = seed?.trackScores ?? false;
     _confrontation =
         seed?.confrontationType ??
         (seed?.useTeams == true
@@ -458,11 +469,31 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     }
     _useTeams =
         _confrontation == BoardgameConfrontationType.teams ||
+        _confrontation == BoardgameConfrontationType.oneVsAll ||
         (_confrontation == BoardgameConfrontationType.cooperative &&
             (seed?.coopTeamCount ?? 1) > 1);
     _winCondition = seed?.winCondition == BoardgameWinCondition.cooperative
         ? BoardgameWinCondition.highest
         : (seed?.winCondition ?? BoardgameWinCondition.highest);
+    final unscored = seed != null &&
+        seed.trackScores == false &&
+        seed.scoreGrid == null &&
+        seed.winCondition != BoardgameWinCondition.noScore &&
+        seed.winCondition != BoardgameWinCondition.exactTarget;
+    if (unscored && s == null) {
+      _winCondition = BoardgameWinCondition.noScore;
+    }
+    if (s != null &&
+        s.trackScores == false &&
+        s.scoreGrid == null &&
+        s.winCondition != BoardgameWinCondition.exactTarget &&
+        s.winCondition != BoardgameWinCondition.customTemplate &&
+        s.winCondition != BoardgameWinCondition.minimumThreshold) {
+      _winCondition = BoardgameWinCondition.noScore;
+    }
+    _template = s?.scoreTemplate ??
+        BoardgameScoreTemplate.fromMetadata(widget.item?.metadata) ??
+        BoardgameScoreTemplate.empty;
     // Nouvelle partie / relaunch → en cours ; édition conserve le statut.
     _status = s?.status ?? BoardgamePlayStatus.inProgress;
     if (s != null && s.scoreGrid != null) {
@@ -484,6 +515,23 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
       );
     } else {
       _initialGrid = BoardgameScoreGrid.empty(playerCount: 0);
+    }
+    if (s == null && _template.lineNames.isNotEmpty) {
+      final width = _initialGrid.players.length;
+      _initialGrid = BoardgameScoreGrid(
+        players: _initialGrid.players,
+        teams: _initialGrid.teams,
+        playerColors: _initialGrid.playerColors,
+        teamColorMap: _initialGrid.teamColorMap,
+        teamScoreMode: _initialGrid.teamScoreMode,
+        rounds: [
+          for (final name in _template.lineNames)
+            BoardgameScoreRound(
+              label: name,
+              scores: List<int?>.filled(width, null),
+            ),
+        ],
+      );
     }
     if (s != null) {
       _winnerManuallyForced =
@@ -536,6 +584,11 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
 
   bool get _isCoop => _confrontation == BoardgameConfrontationType.cooperative;
 
+  bool get _trackScores => _winCondition != BoardgameWinCondition.noScore;
+
+  bool get _oneVsAll =>
+      _confrontation == BoardgameConfrontationType.oneVsAll;
+
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
       context: context,
@@ -586,6 +639,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     Map<String, int>? scores;
     final useTeamsEffective =
         _confrontation == BoardgameConfrontationType.teams ||
+        _confrontation == BoardgameConfrontationType.oneVsAll ||
         (_isCoop && _coopTeamCount > 1) ||
         _useTeams;
 
@@ -616,10 +670,11 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
         );
         return;
       }
-      if (_winCondition == BoardgameWinCondition.exactTarget &&
+      if ((_winCondition == BoardgameWinCondition.exactTarget ||
+              _winCondition == BoardgameWinCondition.minimumThreshold) &&
           _targetScore == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Indique le score exact à atteindre.')),
+          const SnackBar(content: Text('Indique le score à atteindre.')),
         );
         return;
       }
@@ -639,9 +694,21 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     }
 
     final noScore = _winCondition == BoardgameWinCondition.noScore;
+    final savedTemplate = _winCondition == BoardgameWinCondition.customTemplate
+        ? BoardgameScoreTemplate(
+            lineNames: _gridKey.currentState?.roundLabels() ?? _template.lineNames,
+            lineAtLeast: _template.lineAtLeast,
+            distinctLines: _template.distinctLines,
+            totalAtLeast: _template.totalAtLeast,
+          )
+        : _template;
     final autoNames = noScore
         ? const <String>[]
-        : grid?.winnerNames(_winCondition, targetScore: _targetScore) ??
+        : grid?.winnerNames(
+              _winCondition,
+              targetScore: _targetScore,
+              template: savedTemplate,
+            ) ??
             const <String>[];
     final manualWinner = _winnerController.text.trim();
     final autoWinnerStr = _isCoop
@@ -669,8 +736,12 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
         useTeams: useTeamsEffective,
         coopVictory: _isCoop ? _coopVictory : null,
         coopTeamCount: _isCoop ? _coopTeamCount : null,
-        targetScore: _winCondition == BoardgameWinCondition.exactTarget
+        targetScore: _winCondition == BoardgameWinCondition.exactTarget ||
+                _winCondition == BoardgameWinCondition.minimumThreshold
             ? _targetScore
+            : null,
+        scoreTemplate: _winCondition == BoardgameWinCondition.customTemplate
+            ? savedTemplate
             : null,
         status: _status,
         createdAt: widget.initial?.createdAt ?? DateTime.now(),
@@ -703,6 +774,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     final item = widget.item;
     final useTeamsEffective =
         _confrontation == BoardgameConfrontationType.teams ||
+        _confrontation == BoardgameConfrontationType.oneVsAll ||
         (_isCoop && _coopTeamCount > 1);
 
     return Scaffold(
@@ -804,81 +876,82 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
                     ],
                   ),
                 ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Compter les points'),
-                subtitle: const Text('Scores'),
-                value: _trackScores,
-                onChanged: (v) => setState(() => _trackScores = v),
+              const SizedBox(height: 8),
+              Text(
+                'Type de jeu',
+                style: Theme.of(context).textTheme.labelLarge,
               ),
-              if (_trackScores) ...[
-                const SizedBox(height: 8),
+              const SizedBox(height: 4),
+              DropdownButtonFormField<BoardgameConfrontationType>(
+                key: ValueKey(_confrontation),
+                initialValue: _confrontation,
+                decoration: const InputDecoration(isDense: true),
+                items: [
+                  for (final c in BoardgameConfrontationType.values)
+                    DropdownMenuItem(value: c, child: Text(c.label)),
+                ],
+                onChanged: (c) {
+                  if (c == null) return;
+                  setState(() {
+                    _confrontation = c;
+                    _useTeams = c == BoardgameConfrontationType.teams ||
+                        c == BoardgameConfrontationType.oneVsAll ||
+                        (c == BoardgameConfrontationType.cooperative &&
+                            _coopTeamCount > 1);
+                  });
+                },
+              ),
+              if (!_isCoop) ...[
+                const SizedBox(height: 12),
                 Text(
-                  'Type de jeu',
+                  'Condition de victoire',
                   style: Theme.of(context).textTheme.labelLarge,
                 ),
                 const SizedBox(height: 4),
-                SegmentedButton<BoardgameConfrontationType>(
-                  segments: BoardgameConfrontationType.values
-                      .map(
-                        (c) => ButtonSegment(
-                          value: c,
-                          label: Text(
-                            c.shortLabel,
-                            style: const TextStyle(fontSize: 11),
-                          ),
-                        ),
-                      )
-                      .toList(),
-                  selected: {_confrontation},
-                  onSelectionChanged: (s) {
-                    setState(() {
-                      _confrontation = s.first;
-                      _useTeams =
-                          _confrontation == BoardgameConfrontationType.teams ||
-                          (_confrontation ==
-                                  BoardgameConfrontationType.cooperative &&
-                              _coopTeamCount > 1);
-                    });
+                DropdownButtonFormField<BoardgameWinCondition>(
+                  key: ValueKey(_winCondition),
+                  initialValue: _winCondition,
+                  isExpanded: true,
+                  decoration: const InputDecoration(isDense: true),
+                  items: [
+                    for (final c
+                        in BoardgameWinCondition.selectableFor(_winCondition))
+                      DropdownMenuItem(value: c, child: Text(c.label)),
+                  ],
+                  onChanged: (c) {
+                    if (c == null) return;
+                    setState(() => _winCondition = c);
                   },
                 ),
-                if (!_isCoop) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    'Condition de victoire',
-                    style: Theme.of(context).textTheme.labelLarge,
-                  ),
-                  const SizedBox(height: 4),
-                  SegmentedButton<BoardgameWinCondition>(
-                    segments: BoardgameWinCondition.selectable
-                        .map(
-                          (c) => ButtonSegment(
-                            value: c,
-                            label: Text(
-                              c.shortLabel,
-                              style: const TextStyle(fontSize: 11),
-                            ),
-                          ),
-                        )
-                        .toList(),
-                    selected: {_winCondition},
-                    onSelectionChanged: (s) =>
-                        setState(() => _winCondition = s.first),
-                  ),
-                ],
-                if (_winCondition == BoardgameWinCondition.exactTarget &&
+              ],
+              if (_trackScores) ...[
+                if ((_winCondition == BoardgameWinCondition.exactTarget ||
+                        _winCondition ==
+                            BoardgameWinCondition.minimumThreshold) &&
                     !_isCoop) ...[
                   const SizedBox(height: 8),
                   TextField(
                     controller: _targetScoreController,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Score exact à atteindre',
+                    decoration: InputDecoration(
+                      labelText: _winCondition ==
+                              BoardgameWinCondition.minimumThreshold
+                          ? 'Seuil minimum'
+                          : 'Score exact à atteindre',
                       isDense: true,
                     ),
                     onChanged: (_) => setState(() {}),
                   ),
                 ],
+                if (_winCondition == BoardgameWinCondition.customTemplate &&
+                    !_isCoop)
+                  _TemplateFields(
+                    template: _template,
+                    onChanged: (next) {
+                      setState(() => _template = next);
+                      _gridKey.currentState?.setRoundLabels(next.lineNames);
+                    },
+                  ),
                 if (_isCoop) ...[
                   const SizedBox(height: 8),
                   Row(
@@ -946,6 +1019,8 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
                     parseBoardgamePlays(widget.item?.metadata),
                   ),
                   useTeams: useTeamsEffective,
+                  oneVsAll: _oneVsAll,
+                  template: _template,
                   winCondition: _winCondition,
                   targetScore: _targetScore,
                   // Type de jeu pilote déjà Solo / Équipes / Coop — pas de toggle doublon.
@@ -968,7 +1043,6 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
                   controller: _playersOnlyController,
                   decoration: const InputDecoration(
                     labelText: 'Joueurs',
-                    hintText: 'Alice, Bob, Charlie',
                   ),
                 ),
               ],
@@ -985,9 +1059,6 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
                     labelText: _winCondition == BoardgameWinCondition.noScore
                         ? 'Gagnant'
                         : 'Gagnant (forcer manuellement)',
-                    hintText: _winCondition == BoardgameWinCondition.noScore
-                        ? 'Qui a gagné, et pourquoi dans le motif'
-                        : 'Calculé depuis la grille si vide',
                     prefixIcon: Icon(
                       Icons.emoji_events_outlined,
                       color: scheme.primary,
@@ -1015,7 +1086,6 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
                   textCapitalization: TextCapitalization.sentences,
                   decoration: const InputDecoration(
                     labelText: 'Motif (optionnel)',
-                    hintText: '3 planètes identiques, militaire, KO…',
                   ),
                 ),
               ],
@@ -1056,6 +1126,130 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _TemplateFields extends StatefulWidget {
+  final BoardgameScoreTemplate template;
+  final ValueChanged<BoardgameScoreTemplate> onChanged;
+
+  const _TemplateFields({required this.template, required this.onChanged});
+
+  @override
+  State<_TemplateFields> createState() => _TemplateFieldsState();
+}
+
+class _TemplateFieldsState extends State<_TemplateFields> {
+  late final List<TextEditingController> _names;
+  late final TextEditingController _line;
+  late final TextEditingController _distinct;
+  late final TextEditingController _total;
+
+  @override
+  void initState() {
+    super.initState();
+    final names = widget.template.lineNames;
+    _names = [
+      for (final n in names.isEmpty ? const [''] : names)
+        TextEditingController(text: n),
+    ];
+    _line = TextEditingController(
+      text: widget.template.lineAtLeast?.toString() ?? '',
+    );
+    _distinct = TextEditingController(
+      text: widget.template.distinctLines?.toString() ?? '',
+    );
+    _total = TextEditingController(
+      text: widget.template.totalAtLeast?.toString() ?? '',
+    );
+  }
+
+  @override
+  void dispose() {
+    for (final c in _names) {
+      c.dispose();
+    }
+    _line.dispose();
+    _distinct.dispose();
+    _total.dispose();
+    super.dispose();
+  }
+
+  void _emit() {
+    widget.onChanged(
+      BoardgameScoreTemplate(
+        lineNames: [
+          for (final c in _names)
+            if (c.text.trim().isNotEmpty) c.text.trim(),
+        ],
+        lineAtLeast: int.tryParse(_line.text.trim()),
+        distinctLines: int.tryParse(_distinct.text.trim()),
+        totalAtLeast: int.tryParse(_total.text.trim()),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 12),
+        Text(
+          'Lignes du modèle',
+          style: Theme.of(context).textTheme.labelLarge,
+        ),
+        for (var i = 0; i < _names.length; i++)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: TextField(
+              controller: _names[i],
+              decoration: InputDecoration(
+                isDense: true,
+                labelText: 'Ligne ${i + 1}',
+              ),
+              onChanged: (_) => _emit(),
+            ),
+          ),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () {
+              setState(() => _names.add(TextEditingController()));
+            },
+            icon: const Icon(Icons.add),
+            label: const Text('Ajouter une ligne'),
+          ),
+        ),
+        TextField(
+          controller: _line,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            isDense: true,
+            labelText: 'Une ligne atteint',
+          ),
+          onChanged: (_) => _emit(),
+        ),
+        TextField(
+          controller: _distinct,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            isDense: true,
+            labelText: 'Au moins N lignes ont 1 ou plus',
+          ),
+          onChanged: (_) => _emit(),
+        ),
+        TextField(
+          controller: _total,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            isDense: true,
+            labelText: 'Le total atteint',
+          ),
+          onChanged: (_) => _emit(),
+        ),
+      ],
     );
   }
 }

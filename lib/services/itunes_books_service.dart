@@ -23,6 +23,28 @@ class ItunesBooksService {
   static final Map<String, Future<List<Map<String, String>>>> _inFlight =
       {};
   static final Map<String, _CachedItunesList> _memoryCache = {};
+  static Future<void> _pace = Future<void>.value();
+  static DateTime? _lastRequestAt;
+  static DateTime? _backoffUntil;
+  static const _gap = Duration(milliseconds: 400);
+  static const _backoff = Duration(minutes: 3);
+
+  static bool get _coolingDown =>
+      _backoffUntil != null && DateTime.now().isBefore(_backoffUntil!);
+
+  /// Un seul appel Apple à la fois. Un 429 coupe les suivants pendant 3 min.
+  static Future<T> _enqueue<T>(Future<T> Function() job) {
+    final done = _pace.then((_) async {
+      final last = _lastRequestAt;
+      if (last != null && !_coolingDown) {
+        final wait = _gap - DateTime.now().difference(last);
+        if (wait > Duration.zero) await Future<void>.delayed(wait);
+      }
+      return job();
+    });
+    _pace = done.then((_) {}, onError: (_, _) {});
+    return done;
+  }
 
   /// Apple Books FR : d'abord « Nom Tome » + auteur ; éditeurs (Kana/Glénat
   /// ou Le Lombard/Dupuis) seulement si pas assez de couvertures.
@@ -43,11 +65,13 @@ class ItunesBooksService {
       ...BookSeriesNormalizer.extraItunesQueries(clean),
     ];
 
-    final lists = await Future.wait(
-      primary.map(
-        (q) => search(q, limit: 200, allowAudiobook: allowAudiobook),
-      ),
-    );
+    final lists = <List<Map<String, String>>>[];
+    for (final q in primary) {
+      if (_coolingDown) break;
+      lists.add(
+        await search(q, limit: 200, allowAudiobook: allowAudiobook),
+      );
+    }
     final seen = <String>{};
     final out = <Map<String, String>>[];
     void absorb(List<Map<String, String>> list) {
@@ -64,7 +88,7 @@ class ItunesBooksService {
 
     final coverCount =
         out.where((h) => (h['image_url'] ?? '').isNotEmpty).length;
-    if (mangaPublisherPass && coverCount < 8) {
+    if (mangaPublisherPass && coverCount < 8 && !_coolingDown) {
       for (final publisher in const ['Kana', 'Glénat']) {
         absorb(
           await search(
@@ -78,7 +102,7 @@ class ItunesBooksService {
         if (covers >= 8) break;
       }
     }
-    if (bdPublisherPass) {
+    if (bdPublisherPass && !_coolingDown) {
       var covers =
           out.where((h) => (h['image_url'] ?? '').isNotEmpty).length;
       if (covers < 8) {
@@ -246,7 +270,9 @@ class ItunesBooksService {
     String query, {
     required String entity,
     required int limit,
-  }) async {
+  }) {
+    return _enqueue(() async {
+    if (_coolingDown) return [];
     try {
       final itunesUri = Uri.https('itunes.apple.com', '/search', {
         'term': query,
@@ -266,6 +292,12 @@ class ItunesBooksService {
             },
           )
           .timeout(const Duration(seconds: 15));
+      _lastRequestAt = DateTime.now();
+      if (response.statusCode == 429) {
+        _backoffUntil = DateTime.now().add(_backoff);
+        if (kDebugMode) debugPrint('iTunes books 429 — pause ${_backoff.inMinutes} min');
+        return [];
+      }
       if (response.statusCode != 200) {
         if (kDebugMode) {
           debugPrint('iTunes books ${response.statusCode}: ${response.body}');
@@ -284,6 +316,7 @@ class ItunesBooksService {
       if (kDebugMode) debugPrint('iTunes books search: $e');
       return [];
     }
+    });
   }
 
   static Map<String, String>? _mapBook(Map<String, dynamic> m) {

@@ -5,10 +5,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/boardgame_play_session.dart';
+import '../models/boardgame_score_grid.dart';
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
-import '../utils/supabase_embeds.dart';
 import 'activity_service.dart';
+import 'inventory_service.dart';
 import 'play_share_service.dart';
 
 /// Partie enregistrée sur un jeu non possédé (en attente de liaison).
@@ -138,17 +139,26 @@ class GlobalPlayHistoryService {
   Future<List<CollectionItem>> fetchBoardgameItems() async {
     final uid = _userId;
     if (uid == null) return [];
-    final rows = await _client
-        .from('collection_items')
-        .select(SupabaseEmbeds.collectionItemDetail)
-        .eq('category', CollectionCategory.boardgame.dbValue)
-        .eq('is_wishlist', false)
-        .or('added_by.eq.$uid,location_user_id.eq.$uid')
-        .order('title');
-    return (rows as List)
-        .map((r) => CollectionItem.fromJson(Map<String, dynamic>.from(r)))
-        .where((i) => !i.isExpansion)
-        .toList();
+    final items = await InventoryService().fetchOwnedItems();
+    final games = items
+        .where(
+          (i) =>
+              i.category == CollectionCategory.boardgame &&
+              !i.isWishlist &&
+              !i.isExpansion &&
+              (i.addedBy == uid || i.locationUserId == uid),
+        )
+        .toList()
+      ..sort((a, b) => a.title.compareTo(b.title));
+    return games;
+  }
+
+  Future<CollectionItem?> _itemById(String id) async {
+    final items = await InventoryService().fetchOwnedItems();
+    for (final item in items) {
+      if (item.id == id) return item;
+    }
+    return null;
   }
 
   Future<List<GlobalPlayHistoryEntry>> loadAllEntries() async {
@@ -210,14 +220,9 @@ class GlobalPlayHistoryService {
     final itemId = entry.itemId;
     if (itemId == null) return;
 
-    final row = await _client
-        .from('collection_items')
-        .select(SupabaseEmbeds.collectionItemDetail)
-        .eq('id', itemId)
-        .maybeSingle();
-    if (row == null) return;
+    final item = await _itemById(itemId);
+    if (item == null) return;
 
-    final item = CollectionItem.fromJson(Map<String, dynamic>.from(row as Map));
     final sessions = parseBoardgamePlays(item.metadata);
     if (entry.sessionIndex < 0 || entry.sessionIndex >= sessions.length) {
       return;
@@ -249,14 +254,9 @@ class GlobalPlayHistoryService {
     final itemId = entry.itemId;
     if (itemId == null) return;
 
-    final row = await _client
-        .from('collection_items')
-        .select(SupabaseEmbeds.collectionItemDetail)
-        .eq('id', itemId)
-        .maybeSingle();
-    if (row == null) return;
+    final item = await _itemById(itemId);
+    if (item == null) return;
 
-    final item = CollectionItem.fromJson(Map<String, dynamic>.from(row as Map));
     final sessions = parseBoardgamePlays(item.metadata);
     if (entry.sessionIndex < 0 || entry.sessionIndex >= sessions.length) {
       return;
@@ -272,6 +272,18 @@ class GlobalPlayHistoryService {
     final meta = Map<String, dynamic>.from(item.metadata ?? {});
     meta['boardgame_plays'] = sessions.map((s) => s.toJson()).toList();
     meta['games_played'] = sessions.length;
+    BoardgameScoreTemplate? template;
+    DateTime? stamp;
+    for (final s in sessions) {
+      final t = s.scoreTemplate;
+      if (t == null) continue;
+      final at = s.createdAt ?? s.date;
+      if (stamp == null || at.isAfter(stamp)) {
+        stamp = at;
+        template = t;
+      }
+    }
+    if (template != null) meta['score_template'] = template.toJson();
     await _client
         .from('collection_items')
         .update({
@@ -279,6 +291,10 @@ class GlobalPlayHistoryService {
           'games_played': sessions.length,
         })
         .eq('id', item.id);
+    InventoryService.patchRow(item.id, (row) {
+      row['metadata'] = meta;
+      row['games_played'] = sessions.length;
+    });
     unawaited(
       ActivityService().logPlayEdited(
         itemId: item.id,
@@ -378,14 +394,7 @@ class GlobalPlayHistoryService {
     final i = orphans.indexWhere((o) => o.id == orphanId);
     if (i < 0) return false;
 
-    final row = await _client
-        .from('collection_items')
-        .select(SupabaseEmbeds.collectionItemDetail)
-        .eq('id', item.id)
-        .maybeSingle();
-    final fresh = row == null
-        ? item
-        : CollectionItem.fromJson(Map<String, dynamic>.from(row as Map));
+    final fresh = await _itemById(item.id) ?? item;
 
     final attachedSession = orphans[i].session;
     final sessions = mergeSessionIntoHistory(

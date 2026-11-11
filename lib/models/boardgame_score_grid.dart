@@ -164,6 +164,7 @@ class BoardgameScoreGrid {
   Set<int> winningColumnIndices(
     BoardgameWinCondition condition, {
     int? targetScore,
+    BoardgameScoreTemplate? template,
   }) {
     if (condition == BoardgameWinCondition.cooperative ||
         condition == BoardgameWinCondition.noScore ||
@@ -172,6 +173,12 @@ class BoardgameScoreGrid {
     }
     if (condition == BoardgameWinCondition.exactTarget) {
       return _exactTargetWinners(targetScore);
+    }
+    if (condition == BoardgameWinCondition.minimumThreshold) {
+      return _minimumThresholdWinners(targetScore);
+    }
+    if (condition == BoardgameWinCondition.customTemplate) {
+      return _templateWinners(template);
     }
     if (hasTeams) {
       final tt = teamTotals();
@@ -277,11 +284,56 @@ class BoardgameScoreGrid {
     return pool.where((i) => totals[i] == best).toSet();
   }
 
+  /// Plus haut total parmi ceux qui ont atteint le seuil. Personne sinon.
+  Set<int> _minimumThresholdWinners(int? targetScore) {
+    final target = targetScore;
+    if (target == null) return {};
+    if (hasTeams) {
+      final tt = teamTotals();
+      final eligible = tt.entries.where((e) => e.value >= target).toList();
+      if (eligible.isEmpty) return {};
+      final best = eligible.map((e) => e.value).reduce((a, b) => a >= b ? a : b);
+      final winners = <int>{};
+      for (var i = 0; i < teams.length; i++) {
+        final team = teams[i]?.trim();
+        if (team == null || team.isEmpty || !columnHasScores(i)) continue;
+        if (tt[team] == best) winners.add(i);
+      }
+      return winners;
+    }
+    final totals = columnTotals();
+    final eligible = <int>[];
+    for (var i = 0; i < players.length; i++) {
+      if (players[i].trim().isEmpty || !columnHasScores(i)) continue;
+      if (totals[i] >= target) eligible.add(i);
+    }
+    if (eligible.isEmpty) return {};
+    final best = eligible.map((i) => totals[i]).reduce((a, b) => a >= b ? a : b);
+    return eligible.where((i) => totals[i] == best).toSet();
+  }
+
+  /// Une des conditions OU du modèle est remplie sur la colonne.
+  Set<int> _templateWinners(BoardgameScoreTemplate? template) {
+    final rules = template;
+    if (rules == null || !rules.hasRules || !hasScores) return {};
+    final winners = <int>{};
+    for (var i = 0; i < players.length; i++) {
+      if (players[i].trim().isEmpty) continue;
+      if (rules.columnMatches(this, i)) winners.add(i);
+    }
+    return winners;
+  }
+
   String? autoWinnerName(
     BoardgameWinCondition condition, {
     int? targetScore,
+    BoardgameScoreTemplate? template,
   }) {
-    final names = winnerNames(condition, targetScore: targetScore);
+    final names = winnerNames(
+      condition,
+      targetScore: targetScore,
+      template: template,
+    );
     if (names.isEmpty) return null;
     if (names.length == 1) return names.first;
     return names.join(' & ');
@@ -291,10 +343,31 @@ class BoardgameScoreGrid {
   List<String> winnerNames(
     BoardgameWinCondition condition, {
     int? targetScore,
+    BoardgameScoreTemplate? template,
   }) {
     if (condition == BoardgameWinCondition.cooperative ||
         condition == BoardgameWinCondition.noScore) {
       return [];
+    }
+    if (condition == BoardgameWinCondition.minimumThreshold ||
+        condition == BoardgameWinCondition.customTemplate) {
+      final idx = winningColumnIndices(
+        condition,
+        targetScore: targetScore,
+        template: template,
+      );
+      if (hasTeams) {
+        final names = <String>[];
+        for (final i in idx) {
+          final team = i < teams.length ? teams[i]?.trim() ?? '' : '';
+          if (team.isNotEmpty && !names.contains(team)) names.add(team);
+        }
+        if (names.isNotEmpty) return names;
+      }
+      return idx
+          .map((i) => players[i].trim())
+          .where((n) => n.isNotEmpty)
+          .toList();
     }
     if (condition == BoardgameWinCondition.exactTarget ||
         (hasTeams && hasScores && condition != BoardgameWinCondition.exactTarget)) {
@@ -348,6 +421,8 @@ class BoardgameScoreGrid {
     if (condition == BoardgameWinCondition.cooperative ||
         condition == BoardgameWinCondition.noScore ||
         condition == BoardgameWinCondition.exactTarget ||
+        condition == BoardgameWinCondition.minimumThreshold ||
+        condition == BoardgameWinCondition.customTemplate ||
         !hasScores) {
       return {};
     }
@@ -527,24 +602,29 @@ enum TeamScoreMode {
 enum BoardgameConfrontationType {
   freeForAll,
   teams,
-  cooperative;
+  cooperative,
+  /// Un joueur contre le camp des autres (2 équipes verrouillées).
+  oneVsAll;
 
   String get label => switch (this) {
         BoardgameConfrontationType.freeForAll => 'Chacun pour soi',
         BoardgameConfrontationType.teams => 'En équipes',
         BoardgameConfrontationType.cooperative => 'Coopératif',
+        BoardgameConfrontationType.oneVsAll => '1 contre tous',
       };
 
   String get shortLabel => switch (this) {
-        BoardgameConfrontationType.freeForAll => 'Solo',
-        BoardgameConfrontationType.teams => 'Équipes',
-        BoardgameConfrontationType.cooperative => 'Coop',
+        BoardgameConfrontationType.freeForAll => 'Chacun pour soi',
+        BoardgameConfrontationType.teams => 'En équipes',
+        BoardgameConfrontationType.cooperative => 'Coopératif',
+        BoardgameConfrontationType.oneVsAll => '1 contre tous',
       };
 
   static BoardgameConfrontationType fromJson(String? raw) {
     return switch (raw) {
       'teams' => BoardgameConfrontationType.teams,
       'cooperative' => BoardgameConfrontationType.cooperative,
+      'one_vs_all' => BoardgameConfrontationType.oneVsAll,
       _ => BoardgameConfrontationType.freeForAll,
     };
   }
@@ -553,47 +633,138 @@ enum BoardgameConfrontationType {
         BoardgameConfrontationType.freeForAll => 'free_for_all',
         BoardgameConfrontationType.teams => 'teams',
         BoardgameConfrontationType.cooperative => 'cooperative',
+        BoardgameConfrontationType.oneVsAll => 'one_vs_all',
       };
+}
+
+/// Modèle de fin de partie enregistré sur le jeu.
+class BoardgameScoreTemplate {
+  final List<String> lineNames;
+  final int? lineAtLeast;
+  final int? distinctLines;
+  final int? totalAtLeast;
+
+  const BoardgameScoreTemplate({
+    this.lineNames = const [],
+    this.lineAtLeast,
+    this.distinctLines,
+    this.totalAtLeast,
+  });
+
+  static const empty = BoardgameScoreTemplate();
+
+  bool get hasRules =>
+      lineAtLeast != null || distinctLines != null || totalAtLeast != null;
+
+  Map<String, dynamic> toJson() => {
+        if (lineNames.isNotEmpty) 'line_names': lineNames,
+        if (lineAtLeast != null) 'line_at_least': lineAtLeast,
+        if (distinctLines != null) 'distinct_lines': distinctLines,
+        if (totalAtLeast != null) 'total_at_least': totalAtLeast,
+      };
+
+  static BoardgameScoreTemplate? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    int? numOf(String key) {
+      final v = raw[key];
+      if (v is num) return v.round();
+      return int.tryParse(v?.toString() ?? '');
+    }
+
+    final names = (raw['line_names'] as List?)
+            ?.map((e) => e.toString().trim())
+            .where((s) => s.isNotEmpty)
+            .toList() ??
+        const <String>[];
+    final template = BoardgameScoreTemplate(
+      lineNames: names,
+      lineAtLeast: numOf('line_at_least'),
+      distinctLines: numOf('distinct_lines'),
+      totalAtLeast: numOf('total_at_least'),
+    );
+    if (names.isEmpty && !template.hasRules) return null;
+    return template;
+  }
+
+  static BoardgameScoreTemplate? fromMetadata(Map<String, dynamic>? metadata) {
+    return fromJson(metadata?['score_template']);
+  }
+
+  /// Vrai si au moins une condition OU est remplie sur la colonne [index].
+  bool columnMatches(BoardgameScoreGrid grid, int index) {
+    final values = <int>[];
+    for (final round in grid.rounds) {
+      final raw = index < round.scores.length ? round.scores[index] : null;
+      values.add(raw ?? 0);
+    }
+    final line = lineAtLeast != null && values.any((n) => n >= lineAtLeast!);
+    final distinct = distinctLines != null &&
+        values.where((n) => n >= 1).length >= distinctLines!;
+    final total = totalAtLeast != null &&
+        values.fold<int>(0, (a, b) => a + b) >= totalAtLeast!;
+    if (!hasRules) return false;
+    return (lineAtLeast != null && line) ||
+        (distinctLines != null && distinct) ||
+        (totalAtLeast != null && total);
+  }
 }
 
 enum BoardgameWinCondition {
   highest,
   lowest,
   exactTarget,
+  /// Plus haut score, seulement si le total atteint un seuil.
+  minimumThreshold,
   /// Pas de grille : le gagnant est choisi, avec un motif libre.
   noScore,
+  /// Lignes nommées + conditions OU, mémorisées sur le jeu.
+  customTemplate,
   /// Legacy — préférer [BoardgameConfrontationType.cooperative].
   cooperative;
 
   String get label => switch (this) {
         BoardgameWinCondition.highest => 'Plus haut score',
-        BoardgameWinCondition.lowest => 'Plus bas score',
+        BoardgameWinCondition.lowest => 'Plus petit score',
         BoardgameWinCondition.exactTarget => 'Score exact',
-        BoardgameWinCondition.noScore => 'Sans score',
+        BoardgameWinCondition.minimumThreshold =>
+          'Plus haut score (seuil minimum)',
+        BoardgameWinCondition.noScore => 'Sans grille de points',
+        BoardgameWinCondition.customTemplate => 'Modèle personnalisé (Template)',
         BoardgameWinCondition.cooperative => 'Mode coopératif',
       };
 
-  String get shortLabel => switch (this) {
-        BoardgameWinCondition.highest => 'Max',
-        BoardgameWinCondition.lowest => 'Min',
-        BoardgameWinCondition.exactTarget => 'Exact',
-        BoardgameWinCondition.noScore => 'Sans',
-        BoardgameWinCondition.cooperative => 'Coop',
-      };
+  String get shortLabel => label;
 
-  /// Conditions affichables (hors legacy cooperative).
-  static List<BoardgameWinCondition> get selectable => const [
+  /// Menu courant. « Score exact » reste lisible sur les anciennes parties.
+  static List<BoardgameWinCondition> selectableFor(
+    BoardgameWinCondition current,
+  ) {
+    const base = <BoardgameWinCondition>[
+      BoardgameWinCondition.highest,
+      BoardgameWinCondition.lowest,
+      BoardgameWinCondition.minimumThreshold,
+      BoardgameWinCondition.noScore,
+      BoardgameWinCondition.customTemplate,
+    ];
+    if (current == BoardgameWinCondition.exactTarget) {
+      return [
         BoardgameWinCondition.highest,
         BoardgameWinCondition.lowest,
         BoardgameWinCondition.exactTarget,
-        BoardgameWinCondition.noScore,
+        ...base.skip(2),
       ];
+    }
+    return base;
+  }
 
   static BoardgameWinCondition fromJson(String? raw) {
     return switch (raw) {
       'lowest' => BoardgameWinCondition.lowest,
       'exact' || 'exact_target' => BoardgameWinCondition.exactTarget,
+      'min_threshold' || 'minimum_threshold' =>
+        BoardgameWinCondition.minimumThreshold,
       'no_score' || 'unscored' => BoardgameWinCondition.noScore,
+      'custom_template' || 'template' => BoardgameWinCondition.customTemplate,
       'cooperative' => BoardgameWinCondition.cooperative,
       _ => BoardgameWinCondition.highest,
     };
@@ -603,7 +774,9 @@ enum BoardgameWinCondition {
         BoardgameWinCondition.highest => 'highest',
         BoardgameWinCondition.lowest => 'lowest',
         BoardgameWinCondition.exactTarget => 'exact_target',
+        BoardgameWinCondition.minimumThreshold => 'min_threshold',
         BoardgameWinCondition.noScore => 'no_score',
+        BoardgameWinCondition.customTemplate => 'custom_template',
         BoardgameWinCondition.cooperative => 'cooperative',
       };
 }

@@ -32,6 +32,7 @@ class NotificationService extends ChangeNotifier with WidgetsBindingObserver {
   int _listeners = 0;
   bool _observing = false;
   bool _hidden = false;
+  DateTime? _lastSuccessAt;
 
   List<AppNotification> get notifications => List.unmodifiable(_items);
   List<NotificationRow> get rows => groupNotifications(_items);
@@ -46,7 +47,7 @@ class NotificationService extends ChangeNotifier with WidgetsBindingObserver {
       _observing = true;
     }
     if (_listeners == 1 && !_hidden) {
-      unawaited(refresh());
+      unawaited(refresh(force: true));
       _startPoll();
     }
   }
@@ -61,7 +62,16 @@ class NotificationService extends ChangeNotifier with WidgetsBindingObserver {
 
   void _startPoll() {
     _poll?.cancel();
-    _poll = Timer.periodic(_pollInterval, (_) => refresh());
+    final elapsed = _lastSuccessAt == null
+        ? _pollInterval
+        : DateTime.now().difference(_lastSuccessAt!);
+    final wait = elapsed >= _pollInterval
+        ? Duration.zero
+        : _pollInterval - elapsed;
+    _poll = Timer(wait, () {
+      unawaited(refresh(force: true));
+      _poll = Timer.periodic(_pollInterval, (_) => refresh(force: true));
+    });
   }
 
   @override
@@ -74,13 +84,18 @@ class NotificationService extends ChangeNotifier with WidgetsBindingObserver {
     _poll?.cancel();
     _poll = null;
     if (!_hidden && _listeners > 0) {
-      unawaited(refresh());
       _startPoll();
+      unawaited(refresh());
     }
   }
 
-  Future<void> refresh() async {
+  Future<void> refresh({bool force = false}) async {
     if (_hidden) return;
+    if (!force &&
+        _lastSuccessAt != null &&
+        DateTime.now().difference(_lastSuccessAt!) < _pollInterval) {
+      return;
+    }
     final uid = _userId;
     if (uid == null || _loading) return;
     _loading = true;
@@ -95,6 +110,7 @@ class NotificationService extends ChangeNotifier with WidgetsBindingObserver {
         for (final r in rows as List)
           ?AppNotification.tryFromJson(Map<String, dynamic>.from(r as Map)),
       ];
+      _lastSuccessAt = DateTime.now();
     } catch (e) {
       // Table absente (migration non jouée) : centre vide, pas de crash.
       if (kDebugMode) debugPrint('Notifications: $e');

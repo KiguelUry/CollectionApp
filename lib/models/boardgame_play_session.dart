@@ -25,6 +25,7 @@ class BoardgamePlaySession {
   final bool winnerManuallyForced;
   /// Motif court (« militaire », « 3 planètes identiques »).
   final String? winReason;
+  final BoardgameScoreTemplate? scoreTemplate;
 
   const BoardgamePlaySession({
     required this.date,
@@ -45,6 +46,7 @@ class BoardgamePlaySession {
     this.shareId,
     this.winnerManuallyForced = false,
     this.winReason,
+    this.scoreTemplate,
   });
 
   factory BoardgamePlaySession.fromJson(Map<String, dynamic> json) {
@@ -111,6 +113,7 @@ class BoardgamePlaySession {
       winCondition: winCondition,
       confrontationType: confrontation,
       useTeams: confrontation == BoardgameConfrontationType.teams ||
+          confrontation == BoardgameConfrontationType.oneVsAll ||
           (confrontation == BoardgameConfrontationType.cooperative &&
               ((json['coop_team_count'] as num?)?.toInt() ?? 1) > 1) ||
           useTeamsFlag,
@@ -128,6 +131,7 @@ class BoardgamePlaySession {
         if (raw == null || raw.isEmpty) return null;
         return raw;
       }(),
+      scoreTemplate: BoardgameScoreTemplate.fromJson(json['score_template']),
     );
   }
 
@@ -144,7 +148,8 @@ class BoardgamePlaySession {
         'confrontation_type': confrontationType.dbValue,
         'status': status.dbValue,
         if (useTeams ||
-            confrontationType == BoardgameConfrontationType.teams)
+            confrontationType == BoardgameConfrontationType.teams ||
+            confrontationType == BoardgameConfrontationType.oneVsAll)
           'use_teams': true,
         if (coopVictory != null) 'coop_victory': coopVictory,
         if (coopTeamCount != null) 'coop_team_count': coopTeamCount,
@@ -154,6 +159,7 @@ class BoardgamePlaySession {
         if (winnerManuallyForced) 'winner_manually_forced': true,
         if (winReason != null && winReason!.trim().isNotEmpty)
           'win_reason': winReason!.trim(),
+        if (scoreTemplate != null) 'score_template': scoreTemplate!.toJson(),
       };
 
   bool get isCooperative =>
@@ -167,6 +173,7 @@ class BoardgamePlaySession {
     return scoreGrid?.autoWinnerName(
       winCondition,
       targetScore: targetScore,
+      template: scoreTemplate,
     );
   }
 
@@ -274,6 +281,8 @@ class BoardgamePlaySession {
     bool clearWinnerManuallyForced = false,
     String? winReason,
     bool clearWinReason = false,
+    BoardgameScoreTemplate? scoreTemplate,
+    bool clearScoreTemplate = false,
   }) {
     return BoardgamePlaySession(
       date: date ?? this.date,
@@ -296,6 +305,8 @@ class BoardgamePlaySession {
           ? false
           : (winnerManuallyForced ?? this.winnerManuallyForced),
       winReason: clearWinReason ? null : (winReason ?? this.winReason),
+      scoreTemplate:
+          clearScoreTemplate ? null : (scoreTemplate ?? this.scoreTemplate),
     );
   }
 

@@ -82,6 +82,9 @@ class BoardgameScoreGridEditor extends StatefulWidget {
   final BoardgameScoreGrid initialGrid;
   final bool enabled;
   final bool useTeams;
+  /// 1 contre tous : deux camps verrouillés (1 et N-1).
+  final bool oneVsAll;
+  final BoardgameScoreTemplate? template;
   final BoardgameWinCondition winCondition;
   final int? targetScore;
   final ValueChanged<bool>? onTeamsChanged;
@@ -107,6 +110,8 @@ class BoardgameScoreGridEditor extends StatefulWidget {
     required this.initialGrid,
     this.enabled = true,
     this.useTeams = false,
+    this.oneVsAll = false,
+    this.template,
     this.winCondition = BoardgameWinCondition.highest,
     this.targetScore,
     this.onTeamsChanged,
@@ -136,7 +141,6 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
   late TeamScoreMode _teamScoreMode;
   final _newPlayerController = TextEditingController();
   final _newTeamController = TextEditingController();
-  final _newDefinedTeamController = TextEditingController();
   int? _newPlayerColorIndex;
   late int _revision;
   bool _hideTotals = false;
@@ -149,24 +153,30 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
   final _gridHScroll = ScrollController();
   final _gridVScroll = ScrollController();
   bool _gridPointerDragging = false;
+  int _plannedPlayers = 4;
+  bool _teamsOpen = true;
+  final List<_TeamSeat> _plans = [];
 
   @override
   void initState() {
     super.initState();
     _initControllers(widget.initialGrid);
+    _resetPlans();
   }
 
   @override
   void didUpdateWidget(BoardgameScoreGridEditor oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Conserver équipes / couleurs en mémoire — pas de reset destructif.
+    if (oldWidget.oneVsAll != widget.oneVsAll ||
+        oldWidget.useTeams != widget.useTeams) {
+      _resetPlans();
+    }
   }
 
   @override
   void dispose() {
     _newPlayerController.dispose();
     _newTeamController.dispose();
-    _newDefinedTeamController.dispose();
     _gridHScroll.dispose();
     _gridVScroll.dispose();
     _disposeControllers();
@@ -344,6 +354,372 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     );
   }
 
+  void _resetPlans() {
+    _plans.clear();
+    if (!widget.useTeams) return;
+    final existing = <String, int>{};
+    for (final c in _teamControllers) {
+      final name = c.text.trim();
+      if (name.isEmpty) continue;
+      existing[name] = (existing[name] ?? 0) + 1;
+    }
+    if (widget.oneVsAll) {
+      final n = _playerControllers.isEmpty
+          ? 4
+          : _playerControllers.length.clamp(2, 24);
+      _plannedPlayers = n;
+      _plans.add(_TeamSeat('Seul', 1));
+      _plans.add(_TeamSeat('Les autres', n - 1));
+    } else if (existing.isNotEmpty) {
+      for (final e in existing.entries) {
+        _plans.add(_TeamSeat(e.key, e.value));
+      }
+      _plannedPlayers = existing.values.fold<int>(0, (a, b) => a + b);
+      if (_plannedPlayers < 2) _plannedPlayers = 2;
+    } else {
+      _plannedPlayers = 4;
+      _rebalance(2);
+      return;
+    }
+    _syncDefinedTeams();
+  }
+
+  void _rebalance(int teamCount) {
+    final count = widget.oneVsAll ? 2 : teamCount.clamp(1, 8);
+    final seats = widget.oneVsAll
+        ? [1, (_plannedPlayers - 1).clamp(1, 24)]
+        : _balancedSeats(_plannedPlayers, count);
+    final names = [for (final p in _plans) p.name];
+    _plans.clear();
+    for (var i = 0; i < seats.length; i++) {
+      final fallback = widget.oneVsAll
+          ? (i == 0 ? 'Seul' : 'Les autres')
+          : 'Équipe ${String.fromCharCode(65 + i)}';
+      _plans.add(_TeamSeat(i < names.length && names[i].isNotEmpty ? names[i] : fallback, seats[i]));
+    }
+    _syncDefinedTeams();
+  }
+
+  List<int> _balancedSeats(int players, int teams) {
+    final n = players < teams ? teams : players;
+    final base = n ~/ teams;
+    final extra = n % teams;
+    return [for (var i = 0; i < teams; i++) base + (i < extra ? 1 : 0)];
+  }
+
+  void _syncDefinedTeams() {
+    for (final c in _definedTeamControllers) {
+      c.dispose();
+    }
+    _definedTeamControllers = [
+      for (final p in _plans) TextEditingController(text: p.name),
+    ];
+    for (final p in _plans) {
+      _teamColorIndices.putIfAbsent(p.name, () {
+        final next = _pickNextColorIndex();
+        return next >= 0 ? next : 0;
+      });
+    }
+  }
+
+  int _filled(String team) {
+    var n = 0;
+    for (final c in _teamControllers) {
+      if (c.text.trim() == team) n++;
+    }
+    return n;
+  }
+
+  String? _firstFreeTeam() {
+    for (final p in _plans) {
+      if (_filled(p.name) < p.seats) return p.name;
+    }
+    return _plans.isEmpty ? null : _plans.first.name;
+  }
+
+  void _renamePlan(int index, String next) {
+    final name = next.trim();
+    if (name.isEmpty || index < 0 || index >= _plans.length) return;
+    final previous = _plans[index].name;
+    if (previous == name) return;
+    final color = _teamColorIndices.remove(previous);
+    _plans[index].name = name;
+    if (color != null) _teamColorIndices[name] = color;
+    for (final c in _teamControllers) {
+      if (c.text.trim() == previous) c.text = name;
+    }
+    if (index < _definedTeamControllers.length) {
+      _definedTeamControllers[index].text = name;
+    }
+    _localRefresh();
+  }
+
+  void _movePlayer(int playerIndex, String team, {bool refresh = true}) {
+    if (playerIndex < 0 || playerIndex >= _teamControllers.length) return;
+    _teamControllers[playerIndex].text = team;
+    final color = _teamColorIndices[team];
+    if (color != null) _playerColorIndices[playerIndex] = color;
+    if (refresh) _localRefresh();
+  }
+
+  void _shuffleTeams() {
+    if (_plans.isEmpty) return;
+    final seats = <String>[];
+    for (final p in _plans) {
+      for (var i = 0; i < p.seats; i++) {
+        seats.add(p.name);
+      }
+    }
+    final rng = widget.random ?? Random();
+    seats.shuffle(rng);
+    final named = <int>[];
+    for (var i = 0; i < _playerControllers.length; i++) {
+      if (_playerControllers[i].text.trim().isNotEmpty) named.add(i);
+    }
+    for (var i = 0; i < named.length && i < seats.length; i++) {
+      _movePlayer(named[i], seats[i], refresh: false);
+    }
+    _localRefresh();
+  }
+
+  void setRoundLabels(List<String> names) {
+    while (_roundLabelControllers.length < names.length) {
+      _addRound();
+    }
+    for (var i = 0; i < names.length; i++) {
+      _roundLabelControllers[i].text = names[i];
+    }
+    _localRefresh();
+  }
+
+  List<String> roundLabels() =>
+      _roundLabelControllers.map((c) => c.text.trim()).where((s) => s.isNotEmpty).toList();
+
+  Widget _buildTeamBento(ColorScheme scheme) {
+    final seatSum = _plans.fold<int>(0, (a, p) => a + p.seats);
+    final mismatch = seatSum != _plannedPlayers;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            _countBubble(
+              label: 'Nombre de joueurs',
+              value: _plannedPlayers,
+              onChanged: (n) {
+                setState(() {
+                  _plannedPlayers = n.clamp(2, 24);
+                  _rebalance(_plans.length);
+                });
+              },
+            ),
+            _countBubble(
+              label: 'Nombre d\'équipes',
+              value: _plans.length,
+              enabled: !widget.oneVsAll,
+              onChanged: (n) {
+                setState(() => _rebalance(n));
+              },
+            ),
+            if (mismatch)
+              Text(
+                '⚠️ Le nombre ne correspond pas',
+                style: TextStyle(color: scheme.error, fontWeight: FontWeight.w700),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Material(
+          color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                InkWell(
+                  onTap: () => setState(() => _teamsOpen = !_teamsOpen),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Équipes',
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: _shuffleTeams,
+                        child: const Text('Aléatoire'),
+                      ),
+                      Icon(_teamsOpen ? Icons.expand_less : Icons.expand_more),
+                    ],
+                  ),
+                ),
+                if (_teamsOpen)
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final two = constraints.maxWidth > 520;
+                      final cards = [
+                        for (var i = 0; i < _plans.length; i++) _teamCard(i, scheme),
+                      ];
+                      if (!two) {
+                        return Column(children: cards);
+                      }
+                      return Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final card in cards)
+                            SizedBox(width: (constraints.maxWidth - 8) / 2, child: card),
+                        ],
+                      );
+                    },
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _countBubble({
+    required String label,
+    required int value,
+    required ValueChanged<int> onChanged,
+    bool enabled = true,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('$label : '),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            onPressed: !enabled || value <= 1 ? null : () => onChanged(value - 1),
+            icon: const Icon(Icons.remove, size: 16),
+          ),
+          Text('$value', style: const TextStyle(fontWeight: FontWeight.w800)),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            onPressed: !enabled || value >= 24 ? null : () => onChanged(value + 1),
+            icon: const Icon(Icons.add, size: 16),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _teamCard(int index, ColorScheme scheme) {
+    final plan = _plans[index];
+    final color = _teamColorIndices[plan.name];
+    final players = <int>[];
+    for (var i = 0; i < _teamControllers.length; i++) {
+      if (_teamControllers[i].text.trim() == plan.name &&
+          _playerControllers[i].text.trim().isNotEmpty) {
+        players.add(i);
+      }
+    }
+    return Card(
+      margin: const EdgeInsets.only(top: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                InkWell(
+                  onTap: () {
+                    final next = _pickNextColorIndex();
+                    if (next < 0) return;
+                    setState(() => _applyTeamColor(plan.name, next));
+                  },
+                  child: CircleAvatar(
+                    radius: 10,
+                    backgroundColor: color == null
+                        ? scheme.surfaceContainerHighest
+                        : kBoardgameColumnPalette[color],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextFormField(
+                    key: ValueKey('team-$index-${plan.name}'),
+                    initialValue: plan.name,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      labelText: 'Équipe',
+                    ),
+                    onFieldSubmitted: (v) => _renamePlan(index, v),
+                    onTapOutside: (_) {},
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Text('${plan.name} : ${plan.seats} joueurs'),
+                const Spacer(),
+                if (!widget.oneVsAll) ...[
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    onPressed: plan.seats <= 1
+                        ? null
+                        : () => setState(() => plan.seats--),
+                    icon: const Icon(Icons.remove, size: 16),
+                  ),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => setState(() => plan.seats++),
+                    icon: const Icon(Icons.add, size: 16),
+                  ),
+                ],
+              ],
+            ),
+            Wrap(
+              spacing: 6,
+              children: [
+                for (final i in players)
+                  ActionChip(
+                    label: Text(_playerControllers[i].text.trim()),
+                    onPressed: () async {
+                      final target = await showModalBottomSheet<String>(
+                        context: context,
+                        showDragHandle: true,
+                        builder: (ctx) => SafeArea(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              for (final other in _plans)
+                                ListTile(
+                                  title: Text(other.name),
+                                  onTap: () => Navigator.pop(ctx, other.name),
+                                ),
+                            ],
+                          ),
+                        ),
+                      );
+                      if (target != null) _movePlayer(i, target);
+                    },
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _localRefresh() {
     setState(() => _revision++);
     widget.onScoresChanged?.call();
@@ -460,25 +836,6 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     _roundLabelControllers.removeAt(index).dispose();
     for (final c in _cellControllers.removeAt(index)) {
       c.dispose();
-    }
-    _localRefresh();
-  }
-
-  void _addDefinedTeam() {
-    final name = _newDefinedTeamController.text.trim();
-    if (name.isEmpty) return;
-    if (_definedTeamControllers.any((c) => c.text.trim() == name)) return;
-    _definedTeamControllers.add(TextEditingController(text: name));
-    _teamColorIndices.putIfAbsent(name, _pickNextColorIndex);
-    _newDefinedTeamController.clear();
-    _localRefresh();
-  }
-
-  void _removeDefinedTeam(int index) {
-    final removed = _definedTeamControllers.removeAt(index).text.trim();
-    _teamColorIndices.remove(removed);
-    for (final c in _teamControllers) {
-      if (c.text.trim() == removed) c.clear();
     }
     _localRefresh();
   }
@@ -795,7 +1152,6 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                     autofocus: true,
                     decoration: InputDecoration(
                       labelText: 'Nom',
-                      hintText: 'Prénom ou pseudo',
                       suffixIcon: widget.onPickPlayer == null &&
                               widget.friendChoices.isEmpty
                           ? null
@@ -989,7 +1345,10 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     if (result == null || !mounted) return;
 
     final name = result['name'] as String;
-    final team = (result['team'] as String?)?.trim();
+    var team = (result['team'] as String?)?.trim();
+    if (widget.useTeams && (team == null || team.isEmpty)) {
+      team = _firstFreeTeam();
+    }
     final color = result['color'] as int?;
 
     // Vol : libérer la couleur chez l'ancien propriétaire.
@@ -1132,6 +1491,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     final winners = grid.winningColumnIndices(
       widget.winCondition,
       targetScore: widget.targetScore,
+      template: widget.template,
     );
     final colCount = _playerControllers.length;
     final labelW = _labelColWidth();
@@ -1146,59 +1506,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
         if (widget.enabled) ...[
           // ── Configuration des équipes (si type = Équipes) ──
           if (widget.useTeams) ...[
-            Text(
-              'Configuration des équipes',
-              style: Theme.of(context).textTheme.labelLarge,
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _newDefinedTeamController,
-                    decoration: const InputDecoration(
-                      hintText: 'Nom d\'équipe',
-                    ),
-                    onSubmitted: (_) => _addDefinedTeam(),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton.filledTonal(
-                  onPressed: _addDefinedTeam,
-                  icon: const Icon(Icons.add, size: 20),
-                  tooltip: 'Ajouter équipe',
-                ),
-              ],
-            ),
-            if (_definedTeamControllers.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: List.generate(_definedTeamControllers.length, (i) {
-                  final name = _definedTeamControllers[i].text.trim();
-                  final ci = _teamColorIndices[name];
-                  return InputChip(
-                    avatar: CircleAvatar(
-                      radius: 10,
-                      backgroundColor: ci != null
-                          ? kBoardgameColumnPalette[ci]
-                          : scheme.surfaceContainerHighest,
-                    ),
-                    label: Text(name),
-                    onPressed: widget.enabled
-                        ? () {
-                            setState(() {
-                              _newTeamController.text = name;
-                              _newPlayerColorIndex = ci;
-                            });
-                          }
-                        : null,
-                    onDeleted: () => _removeDefinedTeam(i),
-                  );
-                }),
-              ),
-            ],
+            _buildTeamBento(scheme),
             const SizedBox(height: 10),
             Text(
               'Score d\'équipe',
@@ -1963,4 +2271,10 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
       }),
     ]);
   }
+}
+
+class _TeamSeat {
+  String name;
+  int seats;
+  _TeamSeat(this.name, this.seats);
 }
