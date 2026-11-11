@@ -771,6 +771,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     final state = _gridKey.currentState;
     final grid = state?.buildGrid();
     if (state == null || grid == null) return;
+    _initialGrid = grid;
     if (_winCondition != BoardgameWinCondition.customTemplate || _isCoop) {
       if (_winnerManuallyForced) {
         setState(() {
@@ -1037,8 +1038,18 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
                   _TemplateFields(
                     template: _template,
                     onChanged: (next) {
-                      setState(() => _template = next);
                       _gridKey.currentState?.setLineSpecs(next.lines);
+                      final lines =
+                          _gridKey.currentState?.lineSpecs() ?? next.lines;
+                      final grid = _gridKey.currentState?.buildGrid();
+                      setState(() {
+                        _template = BoardgameScoreTemplate(
+                          lines: lines,
+                          rules: next.rules,
+                          matchAll: next.matchAll,
+                        );
+                        if (grid != null) _initialGrid = grid;
+                      });
                     },
                   ),
                 if (_isCoop) ...[
@@ -1269,6 +1280,7 @@ class _TemplateFieldsState extends State<_TemplateFields> {
   late List<ScoreLineSpec> _lines;
   late List<ScoreRule> _rules;
   late List<TextEditingController> _values;
+  late List<TextEditingController> _cellValues;
   late bool _matchAll;
 
   @override
@@ -1280,6 +1292,12 @@ class _TemplateFieldsState extends State<_TemplateFields> {
     _values = [
       for (final rule in _rules)
         TextEditingController(text: rule.value?.toString() ?? ''),
+    ];
+    _cellValues = [
+      for (final rule in _rules)
+        TextEditingController(
+          text: (rule.cellValue ?? 1).toString(),
+        ),
     ];
   }
 
@@ -1301,6 +1319,9 @@ class _TemplateFieldsState extends State<_TemplateFields> {
     for (final controller in _values) {
       controller.dispose();
     }
+    for (final controller in _cellValues) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -1316,12 +1337,20 @@ class _TemplateFieldsState extends State<_TemplateFields> {
           for (var i = 0; i < _rules.length; i++)
             ScoreRule(
               target: _rules[i].target,
-              op: _rules[i].op,
+              op: _rules[i].countsCategories
+                  ? _comparisonOp(_rules[i].op)
+                  : _rules[i].op,
               value: _rules[i].needsValue
                   ? int.tryParse(_values[i].text.trim())
                   : null,
               lineName: _rules[i].target == ScoreRuleTarget.namedLine
                   ? _rules[i].lineName
+                  : null,
+              cellOp: _rules[i].countsCategories
+                  ? _comparisonOp(_rules[i].effectiveCellOp)
+                  : null,
+              cellValue: _rules[i].countsCategories
+                  ? int.tryParse(_cellValues[i].text.trim()) ?? 1
                   : null,
             ),
         ],
@@ -1385,14 +1414,245 @@ class _TemplateFieldsState extends State<_TemplateFields> {
         (item) => item.name == key,
         orElse: () => ScoreRuleTarget.total,
       );
+      final counts = target == ScoreRuleTarget.filledLineCount;
       rule = ScoreRule(
         target: target,
-        op: _rules[index].op,
+        op: counts ? _comparisonOp(_rules[index].op) : _rules[index].op,
         value: _rules[index].value,
+        cellOp: counts ? ScoreRuleOp.gte : null,
+        cellValue: counts ? int.tryParse(_cellValues[index].text.trim()) ?? 1 : null,
       );
+      if (counts && _cellValues[index].text.trim().isEmpty) {
+        _cellValues[index].text = '1';
+      }
     }
     setState(() => _rules[index] = rule);
     _emit();
+  }
+
+  Widget _ruleCard(int i, List<String> names, ColorScheme scheme) {
+    final rule = _rules[i];
+    final target = DropdownButtonFormField<String>(
+      key: ValueKey('target-$i-${_targetKey(rule)}-$names'),
+      initialValue: _targetKey(rule),
+      isExpanded: true,
+      decoration: const InputDecoration(
+        isDense: true,
+        labelText: 'Cible',
+      ),
+      items: [
+        const DropdownMenuItem(value: 'total', child: Text('Score total')),
+        const DropdownMenuItem(
+          value: 'anyLine',
+          child: Text('N\'importe quelle catégorie'),
+        ),
+        const DropdownMenuItem(
+          value: 'filledLineCount',
+          child: Text('Nombre de catégories'),
+        ),
+        for (final name in names)
+          DropdownMenuItem(
+            value: 'line:$name',
+            child: Text('Catégorie : $name'),
+          ),
+        if (rule.target == ScoreRuleTarget.namedLine &&
+            !names.contains(rule.lineName))
+          DropdownMenuItem(
+            value: _targetKey(rule),
+            child: Text('Catégorie : ${rule.lineName ?? ''}'),
+          ),
+      ],
+      onChanged: (key) {
+        if (key == null) return;
+        _setTarget(i, key);
+      },
+    );
+    return Card(
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: scheme.outlineVariant),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 8, 4, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(child: target),
+                IconButton(
+                  tooltip: 'Retirer',
+                  onPressed: () {
+                    setState(() {
+                      _rules.removeAt(i);
+                      _values.removeAt(i).dispose();
+                      _cellValues.removeAt(i).dispose();
+                    });
+                    _emit();
+                  },
+                  icon: const Icon(Icons.close),
+                ),
+              ],
+            ),
+            if (rule.countsCategories) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Valeur de la catégorie',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Expanded(
+                    child: _opMenu(
+                      key: 'cell-$i-${rule.effectiveCellOp.name}',
+                      value: _comparisonOp(rule.effectiveCellOp),
+                      onChanged: (op) {
+                        setState(() {
+                          _rules[i] = ScoreRule(
+                            target: rule.target,
+                            op: _comparisonOp(rule.op),
+                            value: rule.value,
+                            cellOp: op,
+                            cellValue: int.tryParse(_cellValues[i].text.trim()) ?? 1,
+                          );
+                        });
+                        _emit();
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 88,
+                    child: TextField(
+                      controller: _cellValues[i],
+                      keyboardType: TextInputType.number,
+                      textAlign: TextAlign.center,
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        labelText: 'Seuil',
+                      ),
+                      onChanged: (_) => _emit(),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Nombre de catégories',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Expanded(
+                    child: _opMenu(
+                      key: 'count-$i-${_comparisonOp(rule.op).name}',
+                      value: _comparisonOp(rule.op),
+                      onChanged: (op) {
+                        setState(() {
+                          _rules[i] = ScoreRule(
+                            target: rule.target,
+                            op: op,
+                            value: rule.value,
+                            cellOp: rule.effectiveCellOp,
+                            cellValue: int.tryParse(_cellValues[i].text.trim()) ?? 1,
+                          );
+                        });
+                        _emit();
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 88,
+                    child: TextField(
+                      controller: _values[i],
+                      keyboardType: TextInputType.number,
+                      textAlign: TextAlign.center,
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        labelText: 'Nombre',
+                      ),
+                      onChanged: (_) => _emit(),
+                    ),
+                  ),
+                ],
+              ),
+            ] else
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _opMenu(
+                        key: 'op-$i-${rule.op.name}',
+                        value: rule.op,
+                        ops: ScoreRuleOp.values,
+                        onChanged: (op) {
+                          setState(() {
+                            _rules[i] = ScoreRule(
+                              target: rule.target,
+                              op: op,
+                              value: rule.value,
+                              lineName: rule.lineName,
+                            );
+                          });
+                          _emit();
+                        },
+                      ),
+                    ),
+                    if (rule.needsValue) ...[
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: 88,
+                        child: TextField(
+                          controller: _values[i],
+                          keyboardType: TextInputType.number,
+                          textAlign: TextAlign.center,
+                          decoration: const InputDecoration(
+                            isDense: true,
+                            labelText: 'Valeur',
+                          ),
+                          onChanged: (_) => _emit(),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _opMenu({
+    required String key,
+    required ScoreRuleOp value,
+    required ValueChanged<ScoreRuleOp> onChanged,
+    List<ScoreRuleOp> ops = _comparisonOps,
+  }) {
+    return DropdownButtonFormField<ScoreRuleOp>(
+      key: ValueKey(key),
+      initialValue: value,
+      isExpanded: true,
+      decoration: const InputDecoration(
+        isDense: true,
+        labelText: 'Opérateur',
+      ),
+      items: [
+        for (final op in ops)
+          DropdownMenuItem(value: op, child: Text(opLabel(op))),
+      ],
+      onChanged: (op) {
+        if (op == null) return;
+        onChanged(op);
+      },
+    );
   }
 
   @override
@@ -1480,7 +1740,7 @@ class _TemplateFieldsState extends State<_TemplateFields> {
         for (var i = 0; i < _rules.length; i++) ...[
           if (i > 0)
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
+              padding: const EdgeInsets.symmetric(vertical: 12),
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: SegmentedButton<bool>(
@@ -1500,107 +1760,7 @@ class _TemplateFieldsState extends State<_TemplateFields> {
                 ),
               ),
             ),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              SizedBox(
-                width: 230,
-                child: DropdownButtonFormField<String>(
-                  key: ValueKey('target-$i-${_targetKey(_rules[i])}-$names'),
-                  initialValue: _targetKey(_rules[i]),
-                  isExpanded: true,
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    labelText: 'Cible',
-                  ),
-                  items: [
-                    const DropdownMenuItem(
-                      value: 'total',
-                      child: Text('Score total'),
-                    ),
-                    const DropdownMenuItem(
-                      value: 'anyLine',
-                      child: Text('N\'importe quelle catégorie'),
-                    ),
-                    const DropdownMenuItem(
-                      value: 'filledLineCount',
-                      child: Text('Nombre de catégories > 0'),
-                    ),
-                    for (final name in names)
-                      DropdownMenuItem(
-                        value: 'line:$name',
-                        child: Text('Catégorie : $name'),
-                      ),
-                    if (_rules[i].target == ScoreRuleTarget.namedLine &&
-                        !names.contains(_rules[i].lineName))
-                      DropdownMenuItem(
-                        value: _targetKey(_rules[i]),
-                        child: Text('Catégorie : ${_rules[i].lineName ?? ''}'),
-                      ),
-                  ],
-                  onChanged: (key) {
-                    if (key == null) return;
-                    _setTarget(i, key);
-                  },
-                ),
-              ),
-              SizedBox(
-                width: 160,
-                child: DropdownButtonFormField<ScoreRuleOp>(
-                  key: ValueKey('op-$i-${_rules[i].op.name}'),
-                  initialValue: _rules[i].op,
-                  isExpanded: true,
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    labelText: 'Opérateur',
-                  ),
-                  items: [
-                    for (final op in ScoreRuleOp.values)
-                      DropdownMenuItem(value: op, child: Text(opLabel(op))),
-                  ],
-                  onChanged: (op) {
-                    if (op == null) return;
-                    setState(() {
-                      _rules[i] = ScoreRule(
-                        target: _rules[i].target,
-                        op: op,
-                        value: _rules[i].value,
-                        lineName: _rules[i].lineName,
-                      );
-                    });
-                    _emit();
-                  },
-                ),
-              ),
-              if (_rules[i].needsValue)
-                SizedBox(
-                  width: 72,
-                  child: TextField(
-                    controller: _values[i],
-                    keyboardType: TextInputType.number,
-                    textAlign: TextAlign.center,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      labelText: 'Valeur',
-                    ),
-                    onChanged: (_) => _emit(),
-                  ),
-                ),
-              IconButton(
-                tooltip: 'Retirer',
-                onPressed: () {
-                  setState(() {
-                    _rules.removeAt(i);
-                    _values.removeAt(i).dispose();
-                  });
-                  _emit();
-                },
-                icon: const Icon(Icons.close),
-              ),
-            ],
-          ),
+          _ruleCard(i, names, scheme),
         ],
         Align(
           alignment: Alignment.centerLeft,
@@ -1614,6 +1774,7 @@ class _TemplateFieldsState extends State<_TemplateFields> {
                   ),
                 );
                 _values.add(TextEditingController());
+                _cellValues.add(TextEditingController(text: '1'));
               });
               _emit();
             },
@@ -1625,6 +1786,17 @@ class _TemplateFieldsState extends State<_TemplateFields> {
     );
   }
 }
+
+const _comparisonOps = <ScoreRuleOp>[
+  ScoreRuleOp.gte,
+  ScoreRuleOp.eq,
+  ScoreRuleOp.lte,
+  ScoreRuleOp.gt,
+  ScoreRuleOp.lt,
+];
+
+ScoreRuleOp _comparisonOp(ScoreRuleOp op) =>
+    _comparisonOps.contains(op) ? op : ScoreRuleOp.gte;
 
 String opLabel(ScoreRuleOp op) => switch (op) {
       ScoreRuleOp.gte => '>=',

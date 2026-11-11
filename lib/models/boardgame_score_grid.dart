@@ -675,13 +675,25 @@ class ScoreRule {
   final ScoreRuleOp op;
   final int? value;
   final String? lineName;
+  /// Pour « Nombre de catégories » : opérateur appliqué à chaque ligne.
+  final ScoreRuleOp? cellOp;
+  /// Seuil qu'une catégorie doit atteindre pour être comptée. Défaut : 1.
+  final int? cellValue;
 
   const ScoreRule({
     required this.target,
     required this.op,
     this.value,
     this.lineName,
+    this.cellOp,
+    this.cellValue,
   });
+
+  bool get countsCategories => target == ScoreRuleTarget.filledLineCount;
+
+  ScoreRuleOp get effectiveCellOp => cellOp ?? ScoreRuleOp.gte;
+
+  int get effectiveCellValue => cellValue ?? 1;
 
   bool get needsValue =>
       op != ScoreRuleOp.highest && op != ScoreRuleOp.lowest;
@@ -699,7 +711,7 @@ class ScoreRule {
   String get targetLabel => switch (target) {
         ScoreRuleTarget.total => 'Score total',
         ScoreRuleTarget.anyLine => 'N\'importe quelle catégorie',
-        ScoreRuleTarget.filledLineCount => 'Nombre de catégories > 0',
+        ScoreRuleTarget.filledLineCount => 'Nombre de catégories',
         ScoreRuleTarget.namedLine => 'Catégorie : ${lineName ?? ''}',
       };
 
@@ -708,6 +720,10 @@ class ScoreRule {
         'op': op.name,
         if (value != null) 'value': value,
         if (lineName != null && lineName!.isNotEmpty) 'line': lineName,
+        if (countsCategories) ...{
+          'cell_op': effectiveCellOp.name,
+          'cell_value': effectiveCellValue,
+        },
       };
 
   static ScoreRule? fromJson(Object? raw) {
@@ -725,11 +741,21 @@ class ScoreRule {
     final value = valueRaw is num
         ? valueRaw.round()
         : int.tryParse(valueRaw?.toString() ?? '');
+    ScoreRuleOp? cellOp;
+    for (final o in ScoreRuleOp.values) {
+      if (o.name == raw['cell_op']) cellOp = o;
+    }
+    final cellRaw = raw['cell_value'];
+    final cellValue = cellRaw is num
+        ? cellRaw.round()
+        : int.tryParse(cellRaw?.toString() ?? '');
     return ScoreRule(
       target: target,
       op: op,
       value: value,
       lineName: raw['line']?.toString(),
+      cellOp: cellOp,
+      cellValue: cellValue,
     );
   }
 }
@@ -866,9 +892,10 @@ class BoardgameScoreTemplate {
           for (var i = 0; i < grid.players.length; i++) _signedTotal(grid, i),
         ]);
       case ScoreRuleTarget.filledLineCount:
-        final mine = _filledCount(grid, index);
+        final mine = _filledCount(grid, index, rule);
         return _compare(mine, rule, [
-          for (var i = 0; i < grid.players.length; i++) _filledCount(grid, i),
+          for (var i = 0; i < grid.players.length; i++)
+            _filledCount(grid, i, rule),
         ]);
       case ScoreRuleTarget.anyLine:
         if (rule.op == ScoreRuleOp.highest || rule.op == ScoreRuleOp.lowest) {
@@ -913,7 +940,7 @@ class BoardgameScoreTemplate {
       }
     }
     if (rule.target == ScoreRuleTarget.filledLineCount && rule.needsValue) {
-      return '${rule.value} catégories > 0';
+      return '${rule.opLabel} ${rule.value} catégories (valeur ${_opLabel(rule.effectiveCellOp)} ${rule.effectiveCellValue})';
     }
     if (!rule.needsValue) return '${rule.targetLabel} ${rule.opLabel}';
     return '${rule.targetLabel} ${rule.opLabel} ${rule.value ?? ''}';
@@ -946,14 +973,29 @@ class BoardgameScoreTemplate {
     return index < totals.length ? totals[index] : 0;
   }
 
-  int _filledCount(BoardgameScoreGrid grid, int index) {
+  int _filledCount(BoardgameScoreGrid grid, int index, ScoreRule rule) {
+    final probe = ScoreRule(
+      target: ScoreRuleTarget.total,
+      op: rule.effectiveCellOp,
+      value: rule.effectiveCellValue,
+    );
     var n = 0;
     for (final round in grid.rounds) {
       final raw = index < round.scores.length ? round.scores[index] : null;
-      if (raw != null && raw > 0) n++;
+      if (raw != null && _compare(raw, probe, const [])) n++;
     }
     return n;
   }
+
+  String _opLabel(ScoreRuleOp op) => switch (op) {
+        ScoreRuleOp.gte => '>=',
+        ScoreRuleOp.eq => '=',
+        ScoreRuleOp.lte => '<=',
+        ScoreRuleOp.gt => '>',
+        ScoreRuleOp.lt => '<',
+        ScoreRuleOp.highest => 'Plus haut score',
+        ScoreRuleOp.lowest => 'Plus petit score',
+      };
 
   int? _raw(BoardgameScoreGrid grid, int round, int index) {
     if (round < 0 || round >= grid.rounds.length) return null;

@@ -158,6 +158,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
   TextEditingController? _firstPlayer;
   int? _drawHighlight;
   bool _drawingFirst = false;
+  bool _applyingSpecs = false;
   double _minColWidth = 72;
   final _gridHScroll = ScrollController();
   final _gridVScroll = ScrollController();
@@ -538,18 +539,76 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     _localRefresh();
   }
 
+  /// Aligne les lignes de la grille sur les catégories, sans toucher aux joueurs
+  /// ni aux scores des lignes conservées.
   void setLineSpecs(List<ScoreLineSpec> lines) {
-    final specs = lines.where((line) => line.name.trim().isNotEmpty).toList();
-    while (_roundLabelControllers.length < specs.length) {
-      _addRound();
+    final specs = [
+      for (final line in lines)
+        if (line.name.trim().isNotEmpty)
+          ScoreLineSpec(line.name.trim(), sign: line.sign),
+    ];
+    final oldNames = [
+      for (final controller in _roundLabelControllers) controller.text.trim(),
+    ];
+    final used = List<bool>.filled(oldNames.length, false);
+    final source = List<int?>.filled(specs.length, null);
+    for (var s = 0; s < specs.length; s++) {
+      for (var j = 0; j < oldNames.length; j++) {
+        if (!used[j] && oldNames[j] == specs[s].name) {
+          used[j] = true;
+          source[s] = j;
+          break;
+        }
+      }
     }
-    while (_roundLabelControllers.length > specs.length &&
-        _roundLabelControllers.length > 1) {
-      _removeRound(_roundLabelControllers.length - 1);
+    final unused = [
+      for (var j = 0; j < oldNames.length; j++)
+        if (!used[j]) j,
+    ];
+    final missing = [
+      for (var s = 0; s < source.length; s++)
+        if (source[s] == null) s,
+    ];
+    if (unused.length == missing.length) {
+      for (var k = 0; k < unused.length; k++) {
+        source[missing[k]] = unused[k];
+        used[unused[k]] = true;
+      }
     }
-    for (var i = 0; i < specs.length; i++) {
-      _roundLabelControllers[i].text = specs[i].name;
-      if (i < _roundMalus.length) _roundMalus[i] = specs[i].malus;
+    final labels = <TextEditingController>[];
+    final malus = <bool>[];
+    final cells = <List<TextEditingController>>[];
+    final reused = <int>{};
+    _applyingSpecs = true;
+    try {
+      for (var s = 0; s < specs.length; s++) {
+        final src = source[s];
+        if (src != null) {
+          reused.add(src);
+          final controller = _roundLabelControllers[src];
+          if (controller.text != specs[s].name) controller.text = specs[s].name;
+          labels.add(controller);
+          malus.add(specs[s].malus);
+          cells.add(_cellControllers[src]);
+        } else {
+          final width = _playerControllers.length;
+          labels.add(TextEditingController(text: specs[s].name));
+          malus.add(specs[s].malus);
+          cells.add(List.generate(width, (_) => TextEditingController()));
+        }
+      }
+      for (var j = 0; j < oldNames.length; j++) {
+        if (reused.contains(j)) continue;
+        _roundLabelControllers[j].dispose();
+        for (final cell in _cellControllers[j]) {
+          cell.dispose();
+        }
+      }
+      _roundLabelControllers = labels;
+      _roundMalus = malus;
+      _cellControllers = cells;
+    } finally {
+      _applyingSpecs = false;
     }
     _localRefresh();
   }
@@ -821,10 +880,12 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
 
   void _localRefresh() {
     setState(() => _revision++);
+    if (_applyingSpecs) return;
     widget.onScoresChanged?.call();
   }
 
   bool get _hasTableContent {
+    if (_roundLabelControllers.isNotEmpty) return true;
     if (_playerControllers.any((c) => c.text.trim().isNotEmpty)) return true;
     return _playerControllers.isNotEmpty;
   }
@@ -1500,20 +1561,17 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
   }
 
   double _labelColWidth() {
-    var maxWordW = _measureTextWidth('Joueurs', fontSize: 11);
-    var maxLines = 1;
-    for (final label in ['Équipes', 'Joueurs', 'Total', 'Score']) {
-      maxWordW = max(maxWordW, _measureTextWidth(label, fontSize: 11));
+    var width = _measureTextWidth('Joueurs', fontSize: 13);
+    for (final label in ['Équipes', 'Total', 'Score']) {
+      width = max(width, _measureTextWidth(label, fontSize: 13));
     }
-    for (final c in _roundLabelControllers) {
-      final text = c.text.trim().isEmpty ? 'Tour' : c.text.trim();
-      final words = text.split(RegExp(r'\s+'));
-      maxLines = max(maxLines, words.length);
-      for (final w in words) {
-        maxWordW = max(maxWordW, _measureTextWidth(w, fontSize: 11));
-      }
+    for (final controller in _roundLabelControllers) {
+      final text = controller.text.trim().isEmpty
+          ? 'Catégorie'
+          : controller.text.trim();
+      width = max(width, _measureTextWidth(text, fontSize: 13));
     }
-    return maxWordW.clamp(56.0, 200.0) + 16;
+    return (width + 28).clamp(96.0, 240.0);
   }
 
   Widget _multiWordLabel(String text, {TextStyle? style}) {
@@ -2288,17 +2346,18 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
         child: TextField(
           key: ValueKey('round_$row'),
           controller: _roundLabelControllers[row],
-          style: const TextStyle(fontSize: 11),
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          textAlign: TextAlign.left,
           minLines: 1,
           maxLines: 1,
           decoration: InputDecoration(
             isDense: true,
-            hintText: 'Tour ${row + 1}',
+            hintText: 'Catégorie',
             filled: true,
             fillColor: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
             contentPadding: const EdgeInsets.symmetric(
-              horizontal: 6,
+              horizontal: 4,
               vertical: 8,
             ),
           ),
