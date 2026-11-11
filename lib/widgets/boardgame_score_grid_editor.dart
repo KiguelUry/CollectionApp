@@ -91,6 +91,12 @@ class BoardgameScoreGridEditor extends StatefulWidget {
   final Future<String?> Function()? onPickPlayer;
   final bool showScoreTable;
   final List<String> suggestedPlayerNames;
+  /// Configuration au-dessus des joueurs (menus, modèle).
+  final Widget? leading;
+  /// Gagnant, motif, notes. À gauche de la grille sur grand écran.
+  final Widget? trailing;
+  /// Grille collée à droite quand la largeur le permet.
+  final bool wideLayout;
   final VoidCallback? onQuickSave;
 
   /// Amis de l'app proposés dans « Ajouter un joueur ».
@@ -118,6 +124,9 @@ class BoardgameScoreGridEditor extends StatefulWidget {
     this.onPickPlayer,
     this.showScoreTable = true,
     this.suggestedPlayerNames = const [],
+    this.leading,
+    this.trailing,
+    this.wideLayout = false,
     this.onQuickSave,
     this.friendChoices = const [],
     this.onFriendLinked,
@@ -156,6 +165,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
   int _plannedPlayers = 4;
   bool _teamsOpen = true;
   final List<_TeamSeat> _plans = [];
+  late List<bool> _roundMalus;
 
   @override
   void initState() {
@@ -167,9 +177,14 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
   @override
   void didUpdateWidget(BoardgameScoreGridEditor oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.useTeams && !widget.useTeams) {
+      _assignSoloColors();
+      return;
+    }
     if (oldWidget.oneVsAll != widget.oneVsAll ||
         oldWidget.useTeams != widget.useTeams) {
       _resetPlans();
+      if (widget.useTeams) _applyTeamColorsToPlayers();
     }
   }
 
@@ -190,6 +205,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     _roundLabelControllers = grid.rounds
         .map((r) => TextEditingController(text: r.label ?? ''))
         .toList();
+    _roundMalus = [for (final round in grid.rounds) round.malus];
     _cellControllers = grid.rounds
         .map(
           (r) => r.scores
@@ -341,6 +357,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
               ? null
               : _roundLabelControllers[r].text.trim(),
           scores: scores,
+          malus: r < _roundMalus.length && _roundMalus[r],
         ),
       );
     }
@@ -398,6 +415,45 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
       _plans.add(_TeamSeat(i < names.length && names[i].isNotEmpty ? names[i] : fallback, seats[i]));
     }
     _syncDefinedTeams();
+    final kept = {for (final plan in _plans) plan.name};
+    for (var i = 0; i < _teamControllers.length; i++) {
+      final team = _teamControllers[i].text.trim();
+      if (team.isEmpty || kept.contains(team)) {
+        final color = _teamColorIndices[team];
+        if (color != null && i < _playerColorIndices.length) {
+          _playerColorIndices[i] = color;
+        }
+        continue;
+      }
+      final next = _firstFreeTeam() ?? _plans.first.name;
+      _teamControllers[i].text = next;
+      final color = _teamColorIndices[next];
+      if (color != null && i < _playerColorIndices.length) {
+        _playerColorIndices[i] = color;
+      }
+    }
+  }
+
+  void _assignSoloColors() {
+    final used = <int>{};
+    for (var i = 0; i < _playerControllers.length; i++) {
+      var chosen = -1;
+      for (var c = 0; c < kBoardgameColumnPalette.length; c++) {
+        if (used.add(c)) {
+          chosen = c;
+          break;
+        }
+      }
+      if (chosen < 0) chosen = i % kBoardgameColumnPalette.length;
+      if (i < _playerColorIndices.length) _playerColorIndices[i] = chosen;
+    }
+  }
+
+  void _applyTeamColorsToPlayers() {
+    for (var i = 0; i < _teamControllers.length && i < _playerColorIndices.length; i++) {
+      final color = _teamColorIndices[_teamControllers[i].text.trim()];
+      if (color != null) _playerColorIndices[i] = color;
+    }
   }
 
   List<int> _balancedSeats(int players, int teams) {
@@ -482,14 +538,37 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     _localRefresh();
   }
 
-  void setRoundLabels(List<String> names) {
-    while (_roundLabelControllers.length < names.length) {
+  void setLineSpecs(List<ScoreLineSpec> lines) {
+    final specs = lines.where((line) => line.name.trim().isNotEmpty).toList();
+    while (_roundLabelControllers.length < specs.length) {
       _addRound();
     }
-    for (var i = 0; i < names.length; i++) {
-      _roundLabelControllers[i].text = names[i];
+    while (_roundLabelControllers.length > specs.length &&
+        _roundLabelControllers.length > 1) {
+      _removeRound(_roundLabelControllers.length - 1);
+    }
+    for (var i = 0; i < specs.length; i++) {
+      _roundLabelControllers[i].text = specs[i].name;
+      if (i < _roundMalus.length) _roundMalus[i] = specs[i].malus;
     }
     _localRefresh();
+  }
+
+  List<ScoreLineSpec> lineSpecs() {
+    final specs = <ScoreLineSpec>[];
+    for (var i = 0; i < _roundLabelControllers.length; i++) {
+      final name = _roundLabelControllers[i].text.trim();
+      if (name.isEmpty) continue;
+      specs.add(
+        ScoreLineSpec(
+          name,
+          sign: i < _roundMalus.length && _roundMalus[i]
+              ? ScoreLineSign.malus
+              : ScoreLineSign.bonus,
+        ),
+      );
+    }
+    return specs;
   }
 
   List<String> roundLabels() =>
@@ -524,10 +603,20 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                 setState(() => _rebalance(n));
               },
             ),
-            if (mismatch)
-              Text(
-                '⚠️ Le nombre ne correspond pas',
-                style: TextStyle(color: scheme.error, fontWeight: FontWeight.w700),
+            if (mismatch || _plans.any((plan) => _filled(plan.name) > plan.seats))
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.warning_amber_rounded, color: scheme.error, size: 20),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Le nombre ne correspond pas',
+                    style: TextStyle(
+                      color: scheme.error,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
               ),
           ],
         ),
@@ -628,8 +717,10 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
         players.add(i);
       }
     }
+    final overCapacity = players.length > plan.seats;
     return Card(
       margin: const EdgeInsets.only(top: 8),
+      color: overCapacity ? scheme.errorContainer : null,
       child: Padding(
         padding: const EdgeInsets.all(10),
         child: Column(
@@ -668,7 +759,15 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
             const SizedBox(height: 6),
             Row(
               children: [
-                Text('${plan.name} : ${plan.seats} joueurs'),
+                Text(
+                  '${plan.name} : ${plan.seats <= 1 ? '${plan.seats} joueur' : '${plan.seats} joueurs'}',
+                  style: TextStyle(
+                    color: players.length > plan.seats ? scheme.error : null,
+                    fontWeight: players.length > plan.seats
+                        ? FontWeight.w800
+                        : null,
+                  ),
+                ),
                 const Spacer(),
                 if (!widget.oneVsAll) ...[
                   IconButton(
@@ -827,6 +926,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     final n = _playerControllers.length;
     final idx = _roundLabelControllers.length;
     _roundLabelControllers.add(TextEditingController(text: 'Tour ${idx + 1}'));
+    _roundMalus.add(false);
     _cellControllers.add(List.generate(n, (_) => TextEditingController()));
     _localRefresh();
   }
@@ -834,6 +934,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
   void _removeRound(int index) {
     if (_roundLabelControllers.length <= 1) return;
     _roundLabelControllers.removeAt(index).dispose();
+    if (index < _roundMalus.length) _roundMalus.removeAt(index);
     for (final c in _cellControllers.removeAt(index)) {
       c.dispose();
     }
@@ -1500,7 +1601,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
         _teamScoreMode == TeamScoreMode.shared &&
         colCount > 0;
 
-    return Column(
+    final sheet = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (widget.enabled) ...[
@@ -1619,18 +1720,81 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
           const SizedBox(height: 8),
         ],
 
-        // ── Bloc 5 : grille de score ──
-        if (widget.showScoreTable && _hasTableContent) ...[
-          const SizedBox(height: 16),
-          Row(
+        if (!widget.wideLayout)
+          _scoreTable(
+            scheme,
+            grid,
+            sharedTeams,
+            teamTotals,
+            winners,
+            labelW,
+            colCount,
+            totals,
+          ),
+      ],
+    );
+    if (!widget.wideLayout) return sheet;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 12, 32),
             children: [
-              Expanded(
-                child: Text(
-                  'Grille de score',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
-                ),
+              if (widget.leading != null) widget.leading!,
+              sheet,
+              if (widget.trailing != null) widget.trailing!,
+            ],
+          ),
+        ),
+        const VerticalDivider(width: 1),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(12, 16, 16, 32),
+            children: [
+              _scoreTable(
+                scheme,
+                grid,
+                sharedTeams,
+                teamTotals,
+                winners,
+                labelW,
+                colCount,
+                totals,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _scoreTable(
+    ColorScheme scheme,
+    BoardgameScoreGrid grid,
+    bool sharedTeams,
+    Map<String, int> teamTotals,
+    Set<int> winners,
+    double labelW,
+    int colCount,
+    List<int> totals,
+  ) {
+    if (!widget.showScoreTable || !_hasTableContent) {
+      return const SizedBox.shrink();
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(
+                'Grille de score',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
               ),
               if (widget.enabled)
                 TextButton.icon(
@@ -1737,7 +1901,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                               final names = indices
                                   .map((i) => _playerControllers[i].text.trim())
                                   .where((n) => n.isNotEmpty)
-                                  .join(', ');
+                                  .join(' & ');
                               final ci = _teamColorIndices[team];
                               return Container(
                                 width: w,
@@ -1764,8 +1928,9 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                                       _singleLineText(
                                         names,
                                         style: TextStyle(
-                                          fontSize: 10,
-                                          color: scheme.onSurfaceVariant,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w700,
+                                          color: scheme.onSurface,
                                         ),
                                       ),
                                   ],
@@ -1922,7 +2087,6 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
               ],
             ),
           ],
-        ],
       ],
     );
   }

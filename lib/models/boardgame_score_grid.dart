@@ -139,7 +139,7 @@ class BoardgameScoreGrid {
         if (col >= round.scores.length) continue;
         final v = round.scores[col];
         if (v != null) {
-          sum += v;
+          sum += round.malus ? -v : v;
           hasAny = true;
         }
       }
@@ -637,75 +637,338 @@ enum BoardgameConfrontationType {
       };
 }
 
+enum ScoreLineSign { bonus, malus }
+
+class ScoreLineSpec {
+  final String name;
+  final ScoreLineSign sign;
+
+  const ScoreLineSpec(this.name, {this.sign = ScoreLineSign.bonus});
+
+  bool get malus => sign == ScoreLineSign.malus;
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        if (malus) 'sign': 'malus',
+      };
+
+  static ScoreLineSpec fromJson(Object? raw) {
+    if (raw is String) return ScoreLineSpec(raw.trim());
+    if (raw is Map) {
+      final name = raw['name']?.toString().trim() ?? '';
+      final malus = raw['sign']?.toString() == 'malus' || raw['malus'] == true;
+      return ScoreLineSpec(
+        name,
+        sign: malus ? ScoreLineSign.malus : ScoreLineSign.bonus,
+      );
+    }
+    return const ScoreLineSpec('');
+  }
+}
+
+enum ScoreRuleTarget { total, anyLine, filledLineCount, namedLine }
+
+enum ScoreRuleOp { gte, eq, lte, gt, lt, highest, lowest }
+
+class ScoreRule {
+  final ScoreRuleTarget target;
+  final ScoreRuleOp op;
+  final int? value;
+  final String? lineName;
+
+  const ScoreRule({
+    required this.target,
+    required this.op,
+    this.value,
+    this.lineName,
+  });
+
+  bool get needsValue =>
+      op != ScoreRuleOp.highest && op != ScoreRuleOp.lowest;
+
+  String get opLabel => switch (op) {
+        ScoreRuleOp.gte => '>=',
+        ScoreRuleOp.eq => '=',
+        ScoreRuleOp.lte => '<=',
+        ScoreRuleOp.gt => '>',
+        ScoreRuleOp.lt => '<',
+        ScoreRuleOp.highest => 'Plus haut score',
+        ScoreRuleOp.lowest => 'Plus petit score',
+      };
+
+  String get targetLabel => switch (target) {
+        ScoreRuleTarget.total => 'Score total',
+        ScoreRuleTarget.anyLine => 'N\'importe quelle catégorie',
+        ScoreRuleTarget.filledLineCount => 'Nombre de catégories > 0',
+        ScoreRuleTarget.namedLine => 'Catégorie : ${lineName ?? ''}',
+      };
+
+  Map<String, dynamic> toJson() => {
+        'target': target.name,
+        'op': op.name,
+        if (value != null) 'value': value,
+        if (lineName != null && lineName!.isNotEmpty) 'line': lineName,
+      };
+
+  static ScoreRule? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    ScoreRuleTarget? target;
+    for (final t in ScoreRuleTarget.values) {
+      if (t.name == raw['target']) target = t;
+    }
+    ScoreRuleOp? op;
+    for (final o in ScoreRuleOp.values) {
+      if (o.name == raw['op']) op = o;
+    }
+    if (target == null || op == null) return null;
+    final valueRaw = raw['value'];
+    final value = valueRaw is num
+        ? valueRaw.round()
+        : int.tryParse(valueRaw?.toString() ?? '');
+    return ScoreRule(
+      target: target,
+      op: op,
+      value: value,
+      lineName: raw['line']?.toString(),
+    );
+  }
+}
+
 /// Modèle de fin de partie enregistré sur le jeu.
 class BoardgameScoreTemplate {
-  final List<String> lineNames;
-  final int? lineAtLeast;
-  final int? distinctLines;
-  final int? totalAtLeast;
+  final List<ScoreLineSpec> lines;
+  final List<ScoreRule> rules;
+  /// Vrai = toutes les règles (ET). Faux = une seule suffit (OU).
+  final bool matchAll;
 
   const BoardgameScoreTemplate({
-    this.lineNames = const [],
-    this.lineAtLeast,
-    this.distinctLines,
-    this.totalAtLeast,
+    this.lines = const [],
+    this.rules = const [],
+    this.matchAll = false,
   });
 
   static const empty = BoardgameScoreTemplate();
 
-  bool get hasRules =>
-      lineAtLeast != null || distinctLines != null || totalAtLeast != null;
+  List<String> get lineNames => [
+        for (final line in lines)
+          if (line.name.trim().isNotEmpty) line.name.trim(),
+      ];
+
+  bool get hasRules => rules.isNotEmpty;
 
   Map<String, dynamic> toJson() => {
+        if (lines.isNotEmpty)
+          'lines': [for (final line in lines) line.toJson()],
+        if (rules.isNotEmpty) 'rules': [for (final rule in rules) rule.toJson()],
+        'match': matchAll ? 'and' : 'or',
         if (lineNames.isNotEmpty) 'line_names': lineNames,
-        if (lineAtLeast != null) 'line_at_least': lineAtLeast,
-        if (distinctLines != null) 'distinct_lines': distinctLines,
-        if (totalAtLeast != null) 'total_at_least': totalAtLeast,
       };
 
   static BoardgameScoreTemplate? fromJson(Object? raw) {
     if (raw is! Map) return null;
-    int? numOf(String key) {
-      final v = raw[key];
-      if (v is num) return v.round();
-      return int.tryParse(v?.toString() ?? '');
-    }
-
-    final names = (raw['line_names'] as List?)
-            ?.map((e) => e.toString().trim())
-            .where((s) => s.isNotEmpty)
+    final lines = (raw['lines'] as List?)
+            ?.map(ScoreLineSpec.fromJson)
+            .where((l) => l.name.isNotEmpty)
             .toList() ??
-        const <String>[];
-    final template = BoardgameScoreTemplate(
-      lineNames: names,
-      lineAtLeast: numOf('line_at_least'),
-      distinctLines: numOf('distinct_lines'),
-      totalAtLeast: numOf('total_at_least'),
+        (raw['line_names'] as List?)
+            ?.map((e) => ScoreLineSpec(e.toString().trim()))
+            .where((l) => l.name.isNotEmpty)
+            .toList() ??
+        <ScoreLineSpec>[];
+    final rules = (raw['rules'] as List?)
+            ?.map(ScoreRule.fromJson)
+            .whereType<ScoreRule>()
+            .toList() ??
+        <ScoreRule>[];
+    if (rules.isEmpty) {
+      int? numOf(String key) {
+        final v = raw[key];
+        if (v is num) return v.round();
+        return int.tryParse(v?.toString() ?? '');
+      }
+
+      final lineAt = numOf('line_at_least');
+      final distinct = numOf('distinct_lines');
+      final total = numOf('total_at_least');
+      if (lineAt != null) {
+        rules.add(
+          ScoreRule(
+            target: ScoreRuleTarget.anyLine,
+            op: ScoreRuleOp.gte,
+            value: lineAt,
+          ),
+        );
+      }
+      if (distinct != null) {
+        rules.add(
+          ScoreRule(
+            target: ScoreRuleTarget.filledLineCount,
+            op: ScoreRuleOp.gte,
+            value: distinct,
+          ),
+        );
+      }
+      if (total != null) {
+        rules.add(
+          ScoreRule(
+            target: ScoreRuleTarget.total,
+            op: ScoreRuleOp.gte,
+            value: total,
+          ),
+        );
+      }
+    }
+    if (lines.isEmpty && rules.isEmpty) return null;
+    return BoardgameScoreTemplate(
+      lines: lines,
+      rules: rules,
+      matchAll: raw['match']?.toString() == 'and',
     );
-    if (names.isEmpty && !template.hasRules) return null;
-    return template;
   }
 
   static BoardgameScoreTemplate? fromMetadata(Map<String, dynamic>? metadata) {
     return fromJson(metadata?['score_template']);
   }
 
-  /// Vrai si au moins une condition OU est remplie sur la colonne [index].
   bool columnMatches(BoardgameScoreGrid grid, int index) {
-    final values = <int>[];
+    if (!hasRules || index < 0 || index >= grid.players.length) return false;
+    final hits = rules.map((rule) => _ruleMatches(grid, index, rule));
+    if (matchAll) return hits.every((hit) => hit);
+    return hits.any((hit) => hit);
+  }
+
+  /// Résumé des règles remplies par la première colonne gagnante.
+  String? matchSummary(BoardgameScoreGrid grid) {
+    final winners = grid.winningColumnIndices(
+      BoardgameWinCondition.customTemplate,
+      template: this,
+    );
+    if (winners.isEmpty) return null;
+    final joiner = matchAll ? ' ET ' : ' OU ';
+    final parts = <String>[];
+    for (final index in winners) {
+      final labels = <String>[];
+      for (final rule in rules) {
+        if (!_ruleMatches(grid, index, rule)) continue;
+        labels.add(_rulePhrase(grid, index, rule));
+      }
+      if (labels.isNotEmpty) parts.add(labels.join(joiner));
+    }
+    if (parts.isEmpty) return null;
+    return parts.join(' · ');
+  }
+
+  bool _ruleMatches(BoardgameScoreGrid grid, int index, ScoreRule rule) {
+    switch (rule.target) {
+      case ScoreRuleTarget.total:
+        final mine = _signedTotal(grid, index);
+        return _compare(mine, rule, [
+          for (var i = 0; i < grid.players.length; i++) _signedTotal(grid, i),
+        ]);
+      case ScoreRuleTarget.filledLineCount:
+        final mine = _filledCount(grid, index);
+        return _compare(mine, rule, [
+          for (var i = 0; i < grid.players.length; i++) _filledCount(grid, i),
+        ]);
+      case ScoreRuleTarget.anyLine:
+        if (rule.op == ScoreRuleOp.highest || rule.op == ScoreRuleOp.lowest) {
+          for (var r = 0; r < grid.rounds.length; r++) {
+            final mine = _raw(grid, r, index);
+            if (mine == null) continue;
+            final values = [
+              for (var i = 0; i < grid.players.length; i++) _raw(grid, r, i),
+            ];
+            if (_isExtreme(mine, rule.op, values)) return true;
+          }
+          return false;
+        }
+        for (var r = 0; r < grid.rounds.length; r++) {
+          final mine = _raw(grid, r, index);
+          if (mine != null && _compare(mine, rule, const [])) {
+            return true;
+          }
+        }
+        return false;
+      case ScoreRuleTarget.namedLine:
+        final round = _roundIndex(grid, rule.lineName);
+        if (round < 0) return false;
+        final mine = _raw(grid, round, index);
+        if (mine == null && rule.needsValue) return false;
+        final values = [
+          for (var i = 0; i < grid.players.length; i++) _raw(grid, round, i),
+        ];
+        return _compare(mine ?? 0, rule, values.whereType<int>().toList());
+    }
+  }
+
+  String _rulePhrase(BoardgameScoreGrid grid, int index, ScoreRule rule) {
+    if (rule.target == ScoreRuleTarget.anyLine && rule.needsValue) {
+      for (var r = 0; r < grid.rounds.length; r++) {
+        final mine = _raw(grid, r, index);
+        if (mine != null && _compare(mine, rule, const [])) {
+          final name = grid.rounds[r].label?.trim();
+          final label = name == null || name.isEmpty ? 'Catégorie' : name;
+          return '$label ${rule.opLabel} ${rule.value}';
+        }
+      }
+    }
+    if (rule.target == ScoreRuleTarget.filledLineCount && rule.needsValue) {
+      return '${rule.value} catégories > 0';
+    }
+    if (!rule.needsValue) return '${rule.targetLabel} ${rule.opLabel}';
+    return '${rule.targetLabel} ${rule.opLabel} ${rule.value ?? ''}';
+  }
+
+  bool _compare(int mine, ScoreRule rule, List<int> peers) {
+    final value = rule.value ?? 0;
+    return switch (rule.op) {
+      ScoreRuleOp.gte => mine >= value,
+      ScoreRuleOp.eq => mine == value,
+      ScoreRuleOp.lte => mine <= value,
+      ScoreRuleOp.gt => mine > value,
+      ScoreRuleOp.lt => mine < value,
+      ScoreRuleOp.highest => peers.isNotEmpty && mine >= peers.reduce((a, b) => a >= b ? a : b),
+      ScoreRuleOp.lowest => peers.isNotEmpty && mine <= peers.reduce((a, b) => a <= b ? a : b),
+    };
+  }
+
+  bool _isExtreme(int mine, ScoreRuleOp op, List<int?> values) {
+    final nums = values.whereType<int>().toList();
+    if (nums.isEmpty) return false;
+    if (op == ScoreRuleOp.highest) {
+      return mine >= nums.reduce((a, b) => a >= b ? a : b);
+    }
+    return mine <= nums.reduce((a, b) => a <= b ? a : b);
+  }
+
+  int _signedTotal(BoardgameScoreGrid grid, int index) {
+    final totals = grid.columnTotals();
+    return index < totals.length ? totals[index] : 0;
+  }
+
+  int _filledCount(BoardgameScoreGrid grid, int index) {
+    var n = 0;
     for (final round in grid.rounds) {
       final raw = index < round.scores.length ? round.scores[index] : null;
-      values.add(raw ?? 0);
+      if (raw != null && raw > 0) n++;
     }
-    final line = lineAtLeast != null && values.any((n) => n >= lineAtLeast!);
-    final distinct = distinctLines != null &&
-        values.where((n) => n >= 1).length >= distinctLines!;
-    final total = totalAtLeast != null &&
-        values.fold<int>(0, (a, b) => a + b) >= totalAtLeast!;
-    if (!hasRules) return false;
-    return (lineAtLeast != null && line) ||
-        (distinctLines != null && distinct) ||
-        (totalAtLeast != null && total);
+    return n;
+  }
+
+  int? _raw(BoardgameScoreGrid grid, int round, int index) {
+    if (round < 0 || round >= grid.rounds.length) return null;
+    final scores = grid.rounds[round].scores;
+    if (index < 0 || index >= scores.length) return null;
+    return scores[index];
+  }
+
+  int _roundIndex(BoardgameScoreGrid grid, String? name) {
+    final wanted = name?.trim() ?? '';
+    if (wanted.isEmpty) return -1;
+    for (var i = 0; i < grid.rounds.length; i++) {
+      if ((grid.rounds[i].label ?? '').trim() == wanted) return i;
+    }
+    return -1;
   }
 }
 
@@ -806,8 +1069,14 @@ enum BoardgamePlayStatus {
 class BoardgameScoreRound {
   final String? label;
   final List<int?> scores;
+  /// Malus : la valeur saisie est soustraite du total.
+  final bool malus;
 
-  const BoardgameScoreRound({this.label, required this.scores});
+  const BoardgameScoreRound({
+    this.label,
+    required this.scores,
+    this.malus = false,
+  });
 
   factory BoardgameScoreRound.fromJson(Map<String, dynamic> json) {
     final scores = (json['scores'] as List?)
@@ -817,18 +1086,25 @@ class BoardgameScoreRound {
     return BoardgameScoreRound(
       label: json['label'] as String?,
       scores: scores,
+      malus: json['malus'] == true || json['sign']?.toString() == 'malus',
     );
   }
 
   Map<String, dynamic> toJson() => {
         if (label != null && label!.trim().isNotEmpty) 'label': label!.trim(),
         'scores': scores,
+        if (malus) 'malus': true,
       };
 
-  BoardgameScoreRound copyWith({String? label, List<int?>? scores}) {
+  BoardgameScoreRound copyWith({
+    String? label,
+    List<int?>? scores,
+    bool? malus,
+  }) {
     return BoardgameScoreRound(
       label: label ?? this.label,
       scores: scores ?? this.scores,
+      malus: malus ?? this.malus,
     );
   }
 }
