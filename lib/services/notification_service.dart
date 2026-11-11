@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/app_notification.dart';
@@ -13,7 +14,7 @@ import 'play_share_service.dart';
 import 'profile_cache_service.dart';
 
 /// Centre de notifications (table `app_notifications`).
-class NotificationService extends ChangeNotifier {
+class NotificationService extends ChangeNotifier with WidgetsBindingObserver {
   NotificationService._();
   static final instance = NotificationService._();
 
@@ -29,6 +30,8 @@ class NotificationService extends ChangeNotifier {
   bool _loading = false;
   Timer? _poll;
   int _listeners = 0;
+  bool _observing = false;
+  bool _hidden = false;
 
   List<AppNotification> get notifications => List.unmodifiable(_items);
   List<NotificationRow> get rows => groupNotifications(_items);
@@ -38,9 +41,13 @@ class NotificationService extends ChangeNotifier {
   /// Démarre le rafraîchissement périodique (cloche visible).
   void attach() {
     _listeners++;
-    if (_listeners == 1) {
+    if (!_observing) {
+      WidgetsBinding.instance.addObserver(this);
+      _observing = true;
+    }
+    if (_listeners == 1 && !_hidden) {
       unawaited(refresh());
-      _poll = Timer.periodic(_pollInterval, (_) => refresh());
+      _startPoll();
     }
   }
 
@@ -52,7 +59,28 @@ class NotificationService extends ChangeNotifier {
     }
   }
 
+  void _startPoll() {
+    _poll?.cancel();
+    _poll = Timer.periodic(_pollInterval, (_) => refresh());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final hidden = state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached;
+    if (hidden == _hidden) return;
+    _hidden = hidden;
+    _poll?.cancel();
+    _poll = null;
+    if (!_hidden && _listeners > 0) {
+      unawaited(refresh());
+      _startPoll();
+    }
+  }
+
   Future<void> refresh() async {
+    if (_hidden) return;
     final uid = _userId;
     if (uid == null || _loading) return;
     _loading = true;

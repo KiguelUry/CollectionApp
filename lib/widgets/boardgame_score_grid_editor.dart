@@ -1602,14 +1602,14 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                 TextButton.icon(
                   onPressed: _addRound,
                   icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Ligne · Ajouter'),
+                  label: const Text('Tour · Ajouter'),
                 ),
                 if (_roundLabelControllers.length > 1)
                   TextButton.icon(
                     onPressed: () =>
                         _removeRound(_roundLabelControllers.length - 1),
                     icon: const Icon(Icons.remove, size: 18),
-                    label: const Text('Ligne · Retirer'),
+                    label: const Text('Tour · Retirer'),
                   ),
               ],
             ),
@@ -1635,7 +1635,6 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     final roundCount = _roundLabelControllers.length;
     final roundW = _minColWidth;
     final playerLabelW = (labelW + 24).clamp(96.0, 140.0);
-    final maxH = (MediaQuery.sizeOf(context).height * 0.42).clamp(220.0, 420.0);
 
     Widget table = Container(
       decoration: BoxDecoration(
@@ -1698,42 +1697,32 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
       ),
     );
 
-    return SizedBox(
-      height: maxH,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
       child: Scrollbar(
-        controller: _gridVScroll,
-        thumbVisibility: true,
+        controller: _gridHScroll,
         child: SingleChildScrollView(
-          controller: _gridVScroll,
+          controller: _gridHScroll,
+          scrollDirection: Axis.horizontal,
           keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
-          child: Scrollbar(
-            controller: _gridHScroll,
-            thumbVisibility: true,
-            notificationPredicate: (n) => n.depth == 0,
-            child: SingleChildScrollView(
-              controller: _gridHScroll,
-              scrollDirection: Axis.horizontal,
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  table,
-                  if (widget.enabled)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 4),
-                      child: IconButton(
-                        onPressed: () =>
-                            setState(() => _hideTotals = !_hideTotals),
-                        icon: Icon(
-                          _hideTotals
-                              ? Icons.visibility_off_outlined
-                              : Icons.visibility_outlined,
-                        ),
-                      ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              table,
+              if (widget.enabled)
+                Padding(
+                  padding: const EdgeInsets.only(left: 4),
+                  child: IconButton(
+                    onPressed: () =>
+                        setState(() => _hideTotals = !_hideTotals),
+                    icon: Icon(
+                      _hideTotals
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
                     ),
-                ],
-              ),
-            ),
+                  ),
+                ),
+            ],
           ),
         ),
       ),

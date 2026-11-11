@@ -11,14 +11,15 @@ import '../models/category_metadata.dart';
 import '../models/media_format_ui.dart';
 import '../services/boardgame_collection_preferences.dart';
 import '../services/collection_display_preferences.dart';
+import '../services/bgg_catalog_cache.dart';
 import '../services/bgg_service.dart';
+import '../services/inventory_service.dart';
 import '../coordinators/book_item_add_coordinator.dart';
 import '../services/book_catalog_service.dart';
 import '../services/card_catalog_service.dart';
 import '../services/media_catalog_service.dart';
 import '../services/profile_service.dart';
 import '../utils/boardgame_expansion_flow.dart';
-import '../utils/boardgame_expansion_reconcile.dart';
 import '../utils/boardgame_collection_visibility.dart';
 import '../utils/boardgame_display.dart';
 import '../utils/collection_item_filters.dart';
@@ -26,7 +27,6 @@ import '../utils/owned_quantity_index.dart';
 import '../services/owned_catalog_index.dart';
 import '../utils/debounced_runner.dart';
 import '../utils/holder_filter.dart';
-import '../utils/supabase_embeds.dart';
 import '../utils/whereabouts_persistence.dart';
 import '../utils/wishlist_promote.dart';
 import '../services/global_play_history_service.dart';
@@ -63,7 +63,6 @@ import '../widgets/watch_quick_search_sheet.dart';
 import '../services/collection_local_cache.dart';
 import '../services/offline_mode.dart';
 import '../services/supabase_capacity.dart';
-import '../services/supabase_read_cache.dart';
 import '../widgets/offline_banner.dart';
 import '../utils/catalog_hit_metadata.dart';
 import '../widgets/catalog_search_sheet.dart';
@@ -121,7 +120,6 @@ class _HomeScreenState extends State<HomeScreen>
   bool _itemsLoading = true;
   int _enrichGeneration = 0;
   List<CollectionItem>? _enrichedItems;
-  bool _expansionReconcileDone = false;
   CollectionViewMode _viewMode = CollectionViewMode.grid;
   bool _mediaGroupByArtist = false;
   List<StorageLocation> _locations = [];
@@ -184,7 +182,6 @@ class _HomeScreenState extends State<HomeScreen>
     }
     if (widget.category == CollectionCategory.boardgame) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _maybeReconcileExpansions();
         unawaited(_loadBoardgameDisplayPrefs());
         BggCategoryImportPrompt.maybeShow(context);
       });
@@ -212,15 +209,6 @@ class _HomeScreenState extends State<HomeScreen>
       _showOwnedExpansions =
           BoardgameCollectionPreferences.instance.showOwnedExpansions;
     });
-  }
-
-  Future<void> _maybeReconcileExpansions() async {
-    if (_expansionReconcileDone || !mounted) return;
-    _expansionReconcileDone = true;
-    // Réparation BGG / extensions en silence (pas de SnackBar).
-    final result = await repairAndReconcileBoardgameExpansions();
-    if (!mounted || !result.changed) return;
-    await _reloadItemsFromDb();
   }
 
   List<Map<String, dynamic>> _filterAndScopeRows(
@@ -303,20 +291,10 @@ class _HomeScreenState extends State<HomeScreen>
 
   Future<void> _reloadItemsFromDb({bool force = false}) async {
     try {
-      final cacheKey =
-          'collection_items_cat:${widget.category.dbValue}:$_userId';
-      final rows =
-          await SupabaseReadCache.getOrFetch<List<Map<String, dynamic>>>(
-        key: cacheKey,
-        force: force,
-        loader: () async {
-          final data = await Supabase.instance.client
-              .from('collection_items')
-              .select(SupabaseEmbeds.collectionItemList)
-              .eq('category', widget.category.dbValue);
-          return List<Map<String, dynamic>>.from(data as List);
-        },
-      );
+      final all = await InventoryService().fetchRows(force: force);
+      final rows = all
+          .where((r) => r['category']?.toString() == widget.category.dbValue)
+          .toList();
       if (!mounted) return;
       _syncedFromDb = true;
       final scoped = _filterAndScopeRows(rows);
@@ -404,37 +382,37 @@ class _HomeScreenState extends State<HomeScreen>
               parseBggAvgRating(i.metadata?['bgg_avg_rating']) == null &&
               (i.metadata?['bgg_id']?.toString().isNotEmpty ?? false),
         )
-        .take(20)
         .toList();
     if (missing.isEmpty) return;
 
     _bggRatingEnrichInFlight = true;
     try {
+      final ids = [
+        for (final item in missing) item.metadata!['bgg_id'].toString(),
+      ];
+      final cached = await BggCatalogCache.instance.readManyFresh(
+        ids,
+        BggCacheKind.details,
+      );
       var changed = false;
       for (final item in missing) {
         final bggId = item.metadata!['bgg_id'].toString();
-        final details = await BggService.getGameFullDetails(bggId);
-        if (details == null) continue;
-
+        final raw = cached[bggId];
+        if (raw is! Map) continue;
+        final rating = parseBggAvgRating(raw['bgg_avg_rating']);
+        if (rating == null) continue;
         final meta = Map<String, dynamic>.from(item.metadata ?? {});
-        var itemDirty = false;
-        for (final key in [
-          'bgg_avg_rating',
-          'bgg_short_description',
-          'bgg_best_players',
-          'bgg_gallery_urls',
-        ]) {
-          final v = details[key];
-          if (v == null || meta[key] == v) continue;
-          meta[key] = v;
-          itemDirty = true;
+        if (parseBggAvgRating(meta['bgg_avg_rating']) != null) continue;
+        meta['bgg_avg_rating'] = rating;
+        try {
+          await Supabase.instance.client
+              .from('collection_items')
+              .update({'metadata': meta})
+              .eq('id', item.id);
+        } catch (_) {
+          continue;
         }
-        if (!itemDirty) continue;
-
-        await Supabase.instance.client
-            .from('collection_items')
-            .update({'metadata': meta})
-            .eq('id', item.id);
+        InventoryService.patchRow(item.id, (row) => row['metadata'] = meta);
         changed = true;
         if (_enrichedItems != null) {
           final idx = _enrichedItems!.indexWhere((i) => i.id == item.id);

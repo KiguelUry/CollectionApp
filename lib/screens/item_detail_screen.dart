@@ -23,6 +23,8 @@ import '../utils/supabase_embeds.dart';
 import '../services/item_group_service.dart';
 import '../services/loan_service.dart';
 import '../services/collection_refresh.dart';
+import '../services/inventory_service.dart';
+import '../utils/boardgame_expansion_reconcile.dart';
 import '../widgets/app_app_bar.dart';
 import '../widgets/loan_item_dialog.dart';
 import '../widgets/collection_cover_image.dart';
@@ -295,6 +297,9 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       _bggDescriptionLoading = false;
     });
     await _persistBggExtrasToMetadata(details);
+    if (details != null && !widget.readOnly) {
+      await reconcileOpenedBoardgame(item: _item, details: details);
+    }
   }
 
   Future<void> _persistBggExtrasToMetadata(
@@ -327,7 +332,8 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
           .from('collection_items')
           .update({'metadata': meta})
           .eq('id', _item.id);
-      CollectionRefresh.instance.bump();
+      InventoryService.patchRow(_item.id, (row) => row['metadata'] = meta);
+      CollectionRefresh.instance.touch();
     } catch (_) {}
   }
 

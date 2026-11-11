@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../utils/holder_label_utils.dart';
+import 'profile_service.dart';
 
 /// Préfixe grammatical affiché pour un lieu.
 enum PlacePrefix {
@@ -247,11 +248,14 @@ class HouseholdService extends ChangeNotifier {
       final uid = client.auth.currentUser?.id;
       if (uid != null) {
         try {
-          final row = await client
-              .from('profiles')
-              .select('household_aliases, username')
-              .eq('id', uid)
-              .maybeSingle();
+          final cached = await ProfileService().cachedProfileRow(uid);
+          final row = cached != null && cached.containsKey('household_aliases')
+              ? cached
+              : await client
+                  .from('profiles')
+                  .select('household_aliases, username')
+                  .eq('id', uid)
+                  .maybeSingle();
           final remote = row?['household_aliases'];
           if (remote is List && remote.isNotEmpty) {
             return remote.map((e) => e.toString()).toList();
@@ -300,6 +304,10 @@ class HouseholdService extends ChangeNotifier {
       final client = Supabase.instance.client;
       final uid = client.auth.currentUser?.id;
       if (uid == null) return null;
+      final cached = await ProfileService().cachedProfileRow(uid);
+      if (cached != null && cached.containsKey('households')) {
+        return _parseList(cached['households']);
+      }
       final row = await client
           .from('profiles')
           .select('households')
@@ -316,6 +324,7 @@ class HouseholdService extends ChangeNotifier {
       final client = Supabase.instance.client;
       final uid = client.auth.currentUser?.id;
       if (uid == null) return;
+      ProfileService.invalidateCachedProfile(uid);
       await client.from('profiles').update({
         'households': homes.map((h) => h.toJson()).toList(),
       }).eq('id', uid);

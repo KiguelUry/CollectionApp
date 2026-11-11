@@ -165,7 +165,9 @@ class BoardgameScoreGrid {
     BoardgameWinCondition condition, {
     int? targetScore,
   }) {
-    if (condition == BoardgameWinCondition.cooperative || !hasScores) {
+    if (condition == BoardgameWinCondition.cooperative ||
+        condition == BoardgameWinCondition.noScore ||
+        !hasScores) {
       return {};
     }
     if (condition == BoardgameWinCondition.exactTarget) {
@@ -290,7 +292,10 @@ class BoardgameScoreGrid {
     BoardgameWinCondition condition, {
     int? targetScore,
   }) {
-    if (condition == BoardgameWinCondition.cooperative) return [];
+    if (condition == BoardgameWinCondition.cooperative ||
+        condition == BoardgameWinCondition.noScore) {
+      return [];
+    }
     if (condition == BoardgameWinCondition.exactTarget ||
         (hasTeams && hasScores && condition != BoardgameWinCondition.exactTarget)) {
       // Teams + exact handled via winningColumnIndices.
@@ -341,6 +346,7 @@ class BoardgameScoreGrid {
   /// Indices des colonnes en dernière place (ex-aequo inclus).
   Set<int> lastPlaceColumnIndices(BoardgameWinCondition condition) {
     if (condition == BoardgameWinCondition.cooperative ||
+        condition == BoardgameWinCondition.noScore ||
         condition == BoardgameWinCondition.exactTarget ||
         !hasScores) {
       return {};
@@ -554,6 +560,8 @@ enum BoardgameWinCondition {
   highest,
   lowest,
   exactTarget,
+  /// Pas de grille : le gagnant est choisi, avec un motif libre.
+  noScore,
   /// Legacy — préférer [BoardgameConfrontationType.cooperative].
   cooperative;
 
@@ -561,6 +569,7 @@ enum BoardgameWinCondition {
         BoardgameWinCondition.highest => 'Plus haut score',
         BoardgameWinCondition.lowest => 'Plus bas score',
         BoardgameWinCondition.exactTarget => 'Score exact',
+        BoardgameWinCondition.noScore => 'Sans score',
         BoardgameWinCondition.cooperative => 'Mode coopératif',
       };
 
@@ -568,6 +577,7 @@ enum BoardgameWinCondition {
         BoardgameWinCondition.highest => 'Max',
         BoardgameWinCondition.lowest => 'Min',
         BoardgameWinCondition.exactTarget => 'Exact',
+        BoardgameWinCondition.noScore => 'Sans',
         BoardgameWinCondition.cooperative => 'Coop',
       };
 
@@ -576,12 +586,14 @@ enum BoardgameWinCondition {
         BoardgameWinCondition.highest,
         BoardgameWinCondition.lowest,
         BoardgameWinCondition.exactTarget,
+        BoardgameWinCondition.noScore,
       ];
 
   static BoardgameWinCondition fromJson(String? raw) {
     return switch (raw) {
       'lowest' => BoardgameWinCondition.lowest,
       'exact' || 'exact_target' => BoardgameWinCondition.exactTarget,
+      'no_score' || 'unscored' => BoardgameWinCondition.noScore,
       'cooperative' => BoardgameWinCondition.cooperative,
       _ => BoardgameWinCondition.highest,
     };
@@ -591,6 +603,7 @@ enum BoardgameWinCondition {
         BoardgameWinCondition.highest => 'highest',
         BoardgameWinCondition.lowest => 'lowest',
         BoardgameWinCondition.exactTarget => 'exact_target',
+        BoardgameWinCondition.noScore => 'no_score',
         BoardgameWinCondition.cooperative => 'cooperative',
       };
 }

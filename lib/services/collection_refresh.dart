@@ -10,6 +10,9 @@ class CollectionRefresh extends ChangeNotifier {
   CollectionRefresh._();
   static final instance = CollectionRefresh._();
 
+  /// Préviens les écrans sans vider le cache inventaire (patch mémoire déjà fait).
+  void touch() => notifyListeners();
+
   void bump() {
     InventoryService.invalidateCache();
     BookSeriesService.invalidateSeriesCache();

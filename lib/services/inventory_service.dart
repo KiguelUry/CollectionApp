@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_item.dart';
 import '../utils/collection_grid_grouper.dart';
 import '../utils/collection_item_scope.dart';
+import '../utils/supabase_embeds.dart';
 
 /// Source unique de lecture `collection_items` (hub, drawer, prêts, social…).
 ///
@@ -13,18 +14,28 @@ import '../utils/collection_item_scope.dart';
 class InventoryService {
   final _client = Supabase.instance.client;
 
-  /// Colonnes hub + metadata + label lieu (1 GET, pas de select=metadata séparé).
+  /// Une lecture pour le hub et les grilles de catégorie.
+  ///
+  /// Colonnes explicites (pas de `*`) : tout ce que [CollectionItem.fromJson]
+  /// lit, plus les jointures déjà utilisées par les listes
+  /// (`locations`, `groups`, détenteur, auteur, emprunteur).
   static const hubSelect =
       'id, title, quantity, category, subcategory, is_wishlist, is_sold, '
-      'is_for_sale, is_expansion, parent_game_id, added_by, group_id, '
+      'is_for_sale, is_read, is_expansion, parent_game_id, added_by, group_id, '
       'location_id, location_user_id, loaned_to_id, loaned_to_name, loaned_at, '
       'image_url, metadata, games_played, purchase_price, min_players, '
-      'max_players, playing_time, rating, series_id, volume_id, created_at, '
-      'locations(label)';
+      'max_players, playing_time, rating, review, condition, personal_rules, '
+      'series_id, volume_id, created_at, '
+      '${SupabaseEmbeds.locationsLabel}, '
+      '${SupabaseEmbeds.groupsName}, '
+      'location_holder:${SupabaseEmbeds.locationHolderProfile}, '
+      'added_by_profile:${SupabaseEmbeds.addedByProfileUsername}, '
+      'loaned_to:${SupabaseEmbeds.loanedToProfile}';
 
   static const _ttl = Duration(minutes: 10);
 
   static List<CollectionItem>? _cache;
+  static List<Map<String, dynamic>>? _rawCache;
   static DateTime? _cacheAt;
   static String? _cacheUserId;
   static Future<List<CollectionItem>>? _inFlight;
@@ -32,14 +43,40 @@ class InventoryService {
   /// Invalide le cache (après vente / rendu prêt / mutation structurelle).
   static void invalidateCache() {
     _cache = null;
+    _rawCache = null;
     _cacheAt = null;
     _cacheUserId = null;
     _inFlight = null;
   }
 
+  /// Met à jour une ligne déjà en cache, sans nouveau SELECT.
+  static void patchRow(String id, void Function(Map<String, dynamic> row) edit) {
+    final rows = _rawCache;
+    if (rows == null) return;
+    for (final row in rows) {
+      if (row['id']?.toString() == id) {
+        edit(row);
+        break;
+      }
+    }
+    _cache = [
+      for (final row in rows)
+        CollectionItem.fromJson(Map<String, dynamic>.from(row)),
+    ];
+  }
+
   /// Tous les objets perso + groupes (1 requête collection_items).
   Future<List<CollectionItem>> fetchOwnedItems({bool force = false}) =>
       _fetchAll(force: force);
+
+  /// Même lecture, en maps, pour les grilles qui filtrent par catégorie.
+  Future<List<Map<String, dynamic>>> fetchRows({bool force = false}) async {
+    await _fetchAll(force: force);
+    return [
+      for (final row in _rawCache ?? const <Map<String, dynamic>>[])
+        Map<String, dynamic>.from(row),
+    ];
+  }
 
   Future<List<CollectionItem>> _fetchAll({bool force = false}) async {
     final userId = CollectionItemScope.currentUserId;
@@ -72,15 +109,18 @@ class InventoryService {
           .or(filter);
 
       final seen = <String>{};
+      final raw = <Map<String, dynamic>>[];
       final items = <CollectionItem>[];
       for (final row in rows as List) {
         try {
           final map = Map<String, dynamic>.from(row as Map);
           final id = map['id']?.toString() ?? '';
           if (id.isNotEmpty && !seen.add(id)) continue;
+          raw.add(map);
           items.add(CollectionItem.fromJson(map));
         } catch (_) {}
       }
+      _rawCache = raw;
       _cache = items;
       _cacheAt = DateTime.now();
       _cacheUserId = userId;

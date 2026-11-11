@@ -543,7 +543,10 @@ class BoardgameRankingStats {
     int? targetScore,
   }) {
     if (sessionScores.isEmpty) return {};
-    if (condition == BoardgameWinCondition.cooperative) return {};
+    if (condition == BoardgameWinCondition.cooperative ||
+        condition == BoardgameWinCondition.noScore) {
+      return {};
+    }
 
     final sorted = sessionScores.entries.toList();
     if (condition == BoardgameWinCondition.exactTarget) {

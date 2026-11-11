@@ -5,6 +5,7 @@ import '../models/collection_item.dart';
 import '../services/bgg_service.dart';
 import '../services/boardgame_expansion_service.dart';
 import '../services/collection_refresh.dart';
+import '../services/inventory_service.dart';
 import 'boardgame_expansion_flow.dart';
 import 'boardgame_expansions.dart';
 
@@ -80,12 +81,14 @@ Future<bool> _normalizeAsBase(SupabaseClient client, CollectionItem item) async 
 
 Future<bool> _refreshExpansionMetadataFromBgg(
   SupabaseClient client,
-  CollectionItem item,
-) async {
+  CollectionItem item, {
+  Map<String, dynamic>? knownDetails,
+}) async {
   final bggId = _itemBggId(item);
   if (bggId == null) return false;
 
-  final details = await BggService.getGameFullDetails(bggId);
+  final details =
+      knownDetails ?? await BggService.getGameFullDetails(bggId);
   if (details == null) return false;
 
   final link = boardgameExpansionLinkFromDetails(details);
@@ -138,8 +141,31 @@ Future<bool> _refreshExpansionMetadataFromBgg(
         .from('collection_items')
         .update({'metadata': meta})
         .eq('id', item.id);
+    InventoryService.patchRow(item.id, (row) {
+      row['metadata'] = meta;
+      if (link.isExpansion) {
+        row['is_expansion'] = true;
+      } else if (item.isExpansion || item.parentGameId != null) {
+        row['is_expansion'] = false;
+        row['parent_game_id'] = null;
+      }
+    });
+    CollectionRefresh.instance.touch();
   }
   return changed;
+}
+
+/// À l'ouverture d'une fiche : rattache l'extension avec les détails BGG
+/// déjà chargés, sans relire toute la collection.
+Future<void> reconcileOpenedBoardgame({
+  required CollectionItem item,
+  required Map<String, dynamic> details,
+}) async {
+  await _refreshExpansionMetadataFromBgg(
+    Supabase.instance.client,
+    item,
+    knownDetails: details,
+  );
 }
 
 bool _sessionReconcileDone = false;

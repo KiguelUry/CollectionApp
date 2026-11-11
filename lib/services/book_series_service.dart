@@ -270,13 +270,40 @@ class BookSeriesService {
     SupabaseReadCache.invalidate('book_collection_bundle:');
   }
 
+  static Future<
+      ({
+        List<BookSeries> series,
+        Map<String, List<BookVolume>> volumesBySeries,
+        Map<String, List<CollectionItem>> itemsBySeries,
+      })>? _bundleFlight;
+
   /// Charge séries + volumes + items en 3 requêtes (plus de N+1).
+  ///
+  /// Collection et wishlist partagent le même appel tant qu'il est en cours,
+  /// même si un invalidation vide le cache générique entre-temps.
   Future<
       ({
         List<BookSeries> series,
         Map<String, List<BookVolume>> volumesBySeries,
         Map<String, List<CollectionItem>> itemsBySeries,
-      })> fetchCollectionBundle({bool force = false}) async {
+      })> fetchCollectionBundle({bool force = false}) {
+    if (!force && _bundleFlight != null) return _bundleFlight!;
+    final future = _loadCollectionBundle(force: force);
+    if (!force) {
+      _bundleFlight = future;
+      future.whenComplete(() {
+        if (identical(_bundleFlight, future)) _bundleFlight = null;
+      });
+    }
+    return future;
+  }
+
+  Future<
+      ({
+        List<BookSeries> series,
+        Map<String, List<BookVolume>> volumesBySeries,
+        Map<String, List<CollectionItem>> itemsBySeries,
+      })> _loadCollectionBundle({bool force = false}) async {
     final userId = _client.auth.currentUser?.id;
     if (userId == null || userId.isEmpty) {
       return (
@@ -2216,8 +2243,11 @@ class BookSeriesService {
   }
 
   /// Déduplique les `collection_items` d'une série (1 ligne / volume_id).
-  Future<int> dedupeVolumeItems(String seriesId) async {
-    final items = await fetchSeriesItems(seriesId);
+  Future<int> dedupeVolumeItems(
+    String seriesId, {
+    List<CollectionItem>? knownItems,
+  }) async {
+    final items = knownItems ?? await fetchSeriesItems(seriesId);
     final byVol = <String, List<CollectionItem>>{};
     for (final i in items) {
       if (i.volumeId == null || i.isWishlist || i.isSold) continue;

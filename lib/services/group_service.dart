@@ -184,20 +184,33 @@ class GroupService {
   }
 
   Future<void> addMember(String groupId, String profileId) async {
+    _membersCache.remove(groupId);
     await _client.from('group_members').insert({
       'group_id': groupId,
       'profile_id': profileId,
     });
   }
 
+  static const _membersTtl = Duration(minutes: 10);
+  static final Map<String, ({DateTime at, List<Map<String, dynamic>> rows})>
+      _membersCache = {};
+
   Future<List<Map<String, dynamic>>> fetchMembers(String groupId) async {
+    final hit = _membersCache[groupId];
+    if (hit != null && DateTime.now().difference(hit.at) < _membersTtl) {
+      return [
+        for (final row in hit.rows) Map<String, dynamic>.from(row),
+      ];
+    }
     final rows = await _client
         .from('group_members')
         .select(
           'profile_id, ${SupabaseEmbeds.groupMemberProfile}',
         )
         .eq('group_id', groupId);
-    return List<Map<String, dynamic>>.from(rows);
+    final parsed = List<Map<String, dynamic>>.from(rows);
+    _membersCache[groupId] = (at: DateTime.now(), rows: parsed);
+    return parsed;
   }
 
   Future<void> removeMember(String groupId, String profileId) async {

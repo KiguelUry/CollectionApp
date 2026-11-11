@@ -84,6 +84,38 @@ class ProfileService {
       'id, username, bio, avatar_url, accent_color, showcase_public, '
       'showcase_token, share_wishlist';
 
+  static const _profileSelectWide =
+      '$_profileSelectFull, households, household_aliases, gender_identity, '
+      'greeting_grammar, pantheon_item_ids';
+
+  static const _profileTtl = Duration(minutes: 10);
+  static final Map<String, ({DateTime at, Map<String, dynamic> row})>
+      _profileRows = {};
+
+  static void invalidateCachedProfile([String? profileId]) {
+    if (profileId == null) {
+      _profileRows.clear();
+    } else {
+      _profileRows.remove(profileId);
+    }
+  }
+
+  /// Ligne profil (courant ou ami) gardée 10 minutes. `null` si le select large
+  /// n'est pas encore en base : l'appelant retombe sur sa requête étroite.
+  Future<Map<String, dynamic>?> cachedProfileRow(String profileId) async {
+    final hit = _profileRows[profileId];
+    if (hit != null && DateTime.now().difference(hit.at) < _profileTtl) {
+      return hit.row;
+    }
+    try {
+      final row = await _fetchProfileRow(profileId, columns: _profileSelectWide);
+      _profileRows[profileId] = (at: DateTime.now(), row: row);
+      return row;
+    } on PostgrestException {
+      return null;
+    }
+  }
+
   Future<Map<String, dynamic>> _fetchProfileRow(
     String profileId, {
     required String columns,
@@ -106,6 +138,12 @@ class ProfileService {
   }
 
   Future<Map<String, dynamic>> _fetchProfileRowSafe(String profileId) async {
+    final cached = _profileRows[profileId];
+    if (cached != null &&
+        DateTime.now().difference(cached.at) < _profileTtl &&
+        cached.row.containsKey('username')) {
+      return Map<String, dynamic>.from(cached.row);
+    }
     try {
       return await _fetchProfileRow(profileId, columns: _profileSelectFull);
     } on PostgrestException catch (e) {
@@ -299,6 +337,7 @@ class ProfileService {
       throw Exception('100 objets maximum dans la vitrine');
     }
 
+    invalidateCachedProfile(userId);
     final row = await _client
         .from('profiles')
         .update({'favorite_item_ids': ids})
@@ -314,11 +353,17 @@ class ProfileService {
   /// `null` si la colonne n'existe pas encore (script SQL non exécuté).
   Future<List<String>?> fetchPantheonIds(String profileId) async {
     try {
-      final row = await _client
-          .from('profiles')
-          .select('pantheon_item_ids')
-          .eq('id', profileId)
-          .maybeSingle();
+      final cached = await cachedProfileRow(profileId);
+      final Map<String, dynamic>? row;
+      if (cached != null && cached.containsKey('pantheon_item_ids')) {
+        row = cached;
+      } else {
+        row = await _client
+            .from('profiles')
+            .select('pantheon_item_ids')
+            .eq('id', profileId)
+            .maybeSingle();
+      }
       final raw = row?['pantheon_item_ids'];
       if (raw is! List) return const [];
       return raw.map((e) => e.toString()).where((id) => id.isNotEmpty).toList();
@@ -334,6 +379,7 @@ class ProfileService {
     final id = _userId;
     if (id == null) throw Exception('Non connecté');
     final trimmed = ids.where((e) => e.isNotEmpty).take(20).toList();
+    invalidateCachedProfile(id);
     await _client.from('profiles').update({
       'pantheon_item_ids': trimmed,
     }).eq('id', id);
@@ -346,6 +392,7 @@ class ProfileService {
     final id = _userId;
     if (id == null) throw Exception('Non connecté');
 
+    invalidateCachedProfile(id);
     await _client.from('profiles').update({
       'hide_collection_from_non_friends': hideFromNonFriends,
       'hide_collection_from_friends': hideFromFriends,
@@ -363,6 +410,7 @@ class ProfileService {
     final safeIdentity = identity.trim();
     final safeGrammar = grammar.trim();
     if (safeIdentity.isEmpty || safeGrammar.isEmpty) return;
+    invalidateCachedProfile(id);
     try {
       await _client.from('profiles').update({
         'gender_identity': safeIdentity,
@@ -375,11 +423,17 @@ class ProfileService {
     final id = _userId;
     if (id == null) return (identity: null, grammar: null);
     try {
-      final row = await _client
-          .from('profiles')
-          .select('gender_identity, greeting_grammar')
-          .eq('id', id)
-          .maybeSingle();
+      final cached = await cachedProfileRow(id);
+      final Map<String, dynamic>? row;
+      if (cached != null && cached.containsKey('gender_identity')) {
+        row = cached;
+      } else {
+        row = await _client
+            .from('profiles')
+            .select('gender_identity, greeting_grammar')
+            .eq('id', id)
+            .maybeSingle();
+      }
       if (row == null) return (identity: null, grammar: null);
       final identity = row['gender_identity'] as String?;
       final grammar = row['greeting_grammar'] as String?;

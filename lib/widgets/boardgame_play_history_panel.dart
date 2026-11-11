@@ -370,6 +370,10 @@ class _SessionDetailSheet extends StatelessWidget {
                   Text('Gagnant : ${session.effectiveWinner}'),
                 ],
               ),
+              if (session.winReason?.trim().isNotEmpty == true) ...[
+                const SizedBox(height: 4),
+                Text('Motif : ${session.winReason}'),
+              ],
             ],
             if (session.trackScores && session.scoreGrid != null) ...[
               const SizedBox(height: 16),
@@ -428,6 +432,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
   bool? _coopVictory;
   int _coopTeamCount = 1;
   final _winnerController = TextEditingController();
+  final _winReasonController = TextEditingController();
   final _notesController = TextEditingController();
   final _playersOnlyController = TextEditingController();
   final _targetScoreController = TextEditingController();
@@ -488,6 +493,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
       }
     }
     _notesController.text = s?.notes ?? '';
+    _winReasonController.text = s?.winReason ?? '';
     _playersOnlyController.text = (s ?? t)?.players.join(', ') ?? '';
     _coopVictory = s?.coopVictory;
     _coopTeamCount = seed?.coopTeamCount ?? 1;
@@ -519,6 +525,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
   @override
   void dispose() {
     _winnerController.dispose();
+    _winReasonController.dispose();
     _notesController.dispose();
     _playersOnlyController.dispose();
     _targetScoreController.dispose();
@@ -631,16 +638,21 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
       }
     }
 
-    final autoNames =
-        grid?.winnerNames(_winCondition, targetScore: _targetScore) ??
-        const <String>[];
+    final noScore = _winCondition == BoardgameWinCondition.noScore;
+    final autoNames = noScore
+        ? const <String>[]
+        : grid?.winnerNames(_winCondition, targetScore: _targetScore) ??
+            const <String>[];
     final manualWinner = _winnerController.text.trim();
     final autoWinnerStr = _isCoop
         ? null
         : (autoNames.isEmpty ? null : autoNames.join(' & '));
-    final winner = _winnerManuallyForced && manualWinner.isNotEmpty
-        ? manualWinner
-        : autoWinnerStr;
+    final winner = noScore
+        ? (manualWinner.isEmpty ? null : manualWinner)
+        : (_winnerManuallyForced && manualWinner.isNotEmpty
+            ? manualWinner
+            : autoWinnerStr);
+    final winReason = _winReasonController.text.trim();
 
     final session = BoardgamePlaySession(
         date: _date,
@@ -663,8 +675,10 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
         status: _status,
         createdAt: widget.initial?.createdAt ?? DateTime.now(),
         shareId: widget.initial?.shareId ?? newPlayShareId(),
-        winnerManuallyForced:
-            _winnerManuallyForced && winner != null && winner.isNotEmpty,
+        winnerManuallyForced: noScore
+            ? winner != null && winner.isNotEmpty
+            : _winnerManuallyForced && winner != null && winner.isNotEmpty,
+        winReason: winReason.isEmpty ? null : winReason,
       );
     final item = widget.item;
     if (item != null &&
@@ -937,7 +951,8 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
                   // Type de jeu pilote déjà Solo / Équipes / Coop — pas de toggle doublon.
                   onTeamsChanged: null,
                   onPickPlayer: canPickPlayers ? _pickPlayerFromContacts : null,
-                  showScoreTable: true,
+                  showScoreTable:
+                      _winCondition != BoardgameWinCondition.noScore,
                   onQuickSave: _submit,
                   friendChoices: _friendChoices,
                   onFriendLinked: (name, friend) =>
@@ -967,8 +982,12 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
                     }
                   },
                   decoration: InputDecoration(
-                    labelText: 'Gagnant (forcer manuellement)',
-                    hintText: 'Calculé depuis la grille si vide',
+                    labelText: _winCondition == BoardgameWinCondition.noScore
+                        ? 'Gagnant'
+                        : 'Gagnant (forcer manuellement)',
+                    hintText: _winCondition == BoardgameWinCondition.noScore
+                        ? 'Qui a gagné, et pourquoi dans le motif'
+                        : 'Calculé depuis la grille si vide',
                     prefixIcon: Icon(
                       Icons.emoji_events_outlined,
                       color: scheme.primary,
@@ -983,9 +1002,20 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
                             icon: const Icon(Icons.close),
                           )
                         : null,
-                    helperText: _winnerManuallyForced
-                        ? 'Forçage manuel actif'
-                        : 'Auto depuis les scores',
+                    helperText: _winCondition == BoardgameWinCondition.noScore
+                        ? 'Pas de total : le gagnant est celui que tu indiques'
+                        : (_winnerManuallyForced
+                            ? 'Forçage manuel actif'
+                            : 'Auto depuis les scores'),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _winReasonController,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: const InputDecoration(
+                    labelText: 'Motif (optionnel)',
+                    hintText: '3 planètes identiques, militaire, KO…',
                   ),
                 ),
               ],

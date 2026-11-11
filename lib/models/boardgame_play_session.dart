@@ -23,6 +23,8 @@ class BoardgamePlaySession {
   final String? shareId;
   /// Gagnant imposé à la main (sinon dérivé de la grille).
   final bool winnerManuallyForced;
+  /// Motif court (« militaire », « 3 planètes identiques »).
+  final String? winReason;
 
   const BoardgamePlaySession({
     required this.date,
@@ -42,6 +44,7 @@ class BoardgamePlaySession {
     this.createdAt,
     this.shareId,
     this.winnerManuallyForced = false,
+    this.winReason,
   });
 
   factory BoardgamePlaySession.fromJson(Map<String, dynamic> json) {
@@ -120,6 +123,11 @@ class BoardgamePlaySession {
           ? null
           : json['share_id'].toString().trim(),
       winnerManuallyForced: json['winner_manually_forced'] as bool? ?? false,
+      winReason: () {
+        final raw = json['win_reason']?.toString().trim();
+        if (raw == null || raw.isEmpty) return null;
+        return raw;
+      }(),
     );
   }
 
@@ -144,6 +152,8 @@ class BoardgamePlaySession {
         if (notes != null && notes!.trim().isNotEmpty) 'notes': notes!.trim(),
         if (shareId != null) 'share_id': shareId,
         if (winnerManuallyForced) 'winner_manually_forced': true,
+        if (winReason != null && winReason!.trim().isNotEmpty)
+          'win_reason': winReason!.trim(),
       };
 
   bool get isCooperative =>
@@ -262,6 +272,8 @@ class BoardgamePlaySession {
     String? shareId,
     bool? winnerManuallyForced,
     bool clearWinnerManuallyForced = false,
+    String? winReason,
+    bool clearWinReason = false,
   }) {
     return BoardgamePlaySession(
       date: date ?? this.date,
@@ -283,6 +295,7 @@ class BoardgamePlaySession {
       winnerManuallyForced: clearWinnerManuallyForced
           ? false
           : (winnerManuallyForced ?? this.winnerManuallyForced),
+      winReason: clearWinReason ? null : (winReason ?? this.winReason),
     );
   }
 

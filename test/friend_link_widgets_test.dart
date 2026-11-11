@@ -68,7 +68,8 @@ void main() {
       final nameField = find.widgetWithText(TextField, 'Nom');
       expect(tester.widget<TextField>(nameField).controller!.text, 'igor42');
       await tester.enterText(nameField, 'Igor');
-      await tester.tap(find.widgetWithText(FilledButton, 'Ajouter'));
+      // FilledButton.icon est un sous-type privé : byType(FilledButton) ne le voit pas.
+      await tester.tap(find.text('Ajouter'));
       await tester.pumpAndSettle();
 
       expect(linkedName, 'Igor');
@@ -82,7 +83,7 @@ void main() {
       await tester.tap(find.text('Ajouter un joueur'));
       await tester.pumpAndSettle();
       await tester.enterText(find.widgetWithText(TextField, 'Nom'), 'Lou');
-      await tester.tap(find.widgetWithText(FilledButton, 'Ajouter'));
+      await tester.tap(find.text('Ajouter'));
       await tester.pumpAndSettle();
       expect(calls, 0);
     });

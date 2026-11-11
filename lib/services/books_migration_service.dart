@@ -23,16 +23,34 @@ abstract final class BooksMigrationService {
     await prefs.remove(prefKey);
   }
 
+  static Future<int>? _inFlight;
+
   /// Dédup séries + tomes + rattachement orphelins. Idempotent.
-  static Future<int> runIfNeeded({bool force = false}) async {
+  /// Un second appel concurrent attend la même passe.
+  static Future<int> runIfNeeded({bool force = false}) {
+    if (!force && _inFlight != null) return _inFlight!;
+    final run = _run(force);
+    if (!force) {
+      _inFlight = run;
+      run.whenComplete(() {
+        if (identical(_inFlight, run)) _inFlight = null;
+      });
+    }
+    return run;
+  }
+
+  static Future<int> _run(bool force) async {
     if (!force && await isDone()) return 0;
     final service = BookSeriesService();
+    final bundle = await service.fetchCollectionBundle();
     var n = 0;
     n += await service.ensureStandaloneSeriesForUnassigned();
     n += await service.dedupeDuplicateSeriesFolders();
-    final all = await service.fetchAllRootSeries();
-    for (final s in all) {
-      n += await service.dedupeVolumeItems(s.id);
+    for (final s in bundle.series) {
+      n += await service.dedupeVolumeItems(
+        s.id,
+        knownItems: bundle.itemsBySeries[s.id] ?? const [],
+      );
     }
     BooksCollectionCache.instance.clear();
     await markDone();

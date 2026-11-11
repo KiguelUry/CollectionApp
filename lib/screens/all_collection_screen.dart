@@ -15,6 +15,7 @@ import '../services/collection_local_cache.dart';
 import '../services/collection_refresh.dart';
 import '../services/global_play_history_service.dart';
 import '../services/group_service.dart';
+import '../services/inventory_service.dart';
 import '../services/location_service.dart';
 import '../services/supabase_capacity.dart';
 import '../services/tag_service.dart';
@@ -27,7 +28,6 @@ import '../utils/debounced_runner.dart';
 import '../utils/holder_filter.dart';
 import '../utils/hub_category_visibility.dart';
 import '../utils/owned_quantity_index.dart';
-import '../utils/supabase_embeds.dart';
 import '../widgets/app_app_bar.dart';
 import '../widgets/category_collection_tab_pane.dart';
 import '../widgets/collection_item_tile.dart';
@@ -129,38 +129,18 @@ class _AllCollectionScreenState extends State<AllCollectionScreen> {
 
   Future<void> _reload() async {
     try {
-      final client = Supabase.instance.client;
-      // Groupes + objets perso + objets de groupe en parallèle (0 s d'attente).
       final groupsFuture = _groups.isEmpty
           ? GroupService().fetchMyGroups()
           : Future.value(_groups);
-      final personalFuture = client
-          .from('collection_items')
-          .select(SupabaseEmbeds.collectionItemList)
-          .eq('is_wishlist', false)
-          .eq('added_by', _userId);
+      final rowsFuture = InventoryService().fetchRows();
 
       final groups = await groupsFuture;
-      final groupIds = groups.map((g) => g.id).toList();
-      final groupFuture = groupIds.isEmpty
-          ? Future.value(<dynamic>[])
-          : client
-              .from('collection_items')
-              .select(SupabaseEmbeds.collectionItemList)
-              .eq('is_wishlist', false)
-              .inFilter('group_id', groupIds);
-
-      final personalRows = await personalFuture;
-      final groupRows = await groupFuture;
+      final allRows = await rowsFuture;
       if (!mounted) return;
 
-      final byId = <String, Map<String, dynamic>>{};
-      for (final raw in [...personalRows, ...groupRows]) {
-        final map = Map<String, dynamic>.from(raw as Map);
-        final id = map['id']?.toString();
-        if (id != null && id.isNotEmpty) byId[id] = map;
-      }
-      final rows = byId.values.toList();
+      final rows = allRows
+          .where((r) => r['is_wishlist'] != true)
+          .toList();
       _synced = true;
       CollectionLocalCache.write(_userId, _cacheScope, rows);
       setState(() {
