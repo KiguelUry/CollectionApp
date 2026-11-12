@@ -134,7 +134,7 @@ class _OwnProfilePanelState extends State<OwnProfilePanel> {
         username,
         excludeUserId: _profile!.id,
       );
-      if (taken) throw Exception('Ce pseudo est déjà pris.');
+      if (taken) throw Exception('Ce surnom est déjà utilisé');
       final saved = await _service.updateProfileAndCache(
         _profile!.copyWith(
           username: username,

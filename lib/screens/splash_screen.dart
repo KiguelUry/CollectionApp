@@ -10,6 +10,7 @@ import '../services/social_directory_cache.dart';
 import '../utils/hub_greeting.dart';
 import '../widgets/profile/own_profile_panel.dart';
 import '../widgets/splash/collectingo_splash.dart';
+import 'finish_profile_screen.dart';
 import 'login_screen.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -85,6 +86,22 @@ class _SplashScreenState extends State<SplashScreen> {
         context,
         MaterialPageRoute(builder: (context) => const LoginScreen()),
       );
+    } else if (ProfileService.needsProfileSetup(session.user)) {
+      final ready = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(builder: (_) => const FinishProfileScreen()),
+      );
+      if (!mounted) return;
+      if (ready == true) {
+        Navigator.pushReplacementNamed(context, '/categories');
+      } else {
+        await AuthService().signOut();
+        if (!mounted) return;
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+        );
+      }
     } else {
       Navigator.pushReplacementNamed(context, '/categories');
     }

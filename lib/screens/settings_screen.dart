@@ -42,6 +42,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) setState(() {});
   }
 
+  Future<void> _linkProvider(OAuthProvider provider) async {
+    try {
+      await AuthService().linkProvider(provider);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(humanizeSupabaseError(e))),
+      );
+    }
+  }
+
   Future<void> _editCredentials() async {
     final auth = AuthService();
     final emailCtrl = TextEditingController(
@@ -87,7 +98,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 if (email.isNotEmpty && email != currentEmail) {
                   await auth.updateEmail(email);
                   messages.add(
-                    'Un e-mail de confirmation a été envoyé à $email. Ouvre-le et clique sur le lien pour valider la nouvelle adresse.',
+                    'Un e-mail de confirmation a été envoyé à $email. '
+                    'L’adresse actuelle reste celle du compte tant que tu n’as pas cliqué sur le lien.',
                   );
                 }
                 if (password.trim().isNotEmpty) {
@@ -340,6 +352,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const _SectionHeader('Données & compte'),
+          const _SectionHeader('Connexion Google et Discord'),
+          _LinkedProviderTile(
+            label: 'Google',
+            linked: AuthService().providerLinked('google'),
+            onLink: () => _linkProvider(OAuthProvider.google),
+          ),
+          _LinkedProviderTile(
+            label: 'Discord',
+            linked: AuthService().providerLinked('discord'),
+            onLink: () => _linkProvider(OAuthProvider.discord),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text(
+              'Associer un fournisseur garde cette collection. '
+              'Tu pourras ensuite te connecter avec le mail, Google ou Discord.',
+              style: TextStyle(fontSize: 12),
+            ),
+          ),
           ListTile(
             leading: const Icon(Icons.manage_accounts_outlined),
             title: const Text('E-mail et mot de passe'),
@@ -376,6 +407,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _LinkedProviderTile extends StatelessWidget {
+  const _LinkedProviderTile({
+    required this.label,
+    required this.linked,
+    required this.onLink,
+  });
+
+  final String label;
+  final bool linked;
+  final VoidCallback onLink;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: Icon(linked ? Icons.check_circle : Icons.link),
+      title: Text(
+        linked ? '$label · Associé ✓' : 'Associer mon compte $label',
+      ),
+      enabled: !linked,
+      onTap: linked ? null : onLink,
     );
   }
 }

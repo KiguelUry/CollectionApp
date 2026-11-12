@@ -13,10 +13,20 @@ class AuthService {
   /// Inscription. `true` si la session est déjà ouverte.
   /// `false` si Supabase attend le clic sur le lien de confirmation.
   Future<bool> signUp(String email, String password, String username) async {
+    final trimmedName = username.trim();
+    if (trimmedName.isEmpty) {
+      throw Exception('Le surnom est obligatoire');
+    }
+    if (await _profiles.isUsernameTaken(trimmedName)) {
+      throw Exception('Ce surnom est déjà utilisé');
+    }
     final AuthResponse res = await _supabase.auth.signUp(
       email: email,
       password: password,
-      data: {'username': username.trim()},
+      data: {
+        'username': trimmedName,
+        'profile_ready': true,
+      },
     );
 
     if (res.session != null && res.user != null) {
@@ -28,7 +38,7 @@ class AuthService {
       if (existing == null) {
         await _supabase.from('profiles').insert({
           'id': res.user!.id,
-          'username': username.trim(),
+          'username': trimmedName,
         });
       }
       await _profiles.ensureCurrentUserProfile();
@@ -37,15 +47,36 @@ class AuthService {
     return false;
   }
 
-  /// Ouvre le fournisseur Google. L'URL de retour est celle du site web.
-  Future<void> signInWithGoogle() async {
-    await _supabase.auth.signInWithOAuth(
-      OAuthProvider.google,
+  Future<void> signInWithProvider(OAuthProvider provider) {
+    return _supabase.auth.signInWithOAuth(
+      provider,
       redirectTo: AuthRedirectConfig.passwordResetRedirectTo(),
-      authScreenLaunchMode: kIsWeb
-          ? LaunchMode.platformDefault
-          : LaunchMode.externalApplication,
+      authScreenLaunchMode: _oauthLaunchMode,
     );
+  }
+
+  /// Associe Google ou Discord au compte déjà connecté.
+  Future<void> linkProvider(OAuthProvider provider) {
+    return _supabase.auth.linkIdentity(
+      provider,
+      redirectTo: AuthRedirectConfig.passwordResetRedirectTo(),
+      authScreenLaunchMode: _oauthLaunchMode,
+    );
+  }
+
+  LaunchMode get _oauthLaunchMode => kIsWeb
+      ? LaunchMode.platformDefault
+      : LaunchMode.externalApplication;
+
+  Future<void> markProfileReady() {
+    return _supabase.auth.updateUser(
+      UserAttributes(data: const {'profile_ready': true}),
+    );
+  }
+
+  bool providerLinked(String provider) {
+    final identities = _supabase.auth.currentUser?.identities ?? const [];
+    return identities.any((identity) => identity.provider == provider);
   }
 
   Future<void> updateEmail(String email) async {

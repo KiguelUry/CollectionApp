@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/dev_auth_config.dart';
 import '../services/auth_service.dart';
 import '../utils/supabase_error_messages.dart';
@@ -19,7 +20,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isSignUp = false;
   bool _devLoading = false;
   bool _resetLoading = false;
-  bool _googleLoading = false;
+  bool _oauthLoading = false;
 
   @override
   void initState() {
@@ -149,21 +150,21 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  Future<void> _google() async {
-    setState(() => _googleLoading = true);
+  Future<void> _oauth(OAuthProvider provider) async {
+    setState(() => _oauthLoading = true);
     try {
-      await _authService.signInWithGoogle();
+      await _authService.signInWithProvider(provider);
     } catch (e) {
       if (!mounted) return;
       await _showInfoDialog(
-        title: 'Google',
+        title: provider == OAuthProvider.discord ? 'Discord' : 'Google',
         message:
             '${humanizeSupabaseError(e)}\n\n'
-            'Le fournisseur Google doit être activé dans le dashboard Supabase, '
+            'Le fournisseur doit être activé dans le dashboard Supabase, '
             'et l’adresse de redirection autorisée.',
       );
     } finally {
-      if (mounted) setState(() => _googleLoading = false);
+      if (mounted) setState(() => _oauthLoading = false);
     }
   }
 
@@ -224,8 +225,10 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 20),
               OutlinedButton.icon(
-                onPressed: _googleLoading ? null : _google,
-                icon: _googleLoading
+                onPressed: _oauthLoading
+                    ? null
+                    : () => _oauth(OAuthProvider.google),
+                icon: _oauthLoading
                     ? const SizedBox(
                         width: 18,
                         height: 18,
@@ -233,6 +236,14 @@ class _LoginScreenState extends State<LoginScreen> {
                       )
                     : const Icon(Icons.g_mobiledata, size: 28),
                 label: const Text('Continuer avec Google'),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _oauthLoading
+                    ? null
+                    : () => _oauth(OAuthProvider.discord),
+                icon: const Icon(Icons.forum_outlined),
+                label: const Text('Continuer avec Discord'),
               ),
               const SizedBox(height: 12),
               ElevatedButton(

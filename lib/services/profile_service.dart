@@ -34,7 +34,9 @@ class ProfileService {
         .maybeSingle();
     if (existing != null) return;
 
-    final username = _defaultUsername(user);
+    final username = needsProfileSetup(user)
+        ? 'user_${user.id.substring(0, 8)}'
+        : _defaultUsername(user);
     try {
       await _client.from('profiles').insert({
         'id': user.id,
@@ -59,6 +61,24 @@ class ProfileService {
     return 'Ton compte n\'a pas encore de profil dans l\'app. '
         'Déconnecte-toi, reconnecte-toi, ou demande à l\'admin '
         'd\'exécuter le script SQL « profiles backfill » sur Supabase.';
+  }
+
+  /// Premier login Google / Discord tant que le surnom n'a pas été choisi.
+  static bool needsProfileSetup(User? user) {
+    if (user == null) return false;
+    final meta = user.userMetadata;
+    if (meta?['profile_ready'] == true) return false;
+    final providers = <String>{
+      for (final identity in user.identities ?? const [])
+        identity.provider,
+    };
+    final oauth =
+        providers.contains('google') || providers.contains('discord');
+    if (!oauth) return false;
+    if (providers.contains('email') && meta?['profile_ready'] != false) {
+      return false;
+    }
+    return true;
   }
 
   static String _defaultUsername(User user) {
@@ -173,10 +193,14 @@ class ProfileService {
     final trimmed = username.trim();
     if (trimmed.isEmpty) return true;
 
+    final exact = trimmed
+        .replaceAll(r'\', r'\\')
+        .replaceAll('%', r'\%')
+        .replaceAll('_', r'\_');
     final rows = await _client
         .from('profiles')
         .select('id')
-        .ilike('username', trimmed);
+        .ilike('username', exact);
 
     for (final row in rows as List) {
       final id = row['id'] as String?;

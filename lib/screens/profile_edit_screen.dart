@@ -250,7 +250,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         excludeUserId: _profile!.id,
       );
       if (taken) {
-        throw Exception('Ce pseudo est déjà pris (même avec une autre casse).');
+        throw Exception('Ce surnom est déjà utilisé');
       }
       final updated = _profile!.copyWith(
         username: username,
