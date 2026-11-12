@@ -75,6 +75,54 @@ class CollectionLocalCache {
     });
   }
 
+  /// Met à jour `metadata` d'un objet déjà en cache (mémoire + disque).
+  static Future<void> patchItemMetadata(
+    String itemId,
+    Map<String, dynamic> metadata,
+  ) async {
+    for (final entry in _memory.entries.toList()) {
+      var changed = false;
+      for (final row in entry.value) {
+        if (row['id']?.toString() != itemId) continue;
+        row['metadata'] = metadata;
+        changed = true;
+      }
+      if (!changed) continue;
+      final parts = entry.key.split(':');
+      if (parts.length >= 3) {
+        write(parts[1], parts.sublist(2).join(':'), entry.value);
+      }
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      for (final key in prefs.getKeys().where((k) => k.startsWith(_prefix))) {
+        if (_memory.containsKey(key)) continue;
+        final raw = prefs.getString(key);
+        if (raw == null || raw.isEmpty) continue;
+        final decoded = jsonDecode(raw);
+        if (decoded is! List) continue;
+        var changed = false;
+        final rows = <Map<String, dynamic>>[];
+        for (final row in decoded) {
+          if (row is! Map) continue;
+          final map = Map<String, dynamic>.from(row);
+          if (map['id']?.toString() == itemId) {
+            map['metadata'] = metadata;
+            changed = true;
+          }
+          rows.add(map);
+        }
+        if (!changed) continue;
+        final parts = key.split(':');
+        if (parts.length >= 3) {
+          write(parts[1], parts.sublist(2).join(':'), rows);
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('CollectionLocalCache patch: $e');
+    }
+  }
+
   /// À appeler à la déconnexion (appareil partagé).
   static Future<void> clearAll() async {
     _memory.clear();

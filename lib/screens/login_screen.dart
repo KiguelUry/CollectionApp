@@ -19,6 +19,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isSignUp = false;
   bool _devLoading = false;
   bool _resetLoading = false;
+  bool _googleLoading = false;
 
   @override
   void initState() {
@@ -44,11 +45,21 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _handleAuth() async {
     try {
       if (_isSignUp) {
-        await _authService.signUp(
+        final ready = await _authService.signUp(
           _emailController.text,
           _passwordController.text,
           _usernameController.text,
         );
+        if (!ready) {
+          if (!mounted) return;
+          await _showInfoDialog(
+            title: 'Vérifie ta boîte mail',
+            message:
+                'Un e-mail de confirmation a été envoyé à ${_emailController.text.trim()}.\n\n'
+                'Ouvre-le (pense aux indésirables) et clique sur le lien pour activer le compte, puis reviens te connecter.',
+          );
+          return;
+        }
       } else {
         await _authService.signIn(
           _emailController.text,
@@ -138,6 +149,24 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  Future<void> _google() async {
+    setState(() => _googleLoading = true);
+    try {
+      await _authService.signInWithGoogle();
+    } catch (e) {
+      if (!mounted) return;
+      await _showInfoDialog(
+        title: 'Google',
+        message:
+            '${humanizeSupabaseError(e)}\n\n'
+            'Le fournisseur Google doit être activé dans le dashboard Supabase, '
+            'et l’adresse de redirection autorisée.',
+      );
+    } finally {
+      if (mounted) setState(() => _googleLoading = false);
+    }
+  }
+
   Future<void> _devQuickLogin() async {
     if (!DevAuthConfig.hasAutoLogin) {
       await _showInfoDialog(
@@ -194,6 +223,18 @@ class _LoginScreenState extends State<LoginScreen> {
                 onSubmitted: (_) => _handleAuth(),
               ),
               const SizedBox(height: 20),
+              OutlinedButton.icon(
+                onPressed: _googleLoading ? null : _google,
+                icon: _googleLoading
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.g_mobiledata, size: 28),
+                label: const Text('Continuer avec Google'),
+              ),
+              const SizedBox(height: 12),
               ElevatedButton(
                 onPressed: _handleAuth,
                 child: Text(_isSignUp ? "S'inscrire" : 'Se connecter'),

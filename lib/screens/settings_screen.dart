@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../constants/rating_colors.dart';
 import '../services/account_deletion_service.dart';
+import '../services/auth_service.dart';
 import '../services/account_export_service.dart';
 import '../services/settings_service.dart';
 import '../utils/network_feedback.dart';
+import '../utils/supabase_error_messages.dart';
 import '../widgets/app_app_bar.dart';
 import '../widgets/bgg_collection_import_card.dart';
 import '../widgets/households_sheet.dart';
@@ -39,11 +42,88 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) setState(() {});
   }
 
+  Future<void> _editCredentials() async {
+    final auth = AuthService();
+    final emailCtrl = TextEditingController(
+      text: Supabase.instance.client.auth.currentUser?.email ?? '',
+    );
+    final passwordCtrl = TextEditingController();
+    final currentEmail = emailCtrl.text.trim();
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('E-mail et mot de passe'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: emailCtrl,
+              keyboardType: TextInputType.emailAddress,
+              autocorrect: false,
+              decoration: const InputDecoration(labelText: 'Adresse e-mail'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: passwordCtrl,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Nouveau mot de passe',
+                helperText: 'Laisse vide pour ne pas le changer. 6 caractères min.',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Fermer'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final email = emailCtrl.text.trim();
+              final password = passwordCtrl.text;
+              final messages = <String>[];
+              try {
+                if (email.isNotEmpty && email != currentEmail) {
+                  await auth.updateEmail(email);
+                  messages.add(
+                    'Un e-mail de confirmation a été envoyé à $email. Ouvre-le et clique sur le lien pour valider la nouvelle adresse.',
+                  );
+                }
+                if (password.trim().isNotEmpty) {
+                  await auth.updatePassword(password);
+                  messages.add('Le mot de passe a été mis à jour.');
+                }
+                if (messages.isEmpty) {
+                  messages.add('Rien à modifier.');
+                }
+                if (ctx.mounted) Navigator.pop(ctx);
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(messages.join('\n\n'))),
+                );
+              } catch (e) {
+                if (!ctx.mounted) return;
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  SnackBar(content: Text(humanizeSupabaseError(e))),
+                );
+              }
+            },
+            child: const Text('Enregistrer'),
+          ),
+        ],
+      ),
+    );
+    emailCtrl.dispose();
+    passwordCtrl.dispose();
+  }
+
   Future<void> _exportJson() async {
     try {
       final json = await AccountExportService().exportAsJsonString();
       if (!mounted) return;
       await Share.share(json, subject: 'Export Paloma');
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Export JSON prêt à enregistrer ou partager')),
       );
@@ -260,6 +340,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const _SectionHeader('Données & compte'),
+          ListTile(
+            leading: const Icon(Icons.manage_accounts_outlined),
+            title: const Text('E-mail et mot de passe'),
+            subtitle: Text(
+              Supabase.instance.client.auth.currentUser?.email ??
+                  'Modifier l’adresse ou le mot de passe',
+            ),
+            onTap: _editCredentials,
+          ),
           ListTile(
             leading: const Icon(Icons.download_outlined),
             title: const Text('Exporter mes données (JSON)'),

@@ -7,6 +7,10 @@ import '../models/boardgame_score_grid.dart';
 import '../models/friend_choice.dart';
 import 'friend_identity.dart';
 
+void dismissScoreFocus([PointerDownEvent? _]) {
+  FocusManager.instance.primaryFocus?.unfocus();
+}
+
 const Color _teamOverColor = Color(0xFFE57373);
 const Color _teamOverFill = Color(0x1FE57373);
 
@@ -837,8 +841,9 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                       isDense: true,
                       labelText: 'Équipe',
                     ),
+                    textInputAction: TextInputAction.done,
                     onFieldSubmitted: (v) => _renamePlan(index, v),
-                    onTapOutside: (_) {},
+                    onTapOutside: dismissScoreFocus,
                   ),
                 ),
               ],
@@ -1047,6 +1052,8 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
               TextField(
                 controller: nameCtrl,
                 decoration: const InputDecoration(labelText: 'Prénom'),
+                textInputAction: TextInputAction.done,
+                onTapOutside: dismissScoreFocus,
               ),
               if (widget.useTeams) ...[
                 const SizedBox(height: 8),
@@ -1340,6 +1347,8 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                   TextField(
                     controller: nameCtrl,
                     autofocus: true,
+                    textInputAction: TextInputAction.done,
+                    onTapOutside: dismissScoreFocus,
                     decoration: InputDecoration(
                       labelText: 'Nom',
                       suffixIcon: widget.onPickPlayer == null &&
@@ -1427,7 +1436,6 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                               },
                             ),
                     ),
-                    textInputAction: TextInputAction.done,
                   ),
                   if (isFriend && friend != null)
                     Padding(
@@ -1824,6 +1832,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
       children: [
         Expanded(
           child: ListView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             padding: const EdgeInsets.fromLTRB(16, 8, 12, 32),
             children: [
               if (widget.leading != null) widget.leading!,
@@ -1835,6 +1844,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
         const VerticalDivider(width: 1),
         Expanded(
           child: ListView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             padding: const EdgeInsets.fromLTRB(12, 16, 16, 32),
             children: [
               _scoreTable(
@@ -2400,6 +2410,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
               vertical: 8,
             ),
           ),
+          onTapOutside: dismissScoreFocus,
           onChanged: (_) => _localRefresh(),
         ),
       ),
@@ -2454,6 +2465,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                   OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
               contentPadding: const EdgeInsets.symmetric(vertical: 10),
             ),
+            onTapOutside: dismissScoreFocus,
             onChanged: (v) {
               if (_gridPointerDragging) return;
               _localRefresh();

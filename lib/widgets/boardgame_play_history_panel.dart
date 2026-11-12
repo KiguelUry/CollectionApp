@@ -10,7 +10,9 @@ import '../models/boardgame_play_session.dart';
 import '../models/boardgame_score_grid.dart';
 import '../models/collection_item.dart';
 import '../models/friend_choice.dart';
+import '../services/collection_local_cache.dart';
 import '../services/friend_service.dart';
+import '../services/inventory_service.dart';
 import '../services/play_share_service.dart';
 import '../services/player_alias_service.dart';
 import '../services/profile_cache_service.dart';
@@ -626,6 +628,12 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
         (_confrontation == BoardgameConfrontationType.cooperative &&
             _coopTeamCount > 1);
     _activePresetName = raw['activePreset']?.toString();
+    // Le brouillon ne remplace jamais la bibliothèque de modèles du jeu.
+    _presets = NamedScorePreset.listFrom(widget.item?.metadata);
+    if (_activePresetName != null &&
+        !_presets.any((preset) => preset.name == _activePresetName)) {
+      _activePresetName = null;
+    }
     _presetBaseline = _presetFingerprint();
   }
 
@@ -900,6 +908,14 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     if (item == null) return;
     final meta = Map<String, dynamic>.from(item.metadata ?? {});
     meta['score_presets'] = [for (final preset in _presets) preset.toJson()];
+    final live = item.metadata;
+    if (live != null) {
+      live
+        ..clear()
+        ..addAll(meta);
+    }
+    InventoryService.patchRow(item.id, (row) => row['metadata'] = meta);
+    await CollectionLocalCache.patchItemMetadata(item.id, meta);
     try {
       await Supabase.instance.client
           .from('collection_items')
@@ -907,39 +923,78 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     } catch (_) {}
   }
 
+  Future<String?> _askPresetName({String initial = ''}) async {
+    final controller = TextEditingController(text: initial);
+    final chosen = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Nom du modèle'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(labelText: 'Nom'),
+          onTapOutside: (_) =>
+              FocusManager.instance.primaryFocus?.unfocus(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final value = controller.text.trim();
+              if (value.isEmpty) return;
+              Navigator.pop(ctx, value);
+            },
+            child: const Text('Enregistrer'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    final name = chosen?.trim() ?? '';
+    if (!mounted || name.isEmpty) return null;
+    return name;
+  }
+
   Future<void> _savePresetNow() async {
     var name = _activePresetName?.trim() ?? '';
-    if (name.isEmpty) {
-      final controller = TextEditingController();
-      final chosen = await showDialog<String>(
+    if (name.isNotEmpty) {
+      final choice = await showDialog<String>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Nom du modèle'),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(labelText: 'Nom'),
+          title: const Text('Enregistrer le template'),
+          content: Text(
+            '« $name » est le modèle sélectionné. Tu peux le mettre à jour, ou en enregistrer un nouveau.',
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
               child: const Text('Annuler'),
             ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'new'),
+              child: const Text('Nouveau nom'),
+            ),
             FilledButton(
-              onPressed: () {
-                final value = controller.text.trim();
-                if (value.isEmpty) return;
-                Navigator.pop(ctx, value);
-              },
-              child: const Text('Enregistrer'),
+              onPressed: () => Navigator.pop(ctx, 'update'),
+              child: const Text('Mettre à jour'),
             ),
           ],
         ),
       );
-      controller.dispose();
-      if (!mounted || chosen == null || chosen.trim().isEmpty) return;
-      name = chosen.trim();
+      if (!mounted || choice == null) return;
+      if (choice == 'new') {
+        final named = await _askPresetName();
+        if (named == null) return;
+        name = named;
+      }
+    } else {
+      final named = await _askPresetName();
+      if (named == null) return;
+      name = named;
     }
     final preset = NamedScorePreset(
       name: name,
@@ -986,51 +1041,59 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
         : fresh;
     return Padding(
       padding: const EdgeInsets.only(top: 8),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: DropdownButtonFormField<String>(
-              key: ValueKey('preset-$selected-${_presets.length}'),
-              initialValue: selected,
-              isExpanded: true,
-              style: TextStyle(
-                fontSize: 13,
-                color: Theme.of(context).colorScheme.onSurface,
-              ),
-              decoration: _thinField,
-              items: [
-                for (final preset in _presets)
-                  DropdownMenuItem(
-                    value: preset.name,
-                    child: Text(preset.name, overflow: TextOverflow.ellipsis),
-                  ),
-                const DropdownMenuItem(
-                  value: fresh,
-                  child: Text('+ Nouveau'),
+          DropdownButtonFormField<String>(
+            key: ValueKey('preset-$selected-${_presets.length}'),
+            initialValue: selected,
+            isExpanded: true,
+            style: TextStyle(
+              fontSize: 13,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+            decoration: _thinField,
+            items: [
+              for (final preset in _presets)
+                DropdownMenuItem(
+                  value: preset.name,
+                  child: Text(preset.name, overflow: TextOverflow.ellipsis),
                 ),
-              ],
-              onChanged: (value) {
-                if (value == null) return;
-                if (value == fresh) {
-                  _applyPreset(null);
+              const DropdownMenuItem(
+                value: fresh,
+                child: Text('+ Nouveau'),
+              ),
+            ],
+            onChanged: (value) {
+              if (value == null) return;
+              if (value == fresh) {
+                _applyPreset(null);
+                return;
+              }
+              for (final preset in _presets) {
+                if (preset.name == value) {
+                  _applyPreset(preset);
                   return;
                 }
-                for (final preset in _presets) {
-                  if (preset.name == value) {
-                    _applyPreset(preset);
-                    return;
-                  }
-                }
-              },
+              }
+            },
+          ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Wrap(
+              spacing: 4,
+              children: [
+                TextButton(
+                  onPressed: _savePresetNow,
+                  child: const Text('Enregistrer le template'),
+                ),
+                TextButton(
+                  onPressed:
+                      _activePresetName == null ? null : _deleteActivePreset,
+                  child: const Text('Supprimer'),
+                ),
+              ],
             ),
-          ),
-          TextButton(
-            onPressed: _savePresetNow,
-            child: const Text('Enregistrer'),
-          ),
-          TextButton(
-            onPressed: _activePresetName == null ? null : _deleteActivePreset,
-            child: const Text('Supprimer'),
           ),
         ],
       ),
@@ -1446,7 +1509,9 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
       );
     }
 
-    return Scaffold(
+    return GestureDetector(
+      onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+      child: Scaffold(
       appBar: AppBar(
         title: Text(
           item != null && item.title.trim().isNotEmpty
@@ -1629,6 +1694,8 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
                 const SizedBox(height: 8),
                 TextField(
                   controller: _winReasonController,
+                  onTapOutside: (_) =>
+                      FocusManager.instance.primaryFocus?.unfocus(),
                   textCapitalization: TextCapitalization.sentences,
                   onChanged: (_) {
                     if (_applyingField) return;
@@ -1643,6 +1710,8 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
               const SizedBox(height: 12),
               TextField(
                 controller: _notesController,
+                onTapOutside: (_) =>
+                    FocusManager.instance.primaryFocus?.unfocus(),
                 onChanged: (_) => _scheduleDraft(),
                 maxLines: 3,
                 decoration: const InputDecoration(
@@ -1727,6 +1796,8 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
                 maxWidth: BoardgamePlaySessionPage.maxContentWidth,
               ),
               child: ListView(
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
                 children: [
                   ...header,
@@ -1741,6 +1812,8 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
                       decoration: const InputDecoration(
                         labelText: 'Joueurs',
                       ),
+                      onTapOutside: (_) =>
+                          FocusManager.instance.primaryFocus?.unfocus(),
                     ),
                   ],
                   ...footer,
@@ -1749,6 +1822,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
             ),
           );
         },
+      ),
       ),
     );
   }
@@ -2049,6 +2123,7 @@ class _TemplateFieldsState extends State<_TemplateFields> {
                       keyboardType: TextInputType.number,
                       textAlign: TextAlign.center,
                       decoration: _thinField,
+                      onTapOutside: (_) => FocusManager.instance.primaryFocus?.unfocus(),
                       onChanged: (_) => _emit(),
                     ),
                   ),
@@ -2091,6 +2166,7 @@ class _TemplateFieldsState extends State<_TemplateFields> {
                       keyboardType: TextInputType.number,
                       textAlign: TextAlign.center,
                       decoration: _thinField,
+                      onTapOutside: (_) => FocusManager.instance.primaryFocus?.unfocus(),
                       onChanged: (_) => _emit(),
                     ),
                   ),
@@ -2135,7 +2211,8 @@ class _TemplateFieldsState extends State<_TemplateFields> {
                           keyboardType: TextInputType.number,
                           textAlign: TextAlign.center,
                           decoration: _thinField,
-                          onChanged: (_) => _emit(),
+                          onTapOutside: (_) => FocusManager.instance.primaryFocus?.unfocus(),
+                      onChanged: (_) => _emit(),
                         ),
                       ),
                     ],

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config/auth_redirect.dart';
@@ -9,15 +10,16 @@ class AuthService {
   final SupabaseClient _supabase = Supabase.instance.client;
   final _profiles = ProfileService();
 
-  // Inscription : Crée un utilisateur et ajoute son pseudo dans 'profiles'
-  Future<void> signUp(String email, String password, String username) async {
+  /// Inscription. `true` si la session est déjà ouverte.
+  /// `false` si Supabase attend le clic sur le lien de confirmation.
+  Future<bool> signUp(String email, String password, String username) async {
     final AuthResponse res = await _supabase.auth.signUp(
       email: email,
       password: password,
       data: {'username': username.trim()},
     );
 
-    if (res.user != null) {
+    if (res.session != null && res.user != null) {
       final existing = await _supabase
           .from('profiles')
           .select('id')
@@ -29,8 +31,29 @@ class AuthService {
           'username': username.trim(),
         });
       }
+      await _profiles.ensureCurrentUserProfile();
+      return true;
     }
-    await _profiles.ensureCurrentUserProfile();
+    return false;
+  }
+
+  /// Ouvre le fournisseur Google. L'URL de retour est celle du site web.
+  Future<void> signInWithGoogle() async {
+    await _supabase.auth.signInWithOAuth(
+      OAuthProvider.google,
+      redirectTo: AuthRedirectConfig.passwordResetRedirectTo(),
+      authScreenLaunchMode: kIsWeb
+          ? LaunchMode.platformDefault
+          : LaunchMode.externalApplication,
+    );
+  }
+
+  Future<void> updateEmail(String email) async {
+    final trimmed = email.trim();
+    if (!_emailRegex.hasMatch(trimmed)) {
+      throw Exception('L\'adresse e-mail n\'a pas l\'air correcte');
+    }
+    await _supabase.auth.updateUser(UserAttributes(email: trimmed));
   }
 
   // Connexion
