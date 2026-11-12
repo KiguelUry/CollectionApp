@@ -54,7 +54,7 @@ class _WishlistTileMetaIconsState extends State<WishlistTileMetaIcons> {
 
   Color get _fourthChipColor {
     final owned = OwnedCatalogIndex.lookup(widget.item);
-    if (owned != null && owned.count > 0) return Colors.deepPurple.shade400;
+    if (owned != null && owned.count > 0) return Colors.blueGrey.shade400;
     return Colors.blueGrey.shade500;
   }
 

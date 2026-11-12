@@ -119,7 +119,7 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
     if (e.actorAccentColor != null) {
       return ProfileAvatar.colorFromHex(e.actorAccentColor);
     }
-    return Colors.deepPurple;
+    return Colors.blueGrey;
   }
 
   IconData _iconFor(String type) {

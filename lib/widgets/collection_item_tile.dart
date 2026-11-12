@@ -373,7 +373,7 @@ class CollectionItemTile extends StatelessWidget {
                   Positioned(
                     top: 4,
                     right: onDelete != null ? 32 : 4,
-                    child: _badge('×$_ownedQty', Colors.deepPurple),
+                    child: _badge('×$_ownedQty', Colors.blueGrey),
                   ),
                 if (showFavoriteHeart)
                   Positioned(
@@ -659,7 +659,7 @@ class CollectionItemTile extends StatelessWidget {
                 : Icons.extension_outlined,
             suffix: _isOwnedExpansionTile ? 'Ext' : '$expansionCount',
             color: _isOwnedExpansionTile
-                ? Colors.deepPurple.shade500
+                ? Colors.blueGrey.shade500
                 : Colors.green.shade600,
           ),
         );
@@ -796,7 +796,7 @@ class CollectionItemTile extends StatelessWidget {
                   : Icons.extension_outlined,
               suffix: _isOwnedExpansionTile ? 'Ext' : '${ownedExpansionCount(item)}',
               color: _isOwnedExpansionTile
-                  ? Colors.deepPurple.shade500
+                  ? Colors.blueGrey.shade500
                   : Colors.green.shade600,
             ),
           ),

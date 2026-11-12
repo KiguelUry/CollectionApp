@@ -711,7 +711,7 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
                 : Icons.sell_outlined,
             label: listingIntentLabel(intent),
             color: intent == ItemListingIntent.wantsTrade
-                ? Colors.purple.shade500
+                ? Colors.blueGrey.shade500
                 : Colors.green.shade700,
           ),
           if (item.itemCondition != null)
@@ -720,7 +720,7 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
             _Tag(
               icon: Icons.receipt_long_outlined,
               label: 'Payé ${formatEuroChip(paid)}',
-              color: Colors.indigo.shade400,
+              color: Colors.blueGrey.shade400,
             ),
           if (market != null)
             _Tag(

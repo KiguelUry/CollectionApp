@@ -141,7 +141,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
             decoration: InputDecoration(
               hintText: 'Chercher un ami…',
               border: InputBorder.none,
-              icon: Icon(Icons.search, color: Colors.deepPurple.shade300),
+              icon: Icon(Icons.search, color: Colors.blueGrey.shade300),
               suffixIcon: _filterController.text.isNotEmpty
                   ? IconButton(
                       icon: const Icon(Icons.clear, size: 20),
@@ -339,8 +339,8 @@ class _FriendsScreenState extends State<FriendsScreen> {
         appBar: AppAppBar(
           title: 'Amis',
           bottom: TabBar(
-            indicatorColor: Colors.deepPurple.shade300,
-            labelColor: Colors.deepPurple.shade800,
+            indicatorColor: Colors.blueGrey.shade300,
+            labelColor: Colors.blueGrey.shade800,
             tabs: const [
               Tab(icon: Icon(Icons.bolt_rounded, size: 20), text: 'Activité'),
               Tab(icon: Icon(Icons.people_rounded, size: 20), text: 'Mes amis'),

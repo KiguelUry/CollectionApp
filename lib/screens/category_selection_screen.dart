@@ -540,7 +540,7 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
                                 style: greetingStyle?.copyWith(
                                   color: Color.lerp(
                                     accent,
-                                    const Color(0xFF1A1033),
+                                    const Color(0xFF1A1C1F),
                                     0.72,
                                   ),
                                 ),

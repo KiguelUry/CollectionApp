@@ -501,10 +501,10 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
         curve: Curves.easeOut,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.deepPurple.shade400, width: 2.5),
+          border: Border.all(color: Colors.blueGrey.shade400, width: 2.5),
           boxShadow: [
             BoxShadow(
-              color: Colors.deepPurple.withValues(alpha: 0.35),
+              color: Colors.blueGrey.withValues(alpha: 0.35),
               blurRadius: 14,
               spreadRadius: 1,
             ),

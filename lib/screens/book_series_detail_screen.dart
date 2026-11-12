@@ -2099,7 +2099,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                                 ),
                                 decoration: BoxDecoration(
                                   color: upcoming
-                                      ? Colors.deepPurple.shade700
+                                      ? Colors.blueGrey.shade700
                                       : const Color(0xFF1B2838),
                                   borderRadius: BorderRadius.circular(6),
                                 ),
@@ -2422,7 +2422,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                       style: const TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
-                        color: Color(0xFFB39DDB),
+                        color: Color(0xFF90A4AE),
                       ),
                     ),
                   ] else if (japanOnly) ...[

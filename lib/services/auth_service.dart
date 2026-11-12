@@ -23,6 +23,7 @@ class AuthService {
     final AuthResponse res = await _supabase.auth.signUp(
       email: email,
       password: password,
+      emailRedirectTo: AuthRedirectConfig.passwordResetRedirectTo(),
       data: {
         'username': trimmedName,
         'profile_ready': true,
@@ -110,7 +111,10 @@ class AuthService {
     if (!_emailRegex.hasMatch(trimmed)) {
       throw Exception('L\'adresse e-mail n\'a pas l\'air correcte');
     }
-    await _supabase.auth.updateUser(UserAttributes(email: trimmed));
+    await _supabase.auth.updateUser(
+      UserAttributes(email: trimmed),
+      emailRedirectTo: AuthRedirectConfig.passwordResetRedirectTo(),
+    );
   }
 
   // Connexion

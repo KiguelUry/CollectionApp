@@ -6,6 +6,7 @@ import '../../models/card_subcategory.dart';
 import '../../models/tcg_set_info.dart';
 import '../../utils/http_user_agent.dart';
 import '../../utils/tcg_set_image_url.dart';
+import '../../utils/web_image_proxy.dart';
 /// Logo extension / bloc (PNG, WebP ou SVG Scryfall) avec URLs de secours.
 class TcgSetLogo extends StatefulWidget {
   final List<String> urls;
@@ -76,7 +77,12 @@ class _TcgSetLogoState extends State<TcgSetLogo> {
   Widget build(BuildContext context) {
     if (_urls.isEmpty) return _fallback();
 
-    final u = _urls[_index.clamp(0, _urls.length - 1)];
+    final raw = _urls[_index.clamp(0, _urls.length - 1)];
+    final u = raw.toLowerCase().endsWith('.svg')
+        ? raw
+        : (proxyImageUrl(raw, width: 240).isEmpty
+            ? raw
+            : proxyImageUrl(raw, width: 240));
 
     if (u.toLowerCase().endsWith('.svg')) {
       return _SvgLogo(

@@ -163,10 +163,10 @@ class CollectionShareService {
   <title>Collection de ${_escape(name)}</title>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; line-height: 1.5; }
-    h1 { color: #512DA8; font-size: 1.5rem; margin-bottom: 0.25rem; }
+    h1 { color: #37474F; font-size: 1.5rem; margin-bottom: 0.25rem; }
     .date { color: #666; font-size: 0.9rem; margin-bottom: 1.5rem; }
     h2 { font-size: 1.1rem; border-bottom: 2px solid #E8E0F5; padding-bottom: 0.35rem; margin-top: 1.5rem; }
-    h3 { font-size: 0.95rem; color: #512DA8; margin: 1rem 0 0.35rem; }
+    h3 { font-size: 0.95rem; color: #37474F; margin: 1rem 0 0.35rem; }
     .count { font-weight: normal; color: #888; }
     ul { margin: 0 0 0.5rem; padding-left: 1.25rem; }
     li { margin: 0.2rem 0; }

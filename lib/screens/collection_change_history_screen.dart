@@ -231,7 +231,7 @@ class _TimelineTile extends StatelessWidget {
       'added' => wish
           ? (
               icon: Icons.favorite_border,
-              color: Colors.purple.shade600,
+              color: Colors.blueGrey.shade600,
               label: '💜 Wishlist · + Ajout',
             )
           : (
@@ -242,7 +242,7 @@ class _TimelineTile extends StatelessWidget {
       'deleted' => wish
           ? (
               icon: Icons.heart_broken_outlined,
-              color: Colors.purple.shade700,
+              color: Colors.blueGrey.shade700,
               label: '💜 Wishlist · Retiré',
             )
           : (

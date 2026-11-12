@@ -128,7 +128,7 @@ class _StatsDashboardViewState extends State<StatsDashboardView> {
       StatsKpiCard(
         key: const ValueKey('kpi_owned'),
         icon: Icons.inventory_2_outlined,
-        accent: Colors.indigo,
+        accent: Colors.blueGrey,
         label: 'Objets possédés',
         value: '${d.ownedCount}',
         caption: d.expansionCount > 0
@@ -433,7 +433,7 @@ class _ValueSection extends StatelessWidget {
                   amount: data.paidTotal,
                   caption:
                       '${data.paidCopies} exemplaire${data.paidCopies > 1 ? 's' : ''} avec prix',
-                  color: Colors.indigo,
+                  color: Colors.blueGrey,
                 ),
               ),
               const SizedBox(width: 10),

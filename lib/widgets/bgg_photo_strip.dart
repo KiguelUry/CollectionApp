@@ -99,6 +99,61 @@ class _BggPhotoStripState extends State<BggPhotoStrip> {
   }
 }
 
+class _ZoomablePhoto extends StatefulWidget {
+  final String url;
+
+  const _ZoomablePhoto({required this.url});
+
+  @override
+  State<_ZoomablePhoto> createState() => _ZoomablePhotoState();
+}
+
+class _ZoomablePhotoState extends State<_ZoomablePhoto> {
+  final _transform = TransformationController();
+  TapDownDetails? _doubleTap;
+
+  @override
+  void dispose() {
+    _transform.dispose();
+    super.dispose();
+  }
+
+  void _toggleZoom() {
+    if (_transform.value.getMaxScaleOnAxis() > 1.01) {
+      _transform.value = Matrix4.identity();
+      return;
+    }
+    final point = _doubleTap?.localPosition ?? Offset.zero;
+    const scale = 2.5;
+    _transform.value = Matrix4.identity()
+      ..translateByDouble(
+        -point.dx * (scale - 1),
+        -point.dy * (scale - 1),
+        0,
+        1,
+      )
+      ..scaleByDouble(scale, scale, 1, 1);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onDoubleTapDown: (details) => _doubleTap = details,
+      onDoubleTap: _toggleZoom,
+      child: InteractiveViewer(
+        transformationController: _transform,
+        minScale: 1,
+        maxScale: 5,
+        child: CollectionCoverImage(
+          url: widget.url,
+          fit: BoxFit.contain,
+          largeSource: true,
+        ),
+      ),
+    );
+  }
+}
+
 class _Arrow extends StatelessWidget {
   final IconData icon;
   final String tooltip;
@@ -239,13 +294,12 @@ class _BggLightboxState extends State<_BggLightbox> {
                                 setState(() => _index = value),
                             itemBuilder: (context, i) {
                               final item = widget.photos[i];
-                              return CollectionCoverImage(
+                              return _ZoomablePhoto(
                                 url: bggMaterialPhotoUrl(
                                   item.url,
                                   width: 1400,
                                   quality: 90,
                                 ),
-                                fit: BoxFit.contain,
                               );
                             },
                           ),

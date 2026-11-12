@@ -72,11 +72,11 @@ class UserCollectionType {
 
   static const colorChoices = [
     Colors.blueGrey,
-    Colors.indigo,
+    Colors.blueGrey,
     Colors.teal,
     Colors.green,
     Colors.orange,
-    Colors.deepPurple,
+    Colors.blueGrey,
     Colors.pink,
     Colors.brown,
     Colors.cyan,

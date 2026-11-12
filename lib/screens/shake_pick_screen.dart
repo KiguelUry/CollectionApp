@@ -271,7 +271,7 @@ class _ShakePickScreenState extends State<ShakePickScreen>
               style: TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.w500,
-                color: Colors.deepPurple.shade700,
+                color: Colors.blueGrey.shade700,
               ),
             ),
           )
@@ -478,7 +478,7 @@ class _ShakePickScreenState extends State<ShakePickScreen>
           Icon(
             Icons.vibration,
             size: 72,
-            color: Colors.deepPurple.shade300,
+            color: Colors.blueGrey.shade300,
           ),
           const SizedBox(height: 12),
           Text(
@@ -486,7 +486,7 @@ class _ShakePickScreenState extends State<ShakePickScreen>
             style: TextStyle(
               fontSize: 48,
               fontWeight: FontWeight.bold,
-              color: Colors.deepPurple.shade200,
+              color: Colors.blueGrey.shade200,
             ),
           ),
         ],
@@ -550,7 +550,7 @@ class _ShakePickScreenState extends State<ShakePickScreen>
                 item.groupName!,
                 style: TextStyle(
                   fontSize: 12,
-                  color: Colors.deepPurple.shade600,
+                  color: Colors.blueGrey.shade600,
                 ),
               ),
             ],

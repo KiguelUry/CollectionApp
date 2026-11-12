@@ -443,13 +443,13 @@ class _BggSearchDialogState extends State<BggSearchDialog> {
     if (bggRank != null) {
       return CircleAvatar(
         radius: 24,
-        backgroundColor: Colors.deepPurple.shade50,
+        backgroundColor: Colors.blueGrey.shade50,
         child: Text(
           '#$bggRank',
           style: TextStyle(
             fontSize: 9,
             fontWeight: FontWeight.bold,
-            color: Colors.deepPurple.shade700,
+            color: Colors.blueGrey.shade700,
           ),
         ),
       );

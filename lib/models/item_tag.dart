@@ -44,7 +44,7 @@ class ItemTag {
 
 const tagColorPresets = [
   '#9E9E9E',
-  '#673AB7',
+  '#455A64',
   '#2196F3',
   '#4CAF50',
   '#FF9800',

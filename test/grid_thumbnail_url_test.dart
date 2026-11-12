@@ -42,6 +42,28 @@ void main() {
       expect(google.queryParameters['url'], isNot(contains('edge=curl')));
     });
 
+    test('Yu-Gi-Oh / One Piece : wsrv.nl (pas le CDN brut)', () {
+      expect(
+        Uri.parse(
+          proxyImageUrl('https://images.ygoprodeck.com/images/cards/1.jpg'),
+        ).host,
+        'wsrv.nl',
+      );
+      expect(
+        Uri.parse(
+          proxyImageUrl('https://www.optcgapi.com/media/static/Card_Images/a.jpg'),
+        ).host,
+        'wsrv.nl',
+      );
+    });
+
+    test('file:/// et chemins vides ne partent pas sur le réseau', () {
+      expect(proxyImageUrl('file:///'), '');
+      expect(proxyImageUrl('file:///C:/image.jpg'), '');
+      expect(proxyImageUrl(''), '');
+      expect(proxyImageUrl('c0edef9a-sans-hote'), '');
+    });
+
     test('Open Library / AniList / TMDB : HTTPS direct (pas wsrv)', () {
       expect(
         Uri.parse(gridThumbnailUrl('https://covers.openlibrary.org/b/id/1-M.jpg'))

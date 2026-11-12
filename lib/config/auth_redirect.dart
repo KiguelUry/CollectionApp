@@ -14,15 +14,14 @@ abstract final class AuthRedirectConfig {
   static String passwordResetRedirectTo() {
     if (kIsWeb) {
       final base = Uri.base;
+      // Le site est servi sous /CollectionApp/. Sans ce chemin, le lien
+      // mail atterrit sur kiguelury.github.io/ et GitHub Pages répond 404.
+      if (base.host.contains('github.io')) return webProdUrl;
       var path = base.path;
       if (path.isEmpty || path == '/') {
         path = '/';
       } else if (!path.endsWith('/')) {
         path = '$path/';
-      }
-      // Sur GitHub Pages le base-href est /CollectionApp/
-      if (base.host.contains('github.io') && !path.startsWith('/CollectionApp')) {
-        path = webProdPath;
       }
       return Uri(
         scheme: base.scheme,

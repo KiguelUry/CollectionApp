@@ -51,11 +51,11 @@ enum CardSubcategory {
 
   Color get color => switch (this) {
         CardSubcategory.pokemon => Colors.amber.shade800,
-        CardSubcategory.magic => Colors.deepPurple,
-        CardSubcategory.yugioh => Colors.indigo,
+        CardSubcategory.magic => Colors.blueGrey,
+        CardSubcategory.yugioh => Colors.blueGrey,
         CardSubcategory.onepiece => Colors.red.shade700,
         CardSubcategory.lorcana => Colors.lightBlue,
-        CardSubcategory.riftbound => const Color(0xFF6C3483),
+        CardSubcategory.riftbound => const Color(0xFF455A64),
         CardSubcategory.topps => Colors.blue,
         CardSubcategory.panini => Colors.orange,
         CardSubcategory.other => Colors.blueGrey,

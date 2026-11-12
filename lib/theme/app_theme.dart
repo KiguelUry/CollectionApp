@@ -4,8 +4,13 @@ import 'package:google_fonts/google_fonts.dart';
 
 /// Thème global de l'application.
 abstract final class AppTheme {
-  static const Color seed = Color(0xFF5E35B1);
-  static const Color surfaceTint = Color(0xFFF5F3FF);
+  /// Encre / ardoise : plus de teinte mauve dans les contrôles.
+  static const Color seed = Color(0xFF3A4150);
+  static const Color ink = Color(0xFF1A1C1F);
+  static const Color slate = Color(0xFF5C6570);
+  static const Color mist = Color(0xFFE6E8EC);
+  static const Color paper = Color(0xFFF4F5F7);
+  static const Color surfaceTint = paper;
 
   /// Fond / icône des placeholders d'image manquante (tuiles, modales).
   static const Color coverPlaceholderBg = Color(0xFFEEEEEE);
@@ -25,7 +30,16 @@ abstract final class AppTheme {
     final scheme = ColorScheme.fromSeed(
       seedColor: seed,
       brightness: Brightness.light,
-      surface: const Color(0xFFFAFAFC),
+      surface: paper,
+      primary: ink,
+      onPrimary: Colors.white,
+      secondary: slate,
+      onSecondary: Colors.white,
+      primaryContainer: mist,
+      onPrimaryContainer: ink,
+      secondaryContainer: const Color(0xFFD5D8DE),
+      onSecondaryContainer: ink,
+      surfaceTint: Colors.transparent,
     );
 
     final textTheme = _textTheme(ThemeData.light().textTheme, scheme.onSurface);
@@ -94,12 +108,47 @@ abstract final class AppTheme {
         side: BorderSide(color: scheme.outlineVariant),
       ),
       snackBarTheme: _snackBarTheme,
+      switchTheme: _switchTheme(scheme),
+      progressIndicatorTheme: ProgressIndicatorThemeData(color: scheme.primary),
+      segmentedButtonTheme: _segmentedTheme(scheme),
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: {
           TargetPlatform.android: CupertinoPageTransitionsBuilder(),
           TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
           TargetPlatform.windows: CupertinoPageTransitionsBuilder(),
         },
+      ),
+    );
+  }
+
+  static SwitchThemeData _switchTheme(ColorScheme scheme) {
+    return SwitchThemeData(
+      thumbColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.selected)) return scheme.onPrimary;
+        return scheme.outline;
+      }),
+      trackColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.selected)) return scheme.primary;
+        return scheme.surfaceContainerHighest;
+      }),
+    );
+  }
+
+  static SegmentedButtonThemeData _segmentedTheme(ColorScheme scheme) {
+    return SegmentedButtonThemeData(
+      style: ButtonStyle(
+        backgroundColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return scheme.primaryContainer;
+          }
+          return scheme.surface;
+        }),
+        foregroundColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return scheme.onPrimaryContainer;
+          }
+          return scheme.onSurface;
+        }),
       ),
     );
   }
@@ -128,7 +177,16 @@ abstract final class AppTheme {
       brightness: Brightness.dark,
       surface: midnight,
     ).copyWith(
+      primary: const Color(0xFFE8EAED),
+      onPrimary: ink,
+      secondary: const Color(0xFFB0B6C0),
+      onSecondary: ink,
+      primaryContainer: const Color(0xFF2C3138),
+      onPrimaryContainer: const Color(0xFFF2F3F5),
+      secondaryContainer: const Color(0xFF3A4048),
+      onSecondaryContainer: const Color(0xFFF2F3F5),
       surface: midnight,
+      surfaceTint: Colors.transparent,
       surfaceContainerLow: const Color(0xFF1A1A1F),
       surfaceContainerHigh: const Color(0xFF242429),
       outlineVariant: const Color(0xFF3A3A42),
@@ -200,6 +258,9 @@ abstract final class AppTheme {
         side: BorderSide(color: scheme.outlineVariant),
       ),
       snackBarTheme: _snackBarTheme,
+      switchTheme: _switchTheme(scheme),
+      progressIndicatorTheme: ProgressIndicatorThemeData(color: scheme.primary),
+      segmentedButtonTheme: _segmentedTheme(scheme),
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: {
           TargetPlatform.android: CupertinoPageTransitionsBuilder(),

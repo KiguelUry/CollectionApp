@@ -10,7 +10,7 @@ class CollectionGroup {
     required this.id,
     required this.name,
     required this.createdBy,
-    this.accentColor = '#673AB7',
+    this.accentColor = '#455A64',
     this.iconKey = 'groups',
     this.avatarUrl,
   });
@@ -20,7 +20,7 @@ class CollectionGroup {
       id: json['id'] as String,
       name: json['name'] as String,
       createdBy: json['created_by'] as String,
-      accentColor: (json['accent_color'] as String?) ?? '#673AB7',
+      accentColor: (json['accent_color'] as String?) ?? '#455A64',
       iconKey: (json['icon_key'] as String?) ?? 'groups',
       avatarUrl: json['avatar_url'] as String?,
     );
@@ -57,14 +57,14 @@ class CollectionGroup {
 
 /// Couleurs proposées pour les groupes (réutilise la palette profils).
 const List<String> groupAccentPresets = [
-  '#673AB7',
-  '#512DA8',
+  '#455A64',
+  '#37474F',
   '#E91E63',
   '#F44336',
   '#FF9800',
   '#4CAF50',
   '#009688',
   '#2196F3',
-  '#3F51B5',
+  '#546E7A',
   '#795548',
 ];

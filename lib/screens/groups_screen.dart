@@ -198,8 +198,8 @@ class _GroupsScreenState extends State<GroupsScreen> {
         appBar: AppAppBar(
           title: 'Mes groupes',
           bottom: TabBar(
-            indicatorColor: Colors.deepPurple.shade300,
-            labelColor: Colors.deepPurple.shade800,
+            indicatorColor: Colors.blueGrey.shade300,
+            labelColor: Colors.blueGrey.shade800,
             tabs: const [
               Tab(icon: Icon(Icons.bolt_rounded, size: 20), text: 'Activité'),
               Tab(icon: Icon(Icons.groups_rounded, size: 20), text: 'Groupes'),

@@ -6,6 +6,7 @@ import '../constants/rating_colors.dart';
 import '../services/account_deletion_service.dart';
 import '../services/auth_service.dart';
 import '../services/account_export_service.dart';
+import '../services/bgg_collection_import_service.dart';
 import '../services/oauth_link_notice.dart';
 import '../services/settings_service.dart';
 import '../utils/network_feedback.dart';
@@ -301,178 +302,238 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _signOut() async {
+    await AuthService().signOut();
+    if (!mounted) return;
+    Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
+  }
+
+  Future<void> _openBggImport() async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Importer BoardGameGeek'),
+        content: const SizedBox(
+          width: 420,
+          child: BggCollectionImportCard(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Fermer'),
+          ),
+        ],
+      ),
+    );
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
+    final email = Supabase.instance.client.auth.currentUser?.email ?? '';
     return Scaffold(
       appBar: const AppAppBar(title: 'Paramètres'),
       body: ListView(
+        padding: const EdgeInsets.only(bottom: 24),
         children: [
-          const _SectionHeader('Collections'),
-          ListTile(
-            leading: const Icon(Icons.home_outlined),
-            title: const Text('Foyers & lieux liés'),
-            onTap: () => showHouseholdsSheet(context),
-          ),
-          ListTile(
-            leading: const Icon(Icons.tune),
-            title: const Text('Gérer les catégories'),
-            subtitle: const Text('Masquer ou supprimer des collections du hub'),
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => const CategoryManageScreen(),
+          _SettingsCard(
+            title: 'Compte & Sécurité',
+            children: [
+              ListTile(
+                leading: const Icon(Icons.alternate_email),
+                title: const Text('Changer mon adresse e-mail'),
+                subtitle: email.isEmpty ? null : Text(email),
+                onTap: _changeEmail,
               ),
-            ),
-          ),
-          const BggCollectionImportCard(),
-          const _SectionHeader('Apparence'),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: SegmentedButton<AppThemePreference>(
-              segments: const [
-                ButtonSegment(
-                  value: AppThemePreference.system,
-                  label: Text('Auto'),
-                  icon: Icon(Icons.brightness_auto, size: 18),
+              ListTile(
+                leading: const Icon(Icons.lock_outline),
+                title: const Text('Changer mon mot de passe'),
+                onTap: _changePassword,
+              ),
+              _LinkedProviderTile(
+                label: 'Google',
+                linked: AuthService().providerLinked('google'),
+                onLink: () => _linkProvider(OAuthProvider.google),
+                onUnlink: () => _unlinkProvider('google'),
+              ),
+              _LinkedProviderTile(
+                label: 'Discord',
+                linked: AuthService().providerLinked('discord'),
+                onLink: () => _linkProvider(OAuthProvider.discord),
+                onUnlink: () => _unlinkProvider('discord'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.logout),
+                title: const Text('Déconnexion'),
+                onTap: _signOut,
+              ),
+              ListTile(
+                leading: Icon(Icons.delete_forever, color: Colors.red.shade700),
+                title: Text(
+                  'Supprimer mon compte',
+                  style: TextStyle(color: Colors.red.shade700),
                 ),
-                ButtonSegment(
-                  value: AppThemePreference.light,
-                  label: Text('Clair'),
-                  icon: Icon(Icons.light_mode, size: 18),
-                ),
-                ButtonSegment(
-                  value: AppThemePreference.dark,
-                  label: Text('Sombre'),
-                  icon: Icon(Icons.dark_mode, size: 18),
-                ),
-              ],
-              selected: {_settings.themePreference},
-              onSelectionChanged: (selection) {
-                _settings.setThemePreference(selection.first);
-              },
-            ),
+                onTap: _confirmDeleteAccount,
+              ),
+            ],
           ),
-          const _SectionHeader('Notes sur les tuiles'),
-          ListTile(
-            leading: const Icon(Icons.star_rounded, color: RatingColors.personal),
-            title: const Text('Affichage de la note'),
-            subtitle: Text(_settings.tileRatingDisplayMode.subtitle),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Column(
-              children: [
-                for (final mode in TileRatingDisplayMode.values)
-                  RadioListTile<TileRatingDisplayMode>(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(mode.label),
-                    subtitle: Text(
-                      mode.subtitle,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade600,
-                      ),
+          _SettingsCard(
+            title: 'Apparence & Interface',
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: SegmentedButton<AppThemePreference>(
+                  segments: const [
+                    ButtonSegment(
+                      value: AppThemePreference.system,
+                      label: Text('Auto'),
+                      icon: Icon(Icons.brightness_auto, size: 18),
                     ),
-                    value: mode,
-                    groupValue: _settings.tileRatingDisplayMode,
-                    activeColor: mode == TileRatingDisplayMode.alwaysCommunity
-                        ? RatingColors.community
-                        : RatingColors.personal,
-                    onChanged: (v) {
-                      if (v != null) _settings.setTileRatingDisplayMode(v);
-                    },
-                  ),
-              ],
-            ),
-          ),
-          const _SectionHeader('Notifications'),
-          SwitchListTile(
-            title: const Text('Notifications'),
-            value: _settings.notificationsEnabled,
-            onChanged: (v) => _settings.setNotificationsEnabled(v),
-          ),
-          const _SectionHeader('Confidentialité'),
-          SwitchListTile(
-            title: const Text('Masquer ma collection aux non-amis'),
-            subtitle: const Text(
-              'Recommandé : seuls tes amis peuvent voir ta collection',
-            ),
-            value: _settings.hideCollectionFromNonFriends,
-            onChanged: (v) => _settings.setHideFromNonFriends(v),
-          ),
-          SwitchListTile(
-            title: const Text('Masquer ma collection à mes amis'),
-            subtitle: const Text(
-              'Désactivé par défaut : tes amis voient ta collection',
-            ),
-            value: _settings.hideCollectionFromFriends,
-            onChanged: (v) => _settings.setHideFromFriends(v),
-          ),
-          SwitchListTile(
-            title: const Text('Wishlist visible par mes amis'),
-            subtitle: const Text(
-              'Activé par défaut : tes amis peuvent voir ta wishlist',
-            ),
-            value: _settings.shareWishlistWithFriends,
-            onChanged: (v) => _settings.setShareWishlistWithFriends(v),
-          ),
-          ListTile(
-            leading: const Icon(Icons.visibility_outlined),
-            title: const Text('Qui voit quoi ?'),
-            subtitle: const Text('Amis, groupes et données partagées'),
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => const PrivacyVisibilityScreen(),
+                    ButtonSegment(
+                      value: AppThemePreference.light,
+                      label: Text('Clair'),
+                      icon: Icon(Icons.light_mode, size: 18),
+                    ),
+                    ButtonSegment(
+                      value: AppThemePreference.dark,
+                      label: Text('Sombre'),
+                      icon: Icon(Icons.dark_mode, size: 18),
+                    ),
+                  ],
+                  selected: {_settings.themePreference},
+                  onSelectionChanged: (selection) {
+                    _settings.setThemePreference(selection.first);
+                  },
+                ),
               ),
-            ),
+              ListTile(
+                leading: const Icon(Icons.star_rounded, color: RatingColors.personal),
+                title: const Text('Affichage de la note'),
+                subtitle: Text(_settings.tileRatingDisplayMode.label),
+              ),
+              for (final mode in TileRatingDisplayMode.values)
+                RadioListTile<TileRatingDisplayMode>(
+                  dense: true,
+                  title: Text(mode.label),
+                  value: mode,
+                  groupValue: _settings.tileRatingDisplayMode,
+                  activeColor: mode == TileRatingDisplayMode.alwaysCommunity
+                      ? RatingColors.community
+                      : RatingColors.personal,
+                  onChanged: (v) {
+                    if (v != null) _settings.setTileRatingDisplayMode(v);
+                  },
+                ),
+              SwitchListTile(
+                title: const Text('Notifications'),
+                value: _settings.notificationsEnabled,
+                onChanged: (v) => _settings.setNotificationsEnabled(v),
+              ),
+            ],
           ),
-          const _SectionHeader('Données & compte'),
-          const _SectionHeader('Connexion Google et Discord'),
-          _LinkedProviderTile(
-            label: 'Google',
-            linked: AuthService().providerLinked('google'),
-            onLink: () => _linkProvider(OAuthProvider.google),
-            onUnlink: () => _unlinkProvider('google'),
+          _SettingsCard(
+            title: 'Collections & Imports',
+            children: [
+              ListTile(
+                leading: const Icon(Icons.tune),
+                title: const Text('Gérer les catégories'),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const CategoryManageScreen(),
+                  ),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.home_outlined),
+                title: const Text('Foyers & lieux liés'),
+                onTap: () => showHouseholdsSheet(context),
+              ),
+              ValueListenableBuilder<BggImportProgress>(
+                valueListenable: BggCollectionImportService.instance.progress,
+                builder: (context, progress, _) {
+                  return ListTile(
+                    leading: const Icon(Icons.cloud_download_outlined),
+                    title: const Text('Importer ma collection BoardGameGeek'),
+                    subtitle: progress.phase == BggImportPhase.idle
+                        ? null
+                        : Text(progress.message ?? 'Import en cours'),
+                    onTap: _openBggImport,
+                  );
+                },
+              ),
+            ],
           ),
-          _LinkedProviderTile(
-            label: 'Discord',
-            linked: AuthService().providerLinked('discord'),
-            onLink: () => _linkProvider(OAuthProvider.discord),
-            onUnlink: () => _unlinkProvider('discord'),
-          ),
-          ListTile(
-            leading: const Icon(Icons.alternate_email),
-            title: const Text('Changer mon adresse e-mail'),
-            subtitle: Text(
-              Supabase.instance.client.auth.currentUser?.email ?? '',
-            ),
-            onTap: _changeEmail,
-          ),
-          ListTile(
-            leading: const Icon(Icons.lock_outline),
-            title: const Text('Changer mon mot de passe'),
-            onTap: _changePassword,
-          ),
-          ListTile(
-            leading: const Icon(Icons.download_outlined),
-            title: const Text('Exporter mes données (JSON)'),
-            subtitle: const Text(
-              'Collections, wishlists, parties, identités joueurs',
-            ),
-            onTap: _exportJson,
-          ),
-          ListTile(
-            leading: Icon(Icons.delete_forever, color: Colors.red.shade700),
-            title: Text(
-              'Supprimer mon compte',
-              style: TextStyle(color: Colors.red.shade700),
-            ),
-            subtitle: const Text('Double confirmation — effacement définitif'),
-            onTap: _confirmDeleteAccount,
+          _SettingsCard(
+            title: 'Confidentialité & Données',
+            children: [
+              SwitchListTile(
+                title: const Text('Masquer ma collection aux non-amis'),
+                value: _settings.hideCollectionFromNonFriends,
+                onChanged: (v) => _settings.setHideFromNonFriends(v),
+              ),
+              SwitchListTile(
+                title: const Text('Masquer ma collection à mes amis'),
+                value: _settings.hideCollectionFromFriends,
+                onChanged: (v) => _settings.setHideFromFriends(v),
+              ),
+              SwitchListTile(
+                title: const Text('Wishlist visible par mes amis'),
+                value: _settings.shareWishlistWithFriends,
+                onChanged: (v) => _settings.setShareWishlistWithFriends(v),
+              ),
+              ListTile(
+                leading: const Icon(Icons.visibility_outlined),
+                title: const Text('Qui voit quoi ?'),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const PrivacyVisibilityScreen(),
+                  ),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.download_outlined),
+                title: const Text('Exporter mes données (JSON)'),
+                onTap: _exportJson,
+              ),
+            ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _SettingsCard extends StatelessWidget {
+  const _SettingsCard({required this.title, required this.children});
+
+  final String title;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+              child: Text(
+                title,
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: scheme.onSurface,
+                    ),
+              ),
+            ),
+            ...children,
+          ],
+        ),
       ),
     );
   }
@@ -507,26 +568,6 @@ class _LinkedProviderTile extends StatelessWidget {
             )
           : null,
       onTap: linked ? null : onLink,
-    );
-  }
-}
-
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader(this.title);
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
-      child: Text(
-        title,
-        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.bold,
-              color: Theme.of(context).colorScheme.onSurface,
-            ),
-      ),
     );
   }
 }

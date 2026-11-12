@@ -225,7 +225,7 @@ class BoardgameTileMetaIcons extends StatelessWidget {
                 : Icons.extension_outlined,
             suffix: isExpansionTile ? 'Ext' : '$expansionCount',
             color: isExpansionTile
-                ? Colors.deepPurple.shade500
+                ? Colors.blueGrey.shade500
                 : Colors.green.shade600,
           ),
         );

@@ -17,7 +17,7 @@ class UserProfile {
     required this.id,
     required this.username,
     this.avatarUrl,
-    this.accentColor = '#673AB7',
+    this.accentColor = '#455A64',
     this.bio,
     this.showcasePublic = false,
     this.showcaseToken,
@@ -32,7 +32,7 @@ class UserProfile {
       id: json['id'] as String,
       username: json['username'] as String? ?? 'Joueur',
       avatarUrl: json['avatar_url'] as String?,
-      accentColor: (json['accent_color'] as String?) ?? '#673AB7',
+      accentColor: (json['accent_color'] as String?) ?? '#455A64',
       bio: json['bio'] as String?,
       showcasePublic: json['showcase_public'] as bool? ?? false,
       showcaseToken: json['showcase_token'] as String?,
@@ -82,14 +82,14 @@ class UserProfile {
 
 /// Couleurs d'accent proposées pour le profil.
 const List<String> profileAccentPresets = [
-  '#673AB7',
-  '#512DA8',
+  '#455A64',
+  '#37474F',
   '#E91E63',
   '#F44336',
   '#FF9800',
   '#4CAF50',
   '#009688',
   '#2196F3',
-  '#3F51B5',
+  '#546E7A',
   '#795548',
 ];

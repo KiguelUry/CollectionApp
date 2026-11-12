@@ -395,7 +395,7 @@ class _WishlistPriceSheetState extends State<_WishlistPriceSheet> {
                   label: 'Prix neuf minimum',
                   value: formatEuroChip(neu, compact: false),
                   hint: 'Meilleur prix produit en stock si disponible.',
-                  accent: Colors.indigo.shade600,
+                  accent: Colors.blueGrey.shade600,
                 ),
               if (stores.isEmpty)
                 Column(

@@ -2947,7 +2947,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       width: 88,
       child: Column(
         children: [
-          Icon(icon, color: iconColor ?? Colors.deepPurple, size: 26),
+          Icon(icon, color: iconColor ?? Colors.blueGrey, size: 26),
           const SizedBox(height: 4),
           Text(
             label,

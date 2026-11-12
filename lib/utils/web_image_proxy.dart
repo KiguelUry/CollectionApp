@@ -19,8 +19,7 @@ bool _isDirectCorsHost(String host) {
       host.contains('nocookie.net') ||
       host.contains('brickset.com') ||
       host.contains('tcgdex.net') ||
-      host.contains('scryfall.com') ||
-      host.contains('ygoprodeck.com');
+      host.contains('scryfall.com');
 }
 
 /// Domaines qui passent par wsrv (CORS CanvasKit et/ou rate-limit amont).
@@ -30,7 +29,9 @@ bool _needsWsrv(String host) {
       host.contains('mzstatic.com') ||
       host.contains('books.google.') ||
       host.contains('googleapis.com') ||
-      host.contains('googleusercontent.com');
+      host.contains('googleusercontent.com') ||
+      host.contains('ygoprodeck.com') ||
+      host.contains('optcgapi.com');
 }
 
 bool _isMangaDexUploads(String host) =>
@@ -95,11 +96,13 @@ String proxyImageUrl(
   bool crop = false,
 }) {
   var src = url.trim();
-  if (src.isEmpty) return src;
+  if (src.startsWith('data:')) return src;
+  if (src.isEmpty || src.startsWith('file:')) return '';
   if (src.startsWith('//')) src = 'https:$src';
 
   final uri = Uri.tryParse(src);
-  if (uri == null || uri.host.isEmpty) return src;
+  if (uri == null || uri.host.isEmpty) return '';
+  if (uri.scheme != 'http' && uri.scheme != 'https') return '';
 
   final host = uri.host.toLowerCase();
   if (host == kWsrvHost ||
@@ -141,6 +144,8 @@ String proxyImageUrl(
     return https;
   }
 
+  // Hôtes sans CORS (cartes, CDNs divers) : wsrv sur le web.
+  if (kIsWeb) return _wsrv(https, width: width, crop: crop);
   return https;
 }
 

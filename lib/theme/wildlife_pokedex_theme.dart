@@ -19,7 +19,7 @@ abstract final class WildlifePokedexTheme {
         WildlifeRealm.fungi => const Color(0xFF7B1FA2),
         WildlifeRealm.animalia => const Color(0xFF8D6E63),
         WildlifeRealm.protista => const Color(0xFF26C6DA),
-        WildlifeRealm.monera => const Color(0xFF5E35B1),
+        WildlifeRealm.monera => const Color(0xFF455A64),
       };
 
   static Color kingdomGlow(WildlifeKingdom kingdom) => switch (kingdom) {

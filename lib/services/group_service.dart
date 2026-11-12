@@ -91,7 +91,7 @@ class GroupService {
           'name': trimmed,
           'created_by': userId,
           'icon_key': 'groups',
-          'accent_color': '#673AB7',
+          'accent_color': '#455A64',
         })
         .select()
         .single();

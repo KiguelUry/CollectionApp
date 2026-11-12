@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../constants/book_accent.dart';
@@ -1637,7 +1637,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
                       ),
                       decoration: BoxDecoration(
                         color: upcoming
-                            ? Colors.deepPurple.shade700
+                            ? Colors.blueGrey.shade700
                             : const Color(0xFF1B2838),
                         borderRadius: BorderRadius.circular(6),
                         boxShadow: const [
@@ -1664,7 +1664,7 @@ class _BookCatalogGridScreenState extends State<BookCatalogGridScreen> {
                         vertical: 2,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF7E57C2),
+                        color: const Color(0xFF546E7A),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(

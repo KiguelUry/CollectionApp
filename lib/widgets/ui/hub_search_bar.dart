@@ -16,7 +16,7 @@ class HubSearchBar extends StatelessWidget {
     required this.subtitle,
     required this.onTap,
     this.icon = Icons.search_rounded,
-    this.accent = const Color(0xFF5E35B1),
+    this.accent = const Color(0xFF455A64),
   });
 
   @override

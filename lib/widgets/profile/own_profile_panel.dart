@@ -429,40 +429,34 @@ class _OwnProfilePanelState extends State<OwnProfilePanel> {
                       ),
                       if (_profile?.showcasePublic == true &&
                           _profile?.showcaseToken != null) ...[
-                        const Text(
-                          'Contenu visible via le lien',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 13,
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          title: const Text('Inclure ma wishlist'),
+                          value: _visitorShow == 'all',
+                          onChanged: (include) => _setVisitorShow(
+                            include ? 'all' : 'owned',
                           ),
                         ),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          crossAxisAlignment: WrapCrossAlignment.center,
+                        Row(
                           children: [
-                            ChoiceChip(
-                              label: const Text('Collection + wishlist'),
-                              selected: _visitorShow == 'all',
-                              showCheckmark: false,
-                              onSelected: (_) => _setVisitorShow('all'),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: _shareShowcase,
+                                icon: const Icon(Icons.link_rounded, size: 18),
+                                label: const Text('Copier le lien'),
+                              ),
                             ),
-                            ChoiceChip(
-                              label: const Text('Collection seule'),
-                              selected: _visitorShow == 'owned',
-                              showCheckmark: false,
-                              onSelected: (_) => _setVisitorShow('owned'),
-                            ),
-                            OutlinedButton.icon(
-                              onPressed: _previewShowcase,
-                              icon: const Icon(Icons.visibility_outlined),
-                              label: const Text('Aperçu'),
-                            ),
-                            FilledButton.tonalIcon(
-                              onPressed: _shareShowcase,
-                              icon: const Icon(Icons.link_rounded),
-                              label: const Text('Copier le lien'),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: _previewShowcase,
+                                icon: const Icon(
+                                  Icons.visibility_outlined,
+                                  size: 18,
+                                ),
+                                label: const Text('Voir l’aperçu'),
+                              ),
                             ),
                           ],
                         ),

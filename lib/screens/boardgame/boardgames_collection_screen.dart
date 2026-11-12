@@ -125,7 +125,7 @@ class _BoardgamesCollectionScreenState extends State<BoardgamesCollectionScreen>
                   label: 'Pour toi',
                   description: 'Suggestions selon tes goûts !',
                   icon: Icons.auto_awesome,
-                  color: Colors.deepPurple,
+                  color: Colors.blueGrey,
                   onTap: () => _openGrid(
                     context,
                     source: BggCatalogSource.forYou,

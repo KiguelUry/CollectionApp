@@ -248,7 +248,7 @@ class _ItemMarketValuePanelState extends State<ItemMarketValuePanel> {
                   child: _Figure(
                     label: 'Max',
                     value: rangeMax,
-                    color: Colors.indigo,
+                    color: Colors.blueGrey,
                   ),
                 ),
               ] else
@@ -256,7 +256,7 @@ class _ItemMarketValuePanelState extends State<ItemMarketValuePanel> {
                   child: _Figure(
                     label: 'Neuf dès',
                     value: newMin,
-                    color: Colors.indigo,
+                    color: Colors.blueGrey,
                     big: true,
                   ),
                 ),
@@ -424,7 +424,7 @@ class _PriceGauge extends StatelessWidget {
   Widget build(BuildContext context) {
     final marks = <({double v, Color c, String l})>[
       if (secondhand != null) (v: secondhand!, c: Colors.teal, l: lowLabel),
-      if (newMin != null) (v: newMin!, c: Colors.indigo, l: highLabel),
+      if (newMin != null) (v: newMin!, c: Colors.blueGrey, l: highLabel),
       if (paid != null) (v: paid!, c: Colors.orange.shade800, l: paidLabel),
     ];
     if (marks.length < 2) return const SizedBox.shrink();
@@ -451,7 +451,7 @@ class _PriceGauge extends StatelessWidget {
                     gradient: LinearGradient(
                       colors: [
                         Colors.teal.withValues(alpha: 0.25),
-                        Colors.indigo.withValues(alpha: 0.25),
+                        Colors.blueGrey.withValues(alpha: 0.25),
                       ],
                     ),
                   ),

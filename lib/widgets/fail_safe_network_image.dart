@@ -93,7 +93,11 @@ class _FailSafeNetworkImageState extends State<FailSafeNetworkImage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_failed || widget.url.isEmpty || isImageUrlFailed(widget.url)) {
+    final uri = Uri.tryParse(widget.url);
+    final http = uri != null &&
+        (uri.scheme == 'http' || uri.scheme == 'https') &&
+        uri.host.isNotEmpty;
+    if (_failed || !http || isImageUrlFailed(widget.url)) {
       return widget.placeholder(context);
     }
 

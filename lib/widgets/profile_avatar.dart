@@ -19,7 +19,7 @@ class ProfileAvatar extends StatelessWidget {
     this.radius = 24,
   });
 
-  static Color colorFromHex(String? hex, {Color fallback = Colors.deepPurple}) {
+  static Color colorFromHex(String? hex, {Color fallback = const Color(0xFF455A64)}) {
     if (hex == null || hex.isEmpty) return fallback;
     var h = hex.replaceAll('#', '');
     if (h.length == 6) h = 'FF$h';
