@@ -284,6 +284,12 @@ class GlobalPlayHistoryService {
       }
     }
     if (template != null) meta['score_template'] = template.toJson();
+    for (final session in sessions.reversed) {
+      final library = session.presetLibrary;
+      if (library == null) continue;
+      meta['score_presets'] = [for (final preset in library) preset.toJson()];
+      break;
+    }
     await _client
         .from('collection_items')
         .update({

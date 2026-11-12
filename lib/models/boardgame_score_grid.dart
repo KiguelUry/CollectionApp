@@ -416,6 +416,48 @@ class BoardgameScoreGrid {
         .toList();
   }
 
+  /// Phrase affichée dans Motif quand le gagnant est calculé.
+  String? autoWinReason(
+    BoardgameWinCondition condition, {
+    int? targetScore,
+    BoardgameScoreTemplate? template,
+  }) {
+    if (!hasScores) return null;
+    if (condition == BoardgameWinCondition.customTemplate) {
+      return template?.matchSummary(this);
+    }
+    if (condition != BoardgameWinCondition.highest &&
+        condition != BoardgameWinCondition.lowest &&
+        condition != BoardgameWinCondition.minimumThreshold) {
+      return null;
+    }
+    final idx = winningColumnIndices(
+      condition,
+      targetScore: targetScore,
+      template: template,
+    );
+    if (idx.isEmpty) return null;
+    final score = _scoreOf(idx.first);
+    return switch (condition) {
+      BoardgameWinCondition.highest => 'Plus haut score : $score pts',
+      BoardgameWinCondition.lowest => 'Plus petit score : $score pts',
+      BoardgameWinCondition.minimumThreshold =>
+        '$score pts (seuil >= ${targetScore ?? 0})',
+      _ => null,
+    };
+  }
+
+  int _scoreOf(int index) {
+    if (hasTeams && index < teams.length) {
+      final team = teams[index]?.trim();
+      if (team != null && team.isNotEmpty) {
+        return teamTotals()[team] ?? 0;
+      }
+    }
+    final totals = columnTotals();
+    return index < totals.length ? totals[index] : 0;
+  }
+
   /// Indices des colonnes en dernière place (ex-aequo inclus).
   Set<int> lastPlaceColumnIndices(BoardgameWinCondition condition) {
     if (condition == BoardgameWinCondition.cooperative ||
@@ -1011,6 +1053,48 @@ class BoardgameScoreTemplate {
       if ((grid.rounds[i].label ?? '').trim() == wanted) return i;
     }
     return -1;
+  }
+}
+
+/// Modèle nommé, mémorisé sur le jeu (type de partie + grille + règles).
+class NamedScorePreset {
+  final String name;
+  final BoardgameConfrontationType confrontation;
+  final BoardgameScoreTemplate template;
+
+  const NamedScorePreset({
+    required this.name,
+    required this.confrontation,
+    required this.template,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'confrontation': confrontation.dbValue,
+        'template': template.toJson(),
+      };
+
+  static NamedScorePreset? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final name = raw['name']?.toString().trim() ?? '';
+    final template = BoardgameScoreTemplate.fromJson(raw['template']);
+    if (name.isEmpty || template == null) return null;
+    return NamedScorePreset(
+      name: name,
+      confrontation: BoardgameConfrontationType.fromJson(
+        raw['confrontation']?.toString(),
+      ),
+      template: template,
+    );
+  }
+
+  static List<NamedScorePreset> listFrom(Map<String, dynamic>? metadata) {
+    final raw = metadata?['score_presets'];
+    if (raw is! List) return const [];
+    return [
+      for (final item in raw)
+        if (fromJson(item) != null) fromJson(item)!,
+    ];
   }
 }
 

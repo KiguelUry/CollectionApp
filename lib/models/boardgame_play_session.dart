@@ -26,6 +26,8 @@ class BoardgamePlaySession {
   /// Motif court (« militaire », « 3 planètes identiques »).
   final String? winReason;
   final BoardgameScoreTemplate? scoreTemplate;
+  /// Bibliothèque de modèles du jeu. Non sérialisée dans la partie.
+  final List<NamedScorePreset>? presetLibrary;
 
   const BoardgamePlaySession({
     required this.date,
@@ -47,6 +49,7 @@ class BoardgamePlaySession {
     this.winnerManuallyForced = false,
     this.winReason,
     this.scoreTemplate,
+    this.presetLibrary,
   });
 
   factory BoardgamePlaySession.fromJson(Map<String, dynamic> json) {
@@ -283,6 +286,7 @@ class BoardgamePlaySession {
     bool clearWinReason = false,
     BoardgameScoreTemplate? scoreTemplate,
     bool clearScoreTemplate = false,
+    List<NamedScorePreset>? presetLibrary,
   }) {
     return BoardgamePlaySession(
       date: date ?? this.date,
@@ -307,6 +311,7 @@ class BoardgamePlaySession {
       winReason: clearWinReason ? null : (winReason ?? this.winReason),
       scoreTemplate:
           clearScoreTemplate ? null : (scoreTemplate ?? this.scoreTemplate),
+      presetLibrary: presetLibrary ?? this.presetLibrary,
     );
   }
 

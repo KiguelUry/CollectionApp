@@ -112,6 +112,12 @@ class _BoardgamePlayHistoryPanelState extends State<BoardgamePlayHistoryPanel> {
       }
     }
     if (template != null) meta['score_template'] = template.toJson();
+    for (final session in sessions.reversed) {
+      final library = session.presetLibrary;
+      if (library == null) continue;
+      meta['score_presets'] = [for (final preset in library) preset.toJson()];
+      break;
+    }
     widget.onMetadataChanged(meta);
   }
 
@@ -438,6 +444,9 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
   late bool _useTeams;
   late BoardgameWinCondition _winCondition;
   late BoardgameScoreTemplate _template;
+  List<NamedScorePreset> _presets = const [];
+  String? _activePresetName;
+  String _presetBaseline = '';
   late BoardgameConfrontationType _confrontation;
   late BoardgamePlayStatus _status;
   late BoardgameScoreGrid _initialGrid;
@@ -496,6 +505,9 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     _template = s?.scoreTemplate ??
         BoardgameScoreTemplate.fromMetadata(widget.item?.metadata) ??
         BoardgameScoreTemplate.empty;
+    _presets = NamedScorePreset.listFrom(widget.item?.metadata);
+    _activePresetName = _presetNameMatching(_template, _confrontation);
+    _presetBaseline = _presetFingerprint();
     // Nouvelle partie / relaunch → en cours ; édition conserve le statut.
     _status = s?.status ?? BoardgamePlayStatus.inProgress;
     if (s != null && s.scoreGrid != null) {
@@ -637,7 +649,175 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     );
   }
 
-  void _submit() {
+  String _presetFingerprint() {
+    final lines = _template.lines
+        .map((line) => '${line.name}:${line.malus}')
+        .join(',');
+    final rules = _template.rules
+        .map(
+          (rule) =>
+              '${rule.target.name}:${rule.op.name}:${rule.value}:${rule.lineName}:${rule.cellOp?.name}:${rule.cellValue}',
+        )
+        .join(';');
+    return '${_confrontation.dbValue}|${_template.matchAll}|$lines|$rules';
+  }
+
+  String? _presetNameMatching(
+    BoardgameScoreTemplate template,
+    BoardgameConfrontationType confrontation,
+  ) {
+    final probe = _fingerprintOf(confrontation, template);
+    for (final preset in _presets) {
+      if (_fingerprintOf(preset.confrontation, preset.template) == probe) {
+        return preset.name;
+      }
+    }
+    return null;
+  }
+
+  String _fingerprintOf(
+    BoardgameConfrontationType confrontation,
+    BoardgameScoreTemplate template,
+  ) {
+    final lines = template.lines
+        .map((line) => '${line.name}:${line.malus}')
+        .join(',');
+    final rules = template.rules
+        .map(
+          (rule) =>
+              '${rule.target.name}:${rule.op.name}:${rule.value}:${rule.lineName}:${rule.cellOp?.name}:${rule.cellValue}',
+        )
+        .join(';');
+    return '${confrontation.dbValue}|${template.matchAll}|$lines|$rules';
+  }
+
+  Future<bool> _maybeSavePreset() async {
+    if (_winCondition != BoardgameWinCondition.customTemplate || _isCoop) {
+      return true;
+    }
+    final hasContent =
+        _template.lines.isNotEmpty || _template.rules.isNotEmpty;
+    if (!hasContent || _presetFingerprint() == _presetBaseline) return true;
+    final nameCtrl = TextEditingController(text: _activePresetName ?? '');
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Enregistrer ce modèle ?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Veux-tu enregistrer ce modèle personnalisé ? Si oui, sous quel nom ?',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: nameCtrl,
+              autofocus: true,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Nom du modèle',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ''),
+            child: const Text('Non, juste la partie'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final name = nameCtrl.text.trim();
+              if (name.isEmpty) return;
+              Navigator.pop(ctx, name);
+            },
+            child: const Text('Enregistrer le modèle'),
+          ),
+        ],
+      ),
+    );
+    nameCtrl.dispose();
+    if (!mounted || choice == null) return false;
+    if (choice.isEmpty) return true;
+    final preset = NamedScorePreset(
+      name: choice,
+      confrontation: _confrontation,
+      template: _template,
+    );
+    final next = [
+      for (final existing in _presets)
+        if (existing.name.toLowerCase() != choice.toLowerCase()) existing,
+      preset,
+    ];
+    setState(() {
+      _presets = next;
+      _activePresetName = choice;
+      _presetBaseline = _presetFingerprint();
+    });
+    return true;
+  }
+
+  void _applyPreset(NamedScorePreset? preset) {
+    if (preset == null) {
+      setState(() {
+        _activePresetName = null;
+        _template = const BoardgameScoreTemplate();
+        _presetBaseline = _presetFingerprint();
+      });
+      _gridKey.currentState?.setLineSpecs(const []);
+      return;
+    }
+    setState(() {
+      _activePresetName = preset.name;
+      _confrontation = preset.confrontation;
+      _useTeams = preset.confrontation == BoardgameConfrontationType.teams ||
+          preset.confrontation == BoardgameConfrontationType.oneVsAll;
+      _winCondition = BoardgameWinCondition.customTemplate;
+      _template = preset.template;
+      _presetBaseline = _fingerprintOf(preset.confrontation, preset.template);
+    });
+    _gridKey.currentState?.setLineSpecs(preset.template.lines);
+  }
+
+  Widget _presetPicker() {
+    const fresh = '__new__';
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: DropdownButtonFormField<String>(
+        key: ValueKey('preset-${_activePresetName ?? fresh}-${_presets.length}'),
+        initialValue: _activePresetName ?? fresh,
+        isExpanded: true,
+        decoration: const InputDecoration(
+          isDense: true,
+          labelText: 'Modèle enregistré',
+        ),
+        items: [
+          for (final preset in _presets)
+            DropdownMenuItem(value: preset.name, child: Text(preset.name)),
+          const DropdownMenuItem(
+            value: fresh,
+            child: Text('+ Nouveau modèle'),
+          ),
+        ],
+        onChanged: (value) {
+          if (value == null) return;
+          if (value == fresh) {
+            _applyPreset(null);
+            return;
+          }
+          for (final preset in _presets) {
+            if (preset.name == value) {
+              _applyPreset(preset);
+              return;
+            }
+          }
+        },
+      ),
+    );
+  }
+
+  Future<void> _submit() async {
     List<String> players;
     BoardgameScoreGrid? grid;
     Map<String, int>? scores;
@@ -697,6 +877,18 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
       }
     }
 
+    final liveLines = _gridKey.currentState?.lineSpecs();
+    if (liveLines != null &&
+        _winCondition == BoardgameWinCondition.customTemplate) {
+      _template = BoardgameScoreTemplate(
+        lines: liveLines,
+        rules: _template.rules,
+        matchAll: _template.matchAll,
+      );
+    }
+    if (!await _maybeSavePreset()) return;
+    if (!mounted) return;
+
     final noScore = _winCondition == BoardgameWinCondition.noScore;
     final savedTemplate = _winCondition == BoardgameWinCondition.customTemplate
         ? BoardgameScoreTemplate(
@@ -753,6 +945,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
             ? winner != null && winner.isNotEmpty
             : _winnerManuallyForced && winner != null && winner.isNotEmpty,
         winReason: winReason.isEmpty ? null : winReason,
+        presetLibrary: _presets,
       );
     final item = widget.item;
     if (item != null &&
@@ -772,26 +965,26 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     final grid = state?.buildGrid();
     if (state == null || grid == null) return;
     _initialGrid = grid;
-    if (_winCondition != BoardgameWinCondition.customTemplate || _isCoop) {
-      if (_winnerManuallyForced) {
-        setState(() {
-          _winnerManuallyForced = false;
-          _winnerController.clear();
-        });
-      }
-      return;
+    if (_isCoop || _winCondition == BoardgameWinCondition.noScore) return;
+    BoardgameScoreTemplate? template;
+    if (_winCondition == BoardgameWinCondition.customTemplate) {
+      final specs = state.lineSpecs();
+      template = BoardgameScoreTemplate(
+        lines: specs.isEmpty ? _template.lines : specs,
+        rules: _template.rules,
+        matchAll: _template.matchAll,
+      );
     }
-    final specs = state.lineSpecs();
-    final template = BoardgameScoreTemplate(
-      lines: specs.isEmpty ? _template.lines : specs,
-      rules: _template.rules,
-      matchAll: _template.matchAll,
-    );
     final names = grid.winnerNames(
-      BoardgameWinCondition.customTemplate,
+      _winCondition,
+      targetScore: _targetScore,
       template: template,
     );
-    final summary = template.matchSummary(grid);
+    final summary = grid.autoWinReason(
+      _winCondition,
+      targetScore: _targetScore,
+      template: template,
+    );
     _applyingField = true;
     if (!_winnerManuallyForced) {
       _winnerController.text = names.join(' & ');
@@ -800,13 +993,15 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
       _winReasonController.text = summary ?? '';
     }
     _applyingField = false;
+    if (template == null) return;
+    final synced = template;
     final previous = _template.lines
         .map((line) => '${line.name}:${line.malus}')
         .join('|');
-    final next = template.lines
+    final next = synced.lines
         .map((line) => '${line.name}:${line.malus}')
         .join('|');
-    if (previous != next) setState(() => _template = template);
+    if (previous != next) setState(() => _template = synced);
   }
 
   Widget _playMenus(BuildContext context) {
@@ -852,6 +1047,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
       onChanged: (c) {
         if (c == null) return;
         setState(() => _winCondition = c);
+        _onGridChanged();
       },
     );
     final threshold = showThreshold ? _thresholdBubble() : null;
@@ -914,7 +1110,10 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
                 border: InputBorder.none,
                 contentPadding: EdgeInsets.symmetric(vertical: 8),
               ),
-              onChanged: (_) => setState(() {}),
+              onChanged: (_) {
+                setState(() {});
+                _onGridChanged();
+              },
             ),
           ),
         ],
@@ -937,7 +1136,12 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.initial == null ? 'Nouvelle partie' : 'Partie'),
+        title: Text(
+          item != null && item.title.trim().isNotEmpty
+              ? item.title
+              : (widget.initial == null ? 'Nouvelle partie' : 'Partie'),
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: [
           IconButton(
             onPressed: _submit,
@@ -1034,7 +1238,8 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
           ];
           final setup = <Widget>[
                 if (_winCondition == BoardgameWinCondition.customTemplate &&
-                    !_isCoop)
+                    !_isCoop) ...[
+                  _presetPicker(),
                   _TemplateFields(
                     template: _template,
                     onChanged: (next) {
@@ -1052,6 +1257,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
                       });
                     },
                   ),
+                ],
                 if (_isCoop) ...[
                   const SizedBox(height: 8),
                   Row(
@@ -1436,30 +1642,27 @@ class _TemplateFieldsState extends State<_TemplateFields> {
       key: ValueKey('target-$i-${_targetKey(rule)}-$names'),
       initialValue: _targetKey(rule),
       isExpanded: true,
-      decoration: const InputDecoration(
-        isDense: true,
-        labelText: 'Cible',
-      ),
+      decoration: const InputDecoration(isDense: true),
       items: [
-        const DropdownMenuItem(value: 'total', child: Text('Score total')),
+        const DropdownMenuItem(value: 'total', child: Text('Le score total')),
         const DropdownMenuItem(
           value: 'anyLine',
-          child: Text('N\'importe quelle catégorie'),
+          child: Text('Au moins une catégorie'),
         ),
         const DropdownMenuItem(
           value: 'filledLineCount',
-          child: Text('Nombre de catégories'),
+          child: Text('Plusieurs catégories différentes'),
         ),
         for (final name in names)
           DropdownMenuItem(
             value: 'line:$name',
-            child: Text('Catégorie : $name'),
+            child: Text('La catégorie : $name'),
           ),
         if (rule.target == ScoreRuleTarget.namedLine &&
             !names.contains(rule.lineName))
           DropdownMenuItem(
             value: _targetKey(rule),
-            child: Text('Catégorie : ${rule.lineName ?? ''}'),
+            child: Text('La catégorie : ${rule.lineName ?? ''}'),
           ),
       ],
       onChanged: (key) {
@@ -1499,59 +1702,17 @@ class _TemplateFieldsState extends State<_TemplateFields> {
             ),
             if (rule.countsCategories) ...[
               const SizedBox(height: 8),
-              Text(
-                'Valeur de la catégorie',
-                style: Theme.of(context).textTheme.labelLarge,
-              ),
-              const SizedBox(height: 4),
-              Row(
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  Expanded(
-                    child: _opMenu(
-                      key: 'cell-$i-${rule.effectiveCellOp.name}',
-                      value: _comparisonOp(rule.effectiveCellOp),
-                      onChanged: (op) {
-                        setState(() {
-                          _rules[i] = ScoreRule(
-                            target: rule.target,
-                            op: _comparisonOp(rule.op),
-                            value: rule.value,
-                            cellOp: op,
-                            cellValue: int.tryParse(_cellValues[i].text.trim()) ?? 1,
-                          );
-                        });
-                        _emit();
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 8),
                   SizedBox(
-                    width: 88,
-                    child: TextField(
-                      controller: _cellValues[i],
-                      keyboardType: TextInputType.number,
-                      textAlign: TextAlign.center,
-                      decoration: const InputDecoration(
-                        isDense: true,
-                        labelText: 'Seuil',
-                      ),
-                      onChanged: (_) => _emit(),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Nombre de catégories',
-                style: Theme.of(context).textTheme.labelLarge,
-              ),
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  Expanded(
+                    width: 168,
                     child: _opMenu(
                       key: 'count-$i-${_comparisonOp(rule.op).name}',
                       value: _comparisonOp(rule.op),
+                      phrases: _countOpPhrase,
                       onChanged: (op) {
                         setState(() {
                           _rules[i] = ScoreRule(
@@ -1559,27 +1720,66 @@ class _TemplateFieldsState extends State<_TemplateFields> {
                             op: op,
                             value: rule.value,
                             cellOp: rule.effectiveCellOp,
-                            cellValue: int.tryParse(_cellValues[i].text.trim()) ?? 1,
+                            cellValue:
+                                int.tryParse(_cellValues[i].text.trim()) ?? 1,
                           );
                         });
                         _emit();
                       },
                     ),
                   ),
-                  const SizedBox(width: 8),
                   SizedBox(
-                    width: 88,
+                    width: 56,
                     child: TextField(
                       controller: _values[i],
                       keyboardType: TextInputType.number,
                       textAlign: TextAlign.center,
-                      decoration: const InputDecoration(
-                        isDense: true,
-                        labelText: 'Nombre',
-                      ),
+                      decoration: const InputDecoration(isDense: true),
                       onChanged: (_) => _emit(),
                     ),
                   ),
+                  const Text('catégories différentes'),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  const Text('ont chacune'),
+                  SizedBox(
+                    width: 150,
+                    child: _opMenu(
+                      key: 'cell-$i-${rule.effectiveCellOp.name}',
+                      value: _comparisonOp(rule.effectiveCellOp),
+                      phrases: _pointOpPhrase,
+                      onChanged: (op) {
+                        setState(() {
+                          _rules[i] = ScoreRule(
+                            target: rule.target,
+                            op: _comparisonOp(rule.op),
+                            value: rule.value,
+                            cellOp: op,
+                            cellValue:
+                                int.tryParse(_cellValues[i].text.trim()) ?? 1,
+                          );
+                        });
+                        _emit();
+                      },
+                    ),
+                  ),
+                  SizedBox(
+                    width: 56,
+                    child: TextField(
+                      controller: _cellValues[i],
+                      keyboardType: TextInputType.number,
+                      textAlign: TextAlign.center,
+                      decoration: const InputDecoration(isDense: true),
+                      onChanged: (_) => _emit(),
+                    ),
+                  ),
+                  const Text('point(s)'),
                 ],
               ),
             ] else
@@ -1592,6 +1792,10 @@ class _TemplateFieldsState extends State<_TemplateFields> {
                         key: 'op-$i-${rule.op.name}',
                         value: rule.op,
                         ops: ScoreRuleOp.values,
+                        phrases: (op) => _ruleOpPhrase(
+                          op,
+                          category: rule.target != ScoreRuleTarget.total,
+                        ),
                         onChanged: (op) {
                           setState(() {
                             _rules[i] = ScoreRule(
@@ -1608,15 +1812,12 @@ class _TemplateFieldsState extends State<_TemplateFields> {
                     if (rule.needsValue) ...[
                       const SizedBox(width: 8),
                       SizedBox(
-                        width: 88,
+                        width: 72,
                         child: TextField(
                           controller: _values[i],
                           keyboardType: TextInputType.number,
                           textAlign: TextAlign.center,
-                          decoration: const InputDecoration(
-                            isDense: true,
-                            labelText: 'Valeur',
-                          ),
+                          decoration: const InputDecoration(isDense: true),
                           onChanged: (_) => _emit(),
                         ),
                       ),
@@ -1630,23 +1831,63 @@ class _TemplateFieldsState extends State<_TemplateFields> {
     );
   }
 
+  Widget _matchConnector(ColorScheme scheme) {
+    Widget word(bool matchAll, String label) {
+      final selected = _matchAll == matchAll;
+      return InkWell(
+        onTap: () {
+          setState(() => _matchAll = matchAll);
+          _emit();
+        },
+        borderRadius: BorderRadius.circular(6),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: selected ? FontWeight.w500 : FontWeight.w400,
+              color: selected ? scheme.primary : scheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          Expanded(child: Divider(color: scheme.outlineVariant)),
+          const SizedBox(width: 8),
+          word(false, 'ou'),
+          Text(' / ', style: TextStyle(color: scheme.outline, fontSize: 12)),
+          word(true, 'et'),
+          const SizedBox(width: 8),
+          Expanded(child: Divider(color: scheme.outlineVariant)),
+        ],
+      ),
+    );
+  }
+
   Widget _opMenu({
     required String key,
     required ScoreRuleOp value,
     required ValueChanged<ScoreRuleOp> onChanged,
+    required String Function(ScoreRuleOp op) phrases,
     List<ScoreRuleOp> ops = _comparisonOps,
   }) {
     return DropdownButtonFormField<ScoreRuleOp>(
       key: ValueKey(key),
       initialValue: value,
       isExpanded: true,
-      decoration: const InputDecoration(
-        isDense: true,
-        labelText: 'Opérateur',
-      ),
+      decoration: const InputDecoration(isDense: true),
       items: [
         for (final op in ops)
-          DropdownMenuItem(value: op, child: Text(opLabel(op))),
+          DropdownMenuItem(
+            value: op,
+            child: Text(phrases(op), overflow: TextOverflow.ellipsis),
+          ),
       ],
       onChanged: (op) {
         if (op == null) return;
@@ -1738,28 +1979,7 @@ class _TemplateFieldsState extends State<_TemplateFields> {
         ),
         const SizedBox(height: 8),
         for (var i = 0; i < _rules.length; i++) ...[
-          if (i > 0)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: SegmentedButton<bool>(
-                  style: const ButtonStyle(
-                    visualDensity: VisualDensity.compact,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  segments: const [
-                    ButtonSegment(value: false, label: Text('OU')),
-                    ButtonSegment(value: true, label: Text('ET')),
-                  ],
-                  selected: {_matchAll},
-                  onSelectionChanged: (selected) {
-                    setState(() => _matchAll = selected.first);
-                    _emit();
-                  },
-                ),
-              ),
-            ),
+          if (i > 0) _matchConnector(scheme),
           _ruleCard(i, names, scheme),
         ],
         Align(
@@ -1797,6 +2017,47 @@ const _comparisonOps = <ScoreRuleOp>[
 
 ScoreRuleOp _comparisonOp(ScoreRuleOp op) =>
     _comparisonOps.contains(op) ? op : ScoreRuleOp.gte;
+
+String _ruleOpPhrase(ScoreRuleOp op, {required bool category}) {
+  if (category) {
+    return switch (op) {
+      ScoreRuleOp.gte => 'atteint au moins (≥)',
+      ScoreRuleOp.eq => 'atteint exactement (=)',
+      ScoreRuleOp.lte => 'atteint au maximum (≤)',
+      ScoreRuleOp.gt => 'atteint plus de (>)',
+      ScoreRuleOp.lt => 'atteint moins de (<)',
+      ScoreRuleOp.highest => 'le plus élevé',
+      ScoreRuleOp.lowest => 'le plus bas',
+    };
+  }
+  return switch (op) {
+    ScoreRuleOp.gte => "est d'au moins (≥)",
+    ScoreRuleOp.eq => 'est exactement (=)',
+    ScoreRuleOp.lte => "est d'au maximum (≤)",
+    ScoreRuleOp.gt => 'est plus de (>)',
+    ScoreRuleOp.lt => 'est moins de (<)',
+    ScoreRuleOp.highest => 'le plus élevé',
+    ScoreRuleOp.lowest => 'le plus bas',
+  };
+}
+
+String _countOpPhrase(ScoreRuleOp op) => switch (op) {
+      ScoreRuleOp.gte => 'Au moins (≥)',
+      ScoreRuleOp.eq => 'Exactement (=)',
+      ScoreRuleOp.lte => 'Au maximum (≤)',
+      ScoreRuleOp.gt => 'Plus de (>)',
+      ScoreRuleOp.lt => 'Moins de (<)',
+      _ => 'Au moins (≥)',
+    };
+
+String _pointOpPhrase(ScoreRuleOp op) => switch (op) {
+      ScoreRuleOp.gte => 'au moins (≥)',
+      ScoreRuleOp.eq => 'exactement (=)',
+      ScoreRuleOp.lte => 'au maximum (≤)',
+      ScoreRuleOp.gt => 'plus de (>)',
+      ScoreRuleOp.lt => 'moins de (<)',
+      _ => 'au moins (≥)',
+    };
 
 String opLabel(ScoreRuleOp op) => switch (op) {
       ScoreRuleOp.gte => '>=',
