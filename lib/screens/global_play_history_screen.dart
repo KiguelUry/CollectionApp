@@ -368,16 +368,13 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
       ..sort((a, b) => b.entries.length.compareTo(a.entries.length));
     final wide = MediaQuery.sizeOf(context).width > 900;
 
-    final narrowMobile = MediaQuery.sizeOf(context).width < 600;
-    final showInlineActions =
-        MediaQuery.sizeOf(context).width <= 1100 &&
-            (!narrowMobile || !_mobileActionsCompact);
+    final compactActions = MediaQuery.sizeOf(context).width <= 1100;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Historique des parties'),
         actions: [
-          if (narrowMobile && _mobileActionsCompact) ...[
+          if (compactActions) ...[
             IconButton(
               tooltip: 'Tirage au sort',
               icon: const Icon(Icons.casino_outlined),
@@ -418,30 +415,6 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
               onOpenDraw: _openDraw,
               child: Column(
               children: [
-                if (showInlineActions) ...[
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                    child: SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.tonalIcon(
-                        onPressed: _openDraw,
-                        icon: const Icon(Icons.casino_outlined),
-                        label: const Text('Tirage au sort'),
-                      ),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                    child: SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: _openAliasLinker,
-                        icon: const Icon(Icons.people_alt_outlined),
-                        label: const Text('Identités joueurs'),
-                      ),
-                    ),
-                  ),
-                ],
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
                   child: SegmentedButton<int>(
@@ -1343,43 +1316,63 @@ class _GlobalPlayHistoryLayout extends StatelessWidget {
               child: Align(
                 alignment: Alignment.topCenter,
                 child: SizedBox(
-                  width: 250,
+                  width: 420,
                   child: Padding(
                 padding: const EdgeInsets.fromLTRB(12, 56, 12, 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    statCard(
-                      title: 'Parties enregistrées',
-                      value: '$playCount',
-                      icon: Icons.history_edu_outlined,
-                    ),
-                    const SizedBox(height: 12),
-                    Card(
-                      elevation: 0,
-                      color: scheme.secondaryContainer.withValues(alpha: 0.55),
-                      child: InkWell(
-                        onTap: onOpenDraw,
-                        borderRadius: BorderRadius.circular(12),
-                        child: Padding(
-                          padding: const EdgeInsets.all(14),
-                          child: Row(
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: statCard(
+                            title: 'Parties enregistrées',
+                            value: '$playCount',
+                            icon: Icons.history_edu_outlined,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
                             children: [
-                              Icon(Icons.casino_outlined, color: scheme.primary),
-                              const SizedBox(width: 10),
-                              const Expanded(
-                                child: Text(
-                                  'Tirage au sort',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 13,
+                              Card(
+                                elevation: 0,
+                                color: scheme.secondaryContainer
+                                    .withValues(alpha: 0.55),
+                                child: InkWell(
+                                  onTap: onOpenDraw,
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(12),
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          Icons.casino_outlined,
+                                          color: scheme.primary,
+                                          size: 18,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        const Expanded(
+                                          child: Text(
+                                            'Tirage au sort',
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
+                              const SizedBox(height: 8),
+                              identitiesCard(),
                             ],
                           ),
                         ),
-                      ),
+                      ],
                     ),
                     const SizedBox(height: 12),
                     statCard(
@@ -1388,8 +1381,6 @@ class _GlobalPlayHistoryLayout extends StatelessWidget {
                       icon: Icons.extension_outlined,
                       caption: 'Historique global',
                     ),
-                    const SizedBox(height: 12),
-                    identitiesCard(),
                     const SizedBox(height: 12),
                     topPlayedCard(),
                   ],

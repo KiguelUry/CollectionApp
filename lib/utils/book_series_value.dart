@@ -72,9 +72,10 @@ abstract final class BookSeriesValue {
     for (final slot in slots) {
       final n = slot.volume.volumeNumber;
       if (n < 0.5) continue; // hors-série / scans
-      final owned = slot.item != null &&
-          !slot.item!.isWishlist &&
-          !slot.item!.isSold;
+      final owned = slot.status == BookVolumeStatus.owned ||
+          (slot.item != null &&
+              !slot.item!.isWishlist &&
+              !slot.item!.isSold);
       final unit = unitPriceFor(
         subcategory: series.subcategory,
         seriesName: series.name,

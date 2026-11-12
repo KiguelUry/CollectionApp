@@ -49,7 +49,6 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   bool _synopsisVisible = true;
   bool _chaptersExpanded = false;
   bool _refreshingPubs = false;
-  bool _shelfView = false;
   /// `enrichMissingVolumeCovers` : une seule fois par ouverture d’écran.
   bool _hasEnrichedThisSession = false;
   /// true si Possédé/Lu/Note/Wishlist/couvertures ont changé en DB.
@@ -935,15 +934,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
               SliverToBoxAdapter(child: _buildFilterMenu(accent)),
               SliverToBoxAdapter(child: _buildHybridFrise(physical, accent)),
             ],
-            if (_shelfView)
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                  child: _buildShelfView(physical),
-                ),
-              )
-            else
-              _buildCoverGrid(physical, accent, asSliver: true),
+            _buildCoverGrid(physical, accent, asSliver: true),
             if (chapters.isNotEmpty)
               SliverToBoxAdapter(
                 child: _buildChaptersSection(chapters, accent),
@@ -1084,20 +1075,24 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                     );
                   },
                 ),
-                if (stats.ownedCount > 0)
-                  Builder(
-                    builder: (_) {
-                      final value = BookSeriesValue.summarize(
-                        series: series,
-                        slots: _physicalSlots,
-                      );
-                      return _ratingBadge(
-                        '💶 ~${formatEuroChip(value.ownedValueNew)}',
-                        const Color(0xFF059669),
-                        onTap: () => _showSeriesValueSheet(series, value),
-                      );
-                    },
-                  ),
+                Builder(
+                  builder: (_) {
+                    final value = BookSeriesValue.summarize(
+                      series: series,
+                      slots: _slots
+                          .where((slot) => !slot.volume.isChapterOrScan)
+                          .toList(),
+                    );
+                    if (value.ownedCount <= 0 || value.ownedValueNew <= 0) {
+                      return const SizedBox.shrink();
+                    }
+                    return _ratingBadge(
+                      '💶 ~${formatEuroChip(value.ownedValueNew)}',
+                      const Color(0xFF059669),
+                      onTap: () => _showSeriesValueSheet(series, value),
+                    );
+                  },
+                ),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -1657,11 +1652,7 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
               ),
             ),
           ),
-          _ViewModeToggle(
-            shelfView: _shelfView,
-            narrow: narrow,
-            onChanged: (v) => setState(() => _shelfView = v),
-          ),
+          const SizedBox.shrink(),
         ],
       ),
     );
@@ -2294,147 +2285,6 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
     );
   }
 
-  Widget _buildShelfView(List<BookVolumeSlot> slots) {
-    if (slots.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.all(24),
-        child: Text(
-          'Aucun tome pour ce filtre.',
-          style: TextStyle(color: Colors.grey.shade500),
-          textAlign: TextAlign.center,
-        ),
-      );
-    }
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Container(
-        height: 220,
-        padding: const EdgeInsets.fromLTRB(4, 8, 4, 16),
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
-          ),
-          borderRadius: BorderRadius.all(Radius.circular(12)),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            for (final slot in slots) ...[
-              _spineTile(slot),
-              const SizedBox(width: 4),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _spineTile(BookVolumeSlot slot) {
-    final owned = _slotOwned(slot);
-    final read = _slotRead(slot);
-    final wish = _slotWish(slot);
-    final note = _slotRating(slot);
-    final n = slot.volume.displayNumber;
-    final cover = slot.volume.coverUrl;
-    if (!owned && !wish) {
-      return GestureDetector(
-        onTap: () => _onCardTap(slot),
-        onLongPress: () => _toggleOwned(slot),
-        child: CustomPaint(
-          painter: _GhostSpinePainter(),
-          child: SizedBox(
-            width: 28,
-            height: 170,
-            child: Center(
-              child: RotatedBox(
-                quarterTurns: 3,
-                child: Text(
-                  'T$n',
-                  style: const TextStyle(
-                    fontSize: 10,
-                    color: Colors.white38,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-    return GestureDetector(
-      onTap: () => _onCardTap(slot),
-      child: Container(
-        width: 36,
-        height: 180,
-        decoration: BoxDecoration(
-          color: const Color(0xFF334155),
-          borderRadius: BorderRadius.circular(4),
-          border: Border.all(
-            color: wish ? const Color(0xFFA855F7) : const Color(0xFF10B981),
-            width: 1.5,
-          ),
-        ),
-        child: Column(
-          children: [
-            if (cover != null && cover.isNotEmpty)
-              SizedBox(
-                height: 40,
-                width: double.infinity,
-                child: ClipRRect(
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(3),
-                  ),
-                  child: CollectionCoverImage(
-                    url: cover,
-                    bookCover: true,
-                    fit: BoxFit.cover,
-                  ),
-                ),
-              ),
-            Expanded(
-              child: Center(
-                child: RotatedBox(
-                  quarterTurns: 3,
-                  child: Text(
-                    'T$n',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 12,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            if (note != null)
-              Container(
-                width: double.infinity,
-                color: ratingColor(note),
-                padding: const EdgeInsets.symmetric(vertical: 2),
-                child: Text(
-                  '★${note.toStringAsFixed(1)}',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 7,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            if (read)
-              const Padding(
-                padding: EdgeInsets.only(bottom: 2),
-                child: Icon(Icons.remove_red_eye, size: 10, color: Color(0xFFF59E0B)),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _sheetActionButton({
     required bool active,
     required Color activeColor,
@@ -2849,79 +2699,6 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
   }
 }
 
-/// Toggle compact Grille | Étagère (pas de SegmentedButton Material / ✓).
-class _ViewModeToggle extends StatelessWidget {
-  final bool shelfView;
-  final bool narrow;
-  final ValueChanged<bool> onChanged;
-
-  const _ViewModeToggle({
-    required this.shelfView,
-    required this.narrow,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    const emerald = Color(0xFF10B981);
-    const pillBg = Color(0xFF1E293B);
-    Widget seg({
-      required bool value,
-      required IconData icon,
-      required String label,
-    }) {
-      final on = shelfView == value;
-      return Material(
-        color: on ? emerald : Colors.transparent,
-        borderRadius: BorderRadius.circular(16),
-        child: InkWell(
-          onTap: () => onChanged(value),
-          borderRadius: BorderRadius.circular(16),
-          child: Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal: narrow ? 8 : 10,
-              vertical: 6,
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, size: 15, color: Colors.white),
-                if (!narrow) ...[
-                  const SizedBox(width: 4),
-                  Text(
-                    label,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(2),
-      decoration: BoxDecoration(
-        color: pillBg,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: emerald),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          seg(value: false, icon: Icons.grid_view, label: 'Grille'),
-          seg(value: true, icon: Icons.auto_stories, label: 'Étagère'),
-        ],
-      ),
-    );
-  }
-}
-
 class _BubbleTailPainter extends CustomPainter {
   final Color fill;
   final Color border;
@@ -2949,36 +2726,3 @@ class _BubbleTailPainter extends CustomPainter {
   bool shouldRepaint(covariant _BubbleTailPainter oldDelegate) =>
       oldDelegate.fill != fill || oldDelegate.border != border;
 }
-
-class _GhostSpinePainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final r = RRect.fromRectAndRadius(
-      Offset.zero & size,
-      const Radius.circular(4),
-    );
-    final paint = Paint()
-      ..color = const Color(0xFF64748B)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.2;
-    // Pointillés
-    const dash = 4.0;
-    const gap = 3.0;
-    final path = Path()..addRRect(r);
-    for (final metric in path.computeMetrics()) {
-      var distance = 0.0;
-      while (distance < metric.length) {
-        final next = distance + dash;
-        canvas.drawPath(
-          metric.extractPath(distance, next.clamp(0, metric.length)),
-          paint,
-        );
-        distance = next + gap;
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-

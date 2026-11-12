@@ -148,6 +148,9 @@ class BoardgameScoreGrid {
   }
 
   /// Totaux cumulés par équipe (nom d'équipe → score).
+  ///
+  /// En mode commun, le score saisi est celui de l'équipe : seule la première
+  /// colonne du groupe compte. En mode par joueur, on additionne les membres.
   Map<String, int> teamTotals() {
     final totals = columnTotals();
     final out = <String, int>{};
@@ -155,7 +158,11 @@ class BoardgameScoreGrid {
       final team = i < teams.length ? teams[i]?.trim() : null;
       if (team == null || team.isEmpty) continue;
       final t = i < totals.length ? totals[i] : 0;
-      out[team] = (out[team] ?? 0) + t;
+      if (teamScoreMode == TeamScoreMode.shared) {
+        out.putIfAbsent(team, () => t);
+      } else {
+        out[team] = (out[team] ?? 0) + t;
+      }
     }
     return out;
   }
@@ -708,7 +715,18 @@ class ScoreLineSpec {
   }
 }
 
-enum ScoreRuleTarget { total, anyLine, filledLineCount, namedLine }
+enum ScoreRuleTarget {
+  total,
+  anyLine,
+  filledLineCount,
+  namedLine,
+  weakestLine,
+  leadGap,
+  everyLine,
+}
+
+/// Lien avec la règle précédente. `and` est prioritaire sur `or`.
+enum ScoreRuleJoin { and, or }
 
 enum ScoreRuleOp { gte, eq, lte, gt, lt, highest, lowest }
 
@@ -721,6 +739,8 @@ class ScoreRule {
   final ScoreRuleOp? cellOp;
   /// Seuil qu'une catégorie doit atteindre pour être comptée. Défaut : 1.
   final int? cellValue;
+  /// Lien avec la règle précédente. Null = héritage de [BoardgameScoreTemplate.matchAll].
+  final ScoreRuleJoin? link;
 
   const ScoreRule({
     required this.target,
@@ -729,6 +749,7 @@ class ScoreRule {
     this.lineName,
     this.cellOp,
     this.cellValue,
+    this.link,
   });
 
   bool get countsCategories => target == ScoreRuleTarget.filledLineCount;
@@ -755,6 +776,9 @@ class ScoreRule {
         ScoreRuleTarget.anyLine => 'N\'importe quelle catégorie',
         ScoreRuleTarget.filledLineCount => 'Nombre de catégories',
         ScoreRuleTarget.namedLine => 'Catégorie : ${lineName ?? ''}',
+        ScoreRuleTarget.weakestLine => 'Catégorie la plus faible',
+        ScoreRuleTarget.leadGap => 'Écart avec le 2e',
+        ScoreRuleTarget.everyLine => 'Chaque catégorie',
       };
 
   Map<String, dynamic> toJson() => {
@@ -766,6 +790,7 @@ class ScoreRule {
           'cell_op': effectiveCellOp.name,
           'cell_value': effectiveCellValue,
         },
+        if (link != null) 'link': link!.name,
       };
 
   static ScoreRule? fromJson(Object? raw) {
@@ -791,6 +816,10 @@ class ScoreRule {
     final cellValue = cellRaw is num
         ? cellRaw.round()
         : int.tryParse(cellRaw?.toString() ?? '');
+    ScoreRuleJoin? link;
+    for (final join in ScoreRuleJoin.values) {
+      if (join.name == raw['link']) link = join;
+    }
     return ScoreRule(
       target: target,
       op: op,
@@ -798,6 +827,7 @@ class ScoreRule {
       lineName: raw['line']?.toString(),
       cellOp: cellOp,
       cellValue: cellValue,
+      link: link,
     );
   }
 }
@@ -898,11 +928,28 @@ class BoardgameScoreTemplate {
     return fromJson(metadata?['score_template']);
   }
 
+  ScoreRuleJoin joinBefore(int index) {
+    if (index <= 0 || index >= rules.length) return ScoreRuleJoin.or;
+    return rules[index].link ??
+        (matchAll ? ScoreRuleJoin.and : ScoreRuleJoin.or);
+  }
+
+  /// `et` regroupe, `ou` sépare : (1 ET 2) OU (3 ET 4).
   bool columnMatches(BoardgameScoreGrid grid, int index) {
     if (!hasRules || index < 0 || index >= grid.players.length) return false;
-    final hits = rules.map((rule) => _ruleMatches(grid, index, rule));
-    if (matchAll) return hits.every((hit) => hit);
-    return hits.any((hit) => hit);
+    final groups = <List<bool>>[];
+    for (var i = 0; i < rules.length; i++) {
+      final hit = _ruleMatches(grid, index, rules[i]);
+      if (i == 0 || joinBefore(i) == ScoreRuleJoin.or) {
+        groups.add([hit]);
+      } else {
+        groups.last.add(hit);
+      }
+    }
+    for (final group in groups) {
+      if (group.every((hit) => hit)) return true;
+    }
+    return false;
   }
 
   /// Résumé des règles remplies par la première colonne gagnante.
@@ -912,15 +959,20 @@ class BoardgameScoreTemplate {
       template: this,
     );
     if (winners.isEmpty) return null;
-    final joiner = matchAll ? ' ET ' : ' OU ';
     final parts = <String>[];
     for (final index in winners) {
-      final labels = <String>[];
-      for (final rule in rules) {
-        if (!_ruleMatches(grid, index, rule)) continue;
-        labels.add(_rulePhrase(grid, index, rule));
+      String? sentence;
+      for (var i = 0; i < rules.length; i++) {
+        if (!_ruleMatches(grid, index, rules[i])) continue;
+        final phrase = _rulePhrase(grid, index, rules[i]);
+        if (sentence == null) {
+          sentence = phrase;
+        } else {
+          final word = joinBefore(i) == ScoreRuleJoin.and ? ' ET ' : ' OU ';
+          sentence = '$sentence$word$phrase';
+        }
       }
-      if (labels.isNotEmpty) parts.add(labels.join(joiner));
+      if (sentence != null) parts.add(sentence);
     }
     if (parts.isEmpty) return null;
     return parts.join(' · ');
@@ -967,6 +1019,34 @@ class BoardgameScoreTemplate {
           for (var i = 0; i < grid.players.length; i++) _raw(grid, round, i),
         ];
         return _compare(mine ?? 0, rule, values.whereType<int>().toList());
+      case ScoreRuleTarget.weakestLine:
+        final mine = _weakest(grid, index);
+        if (mine == null) return false;
+        final peers = [
+          for (var i = 0; i < grid.players.length; i++)
+            if (_weakest(grid, i) != null) _weakest(grid, i)!,
+        ];
+        return _compare(mine, rule, peers);
+      case ScoreRuleTarget.leadGap:
+        final gap = _leadGap(grid, index);
+        final peers = [
+          for (var i = 0; i < grid.players.length; i++)
+            if (grid.players[i].trim().isNotEmpty) _leadGap(grid, i),
+        ];
+        return _compare(gap, rule, peers);
+      case ScoreRuleTarget.everyLine:
+        if (grid.rounds.isEmpty) return false;
+        for (var r = 0; r < grid.rounds.length; r++) {
+          final mine = _raw(grid, r, index);
+          if (mine == null) return false;
+          final peers = [
+            for (var i = 0; i < grid.players.length; i++) _raw(grid, r, i),
+          ];
+          if (!_compare(mine, rule, peers.whereType<int>().toList())) {
+            return false;
+          }
+        }
+        return true;
     }
   }
 
@@ -1011,8 +1091,48 @@ class BoardgameScoreTemplate {
   }
 
   int _signedTotal(BoardgameScoreGrid grid, int index) {
+    if (grid.hasTeams && index < grid.teams.length) {
+      final team = grid.teams[index]?.trim();
+      if (team != null && team.isNotEmpty) {
+        return grid.teamTotals()[team] ?? 0;
+      }
+    }
     final totals = grid.columnTotals();
     return index < totals.length ? totals[index] : 0;
+  }
+
+  int? _weakest(BoardgameScoreGrid grid, int index) {
+    int? min;
+    for (var r = 0; r < grid.rounds.length; r++) {
+      final raw = _raw(grid, r, index);
+      if (raw == null) continue;
+      if (min == null || raw < min) min = raw;
+    }
+    return min;
+  }
+
+  int _leadGap(BoardgameScoreGrid grid, int index) {
+    final mine = _signedTotal(grid, index);
+    var bestOther = 0;
+    var any = false;
+    if (grid.hasTeams && index < grid.teams.length) {
+      final myTeam = grid.teams[index]?.trim();
+      for (final entry in grid.teamTotals().entries) {
+        if (entry.key == myTeam) continue;
+        any = true;
+        if (entry.value > bestOther) bestOther = entry.value;
+      }
+    } else {
+      final totals = grid.columnTotals();
+      for (var i = 0; i < grid.players.length; i++) {
+        if (i == index || grid.players[i].trim().isEmpty) continue;
+        any = true;
+        final value = i < totals.length ? totals[i] : 0;
+        if (value > bestOther) bestOther = value;
+      }
+    }
+    if (!any) return mine;
+    return mine - bestOther;
   }
 
   int _filledCount(BoardgameScoreGrid grid, int index, ScoreRule rule) {

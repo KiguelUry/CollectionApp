@@ -7,6 +7,9 @@ import '../models/boardgame_score_grid.dart';
 import '../models/friend_choice.dart';
 import 'friend_identity.dart';
 
+const Color _teamOverColor = Color(0xFFE57373);
+const Color _teamOverFill = Color(0x1FE57373);
+
 /// Palette de 20 couleurs contrastées pour colonnes joueur / équipe.
 const List<Color> kBoardgameColumnPalette = [
   Color(0xFFE57373),
@@ -267,16 +270,18 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     }
   }
 
-  /// Prochaine couleur libre ; `-1` si la palette est saturée.
+  /// Couleur libre au hasard ; `-1` si la palette est saturée.
   int _pickNextColorIndex() {
     final used = <int>{
       ..._playerColorIndices.whereType<int>(),
       ..._teamColorIndices.values,
     };
-    for (var i = 0; i < kBoardgameColumnPalette.length; i++) {
-      if (!used.contains(i)) return i;
-    }
-    return -1;
+    final free = <int>[
+      for (var i = 0; i < kBoardgameColumnPalette.length; i++)
+        if (!used.contains(i)) i,
+    ];
+    if (free.isEmpty) return -1;
+    return free[Random().nextInt(free.length)];
   }
 
   Color _colorForColumn(int index) {
@@ -435,17 +440,30 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     }
   }
 
-  void _assignSoloColors() {
-    final used = <int>{};
-    for (var i = 0; i < _playerControllers.length; i++) {
-      var chosen = -1;
-      for (var c = 0; c < kBoardgameColumnPalette.length; c++) {
-        if (used.add(c)) {
-          chosen = c;
-          break;
+  void _setTeamScoreMode(TeamScoreMode next) {
+    if (_teamScoreMode == TeamScoreMode.shared &&
+        next == TeamScoreMode.divided) {
+      final seen = <String>{};
+      for (var i = 0; i < _teamControllers.length; i++) {
+        final team = _teamControllers[i].text.trim();
+        if (team.isEmpty || seen.add(team)) continue;
+        for (final row in _cellControllers) {
+          if (i < row.length) row[i].text = '0';
         }
       }
-      if (chosen < 0) chosen = i % kBoardgameColumnPalette.length;
+    }
+    setState(() => _teamScoreMode = next);
+    _localRefresh();
+  }
+
+  void _assignSoloColors() {
+    final free = <int>[
+      for (var c = 0; c < kBoardgameColumnPalette.length; c++) c,
+    ]..shuffle(Random());
+    for (var i = 0; i < _playerControllers.length; i++) {
+      final chosen = free.isNotEmpty
+          ? free.removeAt(0)
+          : i % kBoardgameColumnPalette.length;
       if (i < _playerColorIndices.length) _playerColorIndices[i] = chosen;
     }
   }
@@ -666,13 +684,17 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.warning_amber_rounded, color: scheme.error, size: 20),
+                  const Icon(
+                    Icons.warning_amber_rounded,
+                    color: _teamOverColor,
+                    size: 20,
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     'Le nombre ne correspond pas',
-                    style: TextStyle(
-                      color: scheme.error,
-                      fontWeight: FontWeight.w800,
+                    style: const TextStyle(
+                      color: _teamOverColor,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ],
@@ -779,7 +801,13 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     final overCapacity = players.length > plan.seats;
     return Card(
       margin: const EdgeInsets.only(top: 8),
-      color: overCapacity ? scheme.errorContainer : null,
+      color: overCapacity ? _teamOverFill : null,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: overCapacity ? _teamOverColor : Colors.transparent,
+        ),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(10),
         child: Column(
@@ -821,7 +849,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                 Text(
                   '${plan.name} : ${plan.seats <= 1 ? '${plan.seats} joueur' : '${plan.seats} joueurs'}',
                   style: TextStyle(
-                    color: players.length > plan.seats ? scheme.error : null,
+                    color: players.length > plan.seats ? _teamOverColor : null,
                     fontWeight: players.length > plan.seats
                         ? FontWeight.w800
                         : null,
@@ -1686,8 +1714,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                 ),
               ],
               selected: {_teamScoreMode},
-              onSelectionChanged: (s) =>
-                  setState(() => _teamScoreMode = s.first),
+              onSelectionChanged: (s) => _setTeamScoreMode(s.first),
             ),
             const SizedBox(height: 4),
             Text(
@@ -2020,7 +2047,6 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                                 lead,
                                 scheme,
                                 w,
-                                syncIndices: indices,
                               );
                             })
                           else
@@ -2033,8 +2059,14 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                           _teamScoreMode == TeamScoreMode.divided &&
                           !sharedTeams &&
                           colCount > 0)
-                        _teamTotalRow(grid, teamTotals, labelW, scheme),
-                      if (colCount > 0)
+                        _teamTotalRow(
+                          grid,
+                          teamTotals,
+                          labelW,
+                          scheme,
+                          winners,
+                        )
+                      else if (colCount > 0)
                         _stretchRow([
                           _cornerLabel(
                             widget.winCondition ==
@@ -2212,7 +2244,14 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                   if (_hideTotals && hasName && grid.hasScores) {
                     text = '?';
                   } else if (hasName && grid.hasScores) {
-                    text = '${p < totals.length ? totals[p] : 0}';
+                    if (widget.useTeams) {
+                      final team = _teamControllers[p].text.trim();
+                      text = team.isNotEmpty
+                          ? '${teamTotals[team] ?? 0}'
+                          : '${p < totals.length ? totals[p] : 0}';
+                    } else {
+                      text = '${p < totals.length ? totals[p] : 0}';
+                    }
                   }
                   final isWinner = !_hideTotals &&
                       winners.contains(p) &&
@@ -2371,9 +2410,8 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     int row,
     int col,
     ColorScheme scheme,
-    double width, {
-    List<int>? syncIndices,
-  }) {
+    double width,
+  ) {
     final color = _colorForColumn(col).withValues(alpha: 0.12);
     if (!widget.enabled) {
       return SizedBox(
@@ -2418,11 +2456,6 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
             ),
             onChanged: (v) {
               if (_gridPointerDragging) return;
-              if (syncIndices != null) {
-                for (final i in syncIndices) {
-                  if (i != col) _cellControllers[row][i].text = v;
-                }
-              }
               _localRefresh();
             },
           ),
@@ -2471,26 +2504,27 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     Map<String, int> teamTotals,
     double labelW,
     ColorScheme scheme,
+    Set<int> winners,
   ) {
     return _stretchRow([
       _cornerLabel(
-        'Éq.',
+        'Total équipe',
         labelW,
         scheme,
-        bg: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
+        bg: scheme.secondaryContainer.withValues(alpha: 0.55),
+        bold: true,
       ),
       ..._teamSpans().map((s) {
-        final total = s.team.isEmpty ? '—' : '${teamTotals[s.team] ?? 0}';
-        return Container(
-          width: s.width,
-          alignment: Alignment.center,
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
-          child: Text(
-            total,
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
-          ),
-        );
+        final total = s.team.isEmpty
+            ? '—'
+            : (_hideTotals ? '?' : '${teamTotals[s.team] ?? 0}');
+        final isWinner = !_hideTotals &&
+            s.team.isNotEmpty &&
+            winners.any((i) =>
+                i >= s.start &&
+                i < s.start + s.span) &&
+            widget.winCondition != BoardgameWinCondition.cooperative;
+        return _totalCell(total, s.width, scheme, isWinner: isWinner);
       }),
     ]);
   }

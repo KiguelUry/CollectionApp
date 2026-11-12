@@ -1269,42 +1269,44 @@ class _HomeScreenState extends State<HomeScreen>
     return c.computeLuminance() > 0.55 ? Colors.black87 : Colors.white;
   }
 
+  IconData get _collectionViewIcon {
+    if (_viewMode == CollectionViewMode.list) return Icons.view_list_rounded;
+    if (_gridMobileColumns == 2) return Icons.grid_view_rounded;
+    return Icons.view_compact_rounded;
+  }
+
+  String get _collectionViewTooltip {
+    if (_viewMode == CollectionViewMode.list) return 'Vue liste · passer en grille';
+    if (_gridMobileColumns == 2) {
+      return 'Grille large · passer en grille dense';
+    }
+    return 'Grille dense · passer en liste';
+  }
+
+  Future<void> _cycleCollectionView() async {
+    if (_viewMode == CollectionViewMode.list) {
+      await CollectionDisplayPreferences.instance.setGridMobileColumns(2);
+      if (!mounted) return;
+      setState(() {
+        _viewMode = CollectionViewMode.grid;
+        _gridMobileColumns = 2;
+      });
+      return;
+    }
+    if (_gridMobileColumns <= 2) {
+      await CollectionDisplayPreferences.instance.setGridMobileColumns(3);
+      if (!mounted) return;
+      setState(() => _gridMobileColumns = 3);
+      return;
+    }
+    setState(() => _viewMode = CollectionViewMode.list);
+  }
+
   List<Widget> get _headerActions => [
-    if (_viewMode == CollectionViewMode.grid)
-      IconButton(
-        icon: Icon(
-          _gridMobileColumns == 2
-              ? Icons.view_agenda_outlined
-              : Icons.dashboard_outlined,
-          color: _onAccent,
-        ),
-        tooltip: _gridMobileColumns == 2
-            ? 'Grille plus dense (s\'adapte à l\'écran)'
-            : 'Grille plus large (s\'adapte à l\'écran)',
-        onPressed: () async {
-          await CollectionDisplayPreferences.instance.toggleGridMobileColumns();
-          if (!mounted) return;
-          setState(() {
-            _gridMobileColumns =
-                CollectionDisplayPreferences.instance.gridMobileColumns;
-          });
-        },
-      ),
     IconButton(
-      icon: Icon(
-        _viewMode == CollectionViewMode.grid
-            ? Icons.view_list_rounded
-            : Icons.grid_on_rounded,
-        color: _onAccent,
-      ),
-      tooltip: _viewMode == CollectionViewMode.grid
-          ? 'Vue liste'
-          : 'Vue grille',
-      onPressed: () => setState(() {
-        _viewMode = _viewMode == CollectionViewMode.grid
-            ? CollectionViewMode.list
-            : CollectionViewMode.grid;
-      }),
+      icon: Icon(_collectionViewIcon, color: _onAccent),
+      tooltip: _collectionViewTooltip,
+      onPressed: _cycleCollectionView,
     ),
     if (widget.category.supportsOpenLibrarySearch)
       IconButton(
