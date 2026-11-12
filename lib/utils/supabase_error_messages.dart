@@ -16,6 +16,11 @@ String humanizeSupabaseError(Object error) {
     return 'E-mail ou mot de passe incorrect.';
   }
 
+  if (lower.contains('email_address_invalid') ||
+      (lower.contains('email address') && lower.contains('invalid'))) {
+    return 'Cette adresse e-mail n’est pas valide.';
+  }
+
   if (lower.contains('email not confirmed')) {
     return 'Confirme d’abord ton adresse e-mail (lien reçu à l’inscription).';
   }

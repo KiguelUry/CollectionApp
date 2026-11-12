@@ -75,8 +75,34 @@ class AuthService {
   }
 
   bool providerLinked(String provider) {
+    return identityFor(provider) != null;
+  }
+
+  UserIdentity? identityFor(String provider) {
     final identities = _supabase.auth.currentUser?.identities ?? const [];
-    return identities.any((identity) => identity.provider == provider);
+    for (final identity in identities) {
+      if (identity.provider == provider) return identity;
+    }
+    return null;
+  }
+
+  /// Retire Google ou Discord seulement s'il reste un autre moyen de connexion.
+  Future<void> unlinkProvider(String provider) async {
+    final identities = _supabase.auth.currentUser?.identities ?? const [];
+    final identity = identityFor(provider);
+    if (identity == null) {
+      throw Exception('Ce compte n’est pas associé.');
+    }
+    final others = identities.where((item) => item.provider != provider);
+    if (others.isEmpty) {
+      throw Exception(
+        'Impossible : c’est ton dernier moyen de connexion.',
+      );
+    }
+    await _supabase.auth.unlinkIdentity(identity);
+    try {
+      await _supabase.auth.refreshSession();
+    } catch (_) {}
   }
 
   Future<void> updateEmail(String email) async {

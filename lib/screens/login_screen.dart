@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/dev_auth_config.dart';
 import '../services/auth_service.dart';
@@ -20,7 +21,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isSignUp = false;
   bool _devLoading = false;
   bool _resetLoading = false;
-  bool _oauthLoading = false;
+  OAuthProvider? _oauthBusy;
 
   @override
   void initState() {
@@ -151,20 +152,17 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _oauth(OAuthProvider provider) async {
-    setState(() => _oauthLoading = true);
+    setState(() => _oauthBusy = provider);
     try {
       await _authService.signInWithProvider(provider);
     } catch (e) {
       if (!mounted) return;
       await _showInfoDialog(
         title: provider == OAuthProvider.discord ? 'Discord' : 'Google',
-        message:
-            '${humanizeSupabaseError(e)}\n\n'
-            'Le fournisseur doit être activé dans le dashboard Supabase, '
-            'et l’adresse de redirection autorisée.',
+        message: humanizeSupabaseError(e),
       );
     } finally {
-      if (mounted) setState(() => _oauthLoading = false);
+      if (mounted) setState(() => _oauthBusy = null);
     }
   }
 
@@ -224,26 +222,29 @@ class _LoginScreenState extends State<LoginScreen> {
                 onSubmitted: (_) => _handleAuth(),
               ),
               const SizedBox(height: 20),
-              OutlinedButton.icon(
-                onPressed: _oauthLoading
-                    ? null
-                    : () => _oauth(OAuthProvider.google),
-                icon: _oauthLoading
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.g_mobiledata, size: 28),
-                label: const Text('Continuer avec Google'),
-              ),
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: _oauthLoading
-                    ? null
-                    : () => _oauth(OAuthProvider.discord),
-                icon: const Icon(Icons.forum_outlined),
-                label: const Text('Continuer avec Discord'),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _OAuthMarkButton(
+                    asset: 'assets/brand/google_g.svg',
+                    label: 'Continuer avec Google',
+                    logoWidth: 22,
+                    logoHeight: 22,
+                    busy: _oauthBusy == OAuthProvider.google,
+                    enabled: _oauthBusy == null,
+                    onPressed: () => _oauth(OAuthProvider.google),
+                  ),
+                  const SizedBox(width: 12),
+                  _OAuthMarkButton(
+                    asset: 'assets/brand/discord_clyde.svg',
+                    label: 'Continuer avec Discord',
+                    logoWidth: 26,
+                    logoHeight: 20,
+                    busy: _oauthBusy == OAuthProvider.discord,
+                    enabled: _oauthBusy == null,
+                    onPressed: () => _oauth(OAuthProvider.discord),
+                  ),
+                ],
               ),
               const SizedBox(height: 12),
               ElevatedButton(
@@ -252,6 +253,9 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               if (!_isSignUp)
                 TextButton(
+                  style: TextButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.onSurface,
+                  ),
                   onPressed: _resetLoading ? null : _forgotPassword,
                   child: _resetLoading
                       ? const SizedBox(
@@ -262,6 +266,9 @@ class _LoginScreenState extends State<LoginScreen> {
                       : const Text('Mot de passe oublié ?'),
                 ),
               TextButton(
+                style: TextButton.styleFrom(
+                  foregroundColor: Theme.of(context).colorScheme.onSurface,
+                ),
                 onPressed: () => setState(() => _isSignUp = !_isSignUp),
                 child: Text(
                   _isSignUp
@@ -296,6 +303,63 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ],
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _OAuthMarkButton extends StatelessWidget {
+  const _OAuthMarkButton({
+    required this.asset,
+    required this.label,
+    required this.logoWidth,
+    required this.logoHeight,
+    required this.busy,
+    required this.enabled,
+    required this.onPressed,
+  });
+
+  final String asset;
+  final String label;
+  final double logoWidth;
+  final double logoHeight;
+  final bool busy;
+  final bool enabled;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final border = Theme.of(context).colorScheme.outlineVariant;
+    return Semantics(
+      button: true,
+      label: label,
+      child: Material(
+        color: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: border),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: enabled ? onPressed : null,
+          child: SizedBox(
+            width: 64,
+            height: 48,
+            child: Center(
+              child: busy
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : SvgPicture.asset(
+                      asset,
+                      width: logoWidth,
+                      height: logoHeight,
+                    ),
+            ),
           ),
         ),
       ),

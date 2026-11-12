@@ -15,6 +15,15 @@ void main() {
     expect(msg, isNot(contains('AuthApiException')));
   });
 
+  test('adresse e-mail refusée', () {
+    expect(
+      humanizeSupabaseError(
+        'AuthApiException(message: Unable to validate email address, statusCode: 400, code: email_address_invalid)',
+      ),
+      'Cette adresse e-mail n’est pas valide.',
+    );
+  });
+
   test('identifiants invalides', () {
     expect(
       humanizeSupabaseError('AuthApiException(message: Invalid login credentials)'),

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_category.dart';
 import '../services/category_hub_preferences.dart';
+import '../services/oauth_link_notice.dart';
 import '../widgets/main_drawer.dart';
 import '../models/user_collection_type.dart';
 import '../models/user_profile.dart';
@@ -85,6 +86,10 @@ class _CategorySelectionScreenState extends State<CategorySelectionScreen>
       _loadingCounts = false;
     }
     _load(silent: snap != null);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      OAuthLinkNotice.showIfPending(context);
+    });
   }
 
   Future<void> _seedGrammarFromPrefs() async {

@@ -6,6 +6,7 @@ import '../constants/rating_colors.dart';
 import '../services/account_deletion_service.dart';
 import '../services/auth_service.dart';
 import '../services/account_export_service.dart';
+import '../services/oauth_link_notice.dart';
 import '../services/settings_service.dart';
 import '../utils/network_feedback.dart';
 import '../utils/supabase_error_messages.dart';
@@ -43,8 +44,66 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _linkProvider(OAuthProvider provider) async {
+    final name = provider == OAuthProvider.discord ? 'discord' : 'google';
+    final label = provider == OAuthProvider.discord ? 'Discord' : 'Google';
+    await OAuthLinkNotice.remember(name);
     try {
       await AuthService().linkProvider(provider);
+      if (!mounted) return;
+      await OAuthLinkNotice.clear();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Compte $label associé avec succès !')),
+      );
+      setState(() {});
+    } catch (e) {
+      await OAuthLinkNotice.clear();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(humanizeSupabaseError(e))),
+      );
+    }
+  }
+
+  Future<void> _unlinkProvider(String provider) async {
+    final label = provider == 'discord' ? 'Discord' : 'Google';
+    final auth = AuthService();
+    if (auth.identityFor(provider) == null) return;
+    final identities =
+        Supabase.instance.client.auth.currentUser?.identities ?? const [];
+    final hasOther = identities.any((item) => item.provider != provider);
+    if (!hasOther) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Impossible : c’est ton dernier moyen de connexion.'),
+        ),
+      );
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Dissocier $label ?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Dissocier'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await auth.unlinkProvider(provider);
+      if (!mounted) return;
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Compte $label dissocié.')),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -53,36 +112,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _editCredentials() async {
+  Future<void> _changeEmail() async {
     final auth = AuthService();
-    final emailCtrl = TextEditingController(
-      text: Supabase.instance.client.auth.currentUser?.email ?? '',
-    );
-    final passwordCtrl = TextEditingController();
-    final currentEmail = emailCtrl.text.trim();
+    final currentEmail =
+        Supabase.instance.client.auth.currentUser?.email ?? '';
+    final emailCtrl = TextEditingController(text: currentEmail);
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('E-mail et mot de passe'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: emailCtrl,
-              keyboardType: TextInputType.emailAddress,
-              autocorrect: false,
-              decoration: const InputDecoration(labelText: 'Adresse e-mail'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: passwordCtrl,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'Nouveau mot de passe',
-                helperText: 'Laisse vide pour ne pas le changer. 6 caractères min.',
-              ),
-            ),
-          ],
+        title: const Text('Changer mon adresse e-mail'),
+        content: TextField(
+          controller: emailCtrl,
+          keyboardType: TextInputType.emailAddress,
+          autocorrect: false,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Nouvelle adresse'),
         ),
         actions: [
           TextButton(
@@ -92,27 +136,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
           FilledButton(
             onPressed: () async {
               final email = emailCtrl.text.trim();
-              final password = passwordCtrl.text;
-              final messages = <String>[];
+              if (email.isEmpty || email == currentEmail) {
+                Navigator.pop(ctx);
+                return;
+              }
               try {
-                if (email.isNotEmpty && email != currentEmail) {
-                  await auth.updateEmail(email);
-                  messages.add(
-                    'Un e-mail de confirmation a été envoyé à $email. '
-                    'L’adresse actuelle reste celle du compte tant que tu n’as pas cliqué sur le lien.',
-                  );
-                }
-                if (password.trim().isNotEmpty) {
-                  await auth.updatePassword(password);
-                  messages.add('Le mot de passe a été mis à jour.');
-                }
-                if (messages.isEmpty) {
-                  messages.add('Rien à modifier.');
-                }
+                await auth.updateEmail(email);
                 if (ctx.mounted) Navigator.pop(ctx);
                 if (!mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(messages.join('\n\n'))),
+                  const SnackBar(
+                    content: Text(
+                      'Un e-mail de confirmation vient d’être envoyé à ta nouvelle adresse.',
+                    ),
+                  ),
                 );
               } catch (e) {
                 if (!ctx.mounted) return;
@@ -127,6 +164,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
     emailCtrl.dispose();
+  }
+
+  Future<void> _changePassword() async {
+    final auth = AuthService();
+    final passwordCtrl = TextEditingController();
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Changer mon mot de passe'),
+        content: TextField(
+          controller: passwordCtrl,
+          obscureText: true,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Nouveau mot de passe',
+            helperText: '6 caractères minimum.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Fermer'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              try {
+                await auth.updatePassword(passwordCtrl.text);
+                if (ctx.mounted) Navigator.pop(ctx);
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Le mot de passe a été mis à jour.'),
+                  ),
+                );
+              } catch (e) {
+                if (!ctx.mounted) return;
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  SnackBar(content: Text(humanizeSupabaseError(e))),
+                );
+              }
+            },
+            child: const Text('Enregistrer'),
+          ),
+        ],
+      ),
+    );
     passwordCtrl.dispose();
   }
 
@@ -228,9 +311,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ListTile(
             leading: const Icon(Icons.home_outlined),
             title: const Text('Foyers & lieux liés'),
-            subtitle: const Text(
-              'Associer Braine-l\'Alleud à Papa, Mom…',
-            ),
             onTap: () => showHouseholdsSheet(context),
           ),
           ListTile(
@@ -309,9 +389,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const _SectionHeader('Notifications'),
           SwitchListTile(
             title: const Text('Notifications'),
-            subtitle: const Text(
-              'Préférences enregistrées localement (push à venir)',
-            ),
             value: _settings.notificationsEnabled,
             onChanged: (v) => _settings.setNotificationsEnabled(v),
           ),
@@ -357,28 +434,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
             label: 'Google',
             linked: AuthService().providerLinked('google'),
             onLink: () => _linkProvider(OAuthProvider.google),
+            onUnlink: () => _unlinkProvider('google'),
           ),
           _LinkedProviderTile(
             label: 'Discord',
             linked: AuthService().providerLinked('discord'),
             onLink: () => _linkProvider(OAuthProvider.discord),
-          ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Text(
-              'Associer un fournisseur garde cette collection. '
-              'Tu pourras ensuite te connecter avec le mail, Google ou Discord.',
-              style: TextStyle(fontSize: 12),
-            ),
+            onUnlink: () => _unlinkProvider('discord'),
           ),
           ListTile(
-            leading: const Icon(Icons.manage_accounts_outlined),
-            title: const Text('E-mail et mot de passe'),
+            leading: const Icon(Icons.alternate_email),
+            title: const Text('Changer mon adresse e-mail'),
             subtitle: Text(
-              Supabase.instance.client.auth.currentUser?.email ??
-                  'Modifier l’adresse ou le mot de passe',
+              Supabase.instance.client.auth.currentUser?.email ?? '',
             ),
-            onTap: _editCredentials,
+            onTap: _changeEmail,
+          ),
+          ListTile(
+            leading: const Icon(Icons.lock_outline),
+            title: const Text('Changer mon mot de passe'),
+            onTap: _changePassword,
           ),
           ListTile(
             leading: const Icon(Icons.download_outlined),
@@ -397,14 +472,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: const Text('Double confirmation — effacement définitif'),
             onTap: _confirmDeleteAccount,
           ),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Text(
-              'Ces réglages sont enregistrés sur ton profil Supabase et '
-              'appliqués par la base de données.',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-            ),
-          ),
         ],
       ),
     );
@@ -416,20 +483,29 @@ class _LinkedProviderTile extends StatelessWidget {
     required this.label,
     required this.linked,
     required this.onLink,
+    required this.onUnlink,
   });
 
   final String label;
   final bool linked;
   final VoidCallback onLink;
+  final VoidCallback onUnlink;
 
   @override
   Widget build(BuildContext context) {
+    final ink = Theme.of(context).colorScheme.onSurface;
     return ListTile(
       leading: Icon(linked ? Icons.check_circle : Icons.link),
       title: Text(
         linked ? '$label · Associé ✓' : 'Associer mon compte $label',
       ),
-      enabled: !linked,
+      trailing: linked
+          ? TextButton(
+              style: TextButton.styleFrom(foregroundColor: ink),
+              onPressed: onUnlink,
+              child: const Text('Dissocier'),
+            )
+          : null,
       onTap: linked ? null : onLink,
     );
   }
@@ -448,7 +524,7 @@ class _SectionHeader extends StatelessWidget {
         title,
         style: Theme.of(context).textTheme.titleSmall?.copyWith(
               fontWeight: FontWeight.bold,
-              color: Theme.of(context).colorScheme.primary,
+              color: Theme.of(context).colorScheme.onSurface,
             ),
       ),
     );
