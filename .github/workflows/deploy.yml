@@ -66,6 +66,25 @@ jobs:
             --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" \
             --dart-define=GOOGLE_BOOKS_API_KEY="${GOOGLE_BOOKS_API_KEY:-}"
 
+      - name: Don't let the cleanup service worker abort startup
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("build/web/flutter_service_worker.js")
+          if not path.exists():
+              raise SystemExit(0)
+          text = path.read_text()
+          text = text.replace(
+              """        clients.forEach((client) => {
+          if (client.url && 'navigate' in client) {
+            client.navigate(client.url);
+          }
+        });""",
+              "        // Reload here aborts main.dart.js and freezes the splash.",
+          )
+          path.write_text(text)
+          PY
+
       - name: Strip missing flutter.js.map sourcemap refs
         run: |
           find build/web -type f \( -name 'flutter.js' -o -name 'flutter_bootstrap.js' -o -name '*.js' \) \

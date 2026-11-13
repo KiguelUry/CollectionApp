@@ -109,6 +109,32 @@
     }
     window.addEventListener('flutter-first-frame', removePalomaBoot);
     document.addEventListener('flutter-first-frame', removePalomaBoot);
+    setTimeout(function () {
+      var boot = document.querySelector('.paloma-boot');
+      if (!boot) return;
+      boot.style.pointerEvents = 'auto';
+      var note = document.createElement('div');
+      note.textContent = 'Le chargement a été interrompu.';
+      note.style.fontSize = '14px';
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = 'Recharger';
+      button.style.cssText = 'pointer-events:auto;border:0;border-radius:12px;padding:10px 16px;font-weight:700;cursor:pointer;';
+      button.onclick = function () {
+        var done = function () { location.reload(); };
+        if (!navigator.serviceWorker) {
+          done();
+          return;
+        }
+        navigator.serviceWorker.getRegistrations()
+          .then(function (regs) {
+            return Promise.all(regs.map(function (reg) { return reg.unregister(); }));
+          })
+          .finally(done);
+      };
+      boot.appendChild(note);
+      boot.appendChild(button);
+    }, 12000);
   </script>
   <script src="passkeys_bundle.js" type="application/javascript"></script>
   <script src="flutter_bootstrap.js" async></script>
