@@ -68,22 +68,9 @@ jobs:
 
       - name: Don't let the cleanup service worker abort startup
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path("build/web/flutter_service_worker.js")
-          if not path.exists():
-              raise SystemExit(0)
-          text = path.read_text()
-          text = text.replace(
-              """        clients.forEach((client) => {
-          if (client.url && 'navigate' in client) {
-            client.navigate(client.url);
-          }
-        });""",
-              "        // Reload here aborts main.dart.js and freezes the splash.",
-          )
-          path.write_text(text)
-          PY
+          if [ -f build/web/flutter_service_worker.js ]; then
+            sed -i '/client\.navigate(client\.url)/d' build/web/flutter_service_worker.js
+          fi
 
       - name: Strip missing flutter.js.map sourcemap refs
         run: |
