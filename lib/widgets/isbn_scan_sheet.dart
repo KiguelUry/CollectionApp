@@ -410,6 +410,7 @@ class _RafaleToggle extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return SegmentedButton<bool>(
+              showSelectedIcon: false,
       segments: const [
         ButtonSegment<bool>(
           value: false,

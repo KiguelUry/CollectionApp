@@ -125,12 +125,16 @@ class CategoryCollectionHeader extends StatelessWidget {
               if (hasToolbar)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(4, 0, 2, 4),
-                  child: _ToolbarLayout(
-                    leftActions: leftActions,
-                    extraActions: extraActions,
-                    // Toujours 1 ligne scrollable (évite Découvrir seul + 2e rangée).
-                    twoRows: false,
-                    compact: !showLabels,
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final narrow = constraints.maxWidth < 720;
+                      return _ToolbarLayout(
+                        leftActions: leftActions,
+                        extraActions: extraActions,
+                        twoRows: narrow && leftActions.length >= 4,
+                        compact: !showLabels,
+                      );
+                    },
                   ),
                 ),
             ],
@@ -178,14 +182,10 @@ class _ToolbarLayout extends StatelessWidget {
       );
     }
 
-    // Mobile : ligne 1 = 1er quick action (Tirage), ligne 2 = le reste.
-    // Droite : Accueil + toggles colonnes.
-    final row1 = leftActions.isEmpty
-        ? const <_ToolbarAction>[]
-        : leftActions.take(1).toList();
-    final row2 = leftActions.length <= 1
-        ? const <_ToolbarAction>[]
-        : leftActions.skip(1).toList();
+    // Écran étroit : 2 boutons au-dessus, 2 en dessous.
+    final split = (leftActions.length / 2).ceil();
+    final row1 = leftActions.take(split).toList();
+    final row2 = leftActions.skip(split).toList();
 
     return SizedBox(
       height: 92,

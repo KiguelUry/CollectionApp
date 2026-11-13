@@ -271,6 +271,7 @@ td,th{border:1px solid #ccc;padding:8px;text-align:left}</style></head><body>
                 Text('Format', style: Theme.of(context).textTheme.labelLarge),
                 const SizedBox(height: 6),
                 SegmentedButton<String>(
+              showSelectedIcon: false,
                   segments: const [
                     ButtonSegment(value: 'csv', label: Text('Excel (CSV)')),
                     ButtonSegment(value: 'web', label: Text('Page web')),

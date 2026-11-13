@@ -203,6 +203,7 @@ class _FingerTeamPickScreenState extends State<FingerTeamPickScreen>
         title: const Text('Jeu du doigt'),
         actions: [
           SegmentedButton<bool>(
+              showSelectedIcon: false,
             segments: const [
               ButtonSegment(
                 value: false,

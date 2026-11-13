@@ -174,6 +174,7 @@ class _BoardgamePlayHistoryPanelState extends State<BoardgamePlayHistoryPanel> {
       children: [
         if (_showTabs) ...[
           SegmentedButton<int>(
+              showSelectedIcon: false,
             segments: const [
               ButtonSegment(value: 0, label: Text('Historique')),
               ButtonSegment(value: 1, label: Text('Classement')),
@@ -543,27 +544,14 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
       _initialGrid = BoardgameScoreGrid.empty(playerCount: 0);
     }
     if (s == null) {
-      // Nouvelle partie : grille vierge, sans le dernier modèle.
+      // Nouvelle partie : 0 joueur, chacun pour soi, plus haut score.
       _template = BoardgameScoreTemplate.empty;
       _activePresetName = null;
-      _winCondition = widget.template == null
-          ? BoardgameWinCondition.customTemplate
-          : _winCondition;
-      final width = _initialGrid.players.length;
-      _initialGrid = BoardgameScoreGrid(
-        players: List<String>.from(_initialGrid.players),
-        teams: List<String?>.from(_initialGrid.teams),
-        playerColors: List<int?>.from(_initialGrid.playerColors),
-        teamColorMap: Map<String, int>.from(_initialGrid.teamColorMap),
-        teamScoreMode: _initialGrid.teamScoreMode,
-        rounds: [
-          for (final label in const ['Tour 1', 'Tour 2', 'Tour 3'])
-            BoardgameScoreRound(
-              label: label,
-              scores: List<int?>.filled(width, null),
-            ),
-        ],
-      );
+      _confrontation = BoardgameConfrontationType.freeForAll;
+      _useTeams = false;
+      _winCondition = BoardgameWinCondition.highest;
+      _targetScoreController.clear();
+      _initialGrid = BoardgameScoreGrid.empty(playerCount: 0);
     } else {
       final linked = s.presetName?.trim();
       if (linked != null && linked.isNotEmpty) {
@@ -587,11 +575,13 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     }
     _notesController.text = s?.notes ?? '';
     _winReasonController.text = s?.winReason ?? '';
-    _playersOnlyController.text = (s ?? t)?.players.join(', ') ?? '';
+    _playersOnlyController.text = s == null ? '' : (s.players.join(', '));
     _coopVictory = s?.coopVictory;
-    _coopTeamCount = seed?.coopTeamCount ?? 1;
-    if (seed?.targetScore != null) {
+    _coopTeamCount = s == null ? 1 : (seed?.coopTeamCount ?? 1);
+    if (s != null && seed?.targetScore != null) {
       _targetScoreController.text = '${seed!.targetScore}';
+    } else if (s == null) {
+      _targetScoreController.clear();
     }
     _loadProfiles();
     _restoreDraft();
@@ -968,7 +958,13 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     if (preset == null) {
       setState(() {
         _activePresetName = null;
-        _template = const BoardgameScoreTemplate();
+        _template = const BoardgameScoreTemplate(
+          lines: [
+            ScoreLineSpec('Tour 1'),
+            ScoreLineSpec('Tour 2'),
+            ScoreLineSpec('Tour 3'),
+          ],
+        );
         _winCondition = BoardgameWinCondition.customTemplate;
         _presetBaseline = _presetFingerprint();
       });
@@ -1564,7 +1560,22 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
       ],
       onChanged: (c) {
         if (c == null) return;
-        setState(() => _winCondition = c);
+        setState(() {
+          _winCondition = c;
+          if (c == BoardgameWinCondition.customTemplate &&
+              _template.lines.isEmpty) {
+            _template = const BoardgameScoreTemplate(
+              lines: [
+                ScoreLineSpec('Tour 1'),
+                ScoreLineSpec('Tour 2'),
+                ScoreLineSpec('Tour 3'),
+              ],
+            );
+          }
+        });
+        if (c == BoardgameWinCondition.customTemplate) {
+          _gridKey.currentState?.setLineSpecs(_template.lines);
+        }
         _onGridChanged();
       },
     );
@@ -1816,6 +1827,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
                     ),
                     const SizedBox(height: 6),
                     SegmentedButton<bool>(
+              showSelectedIcon: false,
                       segments: const [
                         ButtonSegment(
                           value: true,

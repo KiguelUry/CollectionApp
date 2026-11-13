@@ -122,6 +122,7 @@ class _LoanItemDialogState extends State<LoanItemDialog> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   SegmentedButton<bool>(
+              showSelectedIcon: false,
                     segments: const [
                       ButtonSegment(
                         value: false,

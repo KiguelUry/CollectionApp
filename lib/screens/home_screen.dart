@@ -44,6 +44,7 @@ import '../widgets/category_collection_tab_pane.dart';
 import '../widgets/category_collection_header.dart';
 import '../widgets/category_collection_shell.dart';
 import 'collection_change_history_screen.dart';
+import 'community_forum_screen.dart';
 import 'global_play_history_screen.dart';
 import '../widgets/add_item_manual_dialog.dart';
 import '../widgets/add_item_options_dialog.dart';
@@ -1426,6 +1427,16 @@ class _HomeScreenState extends State<HomeScreen>
             context,
             MaterialPageRoute(
               builder: (ctx) => const GlobalPlayHistoryScreen(),
+            ),
+          ),
+        ),
+        CategoryQuickAction(
+          label: 'Forum',
+          icon: Icons.public,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (ctx) => const CommunityForumScreen(),
             ),
           ),
         ),

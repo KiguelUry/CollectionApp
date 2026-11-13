@@ -796,6 +796,44 @@ class ScoreRule {
         ScoreRuleOp.lowest => 'Plus petit score',
       };
 
+  String get symbol => switch (op) {
+        ScoreRuleOp.gte => '≥',
+        ScoreRuleOp.eq => '=',
+        ScoreRuleOp.lte => '≤',
+        ScoreRuleOp.gt => '>',
+        ScoreRuleOp.lt => '<',
+        ScoreRuleOp.highest => 'le plus haut',
+        ScoreRuleOp.lowest => 'le plus bas',
+      };
+
+  /// Phrase lisible, ex. « Score total ≥ 5 ».
+  String get phrase {
+    if (target == ScoreRuleTarget.filledLineCount) {
+      final n = value ?? 1;
+      final cell = effectiveCellOp == ScoreRuleOp.gte
+          ? '≥'
+          : effectiveCellOp == ScoreRuleOp.eq
+              ? '='
+              : effectiveCellOp == ScoreRuleOp.lte
+                  ? '≤'
+                  : effectiveCellOp == ScoreRuleOp.gt
+                      ? '>'
+                      : '<';
+      return 'Au moins $n catégorie${n > 1 ? 's' : ''} $cell $effectiveCellValue';
+    }
+    final subject = switch (target) {
+      ScoreRuleTarget.total => 'Score total',
+      ScoreRuleTarget.anyLine => 'Au moins 1 catégorie',
+      ScoreRuleTarget.namedLine => lineName ?? 'Catégorie',
+      ScoreRuleTarget.weakestLine => 'Catégorie la plus faible',
+      ScoreRuleTarget.leadGap => 'Écart avec le 2e',
+      ScoreRuleTarget.everyLine => 'Chaque catégorie',
+      ScoreRuleTarget.filledLineCount => 'Catégories',
+    };
+    if (!needsValue) return '$subject · $opLabel';
+    return '$subject $symbol ${value ?? 0}';
+  }
+
   String get targetLabel => switch (target) {
         ScoreRuleTarget.total => 'Score total',
         ScoreRuleTarget.anyLine => 'N\'importe quelle catégorie',
@@ -878,6 +916,20 @@ class BoardgameScoreTemplate {
       ];
 
   bool get hasRules => rules.isNotEmpty;
+
+  String get rulesPhrase {
+    if (rules.isEmpty) return 'Aucune condition';
+    final buffer = StringBuffer();
+    for (var i = 0; i < rules.length; i++) {
+      if (i > 0) {
+        final join = rules[i].link ??
+            (matchAll ? ScoreRuleJoin.and : ScoreRuleJoin.or);
+        buffer.write(join == ScoreRuleJoin.and ? ' ET ' : ' OU ');
+      }
+      buffer.write(rules[i].phrase);
+    }
+    return buffer.toString();
+  }
 
   Map<String, dynamic> toJson() => {
         if (lines.isNotEmpty)

@@ -16,8 +16,6 @@ import '../widgets/bgg_network_image.dart';
 import '../widgets/empty_state_view.dart';
 import '../utils/collection_pick_dedupe.dart';
 import '../widgets/orphan_attach_sheet.dart';
-import '../screens/community_forum_screen.dart';
-import '../theme/card_skins.dart';
 import '../widgets/player_alias_linker_sheet.dart';
 import 'item_detail_screen.dart';
 import 'shake_pick_screen.dart';
@@ -385,18 +383,6 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
       appBar: AppBar(
         title: const Text('Historique des parties'),
         actions: [
-          IconButton(
-            tooltip: 'Forum communautaire',
-            icon: const Icon(Icons.public),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const CommunityForumScreen(),
-                ),
-              );
-            },
-          ),
           if (compactActions) ...[
             IconButton(
               tooltip: 'Tirage au sort',
@@ -444,6 +430,7 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
                   child: SegmentedButton<int>(
+              showSelectedIcon: false,
                     segments: const [
                       ButtonSegment(
                         value: 0,
@@ -948,12 +935,14 @@ class _StreakTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final skin = Theme.of(context).extension<PlayCardStyle>()?.skin ??
-        CardSkin.byId('slate');
-    final tint = skin.isDynamic ? CardSkin.tintForGame(group.title) : null;
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
-      decoration: skin.decoration(dynamicTint: tint),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
       child: ListTile(
         leading: _historyThumb(
           group.imageUrl,
@@ -1015,13 +1004,14 @@ class _EntryTileState extends State<_EntryTile> {
     final scheme = Theme.of(context).colorScheme;
     final players = session.players.where((p) => p.trim().isNotEmpty).toList();
 
-    final skin = Theme.of(context).extension<PlayCardStyle>()?.skin ??
-        CardSkin.byId('slate');
-    final tint = skin.isDynamic ? CardSkin.tintForGame(widget.title) : null;
     final shownWinner = _genderedWinner(winner);
     return Container(
       margin: EdgeInsets.only(bottom: 8, left: widget.nested ? 16 : 0),
-      decoration: skin.decoration(dynamicTint: tint),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
       child: InkWell(
         onTap: widget.onTap,
         borderRadius: BorderRadius.circular(12),

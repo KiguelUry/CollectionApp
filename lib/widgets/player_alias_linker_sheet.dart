@@ -4,8 +4,6 @@ import '../models/friend_choice.dart';
 import '../services/friend_service.dart';
 import '../services/global_play_history_service.dart';
 import '../services/player_alias_service.dart';
-import 'friend_identity.dart';
-import 'friend_link_selector.dart';
 
 Future<void> showPlayerAliasLinkerSheet(
   BuildContext context, {
@@ -99,13 +97,8 @@ class PlayerAliasLinkerSheet extends StatefulWidget {
 }
 
 class _PlayerAliasLinkerSheetState extends State<PlayerAliasLinkerSheet> {
-  final _selected = <String>{};
-  final _displayController = TextEditingController();
-  bool _markAsMe = false;
   bool _saving = false;
   List<FriendChoice> _friends = const [];
-  bool _linkFriend = false;
-  FriendChoice? _friend;
 
   @override
   void initState() {
@@ -118,425 +111,245 @@ class _PlayerAliasLinkerSheetState extends State<PlayerAliasLinkerSheet> {
     });
   }
 
-  Future<void> _pickFriendFor(PlayerIdentity identity) async {
-    final picked = await showDialog<FriendChoice>(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        title: Text('« ${identity.displayName} » est…'),
-        children: [
-          for (final f in _friends)
-            SimpleDialogOption(
-              key: ValueKey('pick_friend_${f.profileId}'),
-              onPressed: () => Navigator.pop(ctx, f),
-              child: Row(
-                children: [
-                  FriendAvatarButton(
-                    profileId: f.profileId,
-                    username: f.username,
-                    avatarUrl: f.avatarUrl,
-                    accentColor: f.accentColor,
-                    radius: 16,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(child: Text(f.username)),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-    if (picked == null) return;
-    widget.onMutated?.call();
-    await PlayerAliasService.instance.linkFriend(
-      identity.displayName,
-      profileId: picked.profileId,
-      username: picked.username,
-    );
-    if (mounted) setState(() {});
-  }
-
-  @override
-  void dispose() {
-    _displayController.dispose();
-    super.dispose();
-  }
-
-  void _toggle(String name, bool? selected) {
-    setState(() {
-      if (selected == true) {
-        _selected.add(name);
-        if (_displayController.text.trim().isEmpty) {
-          _displayController.text = name;
-        }
-      } else {
-        _selected.remove(name);
-        if (_displayController.text.trim().toLowerCase() ==
-            name.toLowerCase()) {
-          _displayController.text =
-              _selected.isEmpty ? '' : _selected.first;
-        }
-      }
-    });
-  }
-
   List<List<String>> get _collisions => findAliasCollisions(
         widget.knownNames,
         identityIdOf: (n) => PlayerAliasService.instance.identityFor(n)?.id,
-      ).where((g) => !_mergedCollisionKeys.contains(aliasCollisionKey(g.first)))
-          .toList();
-
-  final _mergedCollisionKeys = <String>{};
+      );
 
   Future<void> _mergeCollision(List<String> names) async {
     final existing = names
         .map(PlayerAliasService.instance.identityFor)
         .whereType<PlayerIdentity>()
         .firstOrNull;
-    final display = existing?.displayName ?? names.first;
     setState(() => _saving = true);
     try {
       final identity = await PlayerAliasService.instance.linkNames(
         names,
-        displayName: display,
+        displayName: existing?.displayName ?? names.first,
         isMe: existing?.isMe ?? false,
+        gender: existing?.gender,
       );
       await GlobalPlayHistoryService().renamePlayerAcrossHistory(
         fromNames: identity.names,
         toName: identity.displayName,
       );
-      if (!mounted) return;
       widget.onMutated?.call();
-      setState(() => _mergedCollisionKeys.add(aliasCollisionKey(names.first)));
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Pseudos fusionnés sous « $display »')),
-      );
+      if (mounted) setState(() {});
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
-  Future<void> _confirm() async {
-    if (_selected.isEmpty) return;
-    final display = _displayController.text.trim().isEmpty
-        ? _selected.first
-        : _displayController.text.trim();
+  Future<void> _openEditor({PlayerIdentity? existing}) async {
+    final nameCtrl = TextEditingController(
+      text: existing?.displayName ?? '',
+    );
+    var gender = existing?.gender ?? PlayerGender.neutral;
+    final selected = <String>{
+      for (final name in existing?.names ?? const <String>[]) name,
+    };
+    FriendChoice? friend;
+    for (final choice in _friends) {
+      if (choice.profileId == existing?.friendProfileId) friend = choice;
+    }
+    var isMe = existing?.isMe ?? false;
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) {
+          final aliases = <String>{
+            ...widget.knownNames,
+            ...?existing?.names,
+          }.toList()
+            ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+          return AlertDialog(
+            title: Text(existing == null ? 'Nouvelle identité' : 'Identité'),
+            content: SizedBox(
+              width: 420,
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: nameCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Nom principal affiché',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SegmentedButton<PlayerGender>(
+                      showSelectedIcon: false,
+                      segments: const [
+                        ButtonSegment(value: PlayerGender.feminine, label: Text('F')),
+                        ButtonSegment(value: PlayerGender.masculine, label: Text('M')),
+                        ButtonSegment(value: PlayerGender.neutral, label: Text('Neutre')),
+                      ],
+                      selected: {gender},
+                      onSelectionChanged: (v) => setLocal(() => gender = v.first),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text('Pseudos de l\'historique'),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        for (final name in aliases)
+                          FilterChip(
+                            label: Text(name),
+                            selected: selected.any(
+                              (s) => s.toLowerCase() == name.toLowerCase(),
+                            ),
+                            onSelected: (on) => setLocal(() {
+                              selected.removeWhere(
+                                (s) => s.toLowerCase() == name.toLowerCase(),
+                              );
+                              if (on) selected.add(name);
+                              if (nameCtrl.text.trim().isEmpty && selected.isNotEmpty) {
+                                nameCtrl.text = selected.first;
+                              }
+                            }),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: friend?.profileId ?? '',
+                      isExpanded: true,
+                      decoration: const InputDecoration(labelText: 'Ami lié'),
+                      items: [
+                        const DropdownMenuItem(value: '', child: Text('Aucun')),
+                        for (final choice in _friends)
+                          DropdownMenuItem(
+                            value: choice.profileId,
+                            child: Text(choice.username),
+                          ),
+                      ],
+                      onChanged: (id) => setLocal(() {
+                        friend = null;
+                        for (final choice in _friends) {
+                          if (choice.profileId == id) friend = choice;
+                        }
+                        final alias = friend?.username.trim() ?? '';
+                        if (alias.isNotEmpty &&
+                            !selected.any(
+                              (s) => s.toLowerCase() == alias.toLowerCase(),
+                            )) {
+                          selected.add(alias);
+                        }
+                      }),
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('C\'est moi'),
+                      value: isMe,
+                      onChanged: (v) => setLocal(() {
+                        isMe = v;
+                        if (v) friend = null;
+                      }),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Annuler'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Enregistrer'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    final display = nameCtrl.text.trim();
+    nameCtrl.dispose();
+    if (saved != true || !mounted) return;
+    final names = selected.toList();
+    if (display.isNotEmpty &&
+        !names.any((n) => n.toLowerCase() == display.toLowerCase())) {
+      names.insert(0, display);
+    }
+    if (names.isEmpty) return;
     setState(() => _saving = true);
     try {
       final identity = await PlayerAliasService.instance.linkNames(
-        _selected.toList(),
-        displayName: display,
-        isMe: _markAsMe,
+        names,
+        displayName: display.isEmpty ? names.first : display,
+        isMe: isMe,
+        gender: gender,
+        friendProfileId: isMe ? null : friend?.profileId,
+        friendUsername: isMe ? null : friend?.username,
       );
-      final friend = _friend;
-      if (_linkFriend && friend != null && !_markAsMe) {
-        await PlayerAliasService.instance.linkFriend(
-          identity.displayName,
-          profileId: friend.profileId,
-          username: friend.username,
-        );
-      }
-
-      final renamed =
-          await GlobalPlayHistoryService().renamePlayerAcrossHistory(
+      await GlobalPlayHistoryService().renamePlayerAcrossHistory(
         fromNames: identity.names,
         toName: identity.displayName,
       );
-
-      if (!mounted) return;
       widget.onMutated?.call();
-      setState(() {
-        _selected.clear();
-        _displayController.clear();
-        _markAsMe = false;
-        _linkFriend = false;
-        _friend = null;
-      });
-      final msg = renamed > 0
-          ? 'Identité enregistrée · $renamed partie${renamed > 1 ? 's' : ''} mises à jour'
-          : 'Identité enregistrée';
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      if (mounted) setState(() {});
     } finally {
       if (mounted) setState(() => _saving = false);
     }
-  }
-
-  Future<void> _addAlias(PlayerIdentity identity) async {
-    final controller = TextEditingController();
-    final name = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Ajouter un pseudo'),
-        content: TextField(
-          controller: controller,
-          maxLength: 18,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: 'Pseudo'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Annuler'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text('Ajouter'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    if (name == null || name.isEmpty || !mounted) return;
-    final created = await PlayerAliasService.instance.linkNames(
-      [...identity.names, name],
-      displayName: identity.displayName,
-      isMe: identity.isMe,
-    );
-    await PlayerAliasService.instance.setGender(created.id, identity.gender);
-    if (mounted) setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     final identities = PlayerAliasService.instance.identities;
-    final height = MediaQuery.sizeOf(context).height * 0.85;
-
-    return SafeArea(
-      child: SizedBox(
-        height: height,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Identités joueurs',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Regroupe les pseudos d’une même personne pour les classements. '
-                'Tu peux aussi choisir un nom unique appliqué partout dans l’historique.\n'
-                'Attention : si deux personnes ont écrit exactement le même pseudo '
-                '(ex. « Lou »), on ne peut pas les distinguer.',
-                style: TextStyle(
-                  fontSize: 13,
-                  height: 1.35,
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-              for (final group in _collisions.take(3))
-                AliasCollisionWarning(
-                  names: group,
-                  enabled: !_saving,
-                  onMerge: () => _mergeCollision(group),
-                ),
-              if (identities.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Text(
-                  'Identités enregistrées',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: scheme.primary,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                for (final g in identities)
-                  Card(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  g.isMe
-                                      ? '${g.displayName} · moi'
-                                      : g.displayName,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                              ),
-                              IconButton(
-                                tooltip: 'Supprimer',
-                                icon: const Icon(Icons.link_off, size: 20),
-                                onPressed: () async {
-                                  await PlayerAliasService.instance
-                                      .deleteGroup(g.id);
-                                  if (mounted) setState(() {});
-                                },
-                              ),
-                            ],
-                          ),
-                          Wrap(
-                            spacing: 6,
-                            children: [
-                              for (final gender in PlayerGender.values)
-                                ChoiceChip(
-                                  label: Text(switch (gender) {
-                                    PlayerGender.feminine => 'F',
-                                    PlayerGender.masculine => 'M',
-                                    PlayerGender.neutral => 'Neutre',
-                                  }),
-                                  selected: g.gender == gender,
-                                  onSelected: (_) async {
-                                    await PlayerAliasService.instance
-                                        .setGender(g.id, gender);
-                                    if (mounted) setState(() {});
-                                  },
-                                ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            g.isLinkedToFriend
-                                ? 'Ami lié : ${g.friendUsername}'
-                                : 'Aucun ami lié',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Wrap(
-                            spacing: 6,
-                            runSpacing: 6,
-                            children: [
-                              for (final name in g.names)
-                                InputChip(
-                                  label: Text(name),
-                                  onDeleted: () async {
-                                    await PlayerAliasService.instance
-                                        .unlinkName(name);
-                                    if (mounted) setState(() {});
-                                  },
-                                ),
-                              ActionChip(
-                                label: const Text('+ Ajouter'),
-                                onPressed: () => _addAlias(g),
-                              ),
-                            ],
-                          ),
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: TextButton(
-                              onPressed: () async {
-                                if (g.isLinkedToFriend) {
-                                  await PlayerAliasService.instance
-                                      .unlinkFriend(g.id);
-                                } else {
-                                  await _pickFriendFor(g);
-                                }
-                                if (mounted) setState(() {});
-                              },
-                              child: Text(
-                                g.isLinkedToFriend
-                                    ? 'Délier l\'ami'
-                                    : 'Lier un ami',
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-              ],
-              const SizedBox(height: 8),
-              Text(
-                'Sélectionne les pseudos à regrouper',
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 6),
-              Expanded(
-                child: widget.knownNames.isEmpty
-                    ? Center(
-                        child: Text(
-                          'Aucun pseudo trouvé dans l’historique.',
-                          style: TextStyle(color: scheme.onSurfaceVariant),
-                        ),
-                      )
-                    : ListView.builder(
-                        itemCount: widget.knownNames.length,
-                        itemBuilder: (context, i) {
-                          final name = widget.knownNames[i];
-                          final id =
-                              PlayerAliasService.instance.identityFor(name);
-                          final selected = _selected.contains(name);
-                          return CheckboxListTile(
-                            dense: true,
-                            value: selected,
-                            title: Text(name),
-                            subtitle: id != null
-                                ? Text(
-                                    '→ ${id.displayName}${id.isMe ? ' (moi)' : ''}',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: scheme.onSurfaceVariant,
-                                    ),
-                                  )
-                                : null,
-                            onChanged: (v) => _toggle(name, v),
-                          );
-                        },
-                      ),
-              ),
-              if (_selected.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _displayController,
-                  decoration: const InputDecoration(
-                    labelText: 'Nom affiché (appliqué partout)',
-                    hintText: 'Ex. Kiki',
-                    helperText:
-                        'Ce nom remplace les pseudos liés dans toutes les parties.',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('C’est moi'),
-                  subtitle: const Text('Marque cette identité comme la tienne'),
-                  value: _markAsMe,
-                  onChanged: (v) => setState(() => _markAsMe = v),
-                ),
-                if (!_markAsMe)
-                  FriendLinkSelector(
-                    friends: _friends,
-                    linked: _linkFriend,
-                    selected: _friend,
-                    onLinkedChanged: (v) => setState(() {
-                      _linkFriend = v;
-                      if (!v) _friend = null;
-                    }),
-                    onSelected: (f) => setState(() => _friend = f),
-                  ),
-              ],
-              const SizedBox(height: 8),
-              FilledButton.icon(
-                onPressed: _saving || _selected.isEmpty ? null : _confirm,
-                icon: _saving
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.group_add_outlined),
-                label: Text(
-                  _selected.isEmpty
-                      ? 'Choisis au moins un pseudo'
-                      : 'Enregistrer l’identité',
-                ),
-              ),
-            ],
+    final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, 4, 16, 16 + bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Identités joueurs',
+            style: Theme.of(context).textTheme.titleLarge,
           ),
-        ),
+          const SizedBox(height: 4),
+          Text(
+            'Un nom affiché, des pseudos regroupés, un ami lié.',
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 12),
+          if (identities.isEmpty)
+            const Text('Aucune identité pour l\'instant.')
+          else
+            for (final identity in identities)
+              Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  title: Text(identity.displayName),
+                  subtitle: Text(
+                    [
+                      identity.names.join(' · '),
+                      if ((identity.friendUsername ?? '').isNotEmpty)
+                        'Ami : ${identity.friendUsername}',
+                    ].join('\n'),
+                  ),
+                  trailing: const Icon(Icons.edit_outlined),
+                  onTap: _saving ? null : () => _openEditor(existing: identity),
+                ),
+              ),
+          for (final group in _collisions)
+            AliasCollisionWarning(
+              names: group,
+              enabled: !_saving,
+              onMerge: () => _mergeCollision(group),
+            ),
+          const SizedBox(height: 8),
+          FilledButton.icon(
+            onPressed: _saving ? null : () => _openEditor(),
+            icon: const Icon(Icons.person_add_alt_1),
+            label: const Text('Nouvelle identité'),
+          ),
+        ],
       ),
     );
   }

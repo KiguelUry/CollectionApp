@@ -367,6 +367,7 @@ class _WishlistPriceSheetState extends State<_WishlistPriceSheet> {
               if (history.isNotEmpty) ...[
                 const SizedBox(height: 10),
                 SegmentedButton<_HistoryRange>(
+              showSelectedIcon: false,
                   segments: const [
                     ButtonSegment(
                       value: _HistoryRange.week,

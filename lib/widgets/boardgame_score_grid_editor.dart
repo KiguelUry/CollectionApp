@@ -1774,6 +1774,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
             ),
             const SizedBox(height: 4),
             SegmentedButton<TeamScoreMode>(
+              showSelectedIcon: false,
               segments: const [
                 ButtonSegment(
                   value: TeamScoreMode.shared,

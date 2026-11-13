@@ -132,6 +132,7 @@ abstract final class AppTheme {
         ),
       ),
       chipTheme: ChipThemeData(
+        showCheckmark: false,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         side: BorderSide(color: scheme.outlineVariant),
       ),
@@ -282,6 +283,7 @@ abstract final class AppTheme {
         ),
       ),
       chipTheme: ChipThemeData(
+        showCheckmark: false,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         side: BorderSide(color: scheme.outlineVariant),
       ),

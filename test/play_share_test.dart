@@ -240,7 +240,7 @@ void main() {
         newId: 'new',
       );
       expect(next, hasLength(4));
-      expect(next.last.names, ['Zoé']);
+      expect(next.last.names, ['Zoé', 'zoe']);
       expect(next.last.friendProfileId, 'p_zoe');
     });
 

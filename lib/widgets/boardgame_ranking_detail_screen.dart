@@ -290,6 +290,7 @@ class _BoardgameRankingDetailScreenState
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: SegmentedButton<RankingDetailMode>(
+              showSelectedIcon: false,
                 segments: const [
                   ButtonSegment(
                     value: RankingDetailMode.global,

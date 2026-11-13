@@ -28,7 +28,6 @@ class BoardgameTemplatesPanel extends StatefulWidget {
 
 class _BoardgameTemplatesPanelState extends State<BoardgameTemplatesPanel> {
   List<CommunityScoreTemplate> _community = [];
-  bool _loading = true;
 
   String get _gameKey => CommunityRulesService.gameKeyFor(
         bggId: widget.item.metadata?['bgg_id']?.toString(),
@@ -46,7 +45,6 @@ class _BoardgameTemplatesPanelState extends State<BoardgameTemplatesPanel> {
     if (!mounted) return;
     setState(() {
       _community = templates;
-      _loading = false;
     });
   }
 
@@ -163,53 +161,6 @@ class _BoardgameTemplatesPanelState extends State<BoardgameTemplatesPanel> {
         else
           for (final preset in _imported) ...[
             _PreviewCard(title: preset.name, preset: preset),
-            const SizedBox(height: 8),
-          ],
-        const SizedBox(height: 8),
-        Text(
-          'Templates de la commu',
-          style: Theme.of(context).textTheme.titleSmall,
-        ),
-        const SizedBox(height: 8),
-        if (_loading)
-          const LinearProgressIndicator()
-        else if (_community.isEmpty)
-          Text(
-            'Aucun modèle partagé pour ce jeu.',
-            style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
-          )
-        else
-          for (final entry in _community) ...[
-            _PreviewCard(
-              title: entry.preset.name,
-              subtitle: '${entry.authorName} · ${entry.likes} like${entry.likes > 1 ? 's' : ''}',
-              preset: entry.preset,
-              trailing: Wrap(
-                spacing: 4,
-                children: [
-                  IconButton(
-                    tooltip: 'Liker',
-                    onPressed: () async {
-                      await CommunityScoreTemplatesService.instance
-                          .toggleLike(entry.id);
-                      await _reload();
-                    },
-                    icon: Icon(
-                      entry.likedByMe(
-                        Supabase.instance.client.auth.currentUser?.id ?? 'local',
-                      )
-                          ? Icons.favorite
-                          : Icons.favorite_border,
-                    ),
-                  ),
-                  if (!widget.readOnly)
-                    TextButton(
-                      onPressed: () => _import(entry.preset, entry.authorName),
-                      child: const Text('Importer dans mes templates'),
-                    ),
-                ],
-              ),
-            ),
             const SizedBox(height: 8),
           ],
         const SizedBox(height: 8),

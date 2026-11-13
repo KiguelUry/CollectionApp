@@ -159,7 +159,20 @@ List<PlayerIdentity> applyFriendLink(
         id.displayName.toLowerCase() == lower;
     if (hit) {
       found = true;
-      next.add(id.copyWith(friendProfileId: profileId, friendUsername: username));
+      final alias = username.trim();
+      final names = [
+        ...id.names,
+        if (alias.isNotEmpty &&
+            !id.names.any((n) => n.toLowerCase() == alias.toLowerCase()))
+          alias,
+      ];
+      next.add(
+        id.copyWith(
+          names: names,
+          friendProfileId: profileId,
+          friendUsername: alias.isEmpty ? username : alias,
+        ),
+      );
     } else if (id.friendProfileId == profileId) {
       next.add(id.copyWith(clearFriend: true));
     } else {
@@ -170,10 +183,15 @@ List<PlayerIdentity> applyFriendLink(
     next.add(
       PlayerIdentity(
         id: newId,
-        names: [name.trim()],
+        names: [
+          name.trim(),
+          if (username.trim().isNotEmpty &&
+              username.trim().toLowerCase() != name.trim().toLowerCase())
+            username.trim(),
+        ],
         displayName: name.trim(),
         friendProfileId: profileId,
-        friendUsername: username,
+        friendUsername: username.trim(),
       ),
     );
   }
@@ -357,6 +375,9 @@ class PlayerAliasService {
     List<String> names, {
     String? displayName,
     bool isMe = false,
+    PlayerGender? gender,
+    String? friendProfileId,
+    String? friendUsername,
   }) async {
     await ensureLoaded();
     final cleaned = <String>[];
@@ -375,8 +396,9 @@ class PlayerAliasService {
     final merged = <String>[];
     final mergedSeen = <String>{};
     var wasMe = isMe;
-    String? friendProfileId;
-    String? friendUsername;
+    var keptGender = gender ?? PlayerGender.neutral;
+    String? keptFriendId = friendProfileId;
+    String? keptFriendName = friendUsername;
 
     void addName(String n) {
       if (mergedSeen.add(n.toLowerCase())) merged.add(n);
@@ -387,9 +409,12 @@ class PlayerAliasService {
           touchKeys.contains(g.displayName.toLowerCase());
       if (hits) {
         wasMe = wasMe || g.isMe;
-        if (friendProfileId == null && g.isLinkedToFriend) {
-          friendProfileId = g.friendProfileId;
-          friendUsername = g.friendUsername;
+        if (gender == null && g.gender != PlayerGender.neutral) {
+          keptGender = g.gender;
+        }
+        if (keptFriendId == null && g.isLinkedToFriend) {
+          keptFriendId = g.friendProfileId;
+          keptFriendName = g.friendUsername;
         }
         for (final n in g.names) {
           addName(n);
@@ -409,6 +434,11 @@ class PlayerAliasService {
     if (!mergedSeen.contains(chosen.toLowerCase())) {
       merged.insert(0, chosen);
     }
+    final friendAlias = keptFriendName?.trim() ?? '';
+    if (friendAlias.isNotEmpty &&
+        !mergedSeen.contains(friendAlias.toLowerCase())) {
+      merged.add(friendAlias);
+    }
 
     // Un seul « moi ».
     final nextKeep = wasMe || isMe
@@ -420,8 +450,9 @@ class PlayerAliasService {
       names: merged,
       displayName: chosen,
       isMe: wasMe || isMe,
-      friendProfileId: (wasMe || isMe) ? null : friendProfileId,
-      friendUsername: (wasMe || isMe) ? null : friendUsername,
+      gender: keptGender,
+      friendProfileId: (wasMe || isMe) ? null : keptFriendId,
+      friendUsername: (wasMe || isMe) ? null : keptFriendName,
     );
     _identities = [...nextKeep, group];
     await _persist();

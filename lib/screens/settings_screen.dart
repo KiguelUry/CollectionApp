@@ -9,7 +9,6 @@ import '../services/account_export_service.dart';
 import '../services/bgg_collection_import_service.dart';
 import '../services/oauth_link_notice.dart';
 import '../services/settings_service.dart';
-import '../theme/card_skins.dart';
 import '../utils/network_feedback.dart';
 import '../utils/supabase_error_messages.dart';
 import '../widgets/app_app_bar.dart';
@@ -384,6 +383,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                 child: SegmentedButton<AppThemePreference>(
+              showSelectedIcon: false,
                   segments: const [
                     ButtonSegment(
                       value: AppThemePreference.system,
@@ -405,37 +405,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   onSelectionChanged: (selection) {
                     _settings.setThemePreference(selection.first);
                   },
-                ),
-              ),
-              const Padding(
-                padding: EdgeInsets.fromLTRB(16, 4, 16, 4),
-                child: Text('Fond de l\'application'),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: Wrap(
-                  spacing: 6,
-                  children: [
-                    for (final choice in backgroundChoices)
-                      ChoiceChip(
-                        label: Text(choice.$1),
-                        selected: _settings.scaffoldBackground.toARGB32() ==
-                            choice.$2.toARGB32(),
-                        onSelected: (_) =>
-                            _settings.setScaffoldBackground(choice.$2),
-                      ),
-                  ],
-                ),
-              ),
-              const Padding(
-                padding: EdgeInsets.fromLTRB(16, 4, 16, 4),
-                child: Text('Styles de cartes'),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: _CardSkinGallery(
-                  selectedId: _settings.cardSkin.id,
-                  onSelected: _settings.setCardSkin,
                 ),
               ),
               ListTile(
@@ -590,7 +559,7 @@ class _LinkedProviderTile extends StatelessWidget {
     return ListTile(
       leading: Icon(linked ? Icons.check_circle : Icons.link),
       title: Text(
-        linked ? '$label · Associé ✓' : 'Associer mon compte $label',
+        linked ? '$label · Associé' : 'Associer mon compte $label',
       ),
       trailing: linked
           ? TextButton(
@@ -600,70 +569,6 @@ class _LinkedProviderTile extends StatelessWidget {
             )
           : null,
       onTap: linked ? null : onLink,
-    );
-  }
-}
-
-class _CardSkinGallery extends StatelessWidget {
-  final String selectedId;
-  final ValueChanged<CardSkin> onSelected;
-
-  const _CardSkinGallery({
-    required this.selectedId,
-    required this.onSelected,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        for (final family in CardSkinFamily.values) ...[
-          Padding(
-            padding: const EdgeInsets.only(top: 8, bottom: 6),
-            child: Text(
-              switch (family) {
-                CardSkinFamily.solid => 'Couleurs unies',
-                CardSkinFamily.gradient => 'Dégradés',
-                CardSkinFamily.special => 'Modes spéciaux',
-              },
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-            ),
-          ),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final skin in CardSkin.all)
-                if (skin.family == family)
-                  InkWell(
-                    onTap: () => onSelected(skin),
-                    borderRadius: BorderRadius.circular(12),
-                    child: Container(
-                      width: 108,
-                      padding: const EdgeInsets.all(8),
-                      decoration: skin.decoration().copyWith(
-                        border: Border.all(
-                          color: skin.id == selectedId
-                              ? Colors.white
-                              : skin.edge,
-                          width: skin.id == selectedId ? 2 : 1,
-                        ),
-                      ),
-                      child: Text(
-                        skin.label,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ),
-            ],
-          ),
-        ],
-      ],
     );
   }
 }

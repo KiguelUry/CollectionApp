@@ -303,6 +303,34 @@ class _PodiumBlock extends StatefulWidget {
 class _PodiumBlockState extends State<_PodiumBlock> {
   bool _percent = false;
 
+  double _rate(BoardgameWinHighlight w) =>
+      w.gamesPlayed == 0 ? 0 : w.wins / w.gamesPlayed;
+
+  int _rankByRate(List<BoardgameWinHighlight> ranked, int index) {
+    var rank = 1;
+    for (var i = 0; i < index; i++) {
+      if (_rate(ranked[i]) != _rate(ranked[i + 1])) rank = i + 2;
+    }
+    return rank;
+  }
+
+  List<BoardgamePodiumSlot> _slotsByRate(List<BoardgameWinHighlight> ranked) {
+    final slots = <BoardgamePodiumSlot>[];
+    var i = 0;
+    var nextRank = 1;
+    while (i < ranked.length && nextRank <= 3 && slots.length < 3) {
+      final group = <BoardgameWinHighlight>[ranked[i]];
+      i++;
+      while (i < ranked.length && _rate(ranked[i]) == _rate(group.first)) {
+        group.add(ranked[i]);
+        i++;
+      }
+      slots.add(BoardgamePodiumSlot(rank: nextRank, players: group));
+      nextRank = i + 1;
+    }
+    return slots;
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -316,6 +344,20 @@ class _PodiumBlockState extends State<_PodiumBlock> {
       }
       return '${w.wins} victoire${w.wins > 1 ? 's' : ''} · ${w.gamesPlayed} partie${w.gamesPlayed > 1 ? 's' : ''}';
     }
+
+    final ranked = [...stats.winPodium];
+    if (_percent) {
+      ranked.sort((a, b) {
+        final ar = a.gamesPlayed == 0 ? 0.0 : a.wins / a.gamesPlayed;
+        final br = b.gamesPlayed == 0 ? 0.0 : b.wins / b.gamesPlayed;
+        final byRate = br.compareTo(ar);
+        if (byRate != 0) return byRate;
+        final byGames = b.gamesPlayed.compareTo(a.gamesPlayed);
+        if (byGames != 0) return byGames;
+        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      });
+    }
+    final slots = _percent ? _slotsByRate(ranked) : stats.podiumSlots;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -332,6 +374,7 @@ class _PodiumBlockState extends State<_PodiumBlock> {
             ),
             const Spacer(),
             SegmentedButton<bool>(
+              showSelectedIcon: false,
               segments: const [
                 ButtonSegment(value: false, label: Text('🏆')),
                 ButtonSegment(value: true, label: Text('%')),
@@ -343,14 +386,16 @@ class _PodiumBlockState extends State<_PodiumBlock> {
           ],
         ),
         const SizedBox(height: 10),
-        _PodiumRow(slots: stats.podiumSlots, percent: _percent),
+        _PodiumRow(slots: slots, percent: _percent),
         const SizedBox(height: 8),
-        ...stats.winPodium.take(5).toList().asMap().entries.map((e) {
+        ...ranked.take(8).toList().asMap().entries.map((e) {
           final w = e.value;
-          final rank = BoardgameRankingStats.displayRankForWinPodium(
-            stats.winPodium,
-            e.key,
-          );
+          final rank = _percent
+              ? _rankByRate(ranked, e.key)
+              : BoardgameRankingStats.displayRankForWinPodium(
+                  stats.winPodium,
+                  e.key,
+                );
           return Padding(
             padding: const EdgeInsets.only(bottom: 4),
             child: Text(
