@@ -5,9 +5,10 @@ import '../models/collection_item.dart';
 import '../services/player_alias_service.dart';
 import '../utils/boardgame_play_stats.dart';
 import 'boardgame_play_history_panel.dart';
+import 'boardgame_templates_panel.dart';
 import 'detail_bento_tile.dart';
 
-enum _PlayHubTab { none, history, stats, ranking }
+enum _PlayHubTab { none, history, stats, ranking, templates }
 
 /// Contenu du bento « Parties et classements » (sous-tuiles directes, sans hub intermédiaire).
 class BoardgamePlaySectionsPanel extends StatefulWidget {
@@ -90,6 +91,15 @@ class _BoardgamePlaySectionsPanelState extends State<BoardgamePlaySectionsPanel>
           selected: _tab == _PlayHubTab.ranking,
           onTap: () => _select(_PlayHubTab.ranking),
         ),
+        const SizedBox(height: 8),
+        DetailBentoSubTile(
+          icon: Icons.dashboard_customize_outlined,
+          title: 'Modèles de score (Templates)',
+          subtitle: 'Aperçu, partage et modèles de la commu',
+          accent: accent,
+          selected: _tab == _PlayHubTab.templates,
+          onTap: () => _select(_PlayHubTab.templates),
+        ),
         if (_tab != _PlayHubTab.none) ...[
           const SizedBox(height: 12),
           switch (_tab) {
@@ -107,6 +117,11 @@ class _BoardgamePlaySectionsPanelState extends State<BoardgamePlaySectionsPanel>
                 item: widget.item,
                 readOnly: widget.readOnly,
                 mode: BoardgamePlayPanelMode.ranking,
+                onMetadataChanged: widget.onMetadataChanged,
+              ),
+            _PlayHubTab.templates => BoardgameTemplatesPanel(
+                item: widget.item,
+                readOnly: widget.readOnly,
                 onMetadataChanged: widget.onMetadataChanged,
               ),
             _PlayHubTab.none => const SizedBox.shrink(),

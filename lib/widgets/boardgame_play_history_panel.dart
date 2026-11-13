@@ -519,7 +519,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     // Nouvelle partie / relaunch → en cours ; édition conserve le statut.
     _status = s?.status ?? BoardgamePlayStatus.inProgress;
     if (s != null && s.scoreGrid != null) {
-      _initialGrid = s.scoreGrid!;
+      _initialGrid = s.scoreGrid!.detached();
     } else if (t?.scoreGrid != null) {
       // Relancer : garder noms/équipes/couleurs, vider les scores.
       final g = t!.scoreGrid!;
@@ -538,24 +538,41 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     } else {
       _initialGrid = BoardgameScoreGrid.empty(playerCount: 0);
     }
-    if (s == null && _template.lineNames.isNotEmpty) {
+    if (s == null) {
+      // Nouvelle partie : grille vierge, sans le dernier modèle.
+      _template = BoardgameScoreTemplate.empty;
+      _activePresetName = null;
+      if (_winCondition == BoardgameWinCondition.customTemplate) {
+        _winCondition = BoardgameWinCondition.highest;
+      }
       final width = _initialGrid.players.length;
       _initialGrid = BoardgameScoreGrid(
-        players: _initialGrid.players,
-        teams: _initialGrid.teams,
-        playerColors: _initialGrid.playerColors,
-        teamColorMap: _initialGrid.teamColorMap,
+        players: List<String>.from(_initialGrid.players),
+        teams: List<String?>.from(_initialGrid.teams),
+        playerColors: List<int?>.from(_initialGrid.playerColors),
+        teamColorMap: Map<String, int>.from(_initialGrid.teamColorMap),
         teamScoreMode: _initialGrid.teamScoreMode,
         rounds: [
-          for (final line in _template.lines)
-            if (line.name.trim().isNotEmpty)
-              BoardgameScoreRound(
-                label: line.name.trim(),
-                malus: line.malus,
-                scores: List<int?>.filled(width, null),
-              ),
+          for (final label in const ['Tour 1', 'Tour 2', 'Tour 3'])
+            BoardgameScoreRound(
+              label: label,
+              scores: List<int?>.filled(width, null),
+            ),
         ],
       );
+    } else {
+      final linked = s.presetName?.trim();
+      if (linked != null && linked.isNotEmpty) {
+        for (final preset in _presets) {
+          if (preset.name.toLowerCase() != linked.toLowerCase()) continue;
+          _activePresetName = preset.name;
+          _template = preset.template;
+          _winCondition = BoardgameWinCondition.customTemplate;
+          _confrontation = preset.confrontation;
+          _initialGrid = _gridAlignedToTemplate(_initialGrid, preset.template);
+          break;
+        }
+      }
     }
     if (s != null) {
       _winnerManuallyForced =
@@ -574,6 +591,50 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     }
     _loadProfiles();
     _restoreDraft();
+  }
+
+  BoardgameScoreGrid _gridAlignedToTemplate(
+    BoardgameScoreGrid grid,
+    BoardgameScoreTemplate template,
+  ) {
+    final named = [
+      for (final line in template.lines)
+        if (line.name.trim().isNotEmpty) line,
+    ];
+    if (named.isEmpty) return grid.detached();
+    final width = grid.players.length;
+    final byLabel = <String, BoardgameScoreRound>{
+      for (final round in grid.rounds)
+        if ((round.label ?? '').trim().isNotEmpty)
+          (round.label ?? '').trim().toLowerCase(): round,
+    };
+    return BoardgameScoreGrid(
+      players: List<String>.from(grid.players),
+      teams: List<String?>.from(grid.teams),
+      playerColors: List<int?>.from(grid.playerColors),
+      teamColorMap: Map<String, int>.from(grid.teamColorMap),
+      teamScoreMode: grid.teamScoreMode,
+      rounds: [
+        for (final line in named)
+          BoardgameScoreRound(
+            label: line.name.trim(),
+            malus: line.malus,
+            scores: _scoresForLine(
+              byLabel[line.name.trim().toLowerCase()],
+              width,
+            ),
+          ),
+      ],
+    );
+  }
+
+  List<int?> _scoresForLine(BoardgameScoreRound? round, int width) {
+    final scores = List<int?>.filled(width, null);
+    if (round == null) return scores;
+    for (var i = 0; i < width && i < round.scores.length; i++) {
+      scores[i] = round.scores[i];
+    }
+    return scores;
   }
 
   String get _draftKey =>
@@ -877,9 +938,14 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
       setState(() {
         _activePresetName = null;
         _template = const BoardgameScoreTemplate();
+        _winCondition = BoardgameWinCondition.highest;
         _presetBaseline = _presetFingerprint();
       });
-      _gridKey.currentState?.setLineSpecs(const []);
+      _gridKey.currentState?.setLineSpecs(const [
+        ScoreLineSpec('Tour 1'),
+        ScoreLineSpec('Tour 2'),
+        ScoreLineSpec('Tour 3'),
+      ]);
       return;
     }
     setState(() {
@@ -1019,9 +1085,53 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     );
   }
 
+  Future<void> _duplicateActivePreset() async {
+    final name = _activePresetName;
+    if (name == null) return;
+    final copyName = await _askPresetName(initial: '$name (copie)');
+    if (copyName == null) return;
+    final preset = NamedScorePreset(
+      name: copyName,
+      confrontation: _confrontation,
+      template: _liveTemplate,
+    );
+    setState(() {
+      _presets = [
+        for (final existing in _presets)
+          if (existing.name.toLowerCase() != copyName.toLowerCase()) existing,
+        preset,
+      ];
+      _activePresetName = copyName;
+      _template = preset.template;
+      _presetBaseline = _presetFingerprint();
+    });
+    await _persistPresetLibrary();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Modèle « $copyName » créé')),
+    );
+  }
+
   Future<void> _deleteActivePreset() async {
     final name = _activePresetName;
     if (name == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Voulez-vous vraiment supprimer le template « $name » ?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
     setState(() {
       _presets = [
         for (final preset in _presets)
@@ -1089,6 +1199,11 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
                 ),
                 TextButton(
                   onPressed:
+                      _activePresetName == null ? null : _duplicateActivePreset,
+                  child: const Text('Dupliquer'),
+                ),
+                TextButton(
+                  onPressed:
                       _activePresetName == null ? null : _deleteActivePreset,
                   child: const Text('Supprimer'),
                 ),
@@ -1101,6 +1216,8 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
   }
 
   List<String> _contenderNames() {
+    final fromGrid = _gridKey.currentState?.contenderNames() ?? const [];
+    if (fromGrid.isNotEmpty) return fromGrid;
     if (!_trackScores) {
       return _playersOnlyController.text
           .split(',')
@@ -1140,7 +1257,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
             for (final name in names)
               ChoiceChip(
                 label: Text(name),
-                selected: current == name,
+                selected: current.toLowerCase() == name.toLowerCase(),
                 onSelected: (_) {
                   setState(() {
                     _winnerManuallyForced = true;
@@ -1151,7 +1268,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
               ),
             ChoiceChip(
               label: const Text('Aucun / Égalité'),
-              selected: _winnerManuallyForced && current.isEmpty,
+              selected: current.isEmpty,
               onSelected: (_) {
                 setState(() {
                   _winnerManuallyForced = true;
@@ -1311,6 +1428,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
         shareId: widget.initial?.shareId ?? newPlayShareId(),
         winnerManuallyForced: _winnerManuallyForced,
         winReason: winReason.isEmpty ? null : winReason,
+        presetName: _activePresetName,
         presetLibrary: _presets,
       );
     final item = widget.item;
@@ -1362,6 +1480,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
       _winReasonController.text = summary ?? '';
     }
     _applyingField = false;
+    if (mounted) setState(() {});
     if (template == null) return;
     final synced = template;
     final previous = _template.lines

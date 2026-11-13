@@ -214,13 +214,18 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
         .map((r) => TextEditingController(text: r.label ?? ''))
         .toList();
     _roundMalus = [for (final round in grid.rounds) round.malus];
-    _cellControllers = grid.rounds
-        .map(
-          (r) => r.scores
-              .map((s) => TextEditingController(text: s?.toString() ?? ''))
-              .toList(),
-        )
-        .toList();
+    final width = grid.players.length;
+    _cellControllers = [
+      for (final round in grid.rounds)
+        [
+          for (var c = 0; c < width; c++)
+            TextEditingController(
+              text: c < round.scores.length
+                  ? (round.scores[c]?.toString() ?? '')
+                  : '',
+            ),
+        ],
+    ];
     final teams = grid.teams.length == grid.players.length
         ? grid.teams
         : List<String?>.filled(grid.players.length, null);
@@ -348,6 +353,46 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     });
   }
 
+  TextEditingController _cellController(int row, int col) {
+    while (_cellControllers.length <= row) {
+      _cellControllers.add([]);
+    }
+    final line = _cellControllers[row];
+    while (line.length <= col) {
+      line.add(TextEditingController());
+    }
+    return line[col];
+  }
+
+  String _cellText(int row, int col) {
+    if (row < 0 || row >= _cellControllers.length) return '';
+    final line = _cellControllers[row];
+    if (col < 0 || col >= line.length) return '';
+    return line[col].text.trim();
+  }
+
+  int liveColumnTotal(int col) {
+    var sum = 0;
+    var any = false;
+    for (var r = 0; r < _roundLabelControllers.length; r++) {
+      final raw = _cellText(r, col);
+      final value = int.tryParse(raw);
+      if (value == null) continue;
+      any = true;
+      sum += r < _roundMalus.length && _roundMalus[r] ? -value : value;
+    }
+    return any ? sum : 0;
+  }
+
+  List<String> contenderNames() {
+    final names = <String>[];
+    for (final controller in _playerControllers) {
+      final name = controller.text.trim();
+      if (name.isNotEmpty && !names.contains(name)) names.add(name);
+    }
+    return names;
+  }
+
   BoardgameScoreGrid buildGrid() {
     final players = _playerControllers.map((c) => c.text).toList();
     final teams = _teamControllers.map((c) {
@@ -358,7 +403,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     for (var r = 0; r < _roundLabelControllers.length; r++) {
       final scores = <int?>[];
       for (var c = 0; c < _playerControllers.length; c++) {
-        final raw = _cellControllers[r][c].text.trim();
+        final raw = _cellText(r, c);
         scores.add(raw.isEmpty ? null : int.tryParse(raw));
       }
       rounds.add(
@@ -959,7 +1004,11 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     _teamControllers = order.map((i) => _teamControllers[i]).toList();
     _playerColorIndices = order.map((i) => _playerColorIndices[i]).toList();
     for (var r = 0; r < _cellControllers.length; r++) {
-      _cellControllers[r] = order.map((i) => _cellControllers[r][i]).toList();
+      final row = _cellControllers[r];
+      _cellControllers[r] = [
+        for (final i in order)
+          i >= 0 && i < row.length ? row[i] : TextEditingController(),
+      ];
     }
   }
 
@@ -1011,7 +1060,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     _teamControllers.removeAt(index).dispose();
     _playerColorIndices.removeAt(index);
     for (final row in _cellControllers) {
-      row.removeAt(index).dispose();
+      if (index < row.length) row.removeAt(index).dispose();
     }
     _localRefresh();
   }
@@ -2128,9 +2177,9 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                                   final team = _teamControllers[i].text.trim();
                                   text = team.isNotEmpty
                                       ? '${teamTotals[team] ?? 0}'
-                                      : '${i < totals.length ? totals[i] : 0}';
+                                      : '${liveColumnTotal(i)}';
                                 } else {
-                                  text = '${i < totals.length ? totals[i] : 0}';
+                                  text = '${liveColumnTotal(i)}';
                                 }
                               }
                               final isWinner =
@@ -2248,7 +2297,6 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                 _scoreCell(r, p, scheme, roundW),
               Builder(
                 builder: (_) {
-                  final totals = grid.columnTotals();
                   final hasName = _playerControllers[p].text.trim().isNotEmpty;
                   String text = '—';
                   if (_hideTotals && hasName && grid.hasScores) {
@@ -2258,9 +2306,9 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                       final team = _teamControllers[p].text.trim();
                       text = team.isNotEmpty
                           ? '${teamTotals[team] ?? 0}'
-                          : '${p < totals.length ? totals[p] : 0}';
+                          : '${liveColumnTotal(p)}';
                     } else {
-                      text = '${p < totals.length ? totals[p] : 0}';
+                      text = '${liveColumnTotal(p)}';
                     }
                   }
                   final isWinner = !_hideTotals &&
@@ -2429,7 +2477,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
         width: width,
         child: Padding(
           padding: const EdgeInsets.all(6),
-          child: _singleLineText(_cellControllers[row][col].text),
+          child: _singleLineText(_cellText(row, col)),
         ),
       );
     }
@@ -2448,7 +2496,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
           padding: const EdgeInsets.all(4),
           child: TextField(
             key: ValueKey('cell_${row}_$col'),
-            controller: _cellControllers[row][col],
+            controller: _cellController(row, col),
             textAlign: TextAlign.center,
             keyboardType: const TextInputType.numberWithOptions(signed: true),
             inputFormatters: [

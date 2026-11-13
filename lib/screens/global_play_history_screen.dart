@@ -37,6 +37,7 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
   List<GlobalPlayHistoryEntry> _entries = [];
   List<GlobalPlayHistoryGroup> _groups = [];
   final _expanded = <String>{};
+  String? _rankingGame;
   bool _mobileActionsCompact = false;
 
   @override
@@ -364,8 +365,16 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
     final dateFmt = DateFormat('d MMM yyyy', 'fr_FR');
     final allSessions = _entries.map((e) => e.session).toList();
 
-    final topPlayed = [..._groups]
-      ..sort((a, b) => b.entries.length.compareTo(a.entries.length));
+    final playCounts = <String, _PlayHistoryTopGame>{};
+    for (final group in _groups) {
+      final previous = playCounts[group.groupKey];
+      playCounts[group.groupKey] = _PlayHistoryTopGame(
+        group.title,
+        (previous?.plays ?? 0) + group.entries.length,
+      );
+    }
+    final topPlayed = playCounts.values.toList()
+      ..sort((a, b) => b.plays.compareTo(a.plays));
     final wide = MediaQuery.sizeOf(context).width > 900;
 
     final compactActions = MediaQuery.sizeOf(context).width <= 1100;
@@ -407,10 +416,13 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
           : _GlobalPlayHistoryLayout(
               gameCount: _groups.length,
               playCount: allSessions.length,
-              topPlayed: topPlayed
-                  .take(5)
-                  .map((g) => _PlayHistoryTopGame(g.title, g.entries.length))
-                  .toList(),
+              topPlayed: topPlayed.take(5).toList(),
+              onOpenTopGame: (title) {
+                setState(() {
+                  _rankingGame = title;
+                  _tabIndex = 1;
+                });
+              },
               onOpenIdentities: _openAliasLinker,
               onOpenDraw: _openDraw,
               child: Column(
@@ -485,24 +497,59 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
         ),
       );
     }
+    final ranked = <GlobalPlayHistoryEntry>[
+      for (final entry in _entries)
+        if (_rankingGame == null || entry.title == _rankingGame) entry,
+    ];
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
         children: [
-          Text(
-            'Classement général',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _rankingGame == null
+                      ? 'Classement général'
+                      : 'Classement · $_rankingGame',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                 ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            initialValue: ranked.any((entry) => entry.title == _rankingGame)
+                ? _rankingGame
+                : '',
+            isExpanded: true,
+            decoration: const InputDecoration(
+              isDense: true,
+              labelText: 'Jeu',
+            ),
+            items: [
+              const DropdownMenuItem(value: '', child: Text('Tous les jeux')),
+              for (final title in {
+                for (final entry in _entries) entry.title,
+              })
+                DropdownMenuItem(value: title, child: Text(title)),
+            ],
+            onChanged: (value) {
+              setState(() {
+                _rankingGame = value == null || value.isEmpty ? null : value;
+              });
+            },
           ),
           const SizedBox(height: 16),
           BoardgameRankingPanel(
-            sessions: sessions,
-            gameTitles: _entries.map((e) => e.title).toList(),
+            sessions: ranked.map((entry) => entry.session).toList(),
+            gameTitles: ranked.map((entry) => entry.title).toList(),
             onOpenSession: (index) {
-              if (index >= 0 && index < _entries.length) {
-                _openEntry(_entries[index]);
+              if (index >= 0 && index < ranked.length) {
+                _openEntry(ranked[index]);
               }
             },
           ),
@@ -543,15 +590,15 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
           final group = _visibleGroups[index];
           final expanded = _expanded.contains(group.streakKey);
 
-          if (group.isStreak && !expanded) {
-            return                 _StreakTile(
-                  group: group,
-                  onTap: () => setState(() => _expanded.add(group.streakKey)),
-                  onOpenGame: () => _openGameDetail(group.entries.first),
-                );
+          if (!expanded) {
+            return _StreakTile(
+              group: group,
+              onTap: () => setState(() => _expanded.add(group.streakKey)),
+              onOpenGame: () => _openGameDetail(group.entries.first),
+            );
           }
 
-          if (group.isStreak && expanded) {
+          if (expanded) {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -567,6 +614,7 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
                     entry: entry,
                     dateFmt: dateFmt,
                     title: group.title,
+                    imageUrl: group.imageUrl,
                     nested: true,
                     onTap: () => _openEntry(entry),
                     onRelaunch: () => _relaunchEntry(entry),
@@ -578,19 +626,7 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
               ],
             );
           }
-
-          final entry = group.entries.first;
-          return _EntryTile(
-            entry: entry,
-            dateFmt: dateFmt,
-            title: group.title,
-            imageUrl: group.imageUrl,
-            onTap: () => _openEntry(entry),
-            onRelaunch: () => _relaunchEntry(entry),
-            onAttach: entry.isOrphan ? () => _attachOrphan(entry) : null,
-            onDelete: () => _deleteEntry(entry),
-            onOpenGame: () => _openGameDetail(entry),
-          );
+          return const SizedBox.shrink();
         },
       ),
     );
@@ -882,8 +918,10 @@ class _StreakTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
+      color: scheme.surfaceContainerHighest,
       child: ListTile(
         leading: _historyThumb(
           group.imageUrl,
@@ -892,7 +930,9 @@ class _StreakTile extends StatelessWidget {
         ),
         title: Text(group.title),
         subtitle: Text(
-          '${group.entries.length} parties jouées d\'affilée !',
+          group.entries.length == 1
+              ? '1 partie jouée'
+              : '${group.entries.length} parties jouées d\'affilée !',
           style: const TextStyle(fontWeight: FontWeight.w600),
         ),
         trailing: Icon(expanded ? Icons.expand_less : Icons.expand_more),
@@ -939,6 +979,7 @@ class _EntryTileState extends State<_EntryTile> {
     final session = widget.entry.session;
     final scores = session.scoresLine;
     final winner = session.winnerLine;
+    final hasWinner = winner != null && winner.trim().isNotEmpty;
     final scheme = Theme.of(context).colorScheme;
     final players = session.players.where((p) => p.trim().isNotEmpty).toList();
 
@@ -1032,14 +1073,27 @@ class _EntryTileState extends State<_EntryTile> {
                         style: const TextStyle(fontSize: 13),
                       ),
                     ],
-                    if (winner != null && winner.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        winner,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: scheme.primary,
+                    if (hasWinner) ...[
+                      const SizedBox(height: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFB45309).withValues(alpha: 0.22),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: const Color(0xFFE8B86D),
+                          ),
+                        ),
+                        child: Text(
+                          '🏆 $winner',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFFE8B86D),
+                          ),
                         ),
                       ),
                     ],
@@ -1151,6 +1205,7 @@ class _GlobalPlayHistoryLayout extends StatelessWidget {
   final List<_PlayHistoryTopGame> topPlayed;
   final VoidCallback onOpenIdentities;
   final VoidCallback onOpenDraw;
+  final ValueChanged<String>? onOpenTopGame;
   final Widget child;
 
   const _GlobalPlayHistoryLayout({
@@ -1159,6 +1214,7 @@ class _GlobalPlayHistoryLayout extends StatelessWidget {
     required this.topPlayed,
     required this.onOpenIdentities,
     required this.onOpenDraw,
+    this.onOpenTopGame,
     required this.child,
   });
 
@@ -1277,30 +1333,35 @@ class _GlobalPlayHistoryLayout extends StatelessWidget {
                   ),
                   const SizedBox(height: 10),
                   for (var i = 0; i < topPlayed.length; i++)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Row(
-                        children: [
-                          Text(
-                            '#${i + 1}',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w800,
-                              color: scheme.onSurfaceVariant,
+                    InkWell(
+                      onTap: onOpenTopGame == null
+                          ? null
+                          : () => onOpenTopGame!(topPlayed[i].title),
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Row(
+                          children: [
+                            Text(
+                              '#${i + 1}',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w800,
+                                color: scheme.onSurfaceVariant,
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              topPlayed[i].title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                topPlayed[i].title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
-                          ),
-                          Text(
-                            '${topPlayed[i].plays}',
-                            style: const TextStyle(fontWeight: FontWeight.w800),
-                          ),
-                        ],
+                            Text(
+                              '${topPlayed[i].plays}',
+                              style: const TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                 ],

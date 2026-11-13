@@ -26,6 +26,8 @@ class BoardgamePlaySession {
   /// Motif court (« militaire », « 3 planètes identiques »).
   final String? winReason;
   final BoardgameScoreTemplate? scoreTemplate;
+  /// Nom du modèle lié. Les catégories suivent la version actuelle du modèle.
+  final String? presetName;
   /// Bibliothèque de modèles du jeu. Non sérialisée dans la partie.
   final List<NamedScorePreset>? presetLibrary;
 
@@ -49,6 +51,7 @@ class BoardgamePlaySession {
     this.winnerManuallyForced = false,
     this.winReason,
     this.scoreTemplate,
+    this.presetName,
     this.presetLibrary,
   });
 
@@ -135,6 +138,11 @@ class BoardgamePlaySession {
         return raw;
       }(),
       scoreTemplate: BoardgameScoreTemplate.fromJson(json['score_template']),
+      presetName: () {
+        final raw = json['preset_name']?.toString().trim();
+        if (raw == null || raw.isEmpty) return null;
+        return raw;
+      }(),
     );
   }
 
@@ -163,6 +171,8 @@ class BoardgamePlaySession {
         if (winReason != null && winReason!.trim().isNotEmpty)
           'win_reason': winReason!.trim(),
         if (scoreTemplate != null) 'score_template': scoreTemplate!.toJson(),
+        if (presetName != null && presetName!.trim().isNotEmpty)
+          'preset_name': presetName!.trim(),
       };
 
   bool get isCooperative =>
@@ -286,6 +296,8 @@ class BoardgamePlaySession {
     bool clearWinReason = false,
     BoardgameScoreTemplate? scoreTemplate,
     bool clearScoreTemplate = false,
+    String? presetName,
+    bool clearPresetName = false,
     List<NamedScorePreset>? presetLibrary,
   }) {
     return BoardgamePlaySession(
@@ -311,6 +323,7 @@ class BoardgamePlaySession {
       winReason: clearWinReason ? null : (winReason ?? this.winReason),
       scoreTemplate:
           clearScoreTemplate ? null : (scoreTemplate ?? this.scoreTemplate),
+      presetName: clearPresetName ? null : (presetName ?? this.presetName),
       presetLibrary: presetLibrary ?? this.presetLibrary,
     );
   }

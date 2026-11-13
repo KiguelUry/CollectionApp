@@ -75,12 +75,37 @@ class BoardgameScoreGrid {
         if (v is num) teamColorMap[e.key.toString()] = v.round();
       }
     }
-    return BoardgameScoreGrid(
+    final grid = BoardgameScoreGrid(
       players: players,
       rounds: rounds,
       teams: teams,
       playerColors: playerColors,
       teamColorMap: teamColorMap,
+      teamScoreMode: teamScoreMode,
+    );
+    var width = players.length;
+    for (final round in rounds) {
+      if (round.scores.length > width) width = round.scores.length;
+    }
+    if (width <= 0) return grid;
+    return grid.ensureColumnCount(width).detached();
+  }
+
+  /// Copie indépendante : modifier une partie ne change pas les précédentes.
+  BoardgameScoreGrid detached() {
+    return BoardgameScoreGrid(
+      players: List<String>.from(players),
+      rounds: [
+        for (final round in rounds)
+          BoardgameScoreRound(
+            label: round.label,
+            scores: List<int?>.from(round.scores),
+            malus: round.malus,
+          ),
+      ],
+      teams: List<String?>.from(teams),
+      playerColors: List<int?>.from(playerColors),
+      teamColorMap: Map<String, int>.from(teamColorMap),
       teamScoreMode: teamScoreMode,
     );
   }

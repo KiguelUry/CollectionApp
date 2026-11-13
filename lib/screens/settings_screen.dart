@@ -9,6 +9,7 @@ import '../services/account_export_service.dart';
 import '../services/bgg_collection_import_service.dart';
 import '../services/oauth_link_notice.dart';
 import '../services/settings_service.dart';
+import '../theme/app_theme.dart';
 import '../utils/network_feedback.dart';
 import '../utils/supabase_error_messages.dart';
 import '../widgets/app_app_bar.dart';
@@ -404,6 +405,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   onSelectionChanged: (selection) {
                     _settings.setThemePreference(selection.first);
                   },
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 4, 16, 4),
+                child: Text('Palette d\'ambiance'),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (final ambiance in PlayAmbiance.values)
+                      ChoiceChip(
+                        label: Text(ambiance.label),
+                        selected: _settings.playAmbiance == ambiance,
+                        onSelected: (_) => _settings.setPlayAmbiance(ambiance),
+                      ),
+                  ],
                 ),
               ),
               ListTile(

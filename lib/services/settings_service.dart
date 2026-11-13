@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../constants/rating_colors.dart';
+import '../theme/app_theme.dart';
 import 'profile_cache_service.dart';
 import 'profile_service.dart';
 
@@ -19,11 +20,13 @@ class SettingsService extends ChangeNotifier {
   static const _keyHideFromFriends = 'settings_hide_from_friends';
   static const _keyShareWishlist = 'settings_share_wishlist_with_friends';
   static const _keyTileRatingMode = 'settings_tile_rating_display_mode';
+  static const _keyPlayAmbiance = 'settings_play_ambiance';
 
   SharedPreferences? _prefs;
   bool _loaded = false;
 
   AppThemePreference themePreference = AppThemePreference.system;
+  PlayAmbiance playAmbiance = PlayAmbiance.slate;
   bool notificationsEnabled = true;
   /// Masquer ma collection aux non-amis (défaut : oui).
   bool hideCollectionFromNonFriends = true;
@@ -50,6 +53,13 @@ class SettingsService extends ChangeNotifier {
           legacyDark ? AppThemePreference.dark : AppThemePreference.light;
     } else {
       themePreference = AppThemePreference.system;
+    }
+    final ambiance = _prefs!.getString(_keyPlayAmbiance);
+    if (ambiance != null) {
+      playAmbiance = PlayAmbiance.values.firstWhere(
+        (value) => value.name == ambiance,
+        orElse: () => PlayAmbiance.slate,
+      );
     }
     notificationsEnabled = _prefs!.getBool(_keyNotifications) ?? true;
     hideCollectionFromNonFriends =
@@ -92,6 +102,12 @@ class SettingsService extends ChangeNotifier {
   Future<void> setThemePreference(AppThemePreference value) async {
     themePreference = value;
     await _prefs?.setString(_keyThemePreference, value.name);
+    notifyListeners();
+  }
+
+  Future<void> setPlayAmbiance(PlayAmbiance value) async {
+    playAmbiance = value;
+    await _prefs?.setString(_keyPlayAmbiance, value.name);
     notifyListeners();
   }
 
