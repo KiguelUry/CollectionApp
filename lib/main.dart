@@ -102,13 +102,17 @@ class _MyAppState extends State<MyApp> {
       navigatorKey: _navigatorKey,
       debugShowCheckedModeBanner: false,
       title: kAppDisplayName,
-      theme: AppTheme.themed(
+      theme: AppTheme.withCardSkin(
+        AppTheme.light,
+        skin: _settings.cardSkin,
+        background: _settings.scaffoldBackground,
         dark: false,
-        ambiance: _settings.playAmbiance,
       ),
-      darkTheme: AppTheme.themed(
+      darkTheme: AppTheme.withCardSkin(
+        AppTheme.dark,
+        skin: _settings.cardSkin,
+        background: _settings.scaffoldBackground,
         dark: true,
-        ambiance: _settings.playAmbiance,
       ),
       themeMode: _settings.themeMode,
       locale: const Locale('fr', 'FR'),

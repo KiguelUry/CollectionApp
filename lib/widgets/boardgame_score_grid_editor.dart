@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../models/boardgame_score_grid.dart';
 import '../models/friend_choice.dart';
+import '../services/player_alias_service.dart';
 import 'friend_identity.dart';
 
 void dismissScoreFocus([PointerDownEvent? _]) {
@@ -1189,7 +1190,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
       ),
     );
     if (ok == true) {
-      final name = nameCtrl.text;
+      final name = _samePersonName(nameCtrl.text);
       final team = teamCtrl.text.trim();
       _deferRefresh(() {
         _playerControllers[index].text = name;
@@ -1396,6 +1397,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                   TextField(
                     controller: nameCtrl,
                     autofocus: true,
+                    maxLength: 18,
                     textInputAction: TextInputAction.done,
                     onTapOutside: dismissScoreFocus,
                     decoration: InputDecoration(
@@ -1569,7 +1571,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                   const SizedBox(height: 16),
                   FilledButton.icon(
                     onPressed: () {
-                      final name = nameCtrl.text.trim();
+                      final name = _samePersonName(nameCtrl.text);
                       if (name.isEmpty) return;
                       Navigator.pop(ctx, {
                         'name': name,
@@ -1632,6 +1634,20 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     return tp.width;
   }
 
+  String _samePersonName(String raw) {
+    var trimmed = raw.trim();
+    if (trimmed.length > 18) trimmed = trimmed.substring(0, 18);
+    final lower = trimmed.toLowerCase();
+    if (lower.isEmpty) return trimmed;
+    for (final controller in _playerControllers) {
+      final current = controller.text.trim();
+      if (current.toLowerCase() == lower) return current;
+    }
+    final identity = PlayerAliasService.instance.identityFor(trimmed);
+    if (identity != null && identity.primary.isNotEmpty) return identity.primary;
+    return trimmed;
+  }
+
   double _colWidth(int index) {
     final name = _playerControllers[index].text.trim();
     final team = widget.useTeams ? _teamControllers[index].text.trim() : '';
@@ -1656,7 +1672,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
           : controller.text.trim();
       width = max(width, _measureTextWidth(text, fontSize: 13));
     }
-    return (width + 28).clamp(96.0, 240.0);
+    return (width + 36).clamp(96.0, 420.0);
   }
 
   Widget _multiWordLabel(String text, {TextStyle? style}) {
@@ -2254,8 +2270,8 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
     // ignore: unused_local_variable
     final _ = (sharedTeams, teamTotals);
     final roundCount = _roundLabelControllers.length;
-    final roundW = _minColWidth;
-    final playerLabelW = (labelW + 24).clamp(96.0, 140.0);
+    final roundW = _labelColWidth().clamp(_minColWidth, 420.0);
+    final playerLabelW = (labelW + 24).clamp(96.0, 420.0);
 
     Widget table = Container(
       decoration: BoxDecoration(
@@ -2447,8 +2463,10 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
           textAlign: TextAlign.left,
           minLines: 1,
           maxLines: 1,
+          maxLength: 20,
           decoration: InputDecoration(
             isDense: true,
+            counterText: '',
             hintText: 'Catégorie',
             filled: true,
             fillColor: scheme.surfaceContainerHighest.withValues(alpha: 0.35),

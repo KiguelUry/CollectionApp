@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'profile_cache_service.dart';
+
 /// Règle simplifiée publiée pour la communauté (MVP local + prêt Supabase).
 class CommunityRuleEntry {
   final String id;
@@ -140,6 +142,11 @@ class CommunityRulesService {
     return 'title:${title.trim().toLowerCase()}';
   }
 
+  Future<List<CommunityRuleEntry>> all() async {
+    await ensureLoaded();
+    return List<CommunityRuleEntry>.from(_all);
+  }
+
   Future<List<CommunityRuleEntry>> forGame(String gameKey, {String? language}) async {
     await ensureLoaded();
     var list = _all.where((e) => e.gameKey == gameKey).toList();
@@ -166,9 +173,8 @@ class CommunityRulesService {
       id: '${DateTime.now().millisecondsSinceEpoch}_${user?.id ?? 'anon'}',
       gameKey: gameKey,
       authorId: user?.id ?? 'anon',
-      authorName:
+      authorName: ProfileCacheService.instance.profile?.username ??
           user?.userMetadata?['username']?.toString() ??
-          user?.email?.split('@').first ??
           'Moi',
       language: language,
       title: title.trim().isEmpty ? 'Règles simplifiées' : title.trim(),

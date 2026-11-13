@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -148,9 +149,37 @@ class ProfileService {
   Future<UserProfile> fetchCurrentProfile() async {
     final id = _userId;
     if (id == null) throw Exception('Non connecté');
-    final profile = UserProfile.fromJson(await _fetchProfileRowSafe(id));
+    var profile = UserProfile.fromJson(await _fetchProfileRowSafe(id));
+    profile = await _restoreUsernameIfEmailOverwrite(profile);
     await ProfileCacheService.instance.apply(profile);
     return profile;
+  }
+
+  /// Un changement de mail ou un lien Google/Discord ne doit pas remplacer
+  /// le pseudo déjà choisi par le début de l'adresse.
+  Future<UserProfile> _restoreUsernameIfEmailOverwrite(UserProfile profile) async {
+    final email = _client.auth.currentUser?.email;
+    final local = email?.split('@').first.trim().toLowerCase();
+    if (local == null || local.isEmpty) return profile;
+    if (profile.username.trim().toLowerCase() != local) return profile;
+    final prefs = await SharedPreferences.getInstance();
+    final cachedName = ProfileCacheService.instance.profile?.id == profile.id
+        ? ProfileCacheService.instance.profile?.username
+        : null;
+    final chosen = prefs.getString('profile_username_chosen') ?? cachedName;
+    if (chosen == null ||
+        chosen.trim().isEmpty ||
+        chosen.trim().toLowerCase() == local) {
+      return profile;
+    }
+    invalidateCachedProfile(profile.id);
+    final row = await _client
+        .from('profiles')
+        .update({'username': chosen.trim()})
+        .eq('id', profile.id)
+        .select()
+        .single();
+    return UserProfile.fromJson(Map<String, dynamic>.from(row));
   }
 
   Future<UserProfile> fetchProfile(String profileId) async {
@@ -215,6 +244,10 @@ class ProfileService {
       throw Exception('Modification non autorisée');
     }
 
+    final trimmedName = profile.username.trim();
+    if (trimmedName.length > 18) {
+      throw Exception('Le pseudo est limité à 18 caractères');
+    }
     final row = await _client
         .from('profiles')
         .update(profile.toUpdateJson())
@@ -222,7 +255,15 @@ class ProfileService {
         .select()
         .single();
 
-    return UserProfile.fromJson(Map<String, dynamic>.from(row));
+    final saved = UserProfile.fromJson(Map<String, dynamic>.from(row));
+    final emailLocal =
+        _client.auth.currentUser?.email?.split('@').first.trim().toLowerCase();
+    if (emailLocal == null ||
+        saved.username.trim().toLowerCase() != emailLocal) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('profile_username_chosen', saved.username.trim());
+    }
+    return saved;
   }
 
   Future<UserProfile> updateProfileAndCache(UserProfile profile) async {

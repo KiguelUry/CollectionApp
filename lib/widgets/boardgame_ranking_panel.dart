@@ -67,31 +67,7 @@ class BoardgameRankingPanel extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (stats.podiumSlots.isNotEmpty) ...[
-          Text(
-            'Podium',
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: scheme.primary,
-            ),
-          ),
-          const SizedBox(height: 10),
-          _PodiumRow(slots: stats.podiumSlots),
-          const SizedBox(height: 8),
-          ...stats.winPodium.take(5).toList().asMap().entries.map((e) {
-            final w = e.value;
-            final rank = BoardgameRankingStats.displayRankForWinPodium(
-              stats.winPodium,
-              e.key,
-            );
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Text(
-                '${_rankEmoji(rank)} ${w.name} — ${w.wins} victoire${w.wins > 1 ? 's' : ''} · ${w.gamesPlayed} partie${w.gamesPlayed > 1 ? 's' : ''}',
-                style: const TextStyle(fontSize: 12),
-              ),
-            );
-          }),
+          _PodiumBlock(stats: stats),
           const SizedBox(height: 16),
         ],
         if (stats.topDuos.isNotEmpty) ...[
@@ -315,10 +291,84 @@ class _StatBlock extends StatelessWidget {
   }
 }
 
+class _PodiumBlock extends StatefulWidget {
+  final BoardgameRankingStats stats;
+
+  const _PodiumBlock({required this.stats});
+
+  @override
+  State<_PodiumBlock> createState() => _PodiumBlockState();
+}
+
+class _PodiumBlockState extends State<_PodiumBlock> {
+  bool _percent = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final stats = widget.stats;
+    String line(BoardgameWinHighlight w) {
+      if (_percent) {
+        final rate = w.gamesPlayed == 0
+            ? 0
+            : ((w.wins / w.gamesPlayed) * 100).round();
+        return '$rate % · ${w.gamesPlayed} partie${w.gamesPlayed > 1 ? 's' : ''}';
+      }
+      return '${w.wins} victoire${w.wins > 1 ? 's' : ''} · ${w.gamesPlayed} partie${w.gamesPlayed > 1 ? 's' : ''}';
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Text(
+              'Podium',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: scheme.primary,
+              ),
+            ),
+            const Spacer(),
+            SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(value: false, label: Text('🏆')),
+                ButtonSegment(value: true, label: Text('%')),
+              ],
+              selected: {_percent},
+              onSelectionChanged: (value) =>
+                  setState(() => _percent = value.first),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        _PodiumRow(slots: stats.podiumSlots, percent: _percent),
+        const SizedBox(height: 8),
+        ...stats.winPodium.take(5).toList().asMap().entries.map((e) {
+          final w = e.value;
+          final rank = BoardgameRankingStats.displayRankForWinPodium(
+            stats.winPodium,
+            e.key,
+          );
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text(
+              '${_rankEmoji(rank)} ${w.name} — ${line(w)}',
+              style: const TextStyle(fontSize: 12),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+}
+
 class _PodiumRow extends StatelessWidget {
   final List<BoardgamePodiumSlot> slots;
+  final bool percent;
 
-  const _PodiumRow({required this.slots});
+  const _PodiumRow({required this.slots, this.percent = false});
 
   Color _medalColor(int rank) => switch (rank) {
         1 => const Color(0xFFFFD700),
@@ -367,7 +417,9 @@ class _PodiumRow extends StatelessWidget {
                 border: Border.all(color: medal.withValues(alpha: 0.6)),
               ),
               child: Text(
-                '$wins',
+                percent
+                    ? '${games == 0 ? 0 : ((wins / games) * 100).round()} %'
+                    : '$wins',
                 style: const TextStyle(
                   fontWeight: FontWeight.w800,
                   fontSize: 18,

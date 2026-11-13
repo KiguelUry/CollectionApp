@@ -470,6 +470,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
   bool _applyingField = false;
   bool _draftReady = false;
   Timer? _draftTimer;
+  Map<String, dynamic>? _pendingDraft;
 
   @override
   void initState() {
@@ -538,13 +539,16 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
     } else {
       _initialGrid = BoardgameScoreGrid.empty(playerCount: 0);
     }
+    if (s == null && widget.template == null) {
+      _initialGrid = BoardgameScoreGrid.empty(playerCount: 0);
+    }
     if (s == null) {
       // Nouvelle partie : grille vierge, sans le dernier modèle.
       _template = BoardgameScoreTemplate.empty;
       _activePresetName = null;
-      if (_winCondition == BoardgameWinCondition.customTemplate) {
-        _winCondition = BoardgameWinCondition.highest;
-      }
+      _winCondition = widget.template == null
+          ? BoardgameWinCondition.customTemplate
+          : _winCondition;
       final width = _initialGrid.players.length;
       _initialGrid = BoardgameScoreGrid(
         players: List<String>.from(_initialGrid.players),
@@ -651,7 +655,34 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
       if (raw != null && raw.isNotEmpty) {
         final decoded = jsonDecode(raw);
         if (decoded is Map && mounted) {
-          _applyDraft(Map<String, dynamic>.from(decoded));
+          _pendingDraft = Map<String, dynamic>.from(decoded);
+          final resume = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Partie en cours'),
+              content: const Text(
+                'Un brouillon non terminé est enregistré. Tu peux le continuer, ou ouvrir une nouvelle partie vierge.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Nouvelle partie vierge'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Continuer la partie en cours'),
+                ),
+              ],
+            ),
+          );
+          if (!mounted) return;
+          if (resume == true && _pendingDraft != null) {
+            _applyDraft(_pendingDraft!);
+            _pendingDraft = null;
+          } else if (resume == false) {
+            _pendingDraft = null;
+            await _clearDraft();
+          }
         }
       }
     } catch (_) {}
@@ -938,7 +969,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
       setState(() {
         _activePresetName = null;
         _template = const BoardgameScoreTemplate();
-        _winCondition = BoardgameWinCondition.highest;
+        _winCondition = BoardgameWinCondition.customTemplate;
         _presetBaseline = _presetFingerprint();
       });
       _gridKey.currentState?.setLineSpecs(const [
@@ -1137,10 +1168,9 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
         for (final preset in _presets)
           if (preset.name.toLowerCase() != name.toLowerCase()) preset,
       ];
-      _activePresetName = null;
-      _presetBaseline = _presetFingerprint();
     });
     await _persistPresetLibrary();
+    _applyPreset(null);
     _scheduleDraft();
   }
 
@@ -1994,6 +2024,33 @@ class _TemplateFieldsState extends State<_TemplateFields> {
                 incoming[i].malus == _lines[i].malus,
         ].every((sameLine) => sameLine);
     if (!same) _lines = [...incoming];
+    final nextRules = widget.template.rules;
+    final rulesSame = nextRules.length == _rules.length &&
+        [
+          for (var i = 0; i < nextRules.length; i++)
+            nextRules[i].target == _rules[i].target &&
+                nextRules[i].op == _rules[i].op &&
+                nextRules[i].value == _rules[i].value &&
+                nextRules[i].lineName == _rules[i].lineName,
+        ].every((ok) => ok);
+    if (!rulesSame) {
+      for (final controller in _values) {
+        controller.dispose();
+      }
+      for (final controller in _cellValues) {
+        controller.dispose();
+      }
+      _rules = [...nextRules];
+      _values = [
+        for (final rule in _rules)
+          TextEditingController(text: rule.value?.toString() ?? ''),
+      ];
+      _cellValues = [
+        for (final rule in _rules)
+          TextEditingController(text: (rule.cellValue ?? 1).toString()),
+      ];
+      _matchAll = widget.template.matchAll;
+    }
   }
 
   @override
@@ -2052,7 +2109,11 @@ class _TemplateFieldsState extends State<_TemplateFields> {
           controller: controller,
           autofocus: true,
           textCapitalization: TextCapitalization.sentences,
-          decoration: const InputDecoration(labelText: 'Nom'),
+          maxLength: 20,
+          decoration: const InputDecoration(
+            labelText: 'Nom',
+            counterText: '',
+          ),
           onSubmitted: (value) => Navigator.pop(context, value),
         ),
         actions: [

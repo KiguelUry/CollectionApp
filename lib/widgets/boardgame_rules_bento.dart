@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_item.dart';
 import '../models/rule_section.dart';
+import '../screens/community_forum_screen.dart';
 import '../services/community_rules_service.dart';
 import 'detail_bento_tile.dart';
 import 'modular_rule_editor.dart';
@@ -219,8 +220,20 @@ class _BoardgameRulesBentoState extends State<BoardgameRulesBento> {
                 ? 'Publier · liker · filtrer par langue'
                 : '${_community.length} publiée${_community.length > 1 ? 's' : ''}',
             accent: accent,
-            selected: _sub == _RulesSub.community,
-            onTap: () => _select(_RulesSub.community),
+            selected: false,
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => CommunityForumScreen(
+                    gameKey: _gameKey,
+                    gameTitle: widget.item.title,
+                    initialKind: ForumKind.rules,
+                    item: widget.item,
+                  ),
+                ),
+              );
+            },
           ),
           if (_sub != _RulesSub.none) ...[
             const SizedBox(height: 14),

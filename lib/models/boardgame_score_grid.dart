@@ -1206,17 +1206,24 @@ class NamedScorePreset {
   final String name;
   final BoardgameConfrontationType confrontation;
   final BoardgameScoreTemplate template;
+  final String? sourceAuthor;
+  final bool imported;
 
   const NamedScorePreset({
     required this.name,
     required this.confrontation,
     required this.template,
+    this.sourceAuthor,
+    this.imported = false,
   });
 
   Map<String, dynamic> toJson() => {
         'name': name,
         'confrontation': confrontation.dbValue,
         'template': template.toJson(),
+        if (sourceAuthor != null && sourceAuthor!.trim().isNotEmpty)
+          'source_author': sourceAuthor,
+        if (imported) 'imported': true,
       };
 
   static NamedScorePreset? fromJson(Object? raw) {
@@ -1230,6 +1237,8 @@ class NamedScorePreset {
         raw['confrontation']?.toString(),
       ),
       template: template,
+      sourceAuthor: raw['source_author']?.toString(),
+      imported: raw['imported'] == true,
     );
   }
 

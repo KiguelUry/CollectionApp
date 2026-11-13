@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/boardgame_score_grid.dart';
 import '../models/collection_item.dart';
 import '../services/collection_local_cache.dart';
+import '../screens/community_forum_screen.dart';
 import '../services/community_rules_service.dart';
 import '../services/community_score_templates_service.dart';
 import '../services/inventory_service.dart';
@@ -27,7 +28,6 @@ class BoardgameTemplatesPanel extends StatefulWidget {
 
 class _BoardgameTemplatesPanelState extends State<BoardgameTemplatesPanel> {
   List<CommunityScoreTemplate> _community = [];
-  List<CommunityRuleEntry> _rules = [];
   bool _loading = true;
 
   String get _gameKey => CommunityRulesService.gameKeyFor(
@@ -43,17 +43,21 @@ class _BoardgameTemplatesPanelState extends State<BoardgameTemplatesPanel> {
 
   Future<void> _reload() async {
     final templates = await CommunityScoreTemplatesService.instance.forGame(_gameKey);
-    final rules = await CommunityRulesService.instance.forGame(_gameKey);
     if (!mounted) return;
     setState(() {
       _community = templates;
-      _rules = rules;
       _loading = false;
     });
   }
 
-  List<NamedScorePreset> get _own =>
+  List<NamedScorePreset> get _allPresets =>
       NamedScorePreset.listFrom(widget.item.metadata);
+
+  List<NamedScorePreset> get _own =>
+      _allPresets.where((preset) => !preset.imported).toList();
+
+  List<NamedScorePreset> get _imported =>
+      _allPresets.where((preset) => preset.imported).toList();
 
   Future<void> _publish(NamedScorePreset preset) async {
     await CommunityScoreTemplatesService.instance.publish(
@@ -62,18 +66,42 @@ class _BoardgameTemplatesPanelState extends State<BoardgameTemplatesPanel> {
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('« ${preset.name} » est publié pour ce jeu')),
+      SnackBar(content: Text('« ${preset.name} » est partagé avec la commu')),
     );
     await _reload();
   }
 
-  Future<void> _import(NamedScorePreset preset) async {
+  Future<void> _import(NamedScorePreset preset, String author) async {
+    final label = author.trim().isEmpty
+        ? preset.name
+        : '${preset.name} de $author';
+    final already = _allPresets.any(
+      (existing) => existing.name.toLowerCase() == label.toLowerCase(),
+    );
+    if (already) {
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Vous avez déjà ce template dans vos modèles.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+    final copy = NamedScorePreset(
+      name: label,
+      confrontation: preset.confrontation,
+      template: preset.template,
+      sourceAuthor: author,
+      imported: true,
+    );
     final meta = Map<String, dynamic>.from(widget.item.metadata ?? {});
-    final next = [
-      for (final existing in _own)
-        if (existing.name.toLowerCase() != preset.name.toLowerCase()) existing,
-      preset,
-    ];
+    final next = [..._allPresets, copy];
     meta['score_presets'] = [for (final preset in next) preset.toJson()];
     widget.item.metadata
       ?..clear()
@@ -88,7 +116,7 @@ class _BoardgameTemplatesPanelState extends State<BoardgameTemplatesPanel> {
     widget.onMetadataChanged(meta);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('« ${preset.name} » ajouté à tes modèles')),
+      SnackBar(content: Text('« $label » ajouté à tes modèles')),
     );
     setState(() {});
   }
@@ -116,9 +144,25 @@ class _BoardgameTemplatesPanelState extends State<BoardgameTemplatesPanel> {
                   ? null
                   : TextButton(
                       onPressed: () => _publish(preset),
-                      child: const Text('Publier'),
+                      child: const Text('Partager avec la commu'),
                     ),
             ),
+            const SizedBox(height: 8),
+          ],
+        const SizedBox(height: 8),
+        Text(
+          'Templates de la commu importés',
+          style: Theme.of(context).textTheme.titleSmall,
+        ),
+        const SizedBox(height: 8),
+        if (_imported.isEmpty)
+          Text(
+            'Aucun modèle importé.',
+            style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
+          )
+        else
+          for (final preset in _imported) ...[
+            _PreviewCard(title: preset.name, preset: preset),
             const SizedBox(height: 8),
           ],
         const SizedBox(height: 8),
@@ -144,7 +188,7 @@ class _BoardgameTemplatesPanelState extends State<BoardgameTemplatesPanel> {
                 spacing: 4,
                 children: [
                   IconButton(
-                    tooltip: 'Noter',
+                    tooltip: 'Liker',
                     onPressed: () async {
                       await CommunityScoreTemplatesService.instance
                           .toggleLike(entry.id);
@@ -160,8 +204,8 @@ class _BoardgameTemplatesPanelState extends State<BoardgameTemplatesPanel> {
                   ),
                   if (!widget.readOnly)
                     TextButton(
-                      onPressed: () => _import(entry.preset),
-                      child: const Text('Importer'),
+                      onPressed: () => _import(entry.preset, entry.authorName),
+                      child: const Text('Importer dans mes templates'),
                     ),
                 ],
               ),
@@ -169,29 +213,32 @@ class _BoardgameTemplatesPanelState extends State<BoardgameTemplatesPanel> {
             const SizedBox(height: 8),
           ],
         const SizedBox(height: 8),
-        Text('Règles de la commu', style: Theme.of(context).textTheme.titleSmall),
-        const SizedBox(height: 8),
-        if (_rules.isEmpty)
-          Text(
-            'Aucune règle partagée pour ce jeu.',
-            style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
-          )
-        else
-          for (final rule in _rules)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Card(
-                child: ListTile(
-                  title: Text(rule.title),
-                  subtitle: Text(
-                    '${rule.authorName} · ${rule.likes} like${rule.likes > 1 ? 's' : ''}\n${rule.body}',
-                    maxLines: 4,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  isThreeLine: true,
+        OutlinedButton.icon(
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => CommunityForumScreen(
+                  gameKey: _gameKey,
+                  gameTitle: widget.item.title,
+                  item: widget.item,
+                  onImportTemplate: (preset) {
+                    var author = 'la commu';
+                    for (final entry in _community) {
+                      if (entry.preset.name == preset.name) {
+                        author = entry.authorName;
+                        break;
+                      }
+                    }
+                    _import(preset, author);
+                  },
                 ),
               ),
-            ),
+            );
+          },
+          icon: const Text('🌍'),
+          label: const Text('Explorer le Forum des Templates de ce jeu'),
+        ),
       ],
     );
   }

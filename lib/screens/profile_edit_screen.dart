@@ -366,6 +366,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                   const SizedBox(height: 24),
                   TextField(
                     controller: _usernameController,
+                    maxLength: 18,
                     decoration: const InputDecoration(
                       labelText: 'Pseudo',
                       border: OutlineInputBorder(),

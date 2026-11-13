@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'profile_cache_service.dart';
+
 import '../models/boardgame_score_grid.dart';
 
 /// Modèle de score partagé localement (même principe que les règles de la commu).
@@ -77,6 +79,8 @@ class CommunityScoreTemplatesService {
   static const _key = 'community_score_templates_v1';
   static const _pointsKey = 'community_score_template_points_v1';
 
+  Future<List<CommunityScoreTemplate>> all() => _load();
+
   Future<List<CommunityScoreTemplate>> forGame(String gameKey) async {
     final all = await _load();
     final list = all.where((e) => e.gameKey == gameKey).toList()
@@ -104,7 +108,9 @@ class CommunityScoreTemplatesService {
         id: '${DateTime.now().microsecondsSinceEpoch}',
         gameKey: gameKey,
         authorId: user?.id ?? 'local',
-        authorName: user?.email?.split('@').first ?? 'Moi',
+        authorName: ProfileCacheService.instance.profile?.username ??
+            user?.userMetadata?['username']?.toString() ??
+            'Moi',
         preset: preset,
         likes: 0,
         likedBy: const {},

@@ -129,6 +129,7 @@ class _FinishProfileScreenState extends State<FinishProfileScreen> {
             const SizedBox(height: 16),
             TextField(
               controller: _username,
+              maxLength: 18,
               textCapitalization: TextCapitalization.words,
               decoration: const InputDecoration(
                 labelText: 'Surnom *',

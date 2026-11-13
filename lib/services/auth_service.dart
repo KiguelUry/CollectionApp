@@ -17,6 +17,9 @@ class AuthService {
     if (trimmedName.isEmpty) {
       throw Exception('Le surnom est obligatoire');
     }
+    if (trimmedName.length > 18) {
+      throw Exception('Le pseudo est limité à 18 caractères');
+    }
     if (await _profiles.isUsernameTaken(trimmedName)) {
       throw Exception('Ce surnom est déjà utilisé');
     }

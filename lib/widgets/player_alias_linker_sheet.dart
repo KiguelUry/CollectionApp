@@ -260,6 +260,41 @@ class _PlayerAliasLinkerSheetState extends State<PlayerAliasLinkerSheet> {
     }
   }
 
+  Future<void> _addAlias(PlayerIdentity identity) async {
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Ajouter un pseudo'),
+        content: TextField(
+          controller: controller,
+          maxLength: 18,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Pseudo'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Ajouter'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (name == null || name.isEmpty || !mounted) return;
+    final created = await PlayerAliasService.instance.linkNames(
+      [...identity.names, name],
+      displayName: identity.displayName,
+      isMe: identity.isMe,
+    );
+    await PlayerAliasService.instance.setGender(created.id, identity.gender);
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -310,61 +345,102 @@ class _PlayerAliasLinkerSheetState extends State<PlayerAliasLinkerSheet> {
                 const SizedBox(height: 6),
                 for (final g in identities)
                   Card(
-                    margin: const EdgeInsets.only(bottom: 6),
-                    child: ListTile(
-                      dense: true,
-                      title: Text(
-                        g.isMe ? '${g.displayName} · moi' : g.displayName,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      subtitle: Text(
-                        g.isLinkedToFriend
-                            ? '${g.names.join(' · ')}\nAmi : ${g.friendUsername ?? '?'}'
-                            : g.names.join(' · '),
-                      ),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
+                    margin: const EdgeInsets.only(bottom: 8),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          if (!g.isMe &&
-                              (_friends.isNotEmpty || g.isLinkedToFriend))
-                            IconButton(
-                              key: ValueKey('link_friend_${g.id}'),
-                              tooltip: g.isLinkedToFriend
-                                  ? 'Délier de ${g.friendUsername ?? 'l’ami'}'
-                                  : 'Cette personne est dans ma liste d’amis',
-                              icon: Icon(
-                                g.isLinkedToFriend
-                                    ? Icons.person_remove_alt_1_outlined
-                                    : Icons.people_alt_outlined,
-                                size: 20,
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  g.isMe
+                                      ? '${g.displayName} · moi'
+                                      : g.displayName,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
                               ),
+                              IconButton(
+                                tooltip: 'Supprimer',
+                                icon: const Icon(Icons.link_off, size: 20),
+                                onPressed: () async {
+                                  await PlayerAliasService.instance
+                                      .deleteGroup(g.id);
+                                  if (mounted) setState(() {});
+                                },
+                              ),
+                            ],
+                          ),
+                          Wrap(
+                            spacing: 6,
+                            children: [
+                              for (final gender in PlayerGender.values)
+                                ChoiceChip(
+                                  label: Text(switch (gender) {
+                                    PlayerGender.feminine => 'F',
+                                    PlayerGender.masculine => 'M',
+                                    PlayerGender.neutral => 'Neutre',
+                                  }),
+                                  selected: g.gender == gender,
+                                  onSelected: (_) async {
+                                    await PlayerAliasService.instance
+                                        .setGender(g.id, gender);
+                                    if (mounted) setState(() {});
+                                  },
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            g.isLinkedToFriend
+                                ? 'Ami lié : ${g.friendUsername}'
+                                : 'Aucun ami lié',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: [
+                              for (final name in g.names)
+                                InputChip(
+                                  label: Text(name),
+                                  onDeleted: () async {
+                                    await PlayerAliasService.instance
+                                        .unlinkName(name);
+                                    if (mounted) setState(() {});
+                                  },
+                                ),
+                              ActionChip(
+                                label: const Text('+ Ajouter'),
+                                onPressed: () => _addAlias(g),
+                              ),
+                            ],
+                          ),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: TextButton(
                               onPressed: () async {
                                 if (g.isLinkedToFriend) {
                                   await PlayerAliasService.instance
                                       .unlinkFriend(g.id);
-                                  if (mounted) setState(() {});
                                 } else {
                                   await _pickFriendFor(g);
                                 }
-                              },
-                            ),
-                          if (!g.isMe)
-                            IconButton(
-                              tooltip: 'C’est moi',
-                              icon: const Icon(Icons.person_outline, size: 20),
-                              onPressed: () async {
-                                await PlayerAliasService.instance.setMe(g.id);
                                 if (mounted) setState(() {});
                               },
+                              child: Text(
+                                g.isLinkedToFriend
+                                    ? 'Délier l\'ami'
+                                    : 'Lier un ami',
+                              ),
                             ),
-                          IconButton(
-                            tooltip: 'Supprimer',
-                            icon: const Icon(Icons.link_off, size: 20),
-                            onPressed: () async {
-                              await PlayerAliasService.instance
-                                  .deleteGroup(g.id);
-                              if (mounted) setState(() {});
-                            },
                           ),
                         ],
                       ),

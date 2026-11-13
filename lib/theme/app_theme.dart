@@ -1,30 +1,7 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-enum PlayAmbiance {
-  slate,
-  ocean,
-  emerald,
-  amber,
-  bordeaux;
-
-  String get label => switch (this) {
-        PlayAmbiance.slate => 'Ardoise / Noir (Initial)',
-        PlayAmbiance.ocean => 'Bleu Océan',
-        PlayAmbiance.emerald => 'Vert Émeraude',
-        PlayAmbiance.amber => 'Ambre / Or chaud',
-        PlayAmbiance.bordeaux => 'Bordeaux / Terre',
-      };
-
-  Color get seed => switch (this) {
-        PlayAmbiance.slate => const Color(0xFF3A4150),
-        PlayAmbiance.ocean => const Color(0xFF1565C0),
-        PlayAmbiance.emerald => const Color(0xFF0F766E),
-        PlayAmbiance.amber => const Color(0xFFB45309),
-        PlayAmbiance.bordeaux => const Color(0xFF7F1D1D),
-      };
-}
+import 'card_skins.dart';
 
 /// Thème global de l'application.
 abstract final class AppTheme {
@@ -50,19 +27,29 @@ abstract final class AppTheme {
     );
   }
 
-  static ThemeData themed({
+  static ThemeData withCardSkin(
+    ThemeData base, {
+    required CardSkin skin,
+    required Color background,
     required bool dark,
-    PlayAmbiance ambiance = PlayAmbiance.slate,
   }) {
-    final base = dark ? AppTheme.dark : AppTheme.light;
-    if (ambiance == PlayAmbiance.slate) return base;
-    final scheme = ColorScheme.fromSeed(
-      seedColor: ambiance.seed,
-      brightness: dark ? Brightness.dark : Brightness.light,
-    );
+    final cardColor = skin.fill.first;
     return base.copyWith(
-      colorScheme: scheme,
-      scaffoldBackgroundColor: scheme.surface,
+      scaffoldBackgroundColor: dark ? background : base.scaffoldBackgroundColor,
+      extensions: [PlayCardStyle(skin)],
+      cardTheme: CardThemeData(
+        elevation: 0,
+        color: cardColor,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(color: skin.edge, width: 1.3),
+        ),
+        margin: EdgeInsets.zero,
+      ),
+      colorScheme: base.colorScheme.copyWith(
+        primary: dark ? skin.accent : base.colorScheme.primary,
+        surface: dark ? background : base.colorScheme.surface,
+      ),
     );
   }
 
@@ -210,7 +197,7 @@ abstract final class AppTheme {
 
   static ThemeData get dark {
     const midnight = Color(0xFF121212);
-    const deepBlack = Color(0xFF0A0A0C);
+    const deepBlack = scaffoldBlack;
 
     final scheme = ColorScheme.fromSeed(
       seedColor: seed,

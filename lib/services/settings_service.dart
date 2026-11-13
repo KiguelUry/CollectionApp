@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../constants/rating_colors.dart';
-import '../theme/app_theme.dart';
+import '../theme/card_skins.dart';
 import 'profile_cache_service.dart';
 import 'profile_service.dart';
 
@@ -20,13 +20,15 @@ class SettingsService extends ChangeNotifier {
   static const _keyHideFromFriends = 'settings_hide_from_friends';
   static const _keyShareWishlist = 'settings_share_wishlist_with_friends';
   static const _keyTileRatingMode = 'settings_tile_rating_display_mode';
-  static const _keyPlayAmbiance = 'settings_play_ambiance';
+  static const _keyCardSkin = 'settings_card_skin';
+  static const _keyScaffoldBackground = 'settings_scaffold_background';
 
   SharedPreferences? _prefs;
   bool _loaded = false;
 
   AppThemePreference themePreference = AppThemePreference.system;
-  PlayAmbiance playAmbiance = PlayAmbiance.slate;
+  CardSkin cardSkin = CardSkin.byId('slate');
+  Color scaffoldBackground = scaffoldBlack;
   bool notificationsEnabled = true;
   /// Masquer ma collection aux non-amis (défaut : oui).
   bool hideCollectionFromNonFriends = true;
@@ -54,12 +56,13 @@ class SettingsService extends ChangeNotifier {
     } else {
       themePreference = AppThemePreference.system;
     }
-    final ambiance = _prefs!.getString(_keyPlayAmbiance);
-    if (ambiance != null) {
-      playAmbiance = PlayAmbiance.values.firstWhere(
-        (value) => value.name == ambiance,
-        orElse: () => PlayAmbiance.slate,
-      );
+    final skinId = _prefs!.getString(_keyCardSkin);
+    if (skinId != null) {
+      cardSkin = CardSkin.byId(skinId);
+    }
+    final background = _prefs!.getInt(_keyScaffoldBackground);
+    if (background != null) {
+      scaffoldBackground = Color(background);
     }
     notificationsEnabled = _prefs!.getBool(_keyNotifications) ?? true;
     hideCollectionFromNonFriends =
@@ -105,9 +108,15 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> setPlayAmbiance(PlayAmbiance value) async {
-    playAmbiance = value;
-    await _prefs?.setString(_keyPlayAmbiance, value.name);
+  Future<void> setCardSkin(CardSkin value) async {
+    cardSkin = value;
+    await _prefs?.setString(_keyCardSkin, value.id);
+    notifyListeners();
+  }
+
+  Future<void> setScaffoldBackground(Color value) async {
+    scaffoldBackground = value;
+    await _prefs?.setInt(_keyScaffoldBackground, value.toARGB32());
     notifyListeners();
   }
 

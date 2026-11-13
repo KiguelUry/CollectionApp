@@ -281,6 +281,7 @@ class _OwnProfilePanelState extends State<OwnProfilePanel> {
                       children: [
                         TextField(
                           controller: _username,
+                          maxLength: 18,
                           onChanged: (_) => _queueSave(),
                           decoration: const InputDecoration(
                             labelText: 'Pseudo',

@@ -1,6 +1,9 @@
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+enum PlayerGender { feminine, masculine, neutral }
 
 /// Identité joueur : un ou plusieurs pseudos = la même personne.
 class PlayerIdentity {
@@ -14,6 +17,7 @@ class PlayerIdentity {
   /// Compte ami de l'app associé à ce joueur (partage des parties).
   final String? friendProfileId;
   final String? friendUsername;
+  final PlayerGender gender;
 
   const PlayerIdentity({
     required this.id,
@@ -22,6 +26,7 @@ class PlayerIdentity {
     this.isMe = false,
     this.friendProfileId,
     this.friendUsername,
+    this.gender = PlayerGender.neutral,
   });
 
   bool get isLinkedToFriend =>
@@ -39,6 +44,7 @@ class PlayerIdentity {
         if (isLinkedToFriend) 'friendProfileId': friendProfileId,
         if (isLinkedToFriend && friendUsername != null)
           'friendUsername': friendUsername,
+        'gender': gender.name,
       };
 
   factory PlayerIdentity.fromJson(Map<String, dynamic> json) {
@@ -57,6 +63,10 @@ class PlayerIdentity {
       isMe: json['isMe'] == true,
       friendProfileId: _nonEmpty(json['friendProfileId']),
       friendUsername: _nonEmpty(json['friendUsername']),
+      gender: PlayerGender.values.firstWhere(
+        (value) => value.name == json['gender'],
+        orElse: () => PlayerGender.neutral,
+      ),
     );
   }
 
@@ -72,6 +82,7 @@ class PlayerIdentity {
     String? friendProfileId,
     String? friendUsername,
     bool clearFriend = false,
+    PlayerGender? gender,
   }) {
     return PlayerIdentity(
       id: id,
@@ -82,6 +93,7 @@ class PlayerIdentity {
           clearFriend ? null : (friendProfileId ?? this.friendProfileId),
       friendUsername:
           clearFriend ? null : (friendUsername ?? this.friendUsername),
+      gender: gender ?? this.gender,
     );
   }
 }
@@ -229,29 +241,62 @@ class PlayerAliasService {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_prefsKey) ?? prefs.getString(_prefsKeyLegacy);
     if (raw == null || raw.isEmpty) {
+      try {
+        final remote = Supabase.instance.client.auth.currentUser
+            ?.userMetadata?['player_identities']
+            ?.toString();
+        if (remote != null && remote.isNotEmpty) {
+          _identities = _decode(remote);
+          _loaded = true;
+          await prefs.setString(_prefsKey, remote);
+          return;
+        }
+      } catch (_) {}
       _identities = [];
       _loaded = true;
       return;
     }
+    _identities = _decode(raw);
+    _loaded = true;
+  }
+
+  List<PlayerIdentity> _decode(String raw) {
     try {
       final list = jsonDecode(raw) as List<dynamic>;
-      _identities = list
+      return list
           .whereType<Map>()
           .map((e) => PlayerIdentity.fromJson(Map<String, dynamic>.from(e)))
           .where((g) => g.names.isNotEmpty)
           .toList();
     } catch (_) {
-      _identities = [];
+      return [];
     }
-    _loaded = true;
+  }
+
+  Future<void> setGender(String identityId, PlayerGender gender) async {
+    await ensureLoaded();
+    _identities = [
+      for (final identity in _identities)
+        if (identity.id == identityId)
+          identity.copyWith(gender: gender)
+        else
+          identity,
+    ];
+    await _persist();
   }
 
   Future<void> _persist() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      _prefsKey,
-      jsonEncode(_identities.map((g) => g.toJson()).toList()),
-    );
+    final encoded = jsonEncode(_identities.map((g) => g.toJson()).toList());
+    await prefs.setString(_prefsKey, encoded);
+    try {
+      final client = Supabase.instance.client;
+      final user = client.auth.currentUser;
+      if (user == null) return;
+      await client.auth.updateUser(
+        UserAttributes(data: {'player_identities': encoded}),
+      );
+    } catch (_) {}
   }
 
   /// Nom canonique pour classements (displayName du groupe, sinon inchangé).

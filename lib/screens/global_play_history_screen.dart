@@ -16,6 +16,8 @@ import '../widgets/bgg_network_image.dart';
 import '../widgets/empty_state_view.dart';
 import '../utils/collection_pick_dedupe.dart';
 import '../widgets/orphan_attach_sheet.dart';
+import '../screens/community_forum_screen.dart';
+import '../theme/card_skins.dart';
 import '../widgets/player_alias_linker_sheet.dart';
 import 'item_detail_screen.dart';
 import 'shake_pick_screen.dart';
@@ -383,6 +385,18 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
       appBar: AppBar(
         title: const Text('Historique des parties'),
         actions: [
+          IconButton(
+            tooltip: 'Forum communautaire',
+            icon: const Icon(Icons.public),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const CommunityForumScreen(),
+                ),
+              );
+            },
+          ),
           if (compactActions) ...[
             IconButton(
               tooltip: 'Tirage au sort',
@@ -900,6 +914,22 @@ Widget _historyThumb(
   );
 }
 
+String _genderedWinner(String? line) {
+  if (line == null || line.trim().isEmpty) return '';
+  final match = RegExp(r'^Gagnants? : (.+)$').firstMatch(line.trim());
+  if (match == null) return line;
+  final names = match.group(1)!.split('&').map((name) => name.trim()).toList();
+  final genders = [
+    for (final name in names) PlayerAliasService.instance.identityFor(name)?.gender,
+  ];
+  final feminine = genders.isNotEmpty &&
+      genders.every((gender) => gender == PlayerGender.feminine);
+  final title = names.length > 1
+      ? (feminine ? 'Gagnantes' : 'Gagnants')
+      : (feminine ? 'Gagnante' : 'Gagnant');
+  return '$title : ${match.group(1)}';
+}
+
 double _thumbSize(BuildContext context) =>
     MediaQuery.sizeOf(context).width > 1100 ? 64 : 40;
 
@@ -918,10 +948,12 @@ class _StreakTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Card(
+    final skin = Theme.of(context).extension<PlayCardStyle>()?.skin ??
+        CardSkin.byId('slate');
+    final tint = skin.isDynamic ? CardSkin.tintForGame(group.title) : null;
+    return Container(
       margin: const EdgeInsets.only(bottom: 8),
-      color: scheme.surfaceContainerHighest,
+      decoration: skin.decoration(dynamicTint: tint),
       child: ListTile(
         leading: _historyThumb(
           group.imageUrl,
@@ -983,8 +1015,13 @@ class _EntryTileState extends State<_EntryTile> {
     final scheme = Theme.of(context).colorScheme;
     final players = session.players.where((p) => p.trim().isNotEmpty).toList();
 
-    return Card(
+    final skin = Theme.of(context).extension<PlayCardStyle>()?.skin ??
+        CardSkin.byId('slate');
+    final tint = skin.isDynamic ? CardSkin.tintForGame(widget.title) : null;
+    final shownWinner = _genderedWinner(winner);
+    return Container(
       margin: EdgeInsets.only(bottom: 8, left: widget.nested ? 16 : 0),
+      decoration: skin.decoration(dynamicTint: tint),
       child: InkWell(
         onTap: widget.onTap,
         borderRadius: BorderRadius.circular(12),
@@ -1088,7 +1125,7 @@ class _EntryTileState extends State<_EntryTile> {
                           ),
                         ),
                         child: Text(
-                          '🏆 $winner',
+                          '🏆 $shownWinner',
                           style: const TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w800,
