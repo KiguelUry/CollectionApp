@@ -66,11 +66,10 @@ jobs:
             --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" \
             --dart-define=GOOGLE_BOOKS_API_KEY="${GOOGLE_BOOKS_API_KEY:-}"
 
-      - name: Don't let the cleanup service worker abort startup
+      - name: Don't register a service worker during startup
         run: |
-          if [ -f build/web/flutter_service_worker.js ]; then
-            sed -i '/client\.navigate(client\.url)/d' build/web/flutter_service_worker.js
-          fi
+          printf '%s\n' "'use strict';" > build/web/flutter_service_worker.js
+          python3 -c 'from pathlib import Path; p=Path("build/web/flutter_bootstrap.js"); t=p.read_text(); start=t.find("serviceWorkerSettings:"); end=t.find("});", start); p.write_text(t[:start] + "serviceWorkerSettings: null\n" + t[end:] if start >= 0 else t)'
 
       - name: Strip missing flutter.js.map sourcemap refs
         run: |

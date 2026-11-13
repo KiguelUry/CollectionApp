@@ -137,6 +137,27 @@
     }, 12000);
   </script>
   <script src="passkeys_bundle.js" type="application/javascript"></script>
-  <script src="flutter_bootstrap.js" async></script>
+  <script>
+    function startPaloma() {
+      var script = document.createElement('script');
+      script.src = 'flutter_bootstrap.js';
+      script.async = true;
+      document.body.appendChild(script);
+    }
+    if (!navigator.serviceWorker) {
+      startPaloma();
+    } else {
+      navigator.serviceWorker.getRegistrations().then(function (regs) {
+        return Promise.all(regs.map(function (reg) { return reg.unregister(); })).then(function () {
+          if (regs.length && !sessionStorage.getItem('paloma-sw-off')) {
+            sessionStorage.setItem('paloma-sw-off', '1');
+            location.reload();
+            return;
+          }
+          startPaloma();
+        });
+      }).catch(startPaloma);
+    }
+  </script>
 </body>
 </html>
