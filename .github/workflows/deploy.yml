@@ -69,7 +69,7 @@ jobs:
       - name: Don't register a service worker during startup
         run: |
           printf '%s\n' "'use strict';" > build/web/flutter_service_worker.js
-          python3 -c 'from pathlib import Path; p=Path("build/web/flutter_bootstrap.js"); t=p.read_text(); start=t.find("serviceWorkerSettings:"); end=t.find("});", start); p.write_text(t[:start] + "serviceWorkerSettings: null\n" + t[end:] if start >= 0 else t)'
+          python3 -c 'from pathlib import Path; p=Path("build/web/flutter_bootstrap.js"); t=p.read_text(); start=t.rfind("_flutter.loader.load("); p.write_text(t[:start] + "_flutter.loader.load({});\n" if start >= 0 else t)'
 
       - name: Strip missing flutter.js.map sourcemap refs
         run: |
