@@ -250,13 +250,21 @@ export default {
 
       const isBgg =
         host === "boardgamegeek.com" || host === "www.boardgamegeek.com";
+      const upstreamHeaders = {
+        Accept: isBgg
+          ? "application/xml, text/xml, */*"
+          : "application/json",
+        "User-Agent": "Collectingo/1.3-cf",
+      };
+      // Token BGG injecté côté Worker (jamais exposé au navigateur / pas de preflight).
+      if (isBgg) {
+        const bggToken = (env.BGG_APPLICATION_TOKEN || "").trim();
+        if (bggToken) {
+          upstreamHeaders.Authorization = `Bearer ${bggToken}`;
+        }
+      }
       const upstream = await fetch(target.toString(), {
-        headers: {
-          Accept: isBgg
-            ? "application/xml, text/xml, */*"
-            : "application/json",
-          "User-Agent": "Collectingo/1.3-cf",
-        },
+        headers: upstreamHeaders,
         redirect: "follow",
       });
       const body = await upstream.arrayBuffer();

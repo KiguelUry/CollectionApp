@@ -1,0 +1,4 @@
+name = "paloma-catalog-proxy"
+main = "paloma-catalog-proxy.js"
+compatibility_date = "2024-11-11"
+workers_dev = true
