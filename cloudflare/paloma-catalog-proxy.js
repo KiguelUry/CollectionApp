@@ -24,6 +24,9 @@ const ALLOWED_JSON_HOSTS = new Set([
   "itunes.apple.com",
   "www.googleapis.com",
   "openlibrary.org",
+  // BGG XML API (hot / thing / search) — remplace Edge Function Supabase bgg-api.
+  "boardgamegeek.com",
+  "www.boardgamegeek.com",
 ]);
 
 const IMAGE_EXT_RE = /\.(jpe?g|png|webp|gif|avif|bmp|svg)(\?|$)/i;
@@ -245,20 +248,28 @@ export default {
         if (booksKey) target.searchParams.set("key", booksKey);
       }
 
+      const isBgg =
+        host === "boardgamegeek.com" || host === "www.boardgamegeek.com";
       const upstream = await fetch(target.toString(), {
         headers: {
-          Accept: "application/json",
+          Accept: isBgg
+            ? "application/xml, text/xml, */*"
+            : "application/json",
           "User-Agent": "Collectingo/1.3-cf",
         },
         redirect: "follow",
       });
       const body = await upstream.arrayBuffer();
       const contentType =
-        upstream.headers.get("Content-Type") ?? "application/json";
+        upstream.headers.get("Content-Type") ??
+        (isBgg ? "application/xml" : "application/json");
       const headers = new Headers({
         ...corsHeaders,
         "Content-Type": contentType,
-        "Cache-Control": "public, max-age=86400, s-maxage=86400",
+        // BGG change souvent (hot) → cache court ; APIs livres → 1 jour.
+        "Cache-Control": isBgg
+          ? "public, max-age=900, s-maxage=900"
+          : "public, max-age=86400, s-maxage=86400",
       });
       headers.delete("set-cookie");
       headers.delete("set-cookie2");

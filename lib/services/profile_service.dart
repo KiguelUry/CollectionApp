@@ -16,6 +16,7 @@ import '../utils/collection_item_filters.dart';
 import '../utils/supabase_embeds.dart';
 import 'activity_service.dart';
 import 'profile_cache_service.dart';
+import 'supabase_read_cache.dart';
 
 class ProfileService {
   SupabaseClient get _client => Supabase.instance.client;
@@ -141,9 +142,17 @@ class ProfileService {
     String profileId, {
     required String columns,
   }) async {
-    final row =
-        await _client.from('profiles').select(columns).eq('id', profileId).single();
-    return Map<String, dynamic>.from(row);
+    return SupabaseReadCache.getOrFetch<Map<String, dynamic>>(
+      key: 'profiles:row:$profileId:$columns',
+      loader: () async {
+        final row = await _client
+            .from('profiles')
+            .select(columns)
+            .eq('id', profileId)
+            .single();
+        return Map<String, dynamic>.from(row);
+      },
+    );
   }
 
   Future<UserProfile> fetchCurrentProfile() async {

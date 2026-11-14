@@ -14,6 +14,7 @@ import 'supabase_read_cache.dart';
 import 'book_catalog_service.dart';
 import 'book_intelligence_service.dart';
 import 'google_books_service.dart';
+import 'inventory_service.dart';
 import 'itunes_books_service.dart';
 import 'mangadex_service.dart';
 import 'open_library_service.dart';
@@ -21,6 +22,15 @@ import 'profile_service.dart';
 
 class BookSeriesService {
   final _client = Supabase.instance.client;
+
+  /// Colonnes utiles à l'UI (évite `select=*` → 12–42 kB de colonnes mortes).
+  static const _bookSeriesSelect =
+      'id, owner_id, name, subcategory, cover_url, parent_series_id, '
+      'description, user_rating, user_review, expected_volume_count, '
+      'wishlist_entire_series, metadata, created_at, updated_at';
+
+  static const _bookVolumeSelect =
+      'id, series_id, volume_number, sort_index, label, metadata';
 
   String get _userId {
     final id = _client.auth.currentUser?.id;
@@ -115,7 +125,7 @@ class BookSeriesService {
   }) async {
     var query = _client
         .from('book_series')
-        .select()
+        .select(_bookSeriesSelect)
         .eq('owner_id', _userId)
         .eq('subcategory', subcategory.dbValue);
 
@@ -132,7 +142,7 @@ class BookSeriesService {
   Future<BookSeries?> fetchSeriesById(String id) async {
     final row = await _client
         .from('book_series')
-        .select()
+        .select(_bookSeriesSelect)
         .eq('id', id)
         .eq('owner_id', _userId)
         .maybeSingle();
@@ -251,7 +261,7 @@ class BookSeriesService {
       loader: () async {
         final rows = await _client
             .from('book_volumes')
-            .select()
+            .select(_bookVolumeSelect)
             .eq('series_id', seriesId)
             .order('sort_index');
         return _volumeList(rows);
@@ -328,7 +338,7 @@ class BookSeriesService {
 
         final volRows = await _client
             .from('book_volumes')
-            .select()
+            .select(_bookVolumeSelect)
             .inFilter('series_id', ids)
             .order('sort_index');
         final volumesBySeries = <String, List<BookVolume>>{};
@@ -336,11 +346,15 @@ class BookSeriesService {
           volumesBySeries.putIfAbsent(v.seriesId, () => []).add(v);
         }
 
-        final itemRows = await _client
-            .from('collection_items')
-            .select()
-            .eq('category', 'book')
-            .inFilter('series_id', ids);
+        // Réutilise InventoryService (0 SQL collection_items supplémentaire).
+        final idSet = ids.toSet();
+        final invRows = await InventoryService().fetchRows();
+        final itemRows = [
+          for (final row in invRows)
+            if (row['category']?.toString() == 'book' &&
+                idSet.contains(row['series_id']?.toString()))
+              row,
+        ];
         final itemsBySeries = _bookItemsBySeries(itemRows);
 
         return (
@@ -2031,7 +2045,7 @@ class BookSeriesService {
     final future = () async {
       final rows = await _client
           .from('book_series')
-          .select()
+          .select(_bookSeriesSelect)
           .eq('owner_id', userId)
           .filter('parent_series_id', 'is', null)
           .order('name');

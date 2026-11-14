@@ -202,15 +202,24 @@ class GroupService {
         for (final row in hit.rows) Map<String, dynamic>.from(row),
       ];
     }
-    final rows = await _client
-        .from('group_members')
-        .select(
-          'profile_id, ${SupabaseEmbeds.groupMemberProfile}',
-        )
-        .eq('group_id', groupId);
-    final parsed = List<Map<String, dynamic>>.from(rows);
+    final parsed =
+        await SupabaseReadCache.getOrFetch<List<Map<String, dynamic>>>(
+      key: 'group_members:list:$groupId',
+      ttl: _membersTtl,
+      loader: () async {
+        final rows = await _client
+            .from('group_members')
+            .select(
+              'profile_id, ${SupabaseEmbeds.groupMemberProfile}',
+            )
+            .eq('group_id', groupId);
+        return List<Map<String, dynamic>>.from(rows);
+      },
+    );
     _membersCache[groupId] = (at: DateTime.now(), rows: parsed);
-    return parsed;
+    return [
+      for (final row in parsed) Map<String, dynamic>.from(row),
+    ];
   }
 
   Future<void> removeMember(String groupId, String profileId) async {

@@ -45,6 +45,9 @@ Uri proxiedCatalogUri(Uri target) {
     'itunes.apple.com',
     'www.googleapis.com',
     'uploads.mangadex.org',
+    'openlibrary.org',
+    'boardgamegeek.com',
+    'www.boardgamegeek.com',
   };
   if (!allowed.contains(host)) return target;
 

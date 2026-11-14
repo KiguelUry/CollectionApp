@@ -2,6 +2,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/collection_category.dart';
 import '../services/discogs_service.dart';
+import '../services/inventory_service.dart';
 import '../utils/active_categories.dart';
 import '../utils/collection_item_scope.dart';
 import '../utils/stats_dashboard.dart';
@@ -14,17 +15,11 @@ class CollectionStatsService {
     final userId = CollectionItemScope.currentUserId;
     if (userId == null) return const StatsDashboard();
 
-    final rows = await CollectionItemScope.ownedByUser(
-      _client.from('collection_items').select(
-        'id, title, category, quantity, purchase_price, image_url, metadata, '
-        'is_wishlist, is_sold, is_for_sale, is_expansion, games_played, '
-        'location_user_id, loaned_to_id, loaned_to_name',
-      ),
-      userId: userId,
-    );
+    // Réutilise InventoryService (0 SQL si déjà chargé au hub).
+    final rows = await InventoryService().fetchRows();
     final active = await ActiveCategories.load();
     return StatsDashboard.fromRows(
-      [for (final r in rows as List) Map<String, dynamic>.from(r as Map)],
+      rows,
       active: active,
       meUserId: userId,
     );

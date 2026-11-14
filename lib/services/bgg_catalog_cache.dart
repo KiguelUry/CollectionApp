@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'supabase_capacity.dart';
@@ -100,6 +103,73 @@ class _CatalogCacheBreaker {
       SupabaseCapacity.looksLikeCapacityError(e);
 }
 
+/// Persist local (SharedPreferences) — remplace `bgg_catalog_cache` Supabase.
+class LocalPrefsBggCacheStore implements BggCacheStore {
+  static const _prefix = 'bgg_local_cache_v1:';
+
+  String _prefsKey(String bggId, BggCacheKind kind) =>
+      '$_prefix${kind.dbValue}:$bggId';
+
+  @override
+  Future<BggCacheEntry?> read(String bggId, BggCacheKind kind) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_prefsKey(bggId, kind));
+      if (raw == null || raw.isEmpty) return null;
+      final map = jsonDecode(raw);
+      if (map is! Map) return null;
+      final at = DateTime.tryParse(map['fetched_at']?.toString() ?? '');
+      final payload = map['payload'];
+      if (at == null || payload == null) return null;
+      return BggCacheEntry(payload as Object, at);
+    } catch (e) {
+      if (kDebugMode) debugPrint('BGG local cache read: $e');
+      return null;
+    }
+  }
+
+  @override
+  Future<void> write(String bggId, BggCacheKind kind, Object payload) async {
+    await writeMany({bggId: payload}, kind);
+  }
+
+  @override
+  Future<Map<String, BggCacheEntry>> readMany(
+    List<String> bggIds,
+    BggCacheKind kind,
+  ) async {
+    final out = <String, BggCacheEntry>{};
+    for (final id in bggIds) {
+      final entry = await read(id, kind);
+      if (entry != null) out[id] = entry;
+    }
+    return out;
+  }
+
+  @override
+  Future<void> writeMany(
+    Map<String, Object> payloadsById,
+    BggCacheKind kind,
+  ) async {
+    if (payloadsById.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final now = DateTime.now().toUtc().toIso8601String();
+      for (final e in payloadsById.entries) {
+        final id = e.key.trim();
+        if (id.isEmpty) continue;
+        await prefs.setString(
+          _prefsKey(id, kind),
+          jsonEncode({'payload': e.value, 'fetched_at': now}),
+        );
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('BGG local cache writeMany: $e');
+    }
+  }
+}
+
+/// Legacy Store Supabase — conservé pour tests / migration, plus utilisé par défaut.
 class SupabaseBggCacheStore implements BggCacheStore {
   static const _table = 'bgg_catalog_cache';
 
@@ -206,19 +276,18 @@ class SupabaseBggCacheStore implements BggCacheStore {
   }
 }
 
-/// Cache BGG partagé : mémoire → table Supabase → API BGG.
+/// Cache BGG local : mémoire → SharedPreferences → API BGG.
 ///
+/// Plus de table Supabase `bgg_catalog_cache` (0 PostgREST egress).
 /// - entrée fraîche (< [ttl]) : aucun appel BGG ;
-/// - absente / périmée : un seul appel BGG même si plusieurs écrans
-///   demandent le même jeu en même temps (requêtes en vol mutualisées) ;
-/// - table absente (404) : coupe-circuit, mémoire + BGG uniquement ;
+/// - absente / périmée : un seul appel BGG (requêtes en vol mutualisées) ;
 /// - échec BGG : on renvoie l'entrée périmée si elle existe.
 class BggCatalogCache {
   BggCatalogCache({
     BggCacheStore? store,
     this.ttl = const Duration(days: 30),
     DateTime Function()? clock,
-  }) : _store = store ?? SupabaseBggCacheStore(),
+  }) : _store = store ?? LocalPrefsBggCacheStore(),
        _clock = clock ?? DateTime.now;
 
   static final instance = BggCatalogCache();
@@ -377,58 +446,21 @@ class BggCatalogCache {
   }
 }
 
-/// Résultats de recherche BGG partagés entre utilisateurs (`bgg_search_cache`).
-/// Table optionnelle : toute erreur (table absente, hors ligne) est ignorée.
+/// Ancien cache recherche partagé (`bgg_search_cache`) — désactivé (0 egress).
+/// La recherche utilise le cache mémoire de [BggService] à la place.
 class BggSearchSharedCache {
-  static const _table = 'bgg_search_cache';
   static const ttl = Duration(days: 7);
 
   static String normalizeKey(String key) =>
       key.toLowerCase().trim().replaceAll(RegExp(r'\s+'), ' ');
 
-  /// Renvoie les jeux et leur fraîcheur, ou `null` si absent.
   static Future<({List<Map<String, String>> games, bool fresh})?> read(
     String key,
-  ) async {
-    try {
-      final row = await Supabase.instance.client
-          .from(_table)
-          .select('payload, fetched_at')
-          .eq('query_key', normalizeKey(key))
-          .maybeSingle();
-      if (row == null || row['payload'] is! List) return null;
-      final at = DateTime.tryParse(row['fetched_at']?.toString() ?? '');
-      final games = [
-        for (final g in row['payload'] as List)
-          if (g is Map)
-            {
-              for (final e in g.entries)
-                if (e.value != null) e.key.toString(): e.value.toString(),
-            },
-      ];
-      if (games.isEmpty) return null;
-      final fresh = at != null && DateTime.now().difference(at) < ttl;
-      return (games: games, fresh: fresh);
-    } catch (e) {
-      if (kDebugMode) debugPrint('BGG search cache read: $e');
-      return null;
-    }
-  }
+  ) async =>
+      null;
 
   static Future<void> write(
     String key,
     List<Map<String, String>> games,
-  ) async {
-    if (games.isEmpty) return;
-    try {
-      if (Supabase.instance.client.auth.currentUser == null) return;
-      await Supabase.instance.client.from(_table).upsert({
-        'query_key': normalizeKey(key),
-        'payload': games,
-        'fetched_at': DateTime.now().toUtc().toIso8601String(),
-      });
-    } catch (e) {
-      if (kDebugMode) debugPrint('BGG search cache write: $e');
-    }
-  }
+  ) async {}
 }

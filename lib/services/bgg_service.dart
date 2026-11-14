@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:xml/xml.dart';
 
 import '../config/app_env.dart';
+import '../config/catalog_proxy_config.dart';
 import '../config/supabase_public_config.dart';
 import '../models/bgg_expansion.dart';
 import '../utils/bgg_collection_parse.dart';
@@ -95,12 +96,14 @@ class BggService {
   /// Jeux de société + JDR narratifs (ex. Alice is Missing) + extensions.
   static const _searchTypes = 'boardgame,rpgitem,boardgameexpansion';
 
-  /// Prefer edge `bgg-api` when Supabase is configured (web + native).
-  /// Native XML direct hits BGG hard on search (no thumbs) and 429s easily.
-  static bool get _useWebJsonApi => _webProxyReady;
+  /// Edge Function Supabase `bgg-api` : uniquement si Cloudflare n'est pas
+  /// configuré (fallback legacy). Sinon XML BGG via Worker / natif.
+  static bool get _useWebJsonApi =>
+      !usesCloudflareCatalogProxy && _webProxyReady;
 
-  /// Recherche BGG via `bgg-api` si configuré, sinon XML natif.
-  static bool get supportsWebSearch => _useWebJsonApi || !kIsWeb;
+  /// Recherche BGG : Worker Cloudflare (XML) ou Edge legacy, ou XML natif.
+  static bool get supportsWebSearch =>
+      usesCloudflareCatalogProxy || _useWebJsonApi || !kIsWeb;
 
   static bool get _webProxyReady {
     return AppEnv.supabaseUrl.isNotEmpty && AppEnv.supabaseAnonKey.isNotEmpty;
@@ -274,8 +277,18 @@ class BggService {
       return http.Response('', 503);
     }
 
-    final target = url;
-    final headers = _headers;
+    var target = url;
+    var headers = _headers;
+    // Web + Cloudflare : proxy BGG (CORS) — zéro appel Edge Function Supabase.
+    if (kIsWeb && usesCloudflareCatalogProxy) {
+      final host = url.host.toLowerCase();
+      if (host == 'boardgamegeek.com' || host.endsWith('.boardgamegeek.com')) {
+        target = buildCatalogProxyUri(url.toString());
+        headers = const {
+          'Accept': 'application/xml, text/xml, */*',
+        };
+      }
+    }
 
     http.Response? last;
     var rateLimitRetries = 0;

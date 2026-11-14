@@ -4,9 +4,12 @@ import '../catalog/services/user_catalog_service.dart';
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import 'boardgame_expansion_service.dart';
-import 'group_service.dart';
+import 'inventory_service.dart';
 
 /// Jeux déjà possédés / en wishlist (clé catalogue = `bgg_id` ou titre).
+///
+/// Lectures : uniquement [InventoryService] (0 SQL supplémentaire si le hub
+/// a déjà chargé la collection).
 class UserBoardgameCollectionService implements UserCatalogService {
   final _client = Supabase.instance.client;
 
@@ -21,24 +24,25 @@ class UserBoardgameCollectionService implements UserCatalogService {
   static String catalogKeyForGame(String bggId, String title) =>
       bggId.isNotEmpty ? bggId : 'title:${title.trim().toLowerCase()}';
 
+  Future<List<CollectionItem>> _boardgames() async {
+    final items = await InventoryService().fetchOwnedItems();
+    return [
+      for (final item in items)
+        if (item.category == CollectionCategory.boardgame) item,
+    ];
+  }
+
   @override
   Future<Set<String>> ownedCatalogKeys() async {
     final userId = _userId;
     if (userId == null) return {};
 
-    final rows = await _client
-        .from('collection_items')
-        .select('title, metadata, parent_game_id, is_expansion')
-        .eq('category', CollectionCategory.boardgame.dbValue)
-        .eq('is_wishlist', false)
-        .or('added_by.eq.$userId,location_user_id.eq.$userId');
-
     final keys = <String>{};
-    for (final row in rows as List) {
-      final title = row['title'] as String? ?? '';
-      final meta = row['metadata'] as Map<String, dynamic>?;
-      final parentId = row['parent_game_id'] as String?;
-      final isExpansion = row['is_expansion'] as bool? ?? false;
+    for (final item in await _boardgames()) {
+      if (item.isWishlist || item.isSold) continue;
+      final meta = item.metadata;
+      final parentId = item.parentGameId;
+      final isExpansion = item.isExpansion;
 
       if (isExpansion && parentId != null && parentId.isNotEmpty) {
         final id = meta?['bgg_id']?.toString();
@@ -46,7 +50,7 @@ class UserBoardgameCollectionService implements UserCatalogService {
         continue;
       }
 
-      keys.add(catalogKeyFromMetadata(meta, title));
+      keys.add(catalogKeyFromMetadata(meta, item.title));
       final ownedExp = meta?['owned_expansion_bgg_ids'];
       if (ownedExp is List) {
         for (final id in ownedExp) {
@@ -55,24 +59,6 @@ class UserBoardgameCollectionService implements UserCatalogService {
         }
       }
     }
-
-    try {
-      final groups = await GroupService().fetchMyGroups();
-      final groupIds = groups.map((g) => g.id).where((id) => id.isNotEmpty).toList();
-      if (groupIds.isNotEmpty) {
-        final shared = await _client
-            .from('collection_items')
-            .select('title, metadata, parent_game_id, is_expansion')
-            .eq('category', CollectionCategory.boardgame.dbValue)
-            .eq('is_wishlist', false)
-            .inFilter('group_id', groupIds);
-        for (final row in shared as List) {
-          final title = row['title'] as String? ?? '';
-          final meta = row['metadata'] as Map<String, dynamic>?;
-          keys.add(catalogKeyFromMetadata(meta, title));
-        }
-      }
-    } catch (_) {}
     return keys;
   }
 
@@ -81,18 +67,11 @@ class UserBoardgameCollectionService implements UserCatalogService {
     final userId = _userId;
     if (userId == null) return {};
 
-    final rows = await _client
-        .from('collection_items')
-        .select('title, metadata')
-        .eq('category', CollectionCategory.boardgame.dbValue)
-        .eq('is_wishlist', true)
-        .eq('added_by', userId);
-
     final keys = <String>{};
-    for (final row in rows as List) {
-      final title = row['title'] as String? ?? '';
-      final meta = row['metadata'] as Map<String, dynamic>?;
-      keys.add(catalogKeyFromMetadata(meta, title));
+    for (final item in await _boardgames()) {
+      if (!item.isWishlist) continue;
+      if (item.addedBy != null && item.addedBy != userId) continue;
+      keys.add(catalogKeyFromMetadata(item.metadata, item.title));
     }
     return keys;
   }
@@ -102,20 +81,15 @@ class UserBoardgameCollectionService implements UserCatalogService {
     final userId = _userId;
     if (userId == null || catalogKey.isEmpty) return false;
 
-    final rows = await _client
-        .from('collection_items')
-        .select('id, title, metadata')
-        .eq('category', CollectionCategory.boardgame.dbValue)
-        .eq('is_wishlist', true)
-        .eq('added_by', userId);
-
-    for (final row in rows as List) {
-      final title = row['title'] as String? ?? '';
-      final meta = row['metadata'] as Map<String, dynamic>?;
-      if (catalogKeyFromMetadata(meta, title) == catalogKey) {
-        await _client.from('collection_items').delete().eq('id', row['id']);
-        return true;
+    for (final item in await _boardgames()) {
+      if (!item.isWishlist) continue;
+      if (item.addedBy != null && item.addedBy != userId) continue;
+      if (catalogKeyFromMetadata(item.metadata, item.title) != catalogKey) {
+        continue;
       }
+      await _client.from('collection_items').delete().eq('id', item.id);
+      InventoryService.invalidateCache();
+      return true;
     }
     return false;
   }
@@ -125,36 +99,43 @@ class UserBoardgameCollectionService implements UserCatalogService {
     final userId = _userId;
     if (userId == null || catalogKey.isEmpty) return false;
 
-    final rows = await _client
-        .from('collection_items')
-        .select('id, title, metadata, parent_game_id, is_expansion')
-        .eq('category', CollectionCategory.boardgame.dbValue)
-        .eq('is_wishlist', false)
-        .or('added_by.eq.$userId,location_user_id.eq.$userId');
-
-    for (final row in rows as List) {
-      final title = row['title'] as String? ?? '';
-      final meta = row['metadata'] as Map<String, dynamic>?;
-      if (catalogKeyFromMetadata(meta, title) == catalogKey) {
-        await _client.from('collection_items').delete().eq('id', row['id']);
+    final items = await _boardgames();
+    for (final item in items) {
+      if (item.isWishlist) continue;
+      final meta = item.metadata;
+      if (catalogKeyFromMetadata(meta, item.title) == catalogKey) {
+        await _client.from('collection_items').delete().eq('id', item.id);
+        InventoryService.invalidateCache();
         return true;
       }
       if (meta?['bgg_id']?.toString() == catalogKey &&
-          row['parent_game_id'] != null) {
-        final parentId = row['parent_game_id'] as String;
-        final parentRow = await _client
-            .from('collection_items')
-            .select()
-            .eq('id', parentId)
-            .maybeSingle();
-        if (parentRow != null) {
-          final parent = CollectionItem.fromJson(
-            Map<String, dynamic>.from(parentRow),
-          );
+          item.parentGameId != null) {
+        final parentId = item.parentGameId!;
+        CollectionItem? parent;
+        for (final candidate in items) {
+          if (candidate.id == parentId) {
+            parent = candidate;
+            break;
+          }
+        }
+        if (parent == null) {
+          final parentRow = await _client
+              .from('collection_items')
+              .select(InventoryService.hubSelect)
+              .eq('id', parentId)
+              .maybeSingle();
+          if (parentRow != null) {
+            parent = CollectionItem.fromJson(
+              Map<String, dynamic>.from(parentRow),
+            );
+          }
+        }
+        if (parent != null) {
           await BoardgameExpansionService().unlinkExpansionFromBase(
             base: parent,
             expansionBggId: catalogKey,
           );
+          InventoryService.invalidateCache();
           return true;
         }
       }

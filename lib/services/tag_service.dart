@@ -2,6 +2,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/collection_item.dart';
 import '../models/item_tag.dart';
+import 'supabase_read_cache.dart';
 
 class TagService {
   final _client = Supabase.instance.client;
@@ -12,15 +13,19 @@ class TagService {
     final id = _userId;
     if (id == null) return [];
 
-    final rows = await _client
-        .from('item_tags')
-        .select()
-        .eq('profile_id', id)
-        .order('label');
-
-    return (rows as List)
-        .map((r) => ItemTag.fromJson(Map<String, dynamic>.from(r)))
-        .toList();
+    return SupabaseReadCache.getOrFetch<List<ItemTag>>(
+      key: 'item_tags:mine:$id',
+      loader: () async {
+        final rows = await _client
+            .from('item_tags')
+            .select()
+            .eq('profile_id', id)
+            .order('label');
+        return (rows as List)
+            .map((r) => ItemTag.fromJson(Map<String, dynamic>.from(r)))
+            .toList();
+      },
+    );
   }
 
   Future<ItemTag> createTag(String label, {String? colorHex}) async {
@@ -40,6 +45,7 @@ class TagService {
         .select()
         .single();
 
+    SupabaseReadCache.invalidate('item_tags:mine:$id');
     return ItemTag.fromJson(Map<String, dynamic>.from(row));
   }
 
@@ -53,38 +59,49 @@ class TagService {
   }
 
   Future<void> setItemTags(String itemId, List<String> tagIds) async {
-    await _client
-        .from('collection_item_tags')
-        .delete()
-        .eq('item_id', itemId);
+    await _client.from('collection_item_tags').delete().eq('item_id', itemId);
 
-    if (tagIds.isEmpty) return;
-
-    await _client.from('collection_item_tags').insert(
-          tagIds
-              .map((tagId) => {'item_id': itemId, 'tag_id': tagId})
-              .toList(),
-        );
+    if (tagIds.isNotEmpty) {
+      await _client.from('collection_item_tags').insert(
+            tagIds
+                .map((tagId) => {'item_id': itemId, 'tag_id': tagId})
+                .toList(),
+          );
+    }
+    SupabaseReadCache.invalidate('collection_item_tags:');
   }
 
   /// Attache les tags aux objets (pour filtres / liste).
+  /// Déduplique les appels simultanés (3 onglets / home + all) via inFlight.
   Future<List<CollectionItem>> enrichItems(List<CollectionItem> items) async {
     if (items.isEmpty) return items;
 
-    final ids = items.map((i) => i.id).toList();
-    final rows = await _client
-        .from('collection_item_tags')
-        .select('item_id, item_tags(id, label, color)')
-        .inFilter('item_id', ids);
+    final ids = items.map((i) => i.id).toList()..sort();
+    // Clé stable pour un même inventaire (évite 3× 6.8 kB au boot).
+    final cacheKey = 'collection_item_tags:enrich:${Object.hashAll(ids)}';
 
-    final byItem = <String, List<ItemTag>>{};
-    for (final row in rows as List) {
-      final itemId = row['item_id'] as String;
-      final tagJson = row['item_tags'];
-      if (tagJson is! Map) continue;
-      byItem.putIfAbsent(itemId, () => []);
-      byItem[itemId]!.add(ItemTag.fromJson(Map<String, dynamic>.from(tagJson)));
-    }
+    final byItem = await SupabaseReadCache.getOrFetch<Map<String, List<ItemTag>>>(
+      key: cacheKey,
+      ttl: const Duration(minutes: 5),
+      loader: () async {
+        final rows = await _client
+            .from('collection_item_tags')
+            .select('item_id, item_tags(id, label, color)')
+            .inFilter('item_id', ids);
+
+        final map = <String, List<ItemTag>>{};
+        for (final row in rows as List) {
+          final itemId = row['item_id'] as String;
+          final tagJson = row['item_tags'];
+          if (tagJson is! Map) continue;
+          map.putIfAbsent(itemId, () => []);
+          map[itemId]!.add(
+            ItemTag.fromJson(Map<String, dynamic>.from(tagJson)),
+          );
+        }
+        return map;
+      },
+    );
 
     var result = items
         .map((i) => i.copyWith(tags: byItem[i.id] ?? const []))
@@ -104,15 +121,20 @@ class TagService {
     };
     if (userIds.isEmpty) return items;
 
-    final rows = await _client
-        .from('profiles')
-        .select('id, username')
-        .inFilter('id', userIds.toList());
-
-    final names = <String, String>{
-      for (final row in rows as List)
-        row['id'] as String: row['username'] as String? ?? 'Membre',
-    };
+    final sorted = userIds.toList()..sort();
+    final names = await SupabaseReadCache.getOrFetch<Map<String, String>>(
+      key: 'profiles:usernames:${sorted.join(',')}',
+      loader: () async {
+        final rows = await _client
+            .from('profiles')
+            .select('id, username')
+            .inFilter('id', sorted);
+        return {
+          for (final row in rows as List)
+            row['id'] as String: row['username'] as String? ?? 'Membre',
+        };
+      },
+    );
 
     return items.map((i) {
       final uid = i.locationUserId;
@@ -134,5 +156,4 @@ class TagService {
     tags.sort((a, b) => a.label.compareTo(b.label));
     return tags;
   }
-
 }
