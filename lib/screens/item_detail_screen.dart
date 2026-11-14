@@ -106,7 +106,10 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
   late final TextEditingController _reviewController;
   late final TextEditingController _priceController;
   late final TextEditingController _gamesPlayedController;
-  late final TextEditingController _personalRulesController;
+  /// Notes valeur / observations (jamais le JSON des règles).
+  late final TextEditingController _valueNotesController;
+  /// Règles perso encodées — mises à jour uniquement via le bento Règles.
+  String _personalRulesEncoded = '';
   late final TextEditingController _merchantController;
   late final TextEditingController _soldToController;
   late final TextEditingController _soldPriceController;
@@ -152,8 +155,9 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     _gamesPlayedController = TextEditingController(
       text: _item.gamesPlayed?.toString() ?? '',
     );
-    _personalRulesController = TextEditingController(
-      text: _item.personalRules ?? '',
+    _personalRulesEncoded = _item.personalRules ?? '';
+    _valueNotesController = TextEditingController(
+      text: _initialValueNotes(_item),
     );
     _merchantController = TextEditingController(
       text: _item.metadata?['merchant']?.toString() ?? '',
@@ -183,7 +187,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       _reviewController.addListener(_scheduleSave);
       _priceController.addListener(_scheduleSave);
       _gamesPlayedController.addListener(_scheduleSave);
-      _personalRulesController.addListener(_scheduleSave);
+      _valueNotesController.addListener(_scheduleSave);
       _merchantController.addListener(_scheduleSave);
       _soldToController.addListener(_scheduleSave);
       _soldPriceController.addListener(_scheduleSave);
@@ -353,7 +357,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     _reviewController.dispose();
     _priceController.dispose();
     _gamesPlayedController.dispose();
-    _personalRulesController.dispose();
+    _valueNotesController.dispose();
     _soldToController.dispose();
     _soldPriceController.dispose();
     _tradedForController.dispose();
@@ -460,6 +464,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
         } else {
           _item = reloaded;
         }
+        _personalRulesEncoded = _item.personalRules ?? '';
         if (_item.isWishlist) {
           unawaited(_resolveOwnedQuantity());
         } else {
@@ -602,6 +607,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     setOrClear('sold_price', _soldPriceController.text);
     setOrClear('traded_for', _tradedForController.text);
     setOrClear('traded_with', _tradedWithController.text);
+    setOrClear('value_notes', _valueNotesController.text);
 
     final groupIds = _selectedGroupIds.toList();
     _item = _item.copyWith(
@@ -610,7 +616,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       purchasePrice: price,
       condition: _condition?.dbValue,
       gamesPlayed: gamesPlayed,
-      personalRules: _personalRulesController.text,
+      personalRules: _personalRulesEncoded,
       quantity: _item.quantity,
       locationId: _item.locationId,
       locationUserId: _item.locationUserId,
@@ -1457,12 +1463,10 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                               _expandedBento == 'rules' ? null : 'rules',
                         ),
                         onPersonalRulesChanged: (encoded) {
-                          _personalRulesController.text = encoded;
-                          setState(() {
-                            _item = _item.copyWith(
-                              personalRules: encoded.isEmpty ? null : encoded,
-                            );
-                          });
+                          _personalRulesEncoded = encoded;
+                          _item = _item.copyWith(
+                            personalRules: encoded.isEmpty ? null : encoded,
+                          );
                           _scheduleSave();
                         },
                       ),
@@ -1739,7 +1743,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       const Divider(height: 28),
                       _buildSectionTitle('Notes'),
                       TextField(
-                        controller: _personalRulesController,
+                        controller: _valueNotesController,
                         readOnly: ro,
                         maxLines: 4,
                         decoration: const InputDecoration(
@@ -1892,7 +1896,7 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
         ],
         const SizedBox(height: 16),
         TextField(
-          controller: _personalRulesController,
+          controller: _valueNotesController,
           readOnly: ro,
           maxLines: 4,
           decoration: const InputDecoration(
@@ -1903,6 +1907,20 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
         ),
       ],
     );
+  }
+
+  /// Notes valeur : metadata dédiée. Ne jamais lire le JSON des règles.
+  static String _initialValueNotes(CollectionItem item) {
+    final fromMeta = item.metadata?['value_notes']?.toString().trim();
+    if (fromMeta != null && fromMeta.isNotEmpty) return fromMeta;
+    final pr = item.personalRules?.trim() ?? '';
+    if (pr.isEmpty) return '';
+    // JSON règles modulaires → hors Notes.
+    if (pr.startsWith('{') && pr.contains('"sections"')) return '';
+    if (pr.startsWith('{') && pr.contains('"v"')) return '';
+    // Legacy hors boardgame : plain text dans personal_rules.
+    if (item.category != CollectionCategory.boardgame) return pr;
+    return '';
   }
 
   Widget _buildShareGroupsPanel(bool ro) {

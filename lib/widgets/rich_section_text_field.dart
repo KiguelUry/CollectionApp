@@ -20,12 +20,15 @@ class RichSectionTextField extends StatefulWidget {
 }
 
 class _RichSectionTextFieldState extends State<RichSectionTextField> {
-  late _RichTextController _controller;
+  late final _RichTextController _controller;
+  late final FocusNode _focusNode;
   TextSelection _lastSelection = const TextSelection.collapsed(offset: 0);
+  bool _emitting = false;
 
   @override
   void initState() {
     super.initState();
+    _focusNode = FocusNode();
     _controller = _RichTextController.fromSpans(widget.initialSpans);
     _controller.addListener(_emit);
     _controller.addListener(_trackSelection);
@@ -34,9 +37,11 @@ class _RichSectionTextFieldState extends State<RichSectionTextField> {
   @override
   void didUpdateWidget(RichSectionTextField oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // Jamais réécrire le controller tant qu'on a le focus (frappe / gras).
+    if (_focusNode.hasFocus || _emitting) return;
     final current = _controller.toSpans();
     if (!_spansEqual(current, widget.initialSpans)) {
-      _controller.setSpans(widget.initialSpans);
+      _controller.setSpans(widget.initialSpans, keepSelection: true);
     }
   }
 
@@ -53,6 +58,7 @@ class _RichSectionTextFieldState extends State<RichSectionTextField> {
     _controller.removeListener(_emit);
     _controller.removeListener(_trackSelection);
     _controller.dispose();
+    _focusNode.dispose();
     super.dispose();
   }
 
@@ -61,7 +67,15 @@ class _RichSectionTextFieldState extends State<RichSectionTextField> {
     if (sel.isValid) _lastSelection = sel;
   }
 
-  void _emit() => widget.onChanged(_controller.toSpans());
+  void _emit() {
+    if (_emitting) return;
+    _emitting = true;
+    try {
+      widget.onChanged(_controller.toSpans());
+    } finally {
+      _emitting = false;
+    }
+  }
 
   TextSelection _effectiveSelection() {
     final sel = _controller.selection;
@@ -80,8 +94,9 @@ class _RichSectionTextFieldState extends State<RichSectionTextField> {
     }
     if (start == end) return;
     _controller.toggleBold(start, end);
+    _lastSelection = TextSelection(baseOffset: start, extentOffset: end);
     _emit();
-    setState(() {});
+    // Pas de setState : le controller notifie déjà le TextField.
   }
 
   @override
@@ -100,6 +115,7 @@ class _RichSectionTextFieldState extends State<RichSectionTextField> {
         ),
         TextField(
           controller: _controller,
+          focusNode: _focusNode,
           minLines: widget.minLines,
           maxLines: 12,
           decoration: const InputDecoration(
@@ -120,11 +136,16 @@ class _RichTextController extends TextEditingController {
     setSpans(spans);
   }
 
-  void setSpans(List<RuleTextSpan> spans) {
+  void setSpans(List<RuleTextSpan> spans, {bool keepSelection = false}) {
+    final sel = selection;
     _spans = spans.isEmpty ? [const RuleTextSpan(text: '')] : List.of(spans);
+    final nextText = _spans.map((s) => s.text).join();
+    final offset = keepSelection && sel.isValid
+        ? sel.extentOffset.clamp(0, nextText.length)
+        : nextText.length;
     value = TextEditingValue(
-      text: _spans.map((s) => s.text).join(),
-      selection: TextSelection.collapsed(offset: text.length),
+      text: nextText,
+      selection: TextSelection.collapsed(offset: offset),
     );
   }
 
@@ -147,7 +168,9 @@ class _RichTextController extends TextEditingController {
       final localStart = (start - spanStart).clamp(0, span.text.length);
       final localEnd = (end - spanStart).clamp(0, span.text.length);
       if (localStart > 0) {
-        next.add(RuleTextSpan(text: span.text.substring(0, localStart), bold: span.bold));
+        next.add(
+          RuleTextSpan(text: span.text.substring(0, localStart), bold: span.bold),
+        );
       }
       next.add(
         RuleTextSpan(
@@ -156,12 +179,15 @@ class _RichTextController extends TextEditingController {
         ),
       );
       if (localEnd < span.text.length) {
-        next.add(RuleTextSpan(text: span.text.substring(localEnd), bold: span.bold));
+        next.add(
+          RuleTextSpan(text: span.text.substring(localEnd), bold: span.bold),
+        );
       }
     }
     _spans = _mergeAdjacent(next);
+    final joined = _spans.map((s) => s.text).join();
     value = TextEditingValue(
-      text: _spans.map((s) => s.text).join(),
+      text: joined,
       selection: TextSelection(baseOffset: start, extentOffset: end),
     );
   }
@@ -181,7 +207,8 @@ class _RichTextController extends TextEditingController {
         out.add(cur);
       }
     }
-    return out.where((s) => s.text.isNotEmpty).toList();
+    final cleaned = out.where((s) => s.text.isNotEmpty).toList();
+    return cleaned.isEmpty ? [const RuleTextSpan(text: '')] : cleaned;
   }
 
   @override
@@ -192,14 +219,16 @@ class _RichTextController extends TextEditingController {
       super.value = newValue;
       return;
     }
-    _spans = _applyTextEdit(_spans, oldText, newText);
+    _spans = _applyTextEdit(_spans, oldText, newText, newValue.selection);
     super.value = newValue;
   }
 
+  /// Préserve le gras autour de l'édition (ne flatten plus tout en un span).
   static List<RuleTextSpan> _applyTextEdit(
     List<RuleTextSpan> spans,
     String oldText,
     String newText,
+    TextSelection selection,
   ) {
     if (oldText == newText) return spans;
     var prefix = 0;
@@ -218,9 +247,50 @@ class _RichTextController extends TextEditingController {
       newSuffix--;
     }
     final inserted = newText.substring(prefix, newSuffix);
-    final flat = spans.map((s) => s.text).join();
-    final rebuilt = flat.replaceRange(prefix, oldSuffix, inserted);
-    return [RuleTextSpan(text: rebuilt)];
+
+    final before = <RuleTextSpan>[];
+    final after = <RuleTextSpan>[];
+    var offset = 0;
+    bool? insertBold;
+    for (final span in spans) {
+      final spanStart = offset;
+      final spanEnd = offset + span.text.length;
+      offset = spanEnd;
+
+      if (spanEnd <= prefix) {
+        before.add(span);
+        if (spanEnd == prefix) insertBold = span.bold;
+        continue;
+      }
+      if (spanStart >= oldSuffix) {
+        after.add(span);
+        continue;
+      }
+
+      // Span chevauche la zone supprimée.
+      final keepStart = (prefix - spanStart).clamp(0, span.text.length);
+      final keepEnd = (oldSuffix - spanStart).clamp(0, span.text.length);
+      if (keepStart > 0) {
+        before.add(
+          RuleTextSpan(text: span.text.substring(0, keepStart), bold: span.bold),
+        );
+        insertBold = span.bold;
+      } else {
+        insertBold ??= span.bold;
+      }
+      if (keepEnd < span.text.length) {
+        after.add(
+          RuleTextSpan(text: span.text.substring(keepEnd), bold: span.bold),
+        );
+      }
+    }
+
+    final next = <RuleTextSpan>[...before];
+    if (inserted.isNotEmpty) {
+      next.add(RuleTextSpan(text: inserted, bold: insertBold ?? false));
+    }
+    next.addAll(after);
+    return _mergeAdjacent(next);
   }
 
   @override
@@ -240,6 +310,9 @@ class _RichTextController extends TextEditingController {
           ),
         ),
       );
+    }
+    if (children.isEmpty) {
+      return TextSpan(style: style, text: '');
     }
     return TextSpan(style: style, children: children);
   }

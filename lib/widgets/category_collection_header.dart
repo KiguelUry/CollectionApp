@@ -28,6 +28,22 @@ class CategoryCollectionHeader extends StatelessWidget {
     this.compactActions = false,
   });
 
+  /// Hauteur hors SafeArea.top pour PreferredSize (titre + tabs + toolbar).
+  static double contentHeight({
+    required double maxWidth,
+    required bool compact,
+    required int quickActionCount,
+    required bool hasToolbar,
+  }) {
+    const title = 40.0;
+    const tabs = 36.0;
+    if (!hasToolbar) return title + tabs + 2;
+    final narrow = maxWidth < 720;
+    final twoRows = !compact && narrow && quickActionCount >= 4;
+    final toolbar = twoRows ? 92.0 : (compact ? 36.0 : 44.0);
+    return title + tabs + toolbar + 6;
+  }
+
   @override
   Widget build(BuildContext context) {
     final accent = accentOverride ?? category.color;
@@ -128,10 +144,13 @@ class CategoryCollectionHeader extends StatelessWidget {
                   child: LayoutBuilder(
                     builder: (context, constraints) {
                       final narrow = constraints.maxWidth < 720;
+                      // Au scroll (compact) : toujours 1 seule ligne.
+                      // Au repos sur mobile : 2 rangées si ≥ 4 actions.
                       return _ToolbarLayout(
                         leftActions: leftActions,
                         extraActions: extraActions,
-                        twoRows: narrow && leftActions.length >= 4,
+                        twoRows:
+                            showLabels && narrow && leftActions.length >= 4,
                         compact: !showLabels,
                       );
                     },

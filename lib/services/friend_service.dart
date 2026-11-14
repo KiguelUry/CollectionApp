@@ -243,7 +243,7 @@ class FriendService {
 
         final profiles = await _client
             .from('profiles')
-            .select('id, username, avatar_url, accent_color')
+            .select('id, username, avatar_url, accent_color, greeting_grammar')
             .inFilter('id', otherIds);
 
         final byId = {
@@ -264,6 +264,7 @@ class FriendService {
                 'username': p?['username'] as String? ?? 'Ami',
                 'avatar_url': p?['avatar_url'],
                 'accent_color': p?['accent_color'],
+                'greeting_grammar': p?['greeting_grammar'],
                 'share_collections': row['share_collections'],
               };
             }(),

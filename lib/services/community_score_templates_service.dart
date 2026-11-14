@@ -120,6 +120,19 @@ class CommunityScoreTemplatesService {
     await _save(all);
   }
 
+  Future<bool> unpublish(String id) async {
+    final userId = Supabase.instance.client.auth.currentUser?.id ?? 'local';
+    final all = await _load();
+    final index = all.indexWhere((e) => e.id == id);
+    if (index < 0) return false;
+    if (all[index].authorId != userId && all[index].authorId != 'local') {
+      return false;
+    }
+    all.removeAt(index);
+    await _save(all);
+    return true;
+  }
+
   Future<void> toggleLike(String id) async {
     final userId = Supabase.instance.client.auth.currentUser?.id ?? 'local';
     final all = await _load();

@@ -101,7 +101,9 @@ class _BoardgameRulesBentoState extends State<BoardgameRulesBento> {
   }
 
   void _onSectionsChanged(List<RuleSection> next) {
-    setState(() => _sections = next);
+    // Pas de setState à chaque frappe : évite de reconstruire l'éditeur
+    // (perte de focus / clavier). Le ModularRuleEditor garde son state local.
+    _sections = next;
     final encoded =
         RuleBodyCodec.isEmpty(next) ? '' : RuleBodyCodec.encode(next);
     widget.onPersonalRulesChanged(encoded);

@@ -25,8 +25,7 @@ Future<List<FriendChoice>> _loadFriendChoices() async {
   try {
     final rows = await FriendService().fetchFriends();
     return [
-      for (final r in rows)
-        FriendChoice.fromFriendRow(r),
+      for (final r in rows) FriendChoice.fromFriendRow(r),
     ];
   } catch (_) {
     return const [];
@@ -50,21 +49,21 @@ class AliasCollisionWarning extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = Colors.amber.shade800;
     return Container(
-      margin: const EdgeInsets.only(top: 10),
-      padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
       decoration: BoxDecoration(
         color: Colors.amber.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
         border: Border.all(color: color.withValues(alpha: 0.45)),
       ),
       child: Row(
         children: [
-          Icon(Icons.warning_amber_rounded, color: color, size: 20),
+          Icon(Icons.warning_amber_rounded, color: color, size: 18),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              'Doublon probable : ${names.map((n) => '« $n »').join(' · ')}',
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              'Doublon : ${names.map((n) => '« $n »').join(' · ')}',
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
             ),
           ),
           TextButton(
@@ -127,7 +126,7 @@ class _PlayerAliasLinkerSheetState extends State<PlayerAliasLinkerSheet> {
         names,
         displayName: existing?.displayName ?? names.first,
         isMe: existing?.isMe ?? false,
-        gender: existing?.gender,
+        gender: existing?.gender ?? PlayerGender.masculine,
       );
       await GlobalPlayHistoryService().renamePlayerAcrossHistory(
         fromNames: identity.names,
@@ -140,11 +139,39 @@ class _PlayerAliasLinkerSheetState extends State<PlayerAliasLinkerSheet> {
     }
   }
 
+  Future<void> _deleteIdentity(PlayerIdentity identity) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Supprimer l\'identité ?'),
+        content: Text('« ${identity.displayName} » sera retirée.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _saving = true);
+    try {
+      await PlayerAliasService.instance.deleteGroup(identity.id);
+      widget.onMutated?.call();
+      if (mounted) setState(() {});
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   Future<void> _openEditor({PlayerIdentity? existing}) async {
     final nameCtrl = TextEditingController(
       text: existing?.displayName ?? '',
     );
-    var gender = existing?.gender ?? PlayerGender.neutral;
     final selected = <String>{
       for (final name in existing?.names ?? const <String>[]) name,
     };
@@ -153,6 +180,7 @@ class _PlayerAliasLinkerSheetState extends State<PlayerAliasLinkerSheet> {
       if (choice.profileId == existing?.friendProfileId) friend = choice;
     }
     var isMe = existing?.isMe ?? false;
+    var aliasQuery = '';
 
     final saved = await showDialog<bool>(
       context: context,
@@ -163,8 +191,18 @@ class _PlayerAliasLinkerSheetState extends State<PlayerAliasLinkerSheet> {
             ...?existing?.names,
           }.toList()
             ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+          final filtered = aliasQuery.trim().isEmpty
+              ? aliases
+              : aliases
+                  .where(
+                    (n) => n.toLowerCase().contains(aliasQuery.toLowerCase()),
+                  )
+                  .toList();
+          final scheme = Theme.of(ctx).colorScheme;
           return AlertDialog(
-            title: Text(existing == null ? 'Nouvelle identité' : 'Identité'),
+            title: Text(
+              existing == null ? 'Nouvelle identité' : 'Modifier l\'identité',
+            ),
             content: SizedBox(
               width: 420,
               child: SingleChildScrollView(
@@ -176,55 +214,82 @@ class _PlayerAliasLinkerSheetState extends State<PlayerAliasLinkerSheet> {
                       controller: nameCtrl,
                       decoration: const InputDecoration(
                         labelText: 'Nom principal affiché',
+                        isDense: true,
+                        border: OutlineInputBorder(),
                       ),
                     ),
                     const SizedBox(height: 12),
-                    SegmentedButton<PlayerGender>(
-                      showSelectedIcon: false,
-                      segments: const [
-                        ButtonSegment(value: PlayerGender.feminine, label: Text('F')),
-                        ButtonSegment(value: PlayerGender.masculine, label: Text('M')),
-                        ButtonSegment(value: PlayerGender.neutral, label: Text('Neutre')),
-                      ],
-                      selected: {gender},
-                      onSelectionChanged: (v) => setLocal(() => gender = v.first),
+                    Text(
+                      'Pseudos de l\'historique',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: scheme.onSurfaceVariant,
+                      ),
                     ),
-                    const SizedBox(height: 12),
-                    const Text('Pseudos de l\'historique'),
                     const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: [
-                        for (final name in aliases)
-                          FilterChip(
-                            label: Text(name),
-                            selected: selected.any(
-                              (s) => s.toLowerCase() == name.toLowerCase(),
-                            ),
-                            onSelected: (on) => setLocal(() {
-                              selected.removeWhere(
-                                (s) => s.toLowerCase() == name.toLowerCase(),
-                              );
-                              if (on) selected.add(name);
-                              if (nameCtrl.text.trim().isEmpty && selected.isNotEmpty) {
-                                nameCtrl.text = selected.first;
-                              }
-                            }),
-                          ),
-                      ],
+                    TextField(
+                      decoration: const InputDecoration(
+                        hintText: 'Filtrer…',
+                        isDense: true,
+                        prefixIcon: Icon(Icons.search, size: 18),
+                        border: OutlineInputBorder(),
+                      ),
+                      onChanged: (v) => setLocal(() => aliasQuery = v),
+                    ),
+                    const SizedBox(height: 8),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 160),
+                      child: SingleChildScrollView(
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            for (final name in filtered)
+                              FilterChip(
+                                visualDensity: VisualDensity.compact,
+                                label: Text(
+                                  name,
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                                selected: selected.any(
+                                  (s) =>
+                                      s.toLowerCase() == name.toLowerCase(),
+                                ),
+                                onSelected: (on) => setLocal(() {
+                                  selected.removeWhere(
+                                    (s) =>
+                                        s.toLowerCase() == name.toLowerCase(),
+                                  );
+                                  if (on) selected.add(name);
+                                  if (nameCtrl.text.trim().isEmpty &&
+                                      selected.isNotEmpty) {
+                                    nameCtrl.text = selected.first;
+                                  }
+                                }),
+                              ),
+                          ],
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
                       initialValue: friend?.profileId ?? '',
                       isExpanded: true,
-                      decoration: const InputDecoration(labelText: 'Ami lié'),
+                      decoration: const InputDecoration(
+                        labelText: 'Ami lié',
+                        isDense: true,
+                        border: OutlineInputBorder(),
+                      ),
                       items: [
-                        const DropdownMenuItem(value: '', child: Text('Aucun')),
+                        const DropdownMenuItem(
+                          value: '',
+                          child: Text('Aucun'),
+                        ),
                         for (final choice in _friends)
                           DropdownMenuItem(
                             value: choice.profileId,
-                            child: Text(choice.username),
+                            child: Text('@${choice.username}'),
                           ),
                       ],
                       onChanged: (id) => setLocal(() {
@@ -239,10 +304,15 @@ class _PlayerAliasLinkerSheetState extends State<PlayerAliasLinkerSheet> {
                             )) {
                           selected.add(alias);
                         }
+                        if (nameCtrl.text.trim().isEmpty &&
+                            alias.isNotEmpty) {
+                          nameCtrl.text = alias;
+                        }
                       }),
                     ),
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
+                      dense: true,
                       title: const Text('C\'est moi'),
                       value: isMe,
                       onChanged: (v) => setLocal(() {
@@ -277,6 +347,14 @@ class _PlayerAliasLinkerSheetState extends State<PlayerAliasLinkerSheet> {
       names.insert(0, display);
     }
     if (names.isEmpty) return;
+
+    // Genre : profil ami si lié, sinon masculin (→ « Gagnant »).
+    final gender = isMe
+        ? (existing?.gender ?? PlayerGender.masculine)
+        : (friend?.playerGender ??
+            existing?.gender ??
+            PlayerGender.masculine);
+
     setState(() => _saving = true);
     try {
       final identity = await PlayerAliasService.instance.linkNames(
@@ -301,55 +379,192 @@ class _PlayerAliasLinkerSheetState extends State<PlayerAliasLinkerSheet> {
   @override
   Widget build(BuildContext context) {
     final identities = PlayerAliasService.instance.identities;
+    final scheme = Theme.of(context).colorScheme;
     final bottom = MediaQuery.viewInsetsOf(context).bottom;
     return Padding(
-      padding: EdgeInsets.fromLTRB(16, 4, 16, 16 + bottom),
+      padding: EdgeInsets.fromLTRB(16, 4, 16, 12 + bottom),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
             'Identités joueurs',
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Un nom affiché, des pseudos regroupés, un ami lié.',
-            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-          ),
-          const SizedBox(height: 12),
-          if (identities.isEmpty)
-            const Text('Aucune identité pour l\'instant.')
-          else
-            for (final identity in identities)
-              Card(
-                margin: const EdgeInsets.only(bottom: 8),
-                child: ListTile(
-                  title: Text(identity.displayName),
-                  subtitle: Text(
-                    [
-                      identity.names.join(' · '),
-                      if ((identity.friendUsername ?? '').isNotEmpty)
-                        'Ami : ${identity.friendUsername}',
-                    ].join('\n'),
-                  ),
-                  trailing: const Icon(Icons.edit_outlined),
-                  onTap: _saving ? null : () => _openEditor(existing: identity),
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
                 ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'Nom + pseudos fusionnés + ami lié.',
+            style: TextStyle(
+              fontSize: 12,
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 10),
+          if (identities.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                'Aucune identité pour l\'instant.',
+                style: TextStyle(color: scheme.onSurfaceVariant),
               ),
+            )
+          else
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(context).height * 0.45,
+              ),
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: identities.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 4),
+                itemBuilder: (context, index) {
+                  final identity = identities[index];
+                  return _CompactIdentityRow(
+                    identity: identity,
+                    enabled: !_saving,
+                    onEdit: () => _openEditor(existing: identity),
+                    onDelete: () => _deleteIdentity(identity),
+                  );
+                },
+              ),
+            ),
           for (final group in _collisions)
             AliasCollisionWarning(
               names: group,
               enabled: !_saving,
               onMerge: () => _mergeCollision(group),
             ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           FilledButton.icon(
             onPressed: _saving ? null : () => _openEditor(),
-            icon: const Icon(Icons.person_add_alt_1),
+            icon: const Icon(Icons.person_add_alt_1, size: 18),
             label: const Text('Nouvelle identité'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _CompactIdentityRow extends StatelessWidget {
+  final PlayerIdentity identity;
+  final bool enabled;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  const _CompactIdentityRow({
+    required this.identity,
+    required this.enabled,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final extras = identity.names
+        .where(
+          (n) => n.toLowerCase() != identity.displayName.toLowerCase(),
+        )
+        .toList();
+    final friend = (identity.friendUsername ?? '').trim();
+
+    return Material(
+      color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: enabled ? onEdit : null,
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 6, 2, 6),
+          child: Row(
+            children: [
+              Expanded(
+                child: Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    Text(
+                      identity.displayName,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14,
+                      ),
+                    ),
+                    for (final pseudo in extras.take(6))
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: scheme.surfaceContainerHigh,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          pseudo,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    if (friend.isNotEmpty)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: scheme.primary.withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: scheme.primary.withValues(alpha: 0.35),
+                          ),
+                        ),
+                        child: Text(
+                          '@$friend',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: scheme.primary,
+                          ),
+                        ),
+                      ),
+                    if (identity.isMe)
+                      Text(
+                        'moi',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: scheme.tertiary,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'Modifier',
+                visualDensity: VisualDensity.compact,
+                onPressed: enabled ? onEdit : null,
+                icon: const Icon(Icons.edit_outlined, size: 18),
+              ),
+              IconButton(
+                tooltip: 'Supprimer',
+                visualDensity: VisualDensity.compact,
+                onPressed: enabled ? onDelete : null,
+                icon: Icon(
+                  Icons.delete_outline,
+                  size: 18,
+                  color: Colors.red.shade400,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

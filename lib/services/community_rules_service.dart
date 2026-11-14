@@ -188,6 +188,55 @@ class CommunityRulesService {
     return entry;
   }
 
+  Future<bool> unpublish(String ruleId) async {
+    await ensureLoaded();
+    final userId = Supabase.instance.client.auth.currentUser?.id ?? 'anon';
+    final idx = _all.indexWhere((e) => e.id == ruleId);
+    if (idx < 0) return false;
+    final entry = _all[idx];
+    if (entry.authorId != userId &&
+        entry.authorId != 'anon' &&
+        entry.authorId != 'local') {
+      return false;
+    }
+    _all = [..._all]..removeAt(idx);
+    await _persist();
+    return true;
+  }
+
+  Future<CommunityRuleEntry?> updateEntry({
+    required String ruleId,
+    String? title,
+    String? body,
+    String? language,
+  }) async {
+    await ensureLoaded();
+    final userId = Supabase.instance.client.auth.currentUser?.id ?? 'anon';
+    final idx = _all.indexWhere((e) => e.id == ruleId);
+    if (idx < 0) return null;
+    final entry = _all[idx];
+    if (entry.authorId != userId &&
+        entry.authorId != 'anon' &&
+        entry.authorId != 'local') {
+      return null;
+    }
+    final next = CommunityRuleEntry(
+      id: entry.id,
+      gameKey: entry.gameKey,
+      authorId: entry.authorId,
+      authorName: entry.authorName,
+      language: language ?? entry.language,
+      title: title?.trim().isNotEmpty == true ? title!.trim() : entry.title,
+      body: body ?? entry.body,
+      likes: entry.likes,
+      likedBy: entry.likedBy,
+      createdAt: entry.createdAt,
+    );
+    _all = [..._all]..[idx] = next;
+    await _persist();
+    return next;
+  }
+
   Future<CommunityRuleEntry?> toggleLike(String ruleId) async {
     await ensureLoaded();
     final userId = Supabase.instance.client.auth.currentUser?.id;

@@ -102,13 +102,14 @@ class _ModularRuleEditorState extends State<ModularRuleEditor> {
     });
   }
 
-  void _updateSection(RuleSection updated) {
+  void _updateSection(RuleSection updated, {bool rebuild = true}) {
     final i = _sections.indexWhere((s) => s.id == updated.id);
     if (i < 0) return;
-    setState(() {
-      _sections[i] = updated;
-      _emit();
-    });
+    _sections[i] = updated;
+    _emit();
+    // Pas de setState sur chaque frappe : évite de reconstruire le TextField
+    // (perte de focus / clavier mobile). Rebuild seulement pour image/structure.
+    if (rebuild && mounted) setState(() {});
   }
 
   Future<void> _pickImage(RuleSection section) async {
@@ -167,8 +168,10 @@ class _ModularRuleEditorState extends State<ModularRuleEditor> {
                   _expanded.add(section.id);
                 }
               }),
-              onSpansChanged: (spans) =>
-                  _updateSection(section.copyWith(spans: spans)),
+              onSpansChanged: (spans) => _updateSection(
+                section.copyWith(spans: spans),
+                rebuild: false,
+              ),
               onRemove: _sections.length > 1
                   ? () => _removeSection(section.id)
                   : null,
@@ -307,7 +310,9 @@ class _SectionBubble extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     RichSectionTextField(
-                      key: ValueKey('${section.id}_${section.spans.length}'),
+                      // Clé stable : NE PAS inclure spans.length (sinon dispose
+                      // du State à chaque frappe → clavier qui se ferme).
+                      key: ValueKey(section.id),
                       initialSpans: section.spans,
                       onChanged: onSpansChanged,
                     ),

@@ -41,6 +41,7 @@ import '../services/location_service.dart';
 import '../services/collection_refresh.dart';
 import '../services/tag_service.dart';
 import '../widgets/category_collection_tab_pane.dart';
+import '../navigation/app_navigation.dart';
 import '../widgets/category_collection_header.dart';
 import '../widgets/category_collection_shell.dart';
 import 'collection_change_history_screen.dart';
@@ -1320,9 +1321,18 @@ class _HomeScreenState extends State<HomeScreen>
   double _headerPreferredHeight(BuildContext context, {required bool compact}) {
     // Sur web : pas de padding.top (évite la bande verte vide).
     final top = kIsWeb ? 0.0 : MediaQuery.paddingOf(context).top;
-    // 1 seule ligne d'actions scrollable (36/44), plus de double rangée mobile.
-    final toolbar = compact ? 36.0 : 44.0;
-    return top + 40 + 36 + toolbar + 6;
+    final width = MediaQuery.sizeOf(context).width;
+    final actions = _quickActions();
+    final showHome = !AppNavigation.isOnCollectionsHome(context);
+    final hasToolbar =
+        showHome || actions.isNotEmpty || _headerActions.isNotEmpty;
+    return top +
+        CategoryCollectionHeader.contentHeight(
+          maxWidth: width,
+          compact: compact,
+          quickActionCount: actions.length,
+          hasToolbar: hasToolbar,
+        );
   }
 
   @override
