@@ -654,10 +654,7 @@ class _BoardgameTileLocationSheetState
                   },
                 ),
               ],
-              if (_saving) ...[
-                const SizedBox(height: 12),
-                const LinearProgressIndicator(minHeight: 2),
-              ],
+              // Sauvegarde optimiste : pas de barre bloquante.
             ],
           ),
         ),
@@ -712,7 +709,6 @@ class _BoardgameTileValueSheetState extends State<_BoardgameTileValueSheet> {
   late List<TextEditingController> _sourceCtrls;
   late List<bool> _expanded;
   Timer? _saveDebounce;
-  bool _saving = false;
 
   bool get _multi => itemUsesCopyUnits(_item);
 
@@ -825,7 +821,6 @@ class _BoardgameTileValueSheetState extends State<_BoardgameTileValueSheet> {
         'metadata': meta,
       };
     }
-    if (mounted) setState(() => _saving = true);
     try {
       await Supabase.instance.client
           .from('collection_items')
@@ -838,8 +833,6 @@ class _BoardgameTileValueSheetState extends State<_BoardgameTileValueSheet> {
           const SnackBar(content: Text('Erreur lors de la sauvegarde')),
         );
       }
-    } finally {
-      if (mounted) setState(() => _saving = false);
     }
   }
 
@@ -895,7 +888,6 @@ class _BoardgameTileValueSheetState extends State<_BoardgameTileValueSheet> {
                 if (widget.showPurchaseBlock)
                   for (var i = 0; i < _units.length; i++)
                     _copyValueRow(context, i),
-                if (_saving) const LinearProgressIndicator(minHeight: 2),
                 const SizedBox(height: 10),
                 ItemMarketValuePanel(
                   item: _item,

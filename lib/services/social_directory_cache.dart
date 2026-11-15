@@ -109,6 +109,17 @@ class SocialDirectoryCache extends ChangeNotifier {
     }
   }
 
+  /// Retire un lieu des suggestions mémoire (suppression ×).
+  void removePlace(String raw) {
+    final bare = holderLabelStorageValue(raw).trim().toLowerCase();
+    if (bare.isEmpty) return;
+    places = [
+      for (final p in places)
+        if (p.trim().toLowerCase() != bare) p,
+    ];
+    notifyListeners();
+  }
+
   static void _addPlace(
     Set<String> places,
     Set<String> people,

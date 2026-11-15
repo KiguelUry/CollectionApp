@@ -7,7 +7,10 @@ import '../models/rule_section.dart';
 import '../services/community_rules_service.dart';
 import '../services/community_score_templates_service.dart';
 import '../services/profile_cache_service.dart';
+import '../utils/cover_image_url.dart';
 import '../widgets/modular_rule_editor.dart';
+import '../widgets/profile_avatar.dart';
+import '../widgets/score_template_preview.dart';
 
 enum ForumKind { templates, rules, contributors }
 
@@ -378,20 +381,29 @@ class _CommunityForumScreenState extends State<CommunityForumScreen> {
   }
 
   Widget _thumb(String gameKey) {
-    final url = (widget.gameKey == gameKey || _gameKey == gameKey)
-        ? widget.item?.imageUrl
-        : null;
+    final raw = (widget.gameKey == gameKey || _gameKey == gameKey)
+        ? (widget.item?.imageUrl ?? '')
+        : '';
+    final url = raw.trim().isEmpty ? '' : gridThumbnailUrl(raw, size: 96);
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
       child: SizedBox(
         width: 44,
         height: 44,
-        child: url == null || url.isEmpty
+        child: url.isEmpty
             ? ColoredBox(
                 color: Theme.of(context).colorScheme.surfaceContainerHighest,
                 child: const Icon(Icons.casino_outlined, size: 20),
               )
-            : Image.network(url, fit: BoxFit.cover),
+            : Image.network(
+                url,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => ColoredBox(
+                  color:
+                      Theme.of(context).colorScheme.surfaceContainerHighest,
+                  child: const Icon(Icons.casino_outlined, size: 20),
+                ),
+              ),
       ),
     );
   }
@@ -683,95 +695,20 @@ class _CommunityForumScreenState extends State<CommunityForumScreen> {
     );
   }
 
-  void _openTemplate(CommunityScoreTemplate entry) {
+  Future<void> _openTemplate(CommunityScoreTemplate entry) async {
     final isAuthor = entry.authorId == _meId || entry.authorId == 'local';
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (ctx) {
-        final scheme = Theme.of(ctx).colorScheme;
-        return Padding(
-          padding: EdgeInsets.fromLTRB(
-            16,
-            4,
-            16,
-            16 + MediaQuery.viewInsetsOf(ctx).bottom,
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  entry.preset.name,
-                  style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                ),
-                const SizedBox(height: 4),
-                Text(_gameLabel(entry.gameKey)),
-                TextButton(
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    _openContributor(entry.authorId, entry.authorName);
-                  },
-                  child: Text('@${entry.authorName}'),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Aperçu grille',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    for (final name in entry.preset.template.lineNames)
-                      Chip(
-                        avatar: const Text('🔘'),
-                        label: Text(name),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text('Mode : ${entry.preset.confrontation.label}'),
-                const SizedBox(height: 8),
-                Text(
-                  'Victoire : ${entry.preset.template.rulesPhrase}',
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 16),
-                FilledButton.icon(
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    _importTemplate(entry);
-                  },
-                  icon: const Icon(Icons.download_outlined),
-                  label: const Text('Importer dans mes templates'),
-                ),
-                if (isAuthor) ...[
-                  const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    onPressed: () async {
-                      await CommunityScoreTemplatesService.instance
-                          .unpublish(entry.id);
-                      if (ctx.mounted) Navigator.pop(ctx);
-                      await _load();
-                    },
-                    icon: const Icon(Icons.delete_outline),
-                    label: const Text('Retirer du forum'),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        );
-      },
+    await showScoreTemplatePreview(
+      context,
+      preset: entry.preset,
+      gameTitle: _gameLabel(entry.gameKey),
+      authorName: entry.authorName,
+      onImport: () => _importTemplate(entry),
+      onUnpublish: isAuthor
+          ? () async {
+              await CommunityScoreTemplatesService.instance.unpublish(entry.id);
+              await _load();
+            }
+          : null,
     );
   }
 
@@ -1202,7 +1139,8 @@ class _BentoGrid extends StatelessWidget {
             crossAxisCount: columns,
             mainAxisSpacing: 10,
             crossAxisSpacing: 10,
-            childAspectRatio: columns == 1 ? 1.55 : 1.25,
+            // Cartes compactes : plus larges que hautes (évite le vide).
+            childAspectRatio: columns == 1 ? 2.05 : 1.75,
           ),
           itemCount: children.length,
           itemBuilder: (_, i) => children[i],
@@ -1238,6 +1176,7 @@ class _TemplateCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final template = entry.preset.template;
     return Material(
       color: scheme.surfaceContainerLow,
       shape: RoundedRectangleBorder(
@@ -1248,11 +1187,12 @@ class _TemplateCard extends StatelessWidget {
         onTap: onOpen,
         borderRadius: BorderRadius.circular(14),
         child: Padding(
-          padding: const EdgeInsets.all(10),
+          padding: const EdgeInsets.fromLTRB(10, 10, 10, 6),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   thumb,
                   const SizedBox(width: 8),
@@ -1260,70 +1200,140 @@ class _TemplateCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          gameLabel,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 13,
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: scheme.primary.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            gameLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 11,
+                              color: scheme.primary,
+                            ),
                           ),
                         ),
+                        const SizedBox(height: 3),
                         Text(
                           entry.preset.name,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontWeight: FontWeight.w700),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 15,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: onAuthor,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        ProfileAvatar(
+                          fallbackInitial: entry.authorName,
+                          radius: 12,
+                        ),
+                        const SizedBox(width: 6),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              entry.authorName,
+                              style: TextStyle(
+                                color: scheme.primary,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            Text(
+                              badge,
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 4),
-              GestureDetector(
-                onTap: onAuthor,
-                child: Text(
-                  '@${entry.authorName} · $badge',
-                  style: TextStyle(color: scheme.primary, fontSize: 12),
-                ),
-              ),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 4,
-                runSpacing: 4,
-                children: [
-                  Chip(
-                    visualDensity: VisualDensity.compact,
-                    label: Text(
-                      entry.preset.confrontation.label,
-                      style: const TextStyle(fontSize: 11),
-                    ),
-                  ),
-                  for (final name in entry.preset.template.lineNames.take(4))
-                    Chip(
-                      visualDensity: VisualDensity.compact,
-                      avatar: const Text('🔘', style: TextStyle(fontSize: 10)),
-                      label: Text(name, style: const TextStyle(fontSize: 11)),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 8),
               Expanded(
-                child: Text(
-                  entry.preset.template.rulesPhrase,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: scheme.onSurfaceVariant,
-                  ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      flex: 3,
+                      child: SingleChildScrollView(
+                        physics: const NeverScrollableScrollPhysics(),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Wrap(
+                              spacing: 4,
+                              runSpacing: 4,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 7,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: scheme.surfaceContainerHighest,
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Text(
+                                    entry.preset.confrontation.label,
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                for (final name
+                                    in template.lineNames.take(5))
+                                  ScoreCategoryChip(
+                                    name: name,
+                                    compact: true,
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            ScoreRuleBadges(
+                              template: template,
+                              compact: true,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      flex: 2,
+                      child: ScoreTemplateMiniGrid(
+                        template: template,
+                        players: 2,
+                      ),
+                    ),
+                  ],
                 ),
               ),
               Row(
                 children: [
                   IconButton(
                     tooltip: 'Liker',
+                    visualDensity: VisualDensity.compact,
                     onPressed: onLike,
                     icon: Icon(
                       liked ? Icons.favorite : Icons.favorite_border,
@@ -1333,12 +1343,21 @@ class _TemplateCard extends StatelessWidget {
                   ),
                   Text('${entry.likes}'),
                   const Spacer(),
-                  TextButton(
+                  TextButton.icon(
                     onPressed: onOpen,
-                    child: const Text('👁 Aperçu'),
+                    icon: const Icon(Icons.visibility_outlined, size: 16),
+                    label: const Text('Voir le tableau'),
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                    ),
                   ),
                   TextButton(
                     onPressed: onImport,
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                    ),
                     child: const Text('+ Importer'),
                   ),
                 ],

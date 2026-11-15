@@ -525,7 +525,8 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
                 ),
           ),
           const SizedBox(height: 10),
-          if (!_firstPageReady)
+          // Une seule barre : disparaît dès que des jeux sont affichés.
+          if (!_firstPageReady && shown.isEmpty)
             const Padding(
               padding: EdgeInsets.only(bottom: 10),
               child: LinearProgressIndicator(minHeight: 2),
@@ -611,10 +612,9 @@ class _BoardgameDiscoverScreenState extends State<BoardgameDiscoverScreen> {
               ],
             ),
           ],
-          if (_hotLoading || _upcomingLoading)
-            const LinearProgressIndicator(minHeight: 2),
           if (!_hotLoading &&
               !_upcomingLoading &&
+              _firstPageReady &&
               shown.isEmpty &&
               _mode != _DiscoverMode.forYou)
             const Padding(

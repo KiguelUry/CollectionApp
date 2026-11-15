@@ -25,18 +25,26 @@ enum RuleSectionKind {
 class RuleTextSpan {
   final String text;
   final bool bold;
+  /// Couleur ARGB hex optionnelle (ex. `#FFD54F`).
+  final String? color;
 
-  const RuleTextSpan({required this.text, this.bold = false});
+  const RuleTextSpan({
+    required this.text,
+    this.bold = false,
+    this.color,
+  });
 
   Map<String, dynamic> toJson() => {
         't': text,
         if (bold) 'b': true,
+        if (color != null && color!.trim().isNotEmpty) 'c': color,
       };
 
   factory RuleTextSpan.fromJson(Map<String, dynamic> json) {
     return RuleTextSpan(
       text: json['t'] as String? ?? '',
       bold: json['b'] == true,
+      color: json['c']?.toString(),
     );
   }
 }

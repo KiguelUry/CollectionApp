@@ -1031,35 +1031,56 @@ class BggService {
     };
   }
 
-  /// Rangs + notes communautaires : cache partagé `bgg_catalog_cache` puis BGG.
+  /// Rangs + notes : cache local puis BGG **par paquets ≤20** (jamais 1 req/ID).
   static Future<Map<String, _BggThingMeta>> _fetchThingMeta(
     List<String> ids,
   ) async {
     if (ids.isEmpty) return {};
-    final unique = ids.toSet().toList();
+    final unique = ids
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toSet()
+        .toList();
     final out = <String, _BggThingMeta>{};
-    await Future.wait(
-      unique.map((id) async {
-        try {
-          final cached = await BggCatalogCache.instance.getOrFetch(
-            id,
-            BggCacheKind.details,
-            () async {
-              final chunk = await _fetchThingMetaUncached([id]);
-              final m = chunk[id];
-              if (m == null) return null;
-              return _cachePayloadFromMeta(id, m);
-            },
-          );
-          if (cached is Map) {
-            final meta = _metaFromCachePayload(Map<String, dynamic>.from(cached));
-            if (meta != null) out[id] = meta;
-          }
-        } catch (e) {
-          if (kDebugMode) debugPrint('BGG meta cache $id: $e');
-        }
-      }),
-    );
+
+    // 1) Cache mémoire / SharedPreferences groupé.
+    try {
+      final cached = await BggCatalogCache.instance.readManyFresh(
+        unique,
+        BggCacheKind.details,
+      );
+      for (final e in cached.entries) {
+        if (e.value is! Map) continue;
+        final meta =
+            _metaFromCachePayload(Map<String, dynamic>.from(e.value as Map));
+        if (meta != null) out[e.key] = meta;
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('BGG meta readMany: $e');
+    }
+
+    final missing = unique.where((id) => !out.containsKey(id)).toList();
+    if (missing.isEmpty) return out;
+
+    // 2) Paquets ≤20 + délai entre lots → évite la tempête 429.
+    for (var i = 0; i < missing.length; i += _thingChunkSize) {
+      if (i > 0) await Future.delayed(_thingBatchGap);
+      final chunk = missing.skip(i).take(_thingChunkSize).toList();
+      try {
+        final fetched = await _fetchThingMetaUncached(chunk);
+        if (fetched.isEmpty) continue;
+        await BggCatalogCache.instance.writeManyFresh(
+          {
+            for (final e in fetched.entries)
+              e.key: _cachePayloadFromMeta(e.key, e.value),
+          },
+          BggCacheKind.details,
+        );
+        out.addAll(fetched);
+      } catch (e) {
+        if (kDebugMode) debugPrint('BGG meta batch: $e');
+      }
+    }
     return out;
   }
 

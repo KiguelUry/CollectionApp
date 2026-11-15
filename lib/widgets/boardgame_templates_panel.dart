@@ -8,6 +8,7 @@ import '../screens/community_forum_screen.dart';
 import '../services/community_rules_service.dart';
 import '../services/community_score_templates_service.dart';
 import '../services/inventory_service.dart';
+import 'score_template_preview.dart';
 
 /// Modèles du jeu, publication et modèles de la communauté.
 class BoardgameTemplatesPanel extends StatefulWidget {
@@ -41,11 +42,10 @@ class _BoardgameTemplatesPanelState extends State<BoardgameTemplatesPanel> {
   }
 
   Future<void> _reload() async {
-    final templates = await CommunityScoreTemplatesService.instance.forGame(_gameKey);
+    final templates =
+        await CommunityScoreTemplatesService.instance.forGame(_gameKey);
     if (!mounted) return;
-    setState(() {
-      _community = templates;
-    });
+    setState(() => _community = templates);
   }
 
   List<NamedScorePreset> get _allPresets =>
@@ -119,6 +119,14 @@ class _BoardgameTemplatesPanelState extends State<BoardgameTemplatesPanel> {
     setState(() {});
   }
 
+  void _openPreview(NamedScorePreset preset) {
+    showScoreTemplatePreview(
+      context,
+      preset: preset,
+      gameTitle: widget.item.title,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -138,6 +146,7 @@ class _BoardgameTemplatesPanelState extends State<BoardgameTemplatesPanel> {
             _PreviewCard(
               title: preset.name,
               preset: preset,
+              onTap: () => _openPreview(preset),
               trailing: widget.readOnly
                   ? null
                   : TextButton(
@@ -160,7 +169,11 @@ class _BoardgameTemplatesPanelState extends State<BoardgameTemplatesPanel> {
           )
         else
           for (final preset in _imported) ...[
-            _PreviewCard(title: preset.name, preset: preset),
+            _PreviewCard(
+              title: preset.name,
+              preset: preset,
+              onTap: () => _openPreview(preset),
+            ),
             const SizedBox(height: 8),
           ],
         const SizedBox(height: 8),
@@ -197,56 +210,63 @@ class _BoardgameTemplatesPanelState extends State<BoardgameTemplatesPanel> {
 
 class _PreviewCard extends StatelessWidget {
   final String title;
-  final String? subtitle;
   final NamedScorePreset preset;
   final Widget? trailing;
+  final VoidCallback onTap;
 
   const _PreviewCard({
     required this.title,
     required this.preset,
-    this.subtitle,
+    required this.onTap,
     this.trailing,
   });
 
   @override
   Widget build(BuildContext context) {
-    final lines = preset.template.lineNames;
-    final rules = preset.template.rules;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.surfaceContainerLow,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
                   ),
-                ),
-                ?trailing,
-              ],
-            ),
-            if (subtitle != null)
-              Text(subtitle!, style: Theme.of(context).textTheme.bodySmall),
-            const SizedBox(height: 6),
-            Text(
-              lines.isEmpty ? 'Aucune catégorie' : lines.join(' · '),
-              style: const TextStyle(fontSize: 13),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              rules.isEmpty
-                  ? 'Aucune condition de victoire'
-                  : '${rules.length} condition${rules.length > 1 ? 's' : ''} · ${preset.confrontation.label}',
-              style: TextStyle(
-                fontSize: 12,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ?trailing,
+                ],
               ),
-            ),
-          ],
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final name in preset.template.lineNames)
+                    ScoreCategoryChip(name: name, compact: true),
+                ],
+              ),
+              const SizedBox(height: 8),
+              ScoreRuleBadges(template: preset.template, compact: true),
+              const SizedBox(height: 4),
+              Text(
+                preset.confrontation.label,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

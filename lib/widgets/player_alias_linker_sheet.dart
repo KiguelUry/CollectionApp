@@ -4,6 +4,7 @@ import '../models/friend_choice.dart';
 import '../services/friend_service.dart';
 import '../services/global_play_history_service.dart';
 import '../services/player_alias_service.dart';
+import 'profile_avatar.dart';
 
 Future<void> showPlayerAliasLinkerSheet(
   BuildContext context, {
@@ -186,18 +187,28 @@ class _PlayerAliasLinkerSheetState extends State<PlayerAliasLinkerSheet> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setLocal) {
+          final usedElsewhere = <String>{};
+          for (final identity in PlayerAliasService.instance.identities) {
+            if (existing != null && identity.id == existing.id) continue;
+            for (final n in identity.names) {
+              usedElsewhere.add(n.toLowerCase());
+            }
+          }
           final aliases = <String>{
             ...widget.knownNames,
             ...?existing?.names,
-          }.toList()
+          }
+              .where((n) {
+                final key = n.toLowerCase();
+                if (selected.any((s) => s.toLowerCase() == key)) return true;
+                return !usedElsewhere.contains(key);
+              })
+              .toList()
             ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-          final filtered = aliasQuery.trim().isEmpty
+          final q = aliasQuery.trim().toLowerCase();
+          final filtered = q.isEmpty
               ? aliases
-              : aliases
-                  .where(
-                    (n) => n.toLowerCase().contains(aliasQuery.toLowerCase()),
-                  )
-                  .toList();
+              : aliases.where((n) => n.toLowerCase().contains(q)).toList();
           final scheme = Theme.of(ctx).colorScheme;
           return AlertDialog(
             title: Text(
@@ -239,38 +250,62 @@ class _PlayerAliasLinkerSheetState extends State<PlayerAliasLinkerSheet> {
                     ),
                     const SizedBox(height: 8),
                     ConstrainedBox(
-                      constraints: const BoxConstraints(maxHeight: 160),
-                      child: SingleChildScrollView(
-                        child: Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
-                          children: [
-                            for (final name in filtered)
-                              FilterChip(
-                                visualDensity: VisualDensity.compact,
-                                label: Text(
-                                  name,
-                                  style: const TextStyle(fontSize: 12),
+                      constraints: const BoxConstraints(maxHeight: 180),
+                      child: filtered.isEmpty
+                          ? Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              child: Text(
+                                'Aucun pseudo disponible.',
+                                style: TextStyle(
+                                  color: scheme.onSurfaceVariant,
+                                  fontSize: 13,
                                 ),
-                                selected: selected.any(
+                              ),
+                            )
+                          : GridView.builder(
+                              shrinkWrap: true,
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 2,
+                                mainAxisExtent: 40,
+                                crossAxisSpacing: 6,
+                                mainAxisSpacing: 6,
+                              ),
+                              itemCount: filtered.length,
+                              itemBuilder: (_, i) {
+                                final name = filtered[i];
+                                final isOn = selected.any(
                                   (s) =>
                                       s.toLowerCase() == name.toLowerCase(),
-                                ),
-                                onSelected: (on) => setLocal(() {
-                                  selected.removeWhere(
-                                    (s) =>
-                                        s.toLowerCase() == name.toLowerCase(),
-                                  );
-                                  if (on) selected.add(name);
-                                  if (nameCtrl.text.trim().isEmpty &&
-                                      selected.isNotEmpty) {
-                                    nameCtrl.text = selected.first;
-                                  }
-                                }),
-                              ),
-                          ],
-                        ),
-                      ),
+                                );
+                                return FilterChip(
+                                  visualDensity: VisualDensity.compact,
+                                  avatar: ProfileAvatar(
+                                    fallbackInitial: name,
+                                    radius: 10,
+                                  ),
+                                  label: Text(
+                                    name,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                                  selected: isOn,
+                                  onSelected: (on) => setLocal(() {
+                                    selected.removeWhere(
+                                      (s) =>
+                                          s.toLowerCase() ==
+                                          name.toLowerCase(),
+                                    );
+                                    if (on) selected.add(name);
+                                    if (nameCtrl.text.trim().isEmpty &&
+                                        selected.isNotEmpty) {
+                                      nameCtrl.text = selected.first;
+                                    }
+                                  }),
+                                );
+                              },
+                            ),
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
@@ -289,7 +324,23 @@ class _PlayerAliasLinkerSheetState extends State<PlayerAliasLinkerSheet> {
                         for (final choice in _friends)
                           DropdownMenuItem(
                             value: choice.profileId,
-                            child: Text('@${choice.username}'),
+                            child: Row(
+                              children: [
+                                ProfileAvatar(
+                                  avatarUrl: choice.avatarUrl,
+                                  accentColorHex: choice.accentColor,
+                                  fallbackInitial: choice.username,
+                                  radius: 12,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    choice.username,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                       ],
                       onChanged: (id) => setLocal(() {
@@ -421,8 +472,16 @@ class _PlayerAliasLinkerSheetState extends State<PlayerAliasLinkerSheet> {
                 separatorBuilder: (_, _) => const SizedBox(height: 4),
                 itemBuilder: (context, index) {
                   final identity = identities[index];
+                  FriendChoice? linked;
+                  for (final f in _friends) {
+                    if (f.profileId == identity.friendProfileId) {
+                      linked = f;
+                      break;
+                    }
+                  }
                   return _CompactIdentityRow(
                     identity: identity,
+                    friend: linked,
                     enabled: !_saving,
                     onEdit: () => _openEditor(existing: identity),
                     onDelete: () => _deleteIdentity(identity),
@@ -450,12 +509,14 @@ class _PlayerAliasLinkerSheetState extends State<PlayerAliasLinkerSheet> {
 
 class _CompactIdentityRow extends StatelessWidget {
   final PlayerIdentity identity;
+  final FriendChoice? friend;
   final bool enabled;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
   const _CompactIdentityRow({
     required this.identity,
+    required this.friend,
     required this.enabled,
     required this.onEdit,
     required this.onDelete,
@@ -469,7 +530,8 @@ class _CompactIdentityRow extends StatelessWidget {
           (n) => n.toLowerCase() != identity.displayName.toLowerCase(),
         )
         .toList();
-    final friend = (identity.friendUsername ?? '').trim();
+    final linkedName =
+        (friend?.username ?? identity.friendUsername ?? '').trim();
 
     return Material(
       color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
@@ -481,6 +543,13 @@ class _CompactIdentityRow extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(10, 6, 2, 6),
           child: Row(
             children: [
+              ProfileAvatar(
+                avatarUrl: friend?.avatarUrl,
+                accentColorHex: friend?.accentColor,
+                fallbackInitial: identity.displayName,
+                radius: 16,
+              ),
+              const SizedBox(width: 10),
               Expanded(
                 child: Wrap(
                   crossAxisAlignment: WrapCrossAlignment.center,
@@ -512,12 +581,9 @@ class _CompactIdentityRow extends StatelessWidget {
                           ),
                         ),
                       ),
-                    if (friend.isNotEmpty)
+                    if (linkedName.isNotEmpty)
                       Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 7,
-                          vertical: 2,
-                        ),
+                        padding: const EdgeInsets.fromLTRB(4, 2, 8, 2),
                         decoration: BoxDecoration(
                           color: scheme.primary.withValues(alpha: 0.14),
                           borderRadius: BorderRadius.circular(999),
@@ -525,13 +591,25 @@ class _CompactIdentityRow extends StatelessWidget {
                             color: scheme.primary.withValues(alpha: 0.35),
                           ),
                         ),
-                        child: Text(
-                          '@$friend',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: scheme.primary,
-                          ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            ProfileAvatar(
+                              avatarUrl: friend?.avatarUrl,
+                              accentColorHex: friend?.accentColor,
+                              fallbackInitial: linkedName,
+                              radius: 8,
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              linkedName,
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: scheme.primary,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     if (identity.isMe)

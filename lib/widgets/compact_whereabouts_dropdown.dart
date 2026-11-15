@@ -329,7 +329,19 @@ class _CompactWhereaboutsDropdownState
   void _selectUser(String userId, String label) {
     if (widget.readOnly) return;
     setState(() => _manualMode = false);
-    widget.onChanged(locationUserId: userId, holderLabel: label);
+    // Foyer lié (Papa/Maman/Zoé → Braine-l'Alleud) : affiche le lieu sur la tuile.
+    Household? linked;
+    final lower = label.trim().toLowerCase();
+    for (final home in _homes) {
+      if (home.people.any((p) => p.trim().toLowerCase() == lower)) {
+        linked = home;
+        break;
+      }
+    }
+    widget.onChanged(
+      locationUserId: userId,
+      holderLabel: linked?.placeLabel ?? label,
+    );
   }
 
   void _selectHome(Household home) {
@@ -395,12 +407,29 @@ class _CompactWhereaboutsDropdownState
   }
 
   Future<void> _removeSuggestion(String place) async {
-    await HolderPlaceHistoryService.removeForGroups(
-      widget.selectedGroupIds,
-      place,
-      personalUserId: widget.selectedGroupIds.isEmpty ? _personalUserId : null,
+    final bare = holderLabelStorageValue(place).trim();
+    // Optimistic : disparaît tout de suite (plus de réapparition via cache social).
+    setState(() {
+      _placeSuggestions = [
+        for (final p in _placeSuggestions)
+          if (_normPlace(p) != _normPlace(place) &&
+              _normPlace(p) != _normPlace(bare))
+            p,
+      ];
+    });
+    SocialDirectoryCache.instance.removePlace(place);
+    if (_normPlace(widget.holderLabel ?? '') == _normPlace(place) ||
+        _normPlace(widget.holderLabel ?? '') == _normPlace(bare)) {
+      widget.onChanged(clearHolder: true, manualHolder: true);
+    }
+    unawaited(
+      HolderPlaceHistoryService.removeForGroups(
+        widget.selectedGroupIds,
+        place,
+        personalUserId:
+            widget.selectedGroupIds.isEmpty ? _personalUserId : null,
+      ),
     );
-    await _loadPlaceSuggestions();
   }
 
   @override
@@ -447,73 +476,104 @@ class _CompactWhereaboutsDropdownState
           ],
         ),
         const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            if (_meUserId != null)
-              FilterChip(
-                avatar: const Icon(Icons.home_outlined, size: 16),
-                label: const Text('Chez moi'),
-                selected: chezMoiSelected,
-                onSelected: widget.readOnly
-                    ? null
-                    : (_) {
-                        setState(() => _pane = null);
-                        _selectUser(_meUserId!, 'Chez moi');
-                      },
-              ),
-            if (widget.loanActive)
-              FilterChip(
-                avatar: Icon(Icons.handshake_outlined,
-                    size: 16, color: Colors.blue.shade700),
-                label: const Text('Prêté'),
-                selected: true,
-                selectedColor: Colors.blue.withValues(alpha: 0.22),
-                checkmarkColor: Colors.blue.shade700,
-                onSelected: null,
-              ),
-            FilterChip(
-              avatar: const Icon(Icons.person_outline, size: 16),
-              label: const Text('Personne'),
-              selected: personSelected,
-              onSelected: widget.readOnly
-                  ? null
-                  : (_) => setState(() {
-                        _pane = _pane == _WhoPane.person ? null : _WhoPane.person;
-                        _manualMode = _pane == _WhoPane.person;
-                      }),
+        // Onglets segmentés (distincts des puces de choix).
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(4),
+            child: Row(
+              children: [
+                if (_meUserId != null)
+                  Expanded(
+                    child: _WhoTab(
+                      icon: Icons.home_outlined,
+                      label: 'Chez moi',
+                      selected: chezMoiSelected,
+                      onTap: widget.readOnly
+                          ? null
+                          : () {
+                              setState(() => _pane = null);
+                              _selectUser(_meUserId!, 'Chez moi');
+                            },
+                    ),
+                  ),
+                Expanded(
+                  child: _WhoTab(
+                    icon: Icons.person_outline,
+                    label: 'Personne',
+                    selected: personSelected,
+                    onTap: widget.readOnly
+                        ? null
+                        : () => setState(() {
+                              _pane = _pane == _WhoPane.person
+                                  ? null
+                                  : _WhoPane.person;
+                              _manualMode = _pane == _WhoPane.person;
+                            }),
+                  ),
+                ),
+                Expanded(
+                  child: _WhoTab(
+                    icon: Icons.place_outlined,
+                    label: 'Lieu',
+                    selected: placeSelected,
+                    onTap: widget.readOnly
+                        ? null
+                        : () => setState(() {
+                              _pane =
+                                  _pane == _WhoPane.place ? null : _WhoPane.place;
+                              _manualMode = _pane == _WhoPane.place;
+                            }),
+                  ),
+                ),
+                Expanded(
+                  child: _WhoTab(
+                    icon: Icons.home_work_outlined,
+                    label: 'Foyers',
+                    selected: false,
+                    onTap: () async {
+                      await showHouseholdsSheet(context);
+                      if (!mounted) return;
+                      setState(() {
+                        _homes = [...HouseholdService.instance.homes];
+                        _placeSuggestions = {
+                          ..._placeSuggestions,
+                          ...SocialDirectoryCache.instance.places,
+                        }.toList();
+                      });
+                    },
+                  ),
+                ),
+              ],
             ),
-            FilterChip(
-              avatar: const Icon(Icons.place_outlined, size: 16),
-              label: const Text('Lieu'),
-              selected: placeSelected,
-              onSelected: widget.readOnly
-                  ? null
-                  : (_) => setState(() {
-                        _pane = _pane == _WhoPane.place ? null : _WhoPane.place;
-                        _manualMode = _pane == _WhoPane.place;
-                      }),
-            ),
-            ActionChip(
-              avatar: const Icon(Icons.home_work_outlined, size: 16),
-              label: const Text('Foyers'),
-              onPressed: () async {
-                await showHouseholdsSheet(context);
-                if (!mounted) return;
-                setState(() {
-                  _homes = [...HouseholdService.instance.homes];
-                  _placeSuggestions = {
-                    ..._placeSuggestions,
-                    ...SocialDirectoryCache.instance.places,
-                  }.toList();
-                });
-              },
-            ),
-          ],
+          ),
         ),
-        if (_pane == _WhoPane.person) ...[
+        if (widget.loanActive) ...[
           const SizedBox(height: 8),
+          FilterChip(
+            avatar: Icon(Icons.handshake_outlined,
+                size: 16, color: Colors.blue.shade700),
+            label: const Text('Prêté'),
+            selected: true,
+            selectedColor: Colors.blue.withValues(alpha: 0.22),
+            checkmarkColor: Colors.blue.shade700,
+            onSelected: null,
+          ),
+        ],
+        if (_pane == _WhoPane.person) ...[
+          const SizedBox(height: 10),
+          Text(
+            'Choisir une personne :',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 6),
           Wrap(
             spacing: 6,
             runSpacing: 6,
@@ -550,7 +610,16 @@ class _CompactWhereaboutsDropdownState
           ],
         ],
         if (_pane == _WhoPane.place) ...[
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
+          Text(
+            'Choisir un lieu :',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 6),
           Wrap(
             spacing: 6,
             runSpacing: 6,
@@ -558,7 +627,7 @@ class _CompactWhereaboutsDropdownState
               for (final chip in _dedupedPlaceChips())
                 if (chip.isHome && chip.home != null)
                   FilterChip(
-                    avatar: const Icon(Icons.shield_outlined, size: 16),
+                    avatar: const Icon(Icons.place_outlined, size: 16),
                     label: Text(chip.label),
                     selected: _isHomeSelected(chip.home!),
                     onSelected:
@@ -636,6 +705,59 @@ class _CompactWhereaboutsDropdownState
       label: Text(label),
       selected: selected,
       onSelected: onTap == null ? null : (_) => onTap(),
+    );
+  }
+}
+
+class _WhoTab extends StatelessWidget {
+  const _WhoTab({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: selected
+          ? scheme.surfaceContainerHighest
+          : Colors.transparent,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 18,
+                color: selected ? scheme.primary : scheme.onSurfaceVariant,
+              ),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  color: selected ? scheme.onSurface : scheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
