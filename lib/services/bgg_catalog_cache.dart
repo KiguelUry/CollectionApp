@@ -313,24 +313,29 @@ class BggCatalogCache {
   }
 
   /// [fetch] renvoie `null` si BGG n'a rien donné (non mis en cache).
+  /// [accept] : si false, l'entrée cache est ignorée et [fetch] est rappelé
+  /// (ex. payload `meta_only` vs fiche complète).
   Future<Object?> getOrFetch(
     String bggId,
     BggCacheKind kind,
-    Future<Object?> Function() fetch,
-  ) {
+    Future<Object?> Function() fetch, {
+    bool Function(Object payload)? accept,
+  }) {
     final id = bggId.trim();
     if (id.isEmpty) return Future.value(null);
     final key = _key(id, kind);
 
     final mem = _memory[key];
-    if (mem != null && mem.isFresh(_clock(), ttl)) {
+    if (mem != null &&
+        mem.isFresh(_clock(), ttl) &&
+        (accept == null || accept(mem.payload))) {
       return Future.value(mem.payload);
     }
 
     final pending = _inFlight[key];
     if (pending != null) return pending;
 
-    final future = _resolve(id, kind, key, fetch);
+    final future = _resolve(id, kind, key, fetch, accept: accept);
     _inFlight[key] = future;
     return future.whenComplete(() => _inFlight.remove(key));
   }
@@ -339,17 +344,19 @@ class BggCatalogCache {
     String id,
     BggCacheKind kind,
     String key,
-    Future<Object?> Function() fetch,
-  ) async {
+    Future<Object?> Function() fetch, {
+    bool Function(Object payload)? accept,
+  }) async {
     BggCacheEntry? stale = _memory[key];
     try {
       final stored = await _store.read(id, kind);
       if (stored != null) {
-        if (stored.isFresh(_clock(), ttl)) {
+        final ok = accept == null || accept(stored.payload);
+        if (stored.isFresh(_clock(), ttl) && ok) {
           _memory[key] = stored;
           return stored.payload;
         }
-        stale = stored;
+        if (ok) stale = stored;
       }
     } catch (e) {
       if (kDebugMode) debugPrint('BGG cache read $key: $e');
@@ -359,10 +366,17 @@ class BggCatalogCache {
     try {
       fresh = await fetch();
     } catch (e) {
-      if (stale != null) return stale.payload;
+      if (stale != null && (accept == null || accept(stale.payload))) {
+        return stale.payload;
+      }
       rethrow;
     }
-    if (fresh == null) return stale?.payload;
+    if (fresh == null) {
+      if (stale != null && (accept == null || accept(stale.payload))) {
+        return stale.payload;
+      }
+      return null;
+    }
 
     _memory[key] = BggCacheEntry(fresh, _clock());
     try {
@@ -375,6 +389,11 @@ class BggCatalogCache {
 
   /// Vide le cache mémoire (ex. epoch Découvrir `discover_cache_v4`).
   void clearMemory() => _memory.clear();
+
+  /// Retire une entrée mémoire (ex. payload `meta_only` avant fiche complète).
+  void evictMemory(String bggId, BggCacheKind kind) {
+    _memory.remove(_key(bggId.trim(), kind));
+  }
 
   @visibleForTesting
   static void resetCircuitBreaker() {
@@ -442,7 +461,8 @@ class BggCatalogCache {
     if (payload is! Map) return false;
     final title = payload['title']?.toString().trim() ?? '';
     final image = payload['image_url']?.toString().trim() ?? '';
-    return title.isNotEmpty && image.isNotEmpty;
+    if (title.isEmpty || title.toLowerCase() == 'sans titre') return false;
+    return image.isNotEmpty;
   }
 }
 

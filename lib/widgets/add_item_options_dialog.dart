@@ -298,6 +298,20 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                         ),
                       ],
                     ),
+                    if (_photosLoading) ...[
+                      const SizedBox(height: 10),
+                      const LinearProgressIndicator(minHeight: 2),
+                    ] else if (_photos.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        'Images du jeu',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      const SizedBox(height: 6),
+                      BggPhotoStrip(photos: _photos),
+                    ],
                     if (widget.showCrowdfundingSearch) ...[
                       const SizedBox(height: 10),
                       OutlinedButton.icon(
@@ -332,20 +346,6 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                           ),
                         ),
                       ),
-                    ],
-                    if (_photosLoading) ...[
-                      const SizedBox(height: 8),
-                      const LinearProgressIndicator(minHeight: 2),
-                    ] else if (_photos.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        'Aperçus & matériel du jeu',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
-                      ),
-                      const SizedBox(height: 8),
-                      BggPhotoStrip(photos: _photos),
                     ],
                     const SizedBox(height: 8),
                     SwitchListTile(

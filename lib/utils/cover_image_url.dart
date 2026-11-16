@@ -71,23 +71,12 @@ String resolveCoverSourceUrl(String url, {required bool large}) {
     resolved = 'https:$resolved';
   }
 
-  // Grilles / listes : vignettes BGG plus légères.
-  if (!large && resolved.contains('geekdo-images.com') &&
-      resolved.contains('/fit-in/')) {
-    resolved = resolved.replaceFirst(
-      RegExp(r'/fit-in/\d+x\d+/'),
-      '/fit-in/320x320/',
-    );
-  }
-
+  // Ne jamais réécrire `/fit-in/WxH/` sur geekdo : BGG renvoie 400
+  // (ex. 200x150 → 320x320), et wsrv.nl répond alors 404
+  // « The requested URL returned error: 400 ».
+  // La réduction de taille passe par wsrv (`&w=`), pas par le path BGG.
   if (large && resolved.contains('geekdo-images.com')) {
     resolved = bggLargeImageUrl(resolved);
-    if (resolved.contains('/fit-in/')) {
-      resolved = resolved.replaceFirst(
-        RegExp(r'/fit-in/\d+x\d+/'),
-        '/fit-in/1200x1200/',
-      );
-    }
   }
 
   // Grilles / listes : garder low.webp (chargement plus rapide).

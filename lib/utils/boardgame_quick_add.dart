@@ -59,10 +59,22 @@ Future<void> quickAddBoardgameFromCatalog(
       ? parseBggAvgRating(details['bgg_avg_rating'])
       : null;
 
-  final detailTitle = details?['title']?.toString().trim();
-  final title = (detailTitle != null && detailTitle.isNotEmpty)
-      ? detailTitle
-      : game.title;
+  final detailTitle = details?['title']?.toString().trim() ?? '';
+  final catalogTitle = game.title.trim();
+  final title = () {
+    bool missing(String t) =>
+        t.isEmpty || t.toLowerCase() == 'sans titre';
+    if (!missing(detailTitle)) return detailTitle;
+    if (!missing(catalogTitle)) return catalogTitle;
+    return detailTitle.isNotEmpty ? detailTitle : catalogTitle;
+  }();
+  final seedPhotos = <BggGalleryPhoto>[
+    for (final raw in (details?['bgg_gallery_urls'] is List
+        ? details!['bgg_gallery_urls'] as List
+        : const []))
+      if (raw.toString().startsWith('http'))
+        BggGalleryPhoto(url: raw.toString()),
+  ];
   final year = details?['year_published'] is int
       ? details!['year_published'] as int
       : int.tryParse('${details?['year_published'] ?? ''}');
@@ -96,6 +108,7 @@ Future<void> quickAddBoardgameFromCatalog(
       playingTime: playingTime,
       description: desc,
       bggId: game.bggId,
+      photos: seedPhotos.isEmpty ? null : seedPhotos,
       showCrowdfundingSearch: showCrowdfundingSearch ||
           (year != null && year > DateTime.now().year),
       onConfirm: (options) async {

@@ -27,6 +27,8 @@ const ALLOWED_JSON_HOSTS = new Set([
   // BGG XML API (hot / thing / search) — remplace Edge Function Supabase bgg-api.
   "boardgamegeek.com",
   "www.boardgamegeek.com",
+  // Galerie photos matériel (ajout rapide / fiche jeu).
+  "api.geekdo.com",
 ]);
 
 const IMAGE_EXT_RE = /\.(jpe?g|png|webp|gif|avif|bmp|svg)(\?|$)/i;
@@ -248,16 +250,17 @@ export default {
         if (booksKey) target.searchParams.set("key", booksKey);
       }
 
-      const isBgg =
+      const isBggXml =
         host === "boardgamegeek.com" || host === "www.boardgamegeek.com";
+      const isBggApi = host === "api.geekdo.com";
       const upstreamHeaders = {
-        Accept: isBgg
+        Accept: isBggXml
           ? "application/xml, text/xml, */*"
           : "application/json",
         "User-Agent": "Collectingo/1.3-cf",
       };
       // Token BGG injecté côté Worker (jamais exposé au navigateur / pas de preflight).
-      if (isBgg) {
+      if (isBggXml || isBggApi) {
         const bggToken = (env.BGG_APPLICATION_TOKEN || "").trim();
         if (bggToken) {
           upstreamHeaders.Authorization = `Bearer ${bggToken}`;
@@ -275,7 +278,7 @@ export default {
         ...corsHeaders,
         "Content-Type": contentType,
         // BGG change souvent (hot) → cache court ; APIs livres → 1 jour.
-        "Cache-Control": isBgg
+        "Cache-Control": isBggXml || isBggApi
           ? "public, max-age=900, s-maxage=900"
           : "public, max-age=86400, s-maxage=86400",
       });

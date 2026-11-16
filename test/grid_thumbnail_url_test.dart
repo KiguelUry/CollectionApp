@@ -5,15 +5,17 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('gridThumbnailUrl / proxyImageUrl', () {
-    test('BGG : passe par wsrv.nl en WebP', () {
+    test('BGG : passe par wsrv.nl en WebP sans réécrire fit-in', () {
       const src =
-          'https://cf.geekdo-images.com/abc/fit-in/500x500/filters:no_upscale()/pic1.jpg';
+          'https://cf.geekdo-images.com/abc/fit-in/200x150/filters:strip_icc()/pic1.jpg';
       final out = gridThumbnailUrl(src);
       final uri = Uri.parse(out);
       expect(uri.host, 'wsrv.nl');
       expect(uri.queryParameters['w'], '260');
       expect(uri.queryParameters['output'], 'webp');
-      expect(uri.queryParameters['url'], contains('/fit-in/320x320/'));
+      // Ne pas muter /fit-in/WxH/ (BGG 400 → wsrv 404).
+      expect(uri.queryParameters['url'], contains('/fit-in/200x150/'));
+      expect(uri.queryParameters['url'], isNot(contains('/fit-in/320x320/')));
     });
 
     test('Discogs / Apple / Google Books : wsrv.nl', () {

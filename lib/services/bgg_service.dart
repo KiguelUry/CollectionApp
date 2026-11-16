@@ -504,11 +504,13 @@ class BggService {
 
   static String unescapeHtml(String raw) => cleanDisplayText(raw);
 
-  /// Titre BGG : `type="primary"` d'abord, sinon `<name value="…"/>` (API Hot).
-  /// Uniquement les `<name>` **enfants directs** du nœud (jamais le document).
-  /// Ignore les balises `alternate`.
+  /// Titre BGG : `type="primary"` d'abord, sinon valeur sans type (API Hot),
+  /// sinon `alternate` (recherche FR : BGG ne renvoie souvent QUE l'alternate).
+  /// Uniquement les `<name>` **enfants directs** du nœud.
   static String _primaryTitle(XmlElement node) {
-    String? fallback;
+    String? untitled;
+    String? untyped;
+    String? alternate;
     for (final name in node.findElements('name')) {
       final value = name.getAttribute('value');
       if (value == null || value.trim().isEmpty) continue;
@@ -516,13 +518,21 @@ class BggService {
       if (type == 'primary') {
         return unescapeHtml(value);
       }
-      // Hot : <name value="…"/> sans type. Jamais alternate.
+      // Hot : <name value="…"/> sans type.
       if (type == null || type.isEmpty) {
-        fallback ??= value;
+        untyped ??= value;
+      } else if (type == 'alternate') {
+        alternate ??= value;
       }
     }
-    if (fallback != null) return unescapeHtml(fallback);
+    untitled = untyped ?? alternate;
+    if (untitled != null) return unescapeHtml(untitled);
     return 'Sans titre';
+  }
+
+  static bool _isMissingTitle(String? title) {
+    final t = title?.trim() ?? '';
+    return t.isEmpty || t.toLowerCase() == 'sans titre';
   }
 
   /// `<item>` de premier niveau uniquement (ignore les versions imbriquées).
@@ -1017,18 +1027,37 @@ class BggService {
     );
   }
 
+  /// Marqueur : payload léger écrit par [_fetchThingMeta] (pas une fiche complète).
+  static const _metaOnlyCacheKey = 'meta_only';
+
   static Map<String, dynamic> _cachePayloadFromMeta(String id, _BggThingMeta m) {
     return {
       'bgg_id': id,
+      _metaOnlyCacheKey: true,
       if (m.image != null && m.image!.isNotEmpty) 'image_url': m.image,
       if (m.thumbnail != null && m.thumbnail!.isNotEmpty)
         'thumbnail_url': m.thumbnail,
       if (m.avgRating != null) 'bgg_avg_rating': m.avgRating,
       if (m.rank != null) _searchMetaRankKey: m.rank,
-      if (m.title != null && m.title!.isNotEmpty) 'title': m.title,
+      if (m.title != null &&
+          m.title!.isNotEmpty &&
+          !_isMissingTitle(m.title))
+        'title': m.title,
       if (m.year != null && m.year!.isNotEmpty) 'year_published': m.year,
       if (m.categories.isNotEmpty) 'bgg_categories': m.categories,
     };
+  }
+
+  static bool _isFullDetailsPayload(Map<String, dynamic> map) {
+    if (map[_metaOnlyCacheKey] == true) return false;
+    // Fiche complète : au moins joueurs ou description (absents du meta search).
+    if (map.containsKey('min_players') || map.containsKey('max_players')) {
+      return true;
+    }
+    final desc = map['bgg_description']?.toString() ??
+        map['bgg_short_description']?.toString() ??
+        '';
+    return desc.trim().isNotEmpty;
   }
 
   /// Rangs + notes : cache local puis BGG **par paquets ≤20** (jamais 1 req/ID).
@@ -1229,12 +1258,14 @@ class BggService {
           imageUrl = m.thumbnail!;
         }
       }
+      final metaTitle = m.title?.trim();
+      final preferMetaTitle = metaTitle != null &&
+          metaTitle.isNotEmpty &&
+          !_isMissingTitle(metaTitle) &&
+          _isMissingTitle(g['title']);
       return {
         ...g,
-        if ((g['title'] ?? '').isEmpty &&
-            m.title != null &&
-            m.title!.isNotEmpty)
-          'title': m.title!,
+        if (preferMetaTitle) 'title': metaTitle,
         if ((g['year'] ?? '').isEmpty && m.year != null && m.year!.isNotEmpty)
           'year': m.year!,
         if ((g['bgg_rank'] ?? '').isEmpty && m.rank != null)
@@ -1385,19 +1416,24 @@ class BggService {
 
   static Future<List<BggGalleryPhoto>> fetchCommunityGallery(String bggId) async {
     if (bggId.trim().isEmpty) return const [];
-    if (_webProxyReady) {
+    // Legacy Edge Function uniquement si Cloudflare n'est pas le proxy actif.
+    if (_useWebJsonApi) {
       final data = await _jsonApiGet('images', {'id': bggId});
       final raw = data?['images'];
       if (raw is List) return _photosFromApiList(raw);
     }
     try {
-      final uri = Uri.parse(
+      var uri = Uri.parse(
         'https://api.geekdo.com/api/images?ajax=1&gallery=game&nosession=1'
         '&objectid=$bggId&objecttype=thing&pageid=1&showcount=12&sort=hot',
       );
+      // Web : api.geekdo.com est CORS-bloqué → Worker Cloudflare.
+      if (kIsWeb && usesCloudflareCatalogProxy) {
+        uri = buildCatalogProxyUri(uri.toString());
+      }
       final response = await http.get(
         uri,
-        headers: {'Accept': 'application/json'},
+        headers: const {'Accept': 'application/json'},
       );
       if (response.statusCode != 200 || response.body.isEmpty) {
         return const [];
@@ -1723,6 +1759,9 @@ class BggService {
         id,
         BggCacheKind.details,
         () => _fetchGameFullDetailsRemote(id),
+        accept: (payload) =>
+            payload is Map &&
+            _isFullDetailsPayload(Map<String, dynamic>.from(payload)),
       );
       if (cached is! Map) return null;
       final map = Map<String, dynamic>.from(cached);
@@ -1737,6 +1776,20 @@ class BggService {
       }
       map['bgg_id'] = id;
       map['id'] = id;
+      // Titre placeholder → refuse (évite « Sans titre » dans l'ajout rapide).
+      if (_isMissingTitle(map['title']?.toString())) {
+        final remote = await _fetchGameFullDetailsRemote(id);
+        if (remote != null) {
+          final fixed = Map<String, dynamic>.from(remote);
+          fixed['bgg_id'] = id;
+          fixed['id'] = id;
+          await BggCatalogCache.instance.writeManyFresh(
+            {id: fixed},
+            BggCacheKind.details,
+          );
+          return fixed;
+        }
+      }
       return map;
     } catch (e) {
       if (kDebugMode) debugPrint('Erreur détails BGG: $e');
