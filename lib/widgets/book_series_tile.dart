@@ -65,18 +65,34 @@ class BookSeriesTile extends StatelessWidget {
                   children: [
                     ClipRRect(
                       borderRadius: BorderRadius.circular(12),
-                      child: series.coverUrl != null &&
-                              series.coverUrl!.trim().isNotEmpty
-                          ? CollectionCoverImage(
-                              url: series.coverUrl!,
-                              bookCover: true,
-                              boxedCover: true,
-                              compact: true,
-                              fit: BoxFit.contain,
-                            )
-                          : CoverImagePlaceholder(
-                              bookCover: true,
-                            ),
+                      child: Builder(
+                        builder: (context) {
+                          final cover = series.coverUrl != null &&
+                                  series.coverUrl!.trim().isNotEmpty
+                              ? CollectionCoverImage(
+                                  url: series.coverUrl!,
+                                  bookCover: true,
+                                  boxedCover: true,
+                                  compact: true,
+                                  fit: BoxFit.contain,
+                                )
+                              : const CoverImagePlaceholder(
+                                  bookCover: true,
+                                );
+                          // Série non possédée → couverture grisée
+                          // (même si des tomes sont marqués lus).
+                          if (stats.ownedCount > 0) return cover;
+                          return ColorFiltered(
+                            colorFilter: const ColorFilter.matrix(<double>[
+                              0.35, 0.45, 0.05, 0, 0,
+                              0.35, 0.45, 0.05, 0, 0,
+                              0.35, 0.45, 0.05, 0, 0,
+                              0, 0, 0, 0.55, 0,
+                            ]),
+                            child: cover,
+                          );
+                        },
+                      ),
                     ),
                     if (onToggleFavorite != null)
                       Positioned(

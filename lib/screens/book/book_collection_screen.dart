@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../constants/book_accent.dart';
@@ -465,33 +467,33 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
       BooksMigrationService.runIfNeeded();
 
       final bundle = await _service.fetchCollectionBundle();
-      final entries = <_SeriesEntry>[];
-      for (var series in bundle.series) {
-        // Persiste le nom nettoyé (« One Piece - Édition originale » → « One Piece »).
-        series = await _service.sanitizeSeriesName(series);
-        // Autre → Roman (Les sept sœurs, Dungeon Crawler Carl…).
-        series = await _service.reclassifyOtherAsNovelIfLikely(series);
-        final volumes = bundle.volumesBySeries[series.id] ?? const [];
-        final items = bundle.itemsBySeries[series.id] ?? const [];
-        final stats = _service.computeStats(
-          series: series,
-          volumes: volumes,
-          items: items,
-        );
-        entries.add(
+      // Paint immédiat : pas d'await sanitize/reclassify dans la boucle
+      // (sinon liste partielle / vide pendant les 429 iTunes/Google).
+      final entries = <_SeriesEntry>[
+        for (final series in bundle.series)
           _SeriesEntry(
             series: series,
-            volumes: volumes,
-            stats: stats,
-            items: items,
-          ),
-        );
-      }
-      entries.sort(
-        (a, b) => a.series.name.toLowerCase().compareTo(
-              b.series.name.toLowerCase(),
+            volumes: bundle.volumesBySeries[series.id] ?? const [],
+            items: bundle.itemsBySeries[series.id] ?? const [],
+            stats: _service.computeStats(
+              series: series,
+              volumes: bundle.volumesBySeries[series.id] ?? const [],
+              items: bundle.itemsBySeries[series.id] ?? const [],
             ),
-      );
+          ),
+      ]..sort(
+          (a, b) => a.series.name.toLowerCase().compareTo(
+                b.series.name.toLowerCase(),
+              ),
+        );
+
+      // Ne jamais écraser une liste pleine par un résultat vide (glitch auth /
+      // cache / soft-refresh) — les séries « disparaissent » sinon.
+      if (entries.isEmpty && _entries.isNotEmpty) {
+        if (mounted) setState(() => _loading = false);
+        return;
+      }
+
       _cache.put([
         for (final e in entries)
           CachedSeriesEntry(
@@ -507,17 +509,59 @@ class _BookCollectionScreenState extends State<BookCollectionScreen> {
           _loading = false;
         });
       }
-      // Mes livres = lecture Supabase uniquement.
-      // Pas de Google Books / MangaDex en tâche de fond sur toute la liste
-      // (évite 429). Enrichissement couvertures = fiche série seulement.
+
+      // Nettoyage noms / Autre→Roman en arrière-plan (non bloquant).
+      unawaited(_sanitizeEntriesInBackground(entries));
     } catch (e) {
       if (mounted) {
         setState(() => _loading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$e')),
-        );
+        if (!silent) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('$e')),
+          );
+        }
       }
     }
+  }
+
+  Future<void> _sanitizeEntriesInBackground(List<_SeriesEntry> snapshot) async {
+    var changed = false;
+    final next = <_SeriesEntry>[];
+    for (final entry in snapshot) {
+      var series = entry.series;
+      try {
+        series = await _service.sanitizeSeriesName(series);
+        series = await _service.reclassifyOtherAsNovelIfLikely(series);
+      } catch (_) {
+        series = entry.series;
+      }
+      if (series.id != entry.series.id ||
+          series.name != entry.series.name ||
+          series.subcategory != entry.series.subcategory) {
+        changed = true;
+      }
+      next.add(
+        _SeriesEntry(
+          series: series,
+          volumes: entry.volumes,
+          items: entry.items,
+          stats: entry.stats,
+        ),
+      );
+    }
+    if (!changed || !mounted) return;
+    // Ne remplace que si la liste affichée est encore ce snapshot.
+    if (_entries.length != snapshot.length) return;
+    _cache.put([
+      for (final e in next)
+        CachedSeriesEntry(
+          series: e.series,
+          volumes: e.volumes,
+          items: e.items,
+          stats: e.stats,
+        ),
+    ]);
+    if (mounted) setState(() => _entries = next);
   }
 
   BookSeriesStats _displayStats(_SeriesEntry entry) {
@@ -1261,14 +1305,28 @@ class _BookSeriesCompactRow extends StatelessWidget {
                   child: SizedBox(
                     width: 46,
                     height: 66,
-                    child: series.coverUrl != null &&
-                            series.coverUrl!.trim().isNotEmpty
-                        ? CollectionCoverImage(
-                            url: series.coverUrl!,
-                            bookCover: true,
-                            fit: BoxFit.cover,
-                          )
-                        : CoverImagePlaceholder(bookCover: true),
+                    child: Builder(
+                      builder: (context) {
+                        final cover = series.coverUrl != null &&
+                                series.coverUrl!.trim().isNotEmpty
+                            ? CollectionCoverImage(
+                                url: series.coverUrl!,
+                                bookCover: true,
+                                fit: BoxFit.cover,
+                              )
+                            : const CoverImagePlaceholder(bookCover: true);
+                        if (stats.ownedCount > 0) return cover;
+                        return ColorFiltered(
+                          colorFilter: const ColorFilter.matrix(<double>[
+                            0.35, 0.45, 0.05, 0, 0,
+                            0.35, 0.45, 0.05, 0, 0,
+                            0.35, 0.45, 0.05, 0, 0,
+                            0, 0, 0, 0.55, 0,
+                          ]),
+                          child: cover,
+                        );
+                      },
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -1387,15 +1445,30 @@ class _BookSeriesCompactGridTile extends StatelessWidget {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  series.coverUrl != null && series.coverUrl!.trim().isNotEmpty
-                      ? CollectionCoverImage(
-                          url: series.coverUrl!,
-                          bookCover: true,
-                          boxedCover: true,
-                          compact: true,
-                          fit: BoxFit.contain,
-                        )
-                      : CoverImagePlaceholder(bookCover: true),
+                  Builder(
+                    builder: (context) {
+                      final cover = series.coverUrl != null &&
+                              series.coverUrl!.trim().isNotEmpty
+                          ? CollectionCoverImage(
+                              url: series.coverUrl!,
+                              bookCover: true,
+                              boxedCover: true,
+                              compact: true,
+                              fit: BoxFit.contain,
+                            )
+                          : const CoverImagePlaceholder(bookCover: true);
+                      if (stats.ownedCount > 0) return cover;
+                      return ColorFiltered(
+                        colorFilter: const ColorFilter.matrix(<double>[
+                          0.35, 0.45, 0.05, 0, 0,
+                          0.35, 0.45, 0.05, 0, 0,
+                          0.35, 0.45, 0.05, 0, 0,
+                          0, 0, 0, 0.55, 0,
+                        ]),
+                        child: cover,
+                      );
+                    },
+                  ),
                   Positioned(
                     right: 4,
                     bottom: 4,

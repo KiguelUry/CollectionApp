@@ -1999,29 +1999,43 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
-                          Opacity(
-                            opacity: owned || read || wish ? 1 : 0.45,
-                            child: coverUrl != null && coverUrl.isNotEmpty
-                                ? CollectionCoverImage(
-                                    url: coverUrl,
-                                    bookCover: true,
-                                    compact: true,
-                                    fit: BoxFit.cover,
-                                  )
-                                : ColoredBox(
-                                    color: Colors.grey.shade800,
-                                    child: Center(
-                                      child: Text(
-                                        isChapter
-                                            ? 'Ch.${slot.volume.displayNumber}'
-                                            : 'T${slot.volume.displayNumber}',
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 18,
+                          Builder(
+                            builder: (context) {
+                              // Couverture pleine couleur seulement si possédé
+                              // (lu sans posséder reste grisé).
+                              final cover = coverUrl != null &&
+                                      coverUrl.isNotEmpty
+                                  ? CollectionCoverImage(
+                                      url: coverUrl,
+                                      bookCover: true,
+                                      compact: true,
+                                      fit: BoxFit.cover,
+                                    )
+                                  : ColoredBox(
+                                      color: Colors.grey.shade800,
+                                      child: Center(
+                                        child: Text(
+                                          isChapter
+                                              ? 'Ch.${slot.volume.displayNumber}'
+                                              : 'T${slot.volume.displayNumber}',
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 18,
+                                          ),
                                         ),
                                       ),
-                                    ),
-                                  ),
+                                    );
+                              if (owned) return cover;
+                              return ColorFiltered(
+                                colorFilter: const ColorFilter.matrix(<double>[
+                                  0.35, 0.45, 0.05, 0, 0,
+                                  0.35, 0.45, 0.05, 0, 0,
+                                  0.35, 0.45, 0.05, 0, 0,
+                                  0, 0, 0, 0.55, 0,
+                                ]),
+                                child: cover,
+                              );
+                            },
                           ),
                           if (isChapter)
                             Positioned(
