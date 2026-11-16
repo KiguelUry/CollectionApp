@@ -875,8 +875,8 @@ class _HomeScreenState extends State<HomeScreen>
       context: context,
       builder: (dialogContext) => BggSearchDialog(
         onGameSelected: (bggGame) {
-          Navigator.pop(dialogContext);
-          _prepareBggAdd(bggGame);
+          // Garde la recherche ouverte dessous → flèche retour y revient.
+          _prepareBggAdd(bggGame, fromSearch: true);
         },
         onManualAdd: kIsWeb
             ? () {
@@ -888,7 +888,10 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Future<void> _prepareBggAdd(Map<String, String> bggGame) async {
+  Future<void> _prepareBggAdd(
+    Map<String, String> bggGame, {
+    bool fromSearch = false,
+  }) async {
     if (!mounted) return;
 
     showDialog(
@@ -911,15 +914,28 @@ class _HomeScreenState extends State<HomeScreen>
 
     final bggId = bggGame['id']!;
     final details = await BggService.getGameFullDetails(bggId);
+    final photos = bggId.isEmpty
+        ? const <BggGalleryPhoto>[]
+        : await BggService.fetchCommunityGallery(bggId);
 
     if (!mounted) return;
-    Navigator.pop(context);
+    Navigator.pop(context); // ferme le loader
+
+    final detailTitle = details?['title']?.toString().trim() ?? '';
+    final searchTitle = bggGame['title']?.trim() ?? '';
+    final title = (detailTitle.isNotEmpty &&
+            detailTitle.toLowerCase() != 'sans titre')
+        ? detailTitle
+        : (searchTitle.isNotEmpty ? searchTitle : detailTitle);
 
     _showOptionsDialog(
-      title: bggGame['title']!,
+      title: title,
       bggId: bggId,
       imageUrl: (details?['image_url'] as String?) ?? bggGame['image_url'],
       bggDetails: details,
+      photos: photos,
+      showBackToSearch: fromSearch,
+      closesTwoDialogs: fromSearch,
     );
   }
 
@@ -1009,14 +1025,52 @@ class _HomeScreenState extends State<HomeScreen>
     Map<String, dynamic>? metadata,
     String? bggId,
     Map<String, dynamic>? bggDetails,
+    List<BggGalleryPhoto>? photos,
+    bool showBackToSearch = false,
     bool closesTwoDialogs = false,
   }) {
+    final year = bggDetails?['year_published'] is int
+        ? bggDetails!['year_published'] as int
+        : int.tryParse('${bggDetails?['year_published'] ?? ''}');
+    final minP = bggDetails?['min_players'] is int
+        ? bggDetails!['min_players'] as int
+        : int.tryParse('${bggDetails?['min_players'] ?? ''}');
+    final maxP = bggDetails?['max_players'] is int
+        ? bggDetails!['max_players'] as int
+        : int.tryParse('${bggDetails?['max_players'] ?? ''}');
+    final playingTime = _positivePlayingTime(bggDetails?['playing_time']);
+    final desc = bggDetails?['bgg_description']?.toString() ??
+        bggDetails?['bgg_short_description']?.toString();
+    final avg = parseBggAvgRating(bggDetails?['bgg_avg_rating']);
+    final seedPhotos = <BggGalleryPhoto>[
+      ...?photos,
+      for (final raw in (bggDetails?['bgg_gallery_urls'] is List
+          ? bggDetails!['bgg_gallery_urls'] as List
+          : const []))
+        if (raw.toString().startsWith('http'))
+          BggGalleryPhoto(url: raw.toString()),
+    ];
+
     showDialog(
       context: context,
       builder: (dialogContext) => AddItemOptionsDialog(
         itemTitle: title,
         itemImageUrl: imageUrl,
         defaultWishlist: _addingToWishlist,
+        bggId: bggId,
+        bggAvgRating: avg,
+        yearPublished: year,
+        minPlayers: minP,
+        maxPlayers: maxP,
+        playingTime: playingTime,
+        description: desc,
+        photos: seedPhotos.isEmpty ? null : seedPhotos,
+        showBackButton: showBackToSearch,
+        showCrowdfundingSearch:
+            year != null && year > DateTime.now().year,
+        onBack: showBackToSearch
+            ? () => Navigator.pop(dialogContext)
+            : null,
         onConfirm: (options) async {
           await _handleSave(
             dialogContext: dialogContext,

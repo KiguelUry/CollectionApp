@@ -52,6 +52,9 @@ class AddItemOptionsDialog extends StatefulWidget {
   final List<BggGalleryPhoto>? photos;
   /// Affiche « Chercher le projet » (Kickstarter / Gamefound) pour les sorties.
   final bool showCrowdfundingSearch;
+  /// Flèche retour (ex. vers la recherche BGG).
+  final bool showBackButton;
+  final VoidCallback? onBack;
   final Future<void> Function(AddItemOptions options) onConfirm;
 
   const AddItemOptionsDialog({
@@ -70,6 +73,8 @@ class AddItemOptionsDialog extends StatefulWidget {
     this.bggId,
     this.photos,
     this.showCrowdfundingSearch = false,
+    this.showBackButton = false,
+    this.onBack,
   });
 
   @override
@@ -99,7 +104,7 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
     _locationUserId = Supabase.instance.client.auth.currentUser?.id;
     _photos = widget.photos ?? const [];
     _load();
-    if (_photos.isEmpty && (widget.bggId ?? '').isNotEmpty) {
+    if ((widget.bggId ?? '').isNotEmpty) {
       unawaited(_loadPhotos());
     }
   }
@@ -111,12 +116,30 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
   Future<void> _loadPhotos() async {
     final id = widget.bggId?.trim();
     if (id == null || id.isEmpty) return;
-    setState(() => _photosLoading = true);
+    if (mounted) setState(() => _photosLoading = true);
     try {
       final photos = await BggService.fetchCommunityGallery(id);
       if (!mounted) return;
+      // Fusionne couverture seed + galerie communauté (sans doublons).
+      final merged = <BggGalleryPhoto>[];
+      final seen = <String>{};
+      void addAll(Iterable<BggGalleryPhoto> list) {
+        for (final p in list) {
+          final key = p.url.trim();
+          if (key.isEmpty || !seen.add(key)) continue;
+          merged.add(p);
+          if (merged.length >= 12) break;
+        }
+      }
+
+      addAll(widget.photos ?? const []);
+      if (widget.itemImageUrl != null &&
+          widget.itemImageUrl!.trim().isNotEmpty) {
+        addAll([BggGalleryPhoto(url: widget.itemImageUrl!.trim())]);
+      }
+      addAll(photos);
       setState(() {
-        _photos = photos;
+        _photos = merged;
         _photosLoading = false;
       });
     } catch (_) {
@@ -211,7 +234,28 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
     final desc = _cleanDescription;
 
     return AlertDialog(
-      title: const Text('Ajouter à la collection'),
+      title: Row(
+        children: [
+          if (widget.showBackButton) ...[
+            IconButton(
+              tooltip: 'Retour à la recherche',
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+              onPressed: () {
+                if (widget.onBack != null) {
+                  widget.onBack!();
+                } else {
+                  Navigator.pop(context);
+                }
+              },
+              icon: const Icon(Icons.arrow_back),
+            ),
+            const SizedBox(width: 4),
+          ],
+          const Expanded(child: Text('Ajouter à la collection')),
+        ],
+      ),
       content: SizedBox(
         width: double.maxFinite,
         child: _loading

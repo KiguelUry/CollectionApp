@@ -1415,36 +1415,47 @@ class BggService {
   }
 
   static Future<List<BggGalleryPhoto>> fetchCommunityGallery(String bggId) async {
-    if (bggId.trim().isEmpty) return const [];
-    // Legacy Edge Function uniquement si Cloudflare n'est pas le proxy actif.
+    final id = bggId.trim();
+    if (id.isEmpty) return const [];
+
+    // 1) Galerie communauté (matériel / mise en table).
+    List<BggGalleryPhoto> community = const [];
     if (_useWebJsonApi) {
-      final data = await _jsonApiGet('images', {'id': bggId});
+      final data = await _jsonApiGet('images', {'id': id});
       final raw = data?['images'];
-      if (raw is List) return _photosFromApiList(raw);
+      if (raw is List) community = _photosFromApiList(raw);
     }
-    try {
-      var uri = Uri.parse(
-        'https://api.geekdo.com/api/images?ajax=1&gallery=game&nosession=1'
-        '&objectid=$bggId&objecttype=thing&pageid=1&showcount=12&sort=hot',
-      );
-      // Web : api.geekdo.com est CORS-bloqué → Worker Cloudflare.
-      if (kIsWeb && usesCloudflareCatalogProxy) {
-        uri = buildCatalogProxyUri(uri.toString());
-      }
-      final response = await http.get(
-        uri,
-        headers: const {'Accept': 'application/json'},
-      );
-      if (response.statusCode != 200 || response.body.isEmpty) {
-        return const [];
-      }
-      final decoded = jsonDecode(response.body);
-      final images = decoded is Map ? decoded['images'] : null;
-      if (images is! List) return const [];
-      return _galleryPhotos(images);
-    } catch (_) {
-      return const [];
+    if (community.isEmpty) {
+      try {
+        var uri = Uri.parse(
+          'https://api.geekdo.com/api/images?ajax=1&gallery=game&nosession=1'
+          '&objectid=$id&objecttype=thing&pageid=1&showcount=12&sort=hot',
+        );
+        if (kIsWeb && usesCloudflareCatalogProxy) {
+          uri = buildCatalogProxyUri(uri.toString());
+        }
+        final response = await http.get(
+          uri,
+          headers: const {'Accept': 'application/json'},
+        );
+        if (response.statusCode == 200 && response.body.isNotEmpty) {
+          final decoded = jsonDecode(response.body);
+          final images = decoded is Map ? decoded['images'] : null;
+          if (images is List) community = _galleryPhotos(images);
+        }
+      } catch (_) {}
     }
+    if (community.isNotEmpty) return community;
+
+    // 2) Fallback : images du geekitems (couverture / hero).
+    final extras = await _fetchGeekItemExtras(id);
+    final urls = extras['bgg_gallery_urls'];
+    if (urls is! List || urls.isEmpty) return const [];
+    return [
+      for (final raw in urls)
+        if (raw.toString().startsWith('http'))
+          BggGalleryPhoto(url: raw.toString()),
+    ];
   }
 
   static List<BggGalleryPhoto> _photosFromApiList(List<dynamic> raw) {
@@ -1518,14 +1529,18 @@ class BggService {
     return null;
   }
 
-  /// `short_description` BGG (API interne geekitems, absente du XML API2).
+  /// Extras BGG via `/api/geekitems` (short_description + images).
+  /// Sur le web : obligatoire via Cloudflare (sinon CORS).
   static Future<Map<String, dynamic>> _fetchGeekItemExtras(String bggId) async {
     if (bggId.isEmpty) return {};
     try {
-      final uri = Uri.https('boardgamegeek.com', '/api/geekitems', {
+      var uri = Uri.https('boardgamegeek.com', '/api/geekitems', {
         'objectid': bggId,
         'objecttype': 'thing',
       });
+      if (kIsWeb && usesCloudflareCatalogProxy) {
+        uri = buildCatalogProxyUri(uri.toString());
+      }
       final geekHeaders = <String, String>{'Accept': 'application/json'};
       if (!kIsWeb) geekHeaders['User-Agent'] = 'CollectionFamille/1.0';
       final response = await http.get(uri, headers: geekHeaders);
@@ -1534,13 +1549,41 @@ class BggService {
       if (decoded is! Map) return {};
       final item = decoded['item'];
       if (item is! Map) return {};
+      final out = <String, dynamic>{};
       final short = item['short_description']?.toString().trim();
-      if (short == null || short.isEmpty) return {};
-      return {'bgg_short_description': short};
+      if (short != null && short.isNotEmpty) {
+        out['bgg_short_description'] = short;
+      }
+      final gallery = _galleryUrlsFromGeekItem(item);
+      if (gallery.isNotEmpty) {
+        out['bgg_gallery_urls'] = gallery;
+      }
+      return out;
     } catch (e) {
       if (kDebugMode) debugPrint('BGG geekitems $bggId: $e');
       return {};
     }
+  }
+
+  /// URLs images utiles depuis le JSON geekitems (couverture + hero).
+  static List<String> _galleryUrlsFromGeekItem(Map item) {
+    final urls = <String>{};
+    void add(Object? raw) {
+      final u = raw?.toString().trim().replaceAll(r'\', '') ?? '';
+      if (u.startsWith('http')) urls.add(u);
+    }
+
+    add(item['topimageurl']);
+    add(item['imageurl']);
+    add(item['imageurl@2x']);
+    final images = item['images'];
+    if (images is Map) {
+      add(images['original']);
+      add(images['previewthumb']);
+      add(images['square200']);
+      add(images['thumb']);
+    }
+    return urls.toList();
   }
 
   static int? _parseBestPlayerCount(XmlElement item) {
@@ -1822,7 +1865,18 @@ class BggService {
       final thing = results[0] as Map<String, dynamic>?;
       final extras = results[1] as Map<String, dynamic>? ?? {};
       if (thing == null && extras.isEmpty) return null;
-      return {...?thing, ...extras, 'bgg_id': bggId};
+      final merged = <String, dynamic>{...?thing, ...extras, 'bgg_id': bggId};
+      // Fusionne les URLs galerie (XML + geekitems) sans écraser.
+      final urls = <String>{};
+      for (final raw in [
+        ...?(thing?['bgg_gallery_urls'] as List?),
+        ...?(extras['bgg_gallery_urls'] as List?),
+      ]) {
+        final u = raw.toString().trim();
+        if (u.startsWith('http')) urls.add(u);
+      }
+      if (urls.isNotEmpty) merged['bgg_gallery_urls'] = urls.toList();
+      return merged;
     } catch (e) {
       if (kDebugMode) debugPrint('Erreur détails BGG: $e');
     }

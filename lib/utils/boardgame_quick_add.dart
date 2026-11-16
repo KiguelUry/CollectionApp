@@ -22,6 +22,7 @@ Future<void> quickAddBoardgameFromCatalog(
   required BggCatalogGame game,
   bool defaultWishlist = false,
   bool showCrowdfundingSearch = false,
+  bool showBackToSearch = false,
 }) async {
   if (!context.mounted) return;
 
@@ -44,8 +45,10 @@ Future<void> quickAddBoardgameFromCatalog(
   );
 
   Map<String, dynamic>? details;
+  List<BggGalleryPhoto> communityPhotos = const [];
   if (game.bggId.isNotEmpty) {
     details = await BggService.getGameFullDetails(game.bggId);
+    communityPhotos = await BggService.fetchCommunityGallery(game.bggId);
   }
 
   if (!context.mounted) return;
@@ -69,6 +72,7 @@ Future<void> quickAddBoardgameFromCatalog(
     return detailTitle.isNotEmpty ? detailTitle : catalogTitle;
   }();
   final seedPhotos = <BggGalleryPhoto>[
+    ...communityPhotos,
     for (final raw in (details?['bgg_gallery_urls'] is List
         ? details!['bgg_gallery_urls'] as List
         : const []))
@@ -109,6 +113,8 @@ Future<void> quickAddBoardgameFromCatalog(
       description: desc,
       bggId: game.bggId,
       photos: seedPhotos.isEmpty ? null : seedPhotos,
+      showBackButton: showBackToSearch,
+      onBack: showBackToSearch ? () => Navigator.pop(dialogContext) : null,
       showCrowdfundingSearch: showCrowdfundingSearch ||
           (year != null && year > DateTime.now().year),
       onConfirm: (options) async {
