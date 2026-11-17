@@ -430,6 +430,9 @@ class BoardgamePlaySessionPage extends StatefulWidget {
   /// Préremplissage (relaunch) sans éditer l'ancienne partie.
   final BoardgamePlaySession? template;
 
+  /// Démarre une nouvelle partie avec ce modèle (catégories + conditions).
+  final NamedScorePreset? startPreset;
+
   static const maxContentWidth = 850.0;
 
   const BoardgamePlaySessionPage({
@@ -437,6 +440,7 @@ class BoardgamePlaySessionPage extends StatefulWidget {
     this.item,
     this.initial,
     this.template,
+    this.startPreset,
   });
 
   @override
@@ -544,14 +548,32 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
       _initialGrid = BoardgameScoreGrid.empty(playerCount: 0);
     }
     if (s == null) {
-      // Nouvelle partie : 0 joueur, chacun pour soi, plus haut score.
-      _template = BoardgameScoreTemplate.empty;
-      _activePresetName = null;
-      _confrontation = BoardgameConfrontationType.freeForAll;
-      _useTeams = false;
-      _winCondition = BoardgameWinCondition.highest;
-      _targetScoreController.clear();
-      _initialGrid = BoardgameScoreGrid.empty(playerCount: 0);
+      final start = widget.startPreset;
+      if (start != null) {
+        // Nouvelle partie depuis un template : catégories + règles, 0 joueur.
+        _template = start.template;
+        _activePresetName = start.name;
+        _confrontation = start.confrontation;
+        _useTeams =
+            start.confrontation == BoardgameConfrontationType.teams ||
+            start.confrontation == BoardgameConfrontationType.oneVsAll;
+        _winCondition = BoardgameWinCondition.customTemplate;
+        _targetScoreController.clear();
+        _initialGrid = _gridAlignedToTemplate(
+          BoardgameScoreGrid.empty(playerCount: 0),
+          start.template,
+        );
+        _presetBaseline = _fingerprintOf(start.confrontation, start.template);
+      } else {
+        // Nouvelle partie : 0 joueur, chacun pour soi, plus haut score.
+        _template = BoardgameScoreTemplate.empty;
+        _activePresetName = null;
+        _confrontation = BoardgameConfrontationType.freeForAll;
+        _useTeams = false;
+        _winCondition = BoardgameWinCondition.highest;
+        _targetScoreController.clear();
+        _initialGrid = BoardgameScoreGrid.empty(playerCount: 0);
+      }
     } else {
       final linked = s.presetName?.trim();
       if (linked != null && linked.isNotEmpty) {

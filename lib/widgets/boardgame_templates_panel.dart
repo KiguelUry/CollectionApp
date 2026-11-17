@@ -8,6 +8,7 @@ import '../screens/community_forum_screen.dart';
 import '../services/community_rules_service.dart';
 import '../services/community_score_templates_service.dart';
 import '../services/inventory_service.dart';
+import 'boardgame_play_history_panel.dart';
 import 'score_template_preview.dart';
 
 /// Modèles du jeu, publication et modèles de la communauté.
@@ -119,11 +120,24 @@ class _BoardgameTemplatesPanelState extends State<BoardgameTemplatesPanel> {
     setState(() {});
   }
 
+  void _startPlay(NamedScorePreset preset) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BoardgamePlaySessionPage(
+          item: widget.item,
+          startPreset: preset,
+        ),
+      ),
+    );
+  }
+
   void _openPreview(NamedScorePreset preset) {
     showScoreTemplatePreview(
       context,
       preset: preset,
       gameTitle: widget.item.title,
+      onStartPlay: widget.readOnly ? null : () => _startPlay(preset),
     );
   }
 
@@ -147,6 +161,8 @@ class _BoardgameTemplatesPanelState extends State<BoardgameTemplatesPanel> {
               title: preset.name,
               preset: preset,
               onTap: () => _openPreview(preset),
+              onStartPlay:
+                  widget.readOnly ? null : () => _startPlay(preset),
               trailing: widget.readOnly
                   ? null
                   : TextButton(
@@ -173,6 +189,8 @@ class _BoardgameTemplatesPanelState extends State<BoardgameTemplatesPanel> {
               title: preset.name,
               preset: preset,
               onTap: () => _openPreview(preset),
+              onStartPlay:
+                  widget.readOnly ? null : () => _startPlay(preset),
             ),
             const SizedBox(height: 8),
           ],
@@ -213,12 +231,14 @@ class _PreviewCard extends StatelessWidget {
   final NamedScorePreset preset;
   final Widget? trailing;
   final VoidCallback onTap;
+  final VoidCallback? onStartPlay;
 
   const _PreviewCard({
     required this.title,
     required this.preset,
     required this.onTap,
     this.trailing,
+    this.onStartPlay,
   });
 
   @override
@@ -246,7 +266,17 @@ class _PreviewCard extends StatelessWidget {
                   ?trailing,
                 ],
               ),
-              const SizedBox(height: 8),
+              if (onStartPlay != null) ...[
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: onStartPlay,
+                    icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                    label: const Text('Commencer une partie avec ce template'),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 4),
               Wrap(
                 spacing: 6,
                 runSpacing: 6,

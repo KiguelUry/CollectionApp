@@ -36,7 +36,11 @@ Future<void> main() async {
     // Web : assets/.env parfois absent ; repli AppEnv.
   }
 
-  // Seul await bloquant avant le 1er frame : Supabase (auth session).
+  // Avant runApp : évite LocaleDataException sur DateFormat('…', 'fr_FR')
+  // dès le 1er écran post-login (notifications, historique, etc.).
+  await initializeDateFormatting('fr_FR');
+
+  // Seul await bloquant restant avant le 1er frame : Supabase (auth session).
   await Supabase.initialize(
     url: AppEnv.supabaseUrl,
     anonKey: AppEnv.supabaseAnonKey,
@@ -45,9 +49,8 @@ Future<void> main() async {
   // UI immédiate (splash) — le reste en arrière-plan.
   runApp(const MyApp());
 
-  // Locale + prefs + cache profil hors du chemin critique du 1er rendu.
+  // Prefs + cache profil hors du chemin critique du 1er rendu.
   unawaited(Future(() async {
-    await initializeDateFormatting('fr_FR');
     await SettingsService.instance.load();
     if (Supabase.instance.client.auth.currentUser != null) {
       unawaited(SocialDirectoryCache.instance.warm());

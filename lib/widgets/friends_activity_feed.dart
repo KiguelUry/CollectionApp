@@ -14,6 +14,7 @@ import 'collection_cover_image.dart';
 import 'profile_avatar.dart';
 
 /// Fil d'activité des amis (ajouts regroupés, notes, trophées).
+/// Layout compact type timeline — pas de grosses cartes.
 class FriendsActivityFeed extends StatefulWidget {
   const FriendsActivityFeed({super.key});
 
@@ -115,13 +116,6 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
     if (mounted) setState(() => _loading = false);
   }
 
-  Color _accentFor(ActivityEvent e) {
-    if (e.actorAccentColor != null) {
-      return ProfileAvatar.colorFromHex(e.actorAccentColor);
-    }
-    return Colors.blueGrey;
-  }
-
   IconData _iconFor(String type) {
     return switch (type) {
       'wishlist_added' => Icons.favorite_rounded,
@@ -205,6 +199,7 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
         ),
       );
     }
+    final scheme = Theme.of(context).colorScheme;
     if (_groups.isEmpty) {
       return RefreshIndicator(
         onRefresh: _load,
@@ -212,21 +207,32 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
           physics: const AlwaysScrollableScrollPhysics(),
           children: [
             const SizedBox(height: 48),
-            Icon(Icons.dynamic_feed_rounded, size: 72, color: Colors.grey.shade400),
+            Icon(
+              Icons.dynamic_feed_rounded,
+              size: 56,
+              color: scheme.onSurfaceVariant.withValues(alpha: 0.45),
+            ),
             const SizedBox(height: 16),
-            const Text(
+            Text(
               'Le fil est calme…',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+                color: scheme.onSurface,
+              ),
             ),
             const SizedBox(height: 8),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 36),
               child: Text(
                 'Tes ajouts et ceux de tes amis apparaissent ici — '
-                'tu peux déjà réagir avec 🔥 👏 ❤️ 🎲 sur tes propres événements.',
+                'tu peux déjà réagir avec 🔥 👏 ❤️ 🎲.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey.shade600, height: 1.35),
+                style: TextStyle(
+                  color: scheme.onSurfaceVariant,
+                  height: 1.35,
+                ),
               ),
             ),
           ],
@@ -236,198 +242,188 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
 
     return RefreshIndicator(
       onRefresh: _load,
-      child: ListView.builder(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 28),
+      child: ListView.separated(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 28),
         itemCount: _groups.length,
-        itemBuilder: (context, index) => _buildGroupCard(_groups[index]),
+        separatorBuilder: (_, _) => Divider(
+          height: 1,
+          thickness: 0.6,
+          color: scheme.outlineVariant.withValues(alpha: 0.45),
+        ),
+        itemBuilder: (context, index) => _buildRow(_groups[index]),
       ),
     );
   }
 
-  Widget _buildGroupCard(ActivityFeedGroup group) {
+  Widget _buildRow(ActivityFeedGroup group) {
     final e = group.head;
-    final accent = _accentFor(e);
+    final scheme = Theme.of(context).colorScheme;
     final iconColor = _iconColorFor(e.eventType);
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Material(
-        elevation: 0,
-        borderRadius: BorderRadius.circular(16),
-        color: Theme.of(context).colorScheme.surface,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: () => _openActivityDetail(group),
-          child: Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: accent.withValues(alpha: 0.18)),
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  accent.withValues(alpha: 0.10),
-                  Theme.of(context).colorScheme.surface,
-                ],
-              ),
+    return InkWell(
+      onTap: () => _openActivityDetail(group),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ProfileAvatar(
+              avatarUrl: e.actorAvatarUrl,
+              accentColorHex: e.actorAccentColor,
+              fallbackInitial: e.actorUsername,
+              radius: 18,
             ),
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    ProfileAvatar(
-                      avatarUrl: e.actorAvatarUrl,
-                      accentColorHex: e.actorAccentColor,
-                      fallbackInitial: e.actorUsername,
-                      radius: 22,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            group.summaryLabel(e),
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 14,
-                              height: 1.25,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            _timeAgo(group.createdAt),
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey.shade600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: iconColor.withValues(alpha: 0.15),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(_iconFor(e.eventType), color: iconColor, size: 20),
-                    ),
-                  ],
-                ),
-                if (group.isBurst) ...[
-                  const SizedBox(height: 10),
-                  _buildThumbnailStrip(group),
-                ] else if (e.itemTitle != null) ...[
-                  const SizedBox(height: 10),
-                  _buildSinglePreview(e, showAdd: _canAddFrom(e)),
-                ],
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    for (final emoji in _emoji)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 4),
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(16),
-                          onTap: () => _react(e.id, emoji),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: _reactions[e.id] == emoji
-                                  ? accent.withValues(alpha: 0.2)
-                                  : Colors.transparent,
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(
-                                color: accent.withValues(alpha: 0.25),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text.rich(
+                          TextSpan(
+                            children: [
+                              TextSpan(
+                                text: group.summaryLabel(e),
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13.5,
+                                  height: 1.25,
+                                  color: scheme.onSurface,
+                                ),
                               ),
-                            ),
-                            child: Text(
-                              (_reactionCounts[e.id]?[emoji] ?? 0) > 1
-                                  ? '$emoji ${_reactionCounts[e.id]![emoji]}'
-                                  : emoji,
-                            ),
+                              TextSpan(
+                                text: '  ·  ${_timeAgo(group.createdAt)}',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w500,
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
+                      Icon(_iconFor(e.eventType), size: 16, color: iconColor),
+                    ],
+                  ),
+                  if (group.isBurst) ...[
+                    const SizedBox(height: 8),
+                    _buildThumbnailStrip(group),
+                  ] else if (e.itemTitle != null) ...[
+                    const SizedBox(height: 6),
+                    _buildSinglePreview(e),
                   ],
-                ),
-              ],
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      for (final emoji in _emoji)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 2),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(12),
+                            onTap: () => _react(e.id, emoji),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 5,
+                                vertical: 2,
+                              ),
+                              child: Opacity(
+                                opacity: _reactions[e.id] == emoji ? 1 : 0.7,
+                                child: Text(
+                                  (_reactionCounts[e.id]?[emoji] ?? 0) > 0
+                                      ? '$emoji ${_reactionCounts[e.id]![emoji]}'
+                                      : emoji,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: _reactions[e.id] == emoji
+                                        ? FontWeight.w700
+                                        : FontWeight.w400,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      const Spacer(),
+                      if (_canAddFrom(e)) _addButton(e),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );
   }
 
   Widget _buildThumbnailStrip(ActivityFeedGroup group) {
+    final scheme = Theme.of(context).colorScheme;
     final withImage = group.events
         .where((e) => e.itemImageUrl != null && e.itemImageUrl!.isNotEmpty)
-        .take(8)
+        .take(6)
         .toList();
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       children: [
-        SizedBox(
-          height: 56,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: withImage.isEmpty ? 1 : withImage.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 6),
-            itemBuilder: (context, i) {
-              if (withImage.isEmpty) {
-                return _countChip(group.count);
-              }
-              final ev = withImage[i];
-              return _thumb(ev.itemImageUrl!, ev.itemCategory);
-            },
+        if (withImage.isEmpty)
+          Container(
+            width: 36,
+            height: 36,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              '+${group.count}',
+              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+            ),
+          )
+        else
+          SizedBox(
+            height: 40,
+            child: ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              scrollDirection: Axis.horizontal,
+              itemCount: withImage.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 4),
+              itemBuilder: (context, i) {
+                final ev = withImage[i];
+                return _thumb(ev.itemImageUrl!, ev.itemCategory);
+              },
+            ),
           ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          'Voir le détail · ${group.count} éléments',
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: Colors.grey.shade700,
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            'Voir le détail · ${group.count} éléments',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: scheme.primary,
+            ),
           ),
         ),
       ],
     );
   }
 
-  Widget _countChip(int count) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade200,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Text(
-        '+$count',
-        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
-      ),
-    );
-  }
-
   Widget _thumb(String url, String? categoryDb) {
     final isBook = categoryDb == 'book';
     return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(6),
       child: SizedBox(
-        width: 40,
-        height: 56,
+        width: 30,
+        height: 40,
         child: CollectionCoverImage(
           url: url,
-          width: 40,
-          height: 56,
+          width: 30,
+          height: 40,
           bookCover: isBook,
           fit: isBook ? BoxFit.contain : BoxFit.cover,
         ),
@@ -435,7 +431,8 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
     );
   }
 
-  Widget _buildSinglePreview(ActivityEvent e, {bool showAdd = false}) {
+  Widget _buildSinglePreview(ActivityEvent e) {
+    final scheme = Theme.of(context).colorScheme;
     CollectionCategory? cat;
     if (e.itemCategory != null) {
       try {
@@ -447,14 +444,14 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
       children: [
         if (e.itemImageUrl != null && e.itemImageUrl!.isNotEmpty)
           ClipRRect(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(6),
             child: SizedBox(
-              width: 44,
-              height: 58,
+              width: 28,
+              height: 36,
               child: CollectionCoverImage(
                 url: e.itemImageUrl!,
-                width: 44,
-                height: 58,
+                width: 28,
+                height: 36,
                 bookCover: e.itemCategory == 'book',
                 fit: e.itemCategory == 'book' ? BoxFit.contain : BoxFit.cover,
               ),
@@ -462,49 +459,51 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
           )
         else if (cat != null)
           Container(
-            width: 44,
-            height: 58,
+            width: 28,
+            height: 36,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: cat.color.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(6),
             ),
-            child: Icon(cat.icon, color: cat.color, size: 26),
+            child: Icon(cat.icon, color: cat.color, size: 16),
           ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 8),
         Expanded(
           child: Text(
             e.itemTitle!,
-            maxLines: 2,
+            maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: 13,
-              color: Colors.grey.shade800,
+              color: scheme.onSurface.withValues(alpha: 0.88),
               fontWeight: FontWeight.w500,
             ),
           ),
         ),
-        if (showAdd) _addButton(e),
       ],
     );
   }
 
   Widget _addButton(ActivityEvent e) {
     final loading = _addingItemId == e.itemId;
+    final scheme = Theme.of(context).colorScheme;
     return IconButton(
       tooltip: 'Ajouter à ma collection',
       visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
       onPressed: loading ? null : () => _addFromActivity(e),
       icon: loading
           ? SizedBox(
-              width: 20,
-              height: 20,
+              width: 16,
+              height: 16,
               child: CircularProgressIndicator(
                 strokeWidth: 2,
-                color: Colors.teal.shade700,
+                color: scheme.primary,
               ),
             )
-          : Icon(Icons.add_circle_outline, color: Colors.teal.shade700),
+          : Icon(Icons.add_circle_outline, color: scheme.primary, size: 20),
     );
   }
 
@@ -526,8 +525,18 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
                     ),
               ),
               const SizedBox(height: 12),
-              _buildSinglePreview(e, showAdd: true),
-              const SizedBox(height: 8),
+              _buildSinglePreview(e),
+              if (_canAddFrom(e)) ...[
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _addFromActivity(e);
+                  },
+                  icon: const Icon(Icons.add),
+                  label: const Text('Ajouter à ma collection'),
+                ),
+              ],
             ],
           ),
         ),
@@ -540,64 +549,69 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
-      builder: (ctx) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.55,
-        minChildSize: 0.35,
-        maxChildSize: 0.9,
-        builder: (_, scroll) => Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
-              child: Text(
-                group.summaryLabel(group.head),
-                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
+      builder: (ctx) {
+        final scheme = Theme.of(ctx).colorScheme;
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.55,
+          minChildSize: 0.35,
+          maxChildSize: 0.9,
+          builder: (_, scroll) => Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+                child: Text(
+                  group.summaryLabel(group.head),
+                  style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
               ),
-            ),
-            Expanded(
-              child: ListView.builder(
-                controller: scroll,
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
-                itemCount: group.events.length,
-                itemBuilder: (context, i) {
-                  final ev = group.events[i];
-                  CollectionCategory? cat;
-                  if (ev.itemCategory != null) {
-                    try {
-                      cat = CollectionCategory.fromDbValue(ev.itemCategory!);
-                    } catch (_) {}
-                  }
-                  return ListTile(
-                    leading: ev.itemImageUrl != null
-                        ? SizedBox(
-                            width: 40,
-                            height: 52,
-                            child: CollectionCoverImage(
-                              url: ev.itemImageUrl!,
+              Expanded(
+                child: ListView.builder(
+                  controller: scroll,
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+                  itemCount: group.events.length,
+                  itemBuilder: (context, i) {
+                    final ev = group.events[i];
+                    CollectionCategory? cat;
+                    if (ev.itemCategory != null) {
+                      try {
+                        cat = CollectionCategory.fromDbValue(ev.itemCategory!);
+                      } catch (_) {}
+                    }
+                    return ListTile(
+                      leading: ev.itemImageUrl != null
+                          ? SizedBox(
                               width: 40,
                               height: 52,
-                              bookCover: ev.itemCategory == 'book',
+                              child: CollectionCoverImage(
+                                url: ev.itemImageUrl!,
+                                width: 40,
+                                height: 52,
+                                bookCover: ev.itemCategory == 'book',
+                              ),
+                            )
+                          : Icon(
+                              cat?.icon ?? Icons.inventory_2_outlined,
+                              color: cat?.color ?? scheme.onSurfaceVariant,
                             ),
-                          )
-                        : Icon(cat?.icon ?? Icons.inventory_2_outlined,
-                            color: cat?.color ?? Colors.grey),
-                    title: Text(
-                      ev.itemTitle ?? 'Objet',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    dense: true,
-                    trailing: _canAddFrom(ev) ? _addButton(ev) : null,
-                  );
-                },
+                      title: Text(
+                        ev.itemTitle ?? 'Objet',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      dense: true,
+                      trailing: _canAddFrom(ev) ? _addButton(ev) : null,
+                    );
+                  },
+                ),
               ),
-            ),
-          ],
-        ),
-      ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

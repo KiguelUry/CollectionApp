@@ -1043,7 +1043,7 @@ class _FilterBar extends StatelessWidget {
         if (showSort) ...[
           const SizedBox(height: 6),
           SizedBox(
-            height: 36,
+            height: 40,
             child: ListView(
               scrollDirection: Axis.horizontal,
               children: [
@@ -1110,13 +1110,42 @@ class _SortChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.only(right: 6),
-      child: ChoiceChip(
-        label: Text(label, style: const TextStyle(fontSize: 12)),
-        selected: selected,
-        visualDensity: VisualDensity.compact,
-        onSelected: (_) => onTap(),
+      padding: const EdgeInsets.only(right: 8),
+      child: Material(
+        color: selected
+            ? scheme.secondaryContainer
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(999),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(999),
+          child: Container(
+            alignment: Alignment.center,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: selected
+                    ? scheme.secondaryContainer
+                    : scheme.outlineVariant.withValues(alpha: 0.7),
+              ),
+            ),
+            child: Text(
+              label,
+              softWrap: false,
+              style: TextStyle(
+                fontSize: 12.5,
+                height: 1.2,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                color: selected
+                    ? scheme.onSecondaryContainer
+                    : scheme.onSurface,
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

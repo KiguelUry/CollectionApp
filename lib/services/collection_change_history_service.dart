@@ -61,15 +61,18 @@ class CollectionChangeEvent {
       };
 }
 
-/// Historique local court (SharedPreferences) — TTL 14 jours, max 80 entrées.
+/// Historique local (SharedPreferences) — TTL 90 jours, max 120 entrées.
+///
+/// Disparaît aussi si l'utilisateur efface les données du site / cookies
+/// (stockage navigateur), change de profil, ou dépasse le TTL / max.
 class CollectionChangeHistoryService {
   CollectionChangeHistoryService._();
   static final instance = CollectionChangeHistoryService._();
 
   static const _keyPrefix = 'collection_change_history_v1_';
   static const _seenPrefix = 'collection_modifs_seen_v1_';
-  static const _ttl = Duration(days: 14);
-  static const _maxEntries = 80;
+  static const _ttl = Duration(days: 90);
+  static const _maxEntries = 120;
 
   String _storageKey(String userId, CollectionCategory category) =>
       '$_keyPrefix${userId}_${category.dbValue}';

@@ -13,6 +13,14 @@ class ScoreCategoryChip extends StatelessWidget {
     this.compact = false,
   });
 
+  static final RegExp _emojiRe = RegExp(
+    r'[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2300}-\u{23FF}\u{FE0F}\u{200D}]',
+    unicode: true,
+  );
+
+  /// True si le libellé contient déjà un emoji (ex. « Vénus 🟡 »).
+  static bool nameHasEmoji(String name) => _emojiRe.hasMatch(name);
+
   static Color accentFor(String name) {
     final n = name.toLowerCase().trim();
     if (n.contains('mercure')) return const Color(0xFF9E9E9E);
@@ -53,6 +61,8 @@ class ScoreCategoryChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final accent = accentFor(name);
+    // Ne pas préfixer si l'utilisateur a déjà mis l'emoji dans le nom.
+    final showAutoEmoji = !nameHasEmoji(name);
     return Container(
       padding: EdgeInsets.symmetric(
         horizontal: compact ? 8 : 10,
@@ -66,8 +76,10 @@ class ScoreCategoryChip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(emojiFor(name), style: TextStyle(fontSize: compact ? 11 : 13)),
-          const SizedBox(width: 5),
+          if (showAutoEmoji) ...[
+            Text(emojiFor(name), style: TextStyle(fontSize: compact ? 11 : 13)),
+            const SizedBox(width: 5),
+          ],
           Text(
             name,
             style: TextStyle(
@@ -153,6 +165,69 @@ class ScoreRuleBadges extends StatelessWidget {
   }
 }
 
+/// Remplit une colonne d'exemple pour illustrer une condition de victoire.
+List<List<int>> buildScoreTemplateDemoScores(
+  BoardgameScoreTemplate template, {
+  int players = 3,
+}) {
+  final lines = template.lineNames;
+  final cols = players.clamp(1, 3);
+  final matrix = List.generate(
+    lines.length,
+    (_) => List<int>.filled(cols, 0),
+  );
+  if (lines.isEmpty) return matrix;
+
+  final rules = template.rules;
+  if (rules.isEmpty) return matrix;
+
+  for (var p = 0; p < cols; p++) {
+    final rule = rules[p % rules.length];
+    _fillDemoColumn(matrix, lines, p, rule);
+  }
+  return matrix;
+}
+
+void _fillDemoColumn(
+  List<List<int>> matrix,
+  List<String> lines,
+  int col,
+  ScoreRule rule,
+) {
+  switch (rule.target) {
+    case ScoreRuleTarget.total:
+      if (lines.isNotEmpty) {
+        matrix[0][col] = rule.value ?? 1;
+      }
+    case ScoreRuleTarget.anyLine:
+      if (lines.isNotEmpty) {
+        matrix[0][col] = rule.value ?? 1;
+      }
+    case ScoreRuleTarget.namedLine:
+      final idx = lines.indexWhere((l) => l == rule.lineName);
+      final i = idx >= 0 ? idx : 0;
+      if (lines.isNotEmpty) {
+        matrix[i][col] = rule.value ?? 1;
+      }
+    case ScoreRuleTarget.everyLine:
+    case ScoreRuleTarget.weakestLine:
+      final v = rule.value ?? 1;
+      for (var i = 0; i < lines.length; i++) {
+        matrix[i][col] = v;
+      }
+    case ScoreRuleTarget.filledLineCount:
+      final n = (rule.value ?? 1).clamp(1, lines.length);
+      final cell = rule.effectiveCellValue;
+      for (var i = 0; i < n; i++) {
+        matrix[i][col] = cell;
+      }
+    case ScoreRuleTarget.leadGap:
+      if (lines.isNotEmpty) {
+        matrix[0][col] = (rule.value ?? 1) + 1;
+      }
+  }
+}
+
 /// Mini-grille visuelle d'exemple (catégories × joueurs).
 class ScoreTemplateMiniGrid extends StatelessWidget {
   final BoardgameScoreTemplate template;
@@ -183,11 +258,12 @@ class ScoreTemplateMiniGrid extends StatelessWidget {
       );
     }
     final cols = players.clamp(1, 3);
+    final scores = buildScoreTemplateDemoScores(template, players: cols);
     return Container(
-      padding: const EdgeInsets.all(6),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: scheme.outlineVariant),
       ),
       child: Column(
@@ -195,35 +271,35 @@ class ScoreTemplateMiniGrid extends StatelessWidget {
         children: [
           Row(
             children: [
-              const SizedBox(width: 54),
+              const SizedBox(width: 72),
               for (var p = 1; p <= cols; p++)
                 Expanded(
                   child: Text(
                     'J$p',
                     textAlign: TextAlign.center,
                     style: const TextStyle(
-                      fontSize: 10,
+                      fontSize: 12,
                       fontWeight: FontWeight.w800,
                     ),
                   ),
                 ),
             ],
           ),
-          const SizedBox(height: 4),
-          for (final line in lines.take(5))
+          const SizedBox(height: 6),
+          for (var li = 0; li < lines.take(5).length; li++)
             Padding(
-              padding: const EdgeInsets.only(bottom: 3),
+              padding: const EdgeInsets.only(bottom: 5),
               child: Row(
                 children: [
                   SizedBox(
-                    width: 54,
+                    width: 72,
                     child: Text(
-                      line,
+                      lines[li],
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 9.5,
-                        color: ScoreCategoryChip.accentFor(line),
+                        fontSize: 11.5,
+                        color: ScoreCategoryChip.accentFor(lines[li]),
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -232,18 +308,21 @@ class ScoreTemplateMiniGrid extends StatelessWidget {
                     Expanded(
                       child: Container(
                         margin: const EdgeInsets.symmetric(horizontal: 2),
-                        height: 16,
+                        height: 26,
                         alignment: Alignment.center,
                         decoration: BoxDecoration(
                           color: scheme.surface,
-                          borderRadius: BorderRadius.circular(4),
+                          borderRadius: BorderRadius.circular(6),
                           border: Border.all(
                             color: scheme.outlineVariant,
                           ),
                         ),
                         child: Text(
-                          '${(p + 1) * (line.length % 3 + 1)}',
-                          style: const TextStyle(fontSize: 9),
+                          '${scores[li][p]}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                     ),
@@ -262,6 +341,7 @@ Future<void> showScoreTemplatePreview(
   String? gameTitle,
   String? authorName,
   VoidCallback? onImport,
+  VoidCallback? onStartPlay,
   Future<void> Function()? onUnpublish,
 }) {
   return showModalBottomSheet<void>(
@@ -342,6 +422,17 @@ Future<void> showScoreTemplatePreview(
               const SizedBox(height: 6),
               ScoreTemplateMiniGrid(template: preset.template, players: 3),
               const SizedBox(height: 16),
+              if (onStartPlay != null) ...[
+                FilledButton.icon(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    onStartPlay();
+                  },
+                  icon: const Icon(Icons.play_arrow_rounded),
+                  label: const Text('Commencer une partie avec ce template'),
+                ),
+                const SizedBox(height: 8),
+              ],
               if (onImport != null)
                 FilledButton.icon(
                   onPressed: () {
@@ -351,8 +442,13 @@ Future<void> showScoreTemplatePreview(
                   icon: const Icon(Icons.download_outlined),
                   label: const Text('Importer dans mes templates'),
                 )
-              else
+              else if (onStartPlay == null)
                 FilledButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Fermer'),
+                )
+              else
+                OutlinedButton(
                   onPressed: () => Navigator.pop(ctx),
                   child: const Text('Fermer'),
                 ),

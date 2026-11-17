@@ -7,10 +7,21 @@ class DevAuthConfig {
 
   static bool get isActive => kDebugMode;
 
+  /// Accès sûr à dotenv (évite NotInitializedError si `.env` absent).
+  static String? _envValue(String key) {
+    try {
+      if (!dotenv.isInitialized) return null;
+      final v = dotenv.env[key]?.trim();
+      return (v != null && v.isNotEmpty) ? v : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Lit `--dart-define=KEY=true` puis `.env` (dart-define prioritaire).
   static bool _envFlag(String key) {
     if (_dartDefineFlag(key)) return true;
-    return dotenv.env[key]?.toLowerCase() == 'true';
+    return _envValue(key)?.toLowerCase() == 'true';
   }
 
   static bool _dartDefineFlag(String key) {
@@ -30,16 +41,14 @@ class DevAuthConfig {
     if (!isActive) return null;
     const fromDefine = String.fromEnvironment('DEV_TEST_EMAIL');
     if (fromDefine.isNotEmpty) return fromDefine;
-    final v = dotenv.env['DEV_TEST_EMAIL']?.trim();
-    return (v != null && v.isNotEmpty) ? v : null;
+    return _envValue('DEV_TEST_EMAIL');
   }
 
   static String? get testPassword {
     if (!isActive) return null;
     const fromDefine = String.fromEnvironment('DEV_TEST_PASSWORD');
     if (fromDefine.isNotEmpty) return fromDefine;
-    final v = dotenv.env['DEV_TEST_PASSWORD']?.trim();
-    return (v != null && v.isNotEmpty) ? v : null;
+    return _envValue('DEV_TEST_PASSWORD');
   }
 
   static bool get hasAutoLogin => testEmail != null && testPassword != null;
@@ -53,7 +62,5 @@ class DevAuthConfig {
       isActive && (_envFlag('DEV_FAST_START') || skipSplash);
 
   static String get loginButtonLabel =>
-      dotenv.env['DEV_LOGIN_LABEL']?.trim().isNotEmpty == true
-          ? dotenv.env['DEV_LOGIN_LABEL']!.trim()
-          : 'Connexion test (dev)';
+      _envValue('DEV_LOGIN_LABEL') ?? 'Connexion test (dev)';
 }

@@ -202,30 +202,35 @@ class CollectionFilterBar extends StatelessWidget {
         ),
       ],
       child: IgnorePointer(
-        child: OutlinedButton.icon(
-          onPressed: () {},
-          style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            visualDensity: VisualDensity.compact,
-            foregroundColor:
-                sortActive ? scheme.primary : scheme.onSurface,
-            side: BorderSide(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
               color: sortActive
                   ? scheme.primary
-                  : scheme.outlineVariant.withValues(alpha: 0.55),
+                  : scheme.outlineVariant.withValues(alpha: 0.35),
+              width: sortActive ? 1.5 : 1,
             ),
           ),
-          icon: Icon(
-            Icons.sort,
-            size: 18,
-            color: sortActive ? scheme.primary : scheme.onSurface,
-          ),
-          label: Text(
-            'Tri',
-            style: TextStyle(
-              fontSize: 13,
-              color: sortActive ? scheme.primary : scheme.onSurface,
-            ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.sort,
+                size: 18,
+                color: sortActive ? scheme.primary : scheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'Tri',
+                style: TextStyle(
+                  fontSize: 13,
+                  color:
+                      sortActive ? scheme.primary : scheme.onSurfaceVariant,
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -247,7 +252,7 @@ class CollectionFilterBar extends StatelessWidget {
           side: BorderSide(
             color: active
                 ? scheme.primary
-                : scheme.outlineVariant.withValues(alpha: 0.55),
+                : scheme.outlineVariant.withValues(alpha: 0.35),
             width: active ? 1.5 : 1,
           ),
         ),
