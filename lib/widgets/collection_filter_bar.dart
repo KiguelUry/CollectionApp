@@ -42,6 +42,9 @@ class CollectionFilterBar extends StatelessWidget {
   final ValueChanged<bool>? onShowOwnedExpansionsChanged;
   final TextEditingController? searchController;
 
+  /// Tri considéré « par défaut » (bordure Tri inactive). Wishlist = favoris.
+  final CollectionSort defaultSort;
+
   const CollectionFilterBar({
     super.key,
     required this.filters,
@@ -70,6 +73,7 @@ class CollectionFilterBar extends StatelessWidget {
     this.showExpansionVisibilityToggle = false,
     this.showOwnedExpansions = false,
     this.onShowOwnedExpansionsChanged,
+    this.defaultSort = CollectionSort.titleAsc,
   });
 
   @override
@@ -131,7 +135,7 @@ class CollectionFilterBar extends StatelessWidget {
 
   Widget _sortMenuButton(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final sortActive = filters.sort != CollectionSort.titleAsc;
+    final sortActive = filters.sort != defaultSort;
     return PopupMenuButton<CollectionSort>(
       tooltip: 'Trier',
       initialValue: filters.sort,

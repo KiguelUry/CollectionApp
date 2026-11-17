@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/boardgame_score_grid.dart';
+import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../models/rule_section.dart';
 import '../services/community_rules_service.dart';
 import '../services/community_score_templates_service.dart';
+import '../services/inventory_service.dart';
 import '../services/profile_cache_service.dart';
 import '../utils/cover_image_url.dart';
 import '../widgets/modular_rule_editor.dart';
@@ -46,6 +48,9 @@ class _CommunityForumScreenState extends State<CommunityForumScreen> {
   List<CommunityRuleEntry> _rules = [];
   bool _loading = true;
 
+  /// Jeux de la collection (clé forum → item), pour filtre + partage de templates.
+  final Map<String, CollectionItem> _collectionByKey = {};
+
   @override
   void initState() {
     super.initState();
@@ -59,22 +64,56 @@ class _CommunityForumScreenState extends State<CommunityForumScreen> {
     setState(() => _loading = true);
     final templates = await CommunityScoreTemplatesService.instance.all();
     final rules = await CommunityRulesService.instance.all();
+    Map<String, CollectionItem> collection = {};
+    try {
+      final items = await InventoryService().fetchOwnedItems();
+      for (final item in items) {
+        if (item.category != CollectionCategory.boardgame) continue;
+        if (item.isWishlist || item.isSold) continue;
+        final key = CommunityRulesService.gameKeyFor(
+          bggId: item.metadata?['bgg_id']?.toString(),
+          title: item.title,
+        );
+        collection.putIfAbsent(key, () => item);
+      }
+    } catch (_) {}
+    if (widget.item != null) {
+      final item = widget.item!;
+      final key = CommunityRulesService.gameKeyFor(
+        bggId: item.metadata?['bgg_id']?.toString(),
+        title: item.title,
+      );
+      collection[key] = item;
+    }
     if (!mounted) return;
     setState(() {
       _templates = templates;
       _rules = rules;
+      _collectionByKey
+        ..clear()
+        ..addAll(collection);
       _loading = false;
     });
   }
 
-  List<String> get _gameKeys {
+  List<String> get _collectionGameKeys {
+    final keys = _collectionByKey.keys.toList()
+      ..sort((a, b) => _gameLabel(a).toLowerCase().compareTo(
+            _gameLabel(b).toLowerCase(),
+          ));
+    return keys;
+  }
+
+  List<String> get _communityOnlyKeys {
     final keys = <String>{
       for (final template in _templates) template.gameKey,
       for (final rule in _rules) rule.gameKey,
-      ?_gameKey,
-      ?widget.gameKey,
-    };
-    return keys.toList()..sort();
+    }..removeAll(_collectionByKey.keys);
+    final list = keys.toList()
+      ..sort((a, b) => _gameLabel(a).toLowerCase().compareTo(
+            _gameLabel(b).toLowerCase(),
+          ));
+    return list;
   }
 
   String get _title {
@@ -83,6 +122,8 @@ class _CommunityForumScreenState extends State<CommunityForumScreen> {
   }
 
   String _gameLabel(String key) {
+    final fromCollec = _collectionByKey[key]?.title.trim();
+    if (fromCollec != null && fromCollec.isNotEmpty) return fromCollec;
     if (_gameKey == key && (_gameTitle ?? '').trim().isNotEmpty) {
       return _gameTitle!.trim();
     }
@@ -125,15 +166,19 @@ class _CommunityForumScreenState extends State<CommunityForumScreen> {
             ),
           IconButton(
             tooltip: 'Partager',
-            onPressed: _share,
+            onPressed: () => _share(asRule: _kind == ForumKind.rules),
             icon: const Icon(Icons.add_circle_outline),
           ),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _share,
+        onPressed: () => _share(asRule: _kind == ForumKind.rules),
         icon: const Icon(Icons.add),
-        label: const Text('Partager'),
+        label: Text(
+          _kind == ForumKind.rules
+              ? 'Partager une règle'
+              : 'Partager un template',
+        ),
       ),
       body: Column(
         children: [
@@ -150,7 +195,6 @@ class _CommunityForumScreenState extends State<CommunityForumScreen> {
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
             child: _FilterBar(
-              gameKeys: _gameKeys,
               gameKey: _gameKey,
               gameLabelOf: _gameLabel,
               sort: _sort,
@@ -160,10 +204,7 @@ class _CommunityForumScreenState extends State<CommunityForumScreen> {
               showMonth: _kind == ForumKind.contributors,
               search: _search,
               onSearch: (v) => setState(() => _search = v),
-              onGameKey: (key, title) => setState(() {
-                _gameKey = key;
-                _gameTitle = title;
-              }),
+              onPickGame: _pickGameFilter,
               onSort: (s) => setState(() => _sort = s),
               onMineOnly: (v) => setState(() => _mineOnly = v),
               onMonthOnly: (v) => setState(() => _monthOnly = v),
@@ -245,7 +286,7 @@ class _CommunityForumScreenState extends State<CommunityForumScreen> {
           const SizedBox(height: 12),
           Center(
             child: FilledButton.tonal(
-              onPressed: _share,
+              onPressed: () => _share(asRule: false),
               child: const Text('Partager un template'),
             ),
           ),
@@ -284,6 +325,13 @@ class _CommunityForumScreenState extends State<CommunityForumScreen> {
             'Aucune règle pour ce filtre.',
             textAlign: TextAlign.center,
             style: TextStyle(color: scheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 12),
+          Center(
+            child: FilledButton.tonal(
+              onPressed: () => _share(asRule: true),
+              child: const Text('Partager une règle'),
+            ),
           ),
         ],
       );
@@ -493,12 +541,143 @@ class _CommunityForumScreenState extends State<CommunityForumScreen> {
     return '${out.substring(0, 137)}…';
   }
 
-  Future<void> _share() async {
+  Future<void> _pickGameFilter() async {
+    final picked = await _showGamePickerSheet(
+      selectedKey: _gameKey,
+      allowAll: true,
+    );
+    if (!mounted || picked == null) return;
+    setState(() {
+      _gameKey = picked.key;
+      _gameTitle = picked.title;
+    });
+  }
+
+  Future<_PickedForumGame?> _showGamePickerSheet({
+    String? selectedKey,
+    bool allowAll = false,
+  }) {
+    return showModalBottomSheet<_PickedForumGame>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) {
+        var query = '';
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            bool match(String key) {
+              final q = query.trim().toLowerCase();
+              if (q.isEmpty) return true;
+              return _gameLabel(key).toLowerCase().contains(q) ||
+                  key.toLowerCase().contains(q);
+            }
+
+            final mine = _collectionGameKeys.where(match).toList();
+            final others = _communityOnlyKeys.where(match).toList();
+            return SafeArea(
+              child: SizedBox(
+                height: MediaQuery.sizeOf(ctx).height * 0.72,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                      child: Text(
+                        'Choisir un jeu',
+                        style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: TextField(
+                        autofocus: true,
+                        decoration: const InputDecoration(
+                          hintText: 'Rechercher dans ta collec…',
+                          prefixIcon: Icon(Icons.search),
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        onChanged: (v) => setLocal(() => query = v),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: ListView(
+                        children: [
+                          if (allowAll)
+                            ListTile(
+                              leading: const Icon(Icons.apps_rounded),
+                              title: const Text('Tous les jeux'),
+                              selected: selectedKey == null,
+                              onTap: () => Navigator.pop(
+                                ctx,
+                                const _PickedForumGame(null, null),
+                              ),
+                            ),
+                          if (mine.isNotEmpty) ...[
+                            const Padding(
+                              padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
+                              child: Text(
+                                'Ma collection',
+                                style: TextStyle(fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                            for (final key in mine)
+                              ListTile(
+                                leading: const Icon(Icons.casino_outlined),
+                                title: Text(_gameLabel(key)),
+                                selected: selectedKey == key,
+                                onTap: () => Navigator.pop(
+                                  ctx,
+                                  _PickedForumGame(key, _gameLabel(key)),
+                                ),
+                              ),
+                          ],
+                          if (others.isNotEmpty) ...[
+                            const Padding(
+                              padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
+                              child: Text(
+                                'Autres (forum)',
+                                style: TextStyle(fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                            for (final key in others)
+                              ListTile(
+                                leading: const Icon(Icons.public_outlined),
+                                title: Text(_gameLabel(key)),
+                                selected: selectedKey == key,
+                                onTap: () => Navigator.pop(
+                                  ctx,
+                                  _PickedForumGame(key, _gameLabel(key)),
+                                ),
+                              ),
+                          ],
+                          if (mine.isEmpty && others.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.all(24),
+                              child: Text(
+                                'Aucun jeu trouvé.',
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _share({bool asRule = false}) async {
     final titleCtrl = TextEditingController();
     final bodyCtrl = TextEditingController();
-    final catsCtrl = TextEditingController(text: 'Tour 1, Tour 2, Tour 3');
-    var asRule = _kind == ForumKind.rules;
-    final presets = NamedScorePreset.listFrom(widget.item?.metadata);
     final key = _gameKey ??
         widget.gameKey ??
         (widget.item == null
@@ -506,167 +685,300 @@ class _CommunityForumScreenState extends State<CommunityForumScreen> {
             : CommunityRulesService.gameKeyFor(
                 bggId: widget.item!.metadata?['bgg_id']?.toString(),
                 title: widget.item!.title,
-              ));
+              )) ??
+        (_collectionGameKeys.isNotEmpty ? _collectionGameKeys.first : null);
 
     String? selectedGameKey = key;
+    NamedScorePreset? selectedPreset;
+    var shareAsRule = asRule;
     if (!mounted) return;
 
-    await showDialog<void>(
+    await showModalBottomSheet<void>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setLocal) {
-          final keys = _gameKeys;
-          return AlertDialog(
-            title: const Text('Partager'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SegmentedButton<bool>(
-                    showSelectedIcon: false,
-                    segments: const [
-                      ButtonSegment(value: false, label: Text('Template')),
-                      ButtonSegment(value: true, label: Text('Règle')),
-                    ],
-                    selected: {asRule},
-                    onSelectionChanged: (v) =>
-                        setLocal(() => asRule = v.first),
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    initialValue: selectedGameKey ?? '',
-                    isExpanded: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Jeu',
-                      isDense: true,
-                    ),
-                    items: [
-                      const DropdownMenuItem(
-                        value: '',
-                        child: Text('Choisir…'),
-                      ),
-                      if (widget.gameKey != null)
-                        DropdownMenuItem(
-                          value: widget.gameKey,
-                          child: Text(widget.gameTitle ?? widget.gameKey!),
-                        ),
-                      for (final k in keys)
-                        if (k != widget.gameKey)
-                          DropdownMenuItem(
-                            value: k,
-                            child: Text(_gameLabel(k)),
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            final scheme = Theme.of(ctx).colorScheme;
+            final item = selectedGameKey == null
+                ? null
+                : _collectionByKey[selectedGameKey];
+            final presets = NamedScorePreset.listFrom(item?.metadata)
+                .where((p) => !p.imported)
+                .toList();
+            final bottom = MediaQuery.viewInsetsOf(ctx).bottom;
+
+            Future<void> publishPreset(NamedScorePreset preset) async {
+              if (selectedGameKey == null) return;
+              await CommunityScoreTemplatesService.instance.publish(
+                gameKey: selectedGameKey!,
+                preset: preset,
+              );
+              if (ctx.mounted) Navigator.pop(ctx);
+              await _load();
+              if (!mounted) return;
+              setState(() {
+                _gameKey = selectedGameKey;
+                _gameTitle = _gameLabel(selectedGameKey!);
+                _kind = ForumKind.templates;
+                _mineOnly = false;
+                _sort = 'recent';
+              });
+            }
+
+            return Padding(
+              padding: EdgeInsets.fromLTRB(16, 4, 16, 16 + bottom),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      shareAsRule
+                          ? 'Partager une règle'
+                          : 'Partager un template',
+                      style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w800,
                           ),
-                    ],
-                    onChanged: (v) => setLocal(() {
-                      selectedGameKey =
-                          (v == null || v.isEmpty) ? null : v;
-                    }),
-                  ),
-                  if (!asRule && presets.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    for (final preset in presets)
-                      ListTile(
-                        dense: true,
-                        title: Text(preset.name),
-                        trailing: TextButton(
-                          onPressed: selectedGameKey == null
-                              ? null
-                              : () async {
-                                  await CommunityScoreTemplatesService.instance
-                                      .publish(
-                                    gameKey: selectedGameKey!,
-                                    preset: preset,
-                                  );
-                                  if (ctx.mounted) Navigator.pop(ctx);
-                                  await _load();
-                                  if (!mounted) return;
-                                  setState(() {
-                                    _gameKey = selectedGameKey;
-                                    _kind = ForumKind.templates;
-                                    _mineOnly = false;
-                                  });
-                                },
-                          child: const Text('Publier'),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      shareAsRule
+                          ? 'Choisis le jeu puis rédige ta règle.'
+                          : 'Choisis un jeu de ta collec, puis un de tes modèles.',
+                      style: TextStyle(color: scheme.onSurfaceVariant),
+                    ),
+                    const SizedBox(height: 14),
+                    SegmentedButton<bool>(
+                      showSelectedIcon: false,
+                      segments: const [
+                        ButtonSegment(
+                          value: false,
+                          label: Text('Template'),
+                          icon: Icon(Icons.grid_view_rounded, size: 16),
+                        ),
+                        ButtonSegment(
+                          value: true,
+                          label: Text('Règle'),
+                          icon: Icon(Icons.menu_book_outlined, size: 16),
+                        ),
+                      ],
+                      selected: {shareAsRule},
+                      onSelectionChanged: (v) =>
+                          setLocal(() => shareAsRule = v.first),
+                    ),
+                    const SizedBox(height: 14),
+                    Material(
+                      color: scheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(12),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: () async {
+                          final picked = await _showGamePickerSheet(
+                            selectedKey: selectedGameKey,
+                          );
+                          if (picked == null || picked.key == null) return;
+                          setLocal(() {
+                            selectedGameKey = picked.key;
+                            selectedPreset = null;
+                          });
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 14,
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.casino_outlined, color: scheme.primary),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  selectedGameKey == null
+                                      ? 'Choisir un jeu…'
+                                      : _gameLabel(selectedGameKey!),
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    color: selectedGameKey == null
+                                        ? scheme.onSurfaceVariant
+                                        : scheme.onSurface,
+                                  ),
+                                ),
+                              ),
+                              Icon(
+                                Icons.expand_more,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ],
+                          ),
                         ),
                       ),
+                    ),
+                    if (!shareAsRule) ...[
+                      const SizedBox(height: 16),
+                      Text(
+                        'Tes modèles',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      if (selectedGameKey == null)
+                        Text(
+                          'Sélectionne un jeu pour voir tes templates.',
+                          style: TextStyle(color: scheme.onSurfaceVariant),
+                        )
+                      else if (presets.isEmpty)
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: scheme.outlineVariant),
+                          ),
+                          child: Text(
+                            'Aucun template enregistré pour « ${_gameLabel(selectedGameKey!)} ».\n'
+                            'Crées-en un depuis une partie (Enregistrer le template).',
+                            style: TextStyle(
+                              color: scheme.onSurfaceVariant,
+                              height: 1.35,
+                            ),
+                          ),
+                        )
+                      else
+                        for (final preset in presets)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Material(
+                              color: selectedPreset?.name == preset.name
+                                  ? scheme.primaryContainer
+                                  : scheme.surfaceContainerLow,
+                              borderRadius: BorderRadius.circular(12),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(12),
+                                onTap: () =>
+                                    setLocal(() => selectedPreset = preset),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              preset.name,
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.w800,
+                                              ),
+                                            ),
+                                          ),
+                                          if (selectedPreset?.name ==
+                                              preset.name)
+                                            Icon(
+                                              Icons.check_circle,
+                                              color: scheme.primary,
+                                              size: 20,
+                                            ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Wrap(
+                                        spacing: 6,
+                                        runSpacing: 6,
+                                        children: [
+                                          for (final name
+                                              in preset.template.lineNames.take(4))
+                                            ScoreCategoryChip(
+                                              name: name,
+                                              compact: true,
+                                            ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 6),
+                                      ScoreRuleBadges(
+                                        template: preset.template,
+                                        compact: true,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                      const SizedBox(height: 8),
+                      FilledButton.icon(
+                        onPressed: selectedGameKey == null ||
+                                selectedPreset == null
+                            ? null
+                            : () => publishPreset(selectedPreset!),
+                        icon: const Icon(Icons.publish_outlined),
+                        label: const Text('Publier ce template'),
+                      ),
+                    ] else ...[
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: titleCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Titre de la règle',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: bodyCtrl,
+                        minLines: 4,
+                        maxLines: 8,
+                        decoration: const InputDecoration(
+                          labelText: 'Texte de la règle',
+                          alignLabelWithHint: true,
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      FilledButton.icon(
+                        onPressed: selectedGameKey == null
+                            ? null
+                            : () async {
+                                final title = titleCtrl.text.trim();
+                                if (title.isEmpty) return;
+                                await CommunityRulesService.instance.publish(
+                                  gameKey: selectedGameKey!,
+                                  language: 'fr',
+                                  title: title,
+                                  body: bodyCtrl.text.trim(),
+                                );
+                                if (ctx.mounted) Navigator.pop(ctx);
+                                await _load();
+                                if (!mounted) return;
+                                setState(() {
+                                  _gameKey = selectedGameKey;
+                                  _gameTitle = _gameLabel(selectedGameKey!);
+                                  _kind = ForumKind.rules;
+                                  _mineOnly = false;
+                                  _sort = 'recent';
+                                });
+                              },
+                        icon: const Icon(Icons.publish_outlined),
+                        label: const Text('Publier la règle'),
+                      ),
+                    ],
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Annuler'),
+                    ),
                   ],
-                  TextField(
-                    controller: titleCtrl,
-                    decoration: const InputDecoration(labelText: 'Titre'),
-                  ),
-                  if (!asRule)
-                    TextField(
-                      controller: catsCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Catégories (séparées par des virgules)',
-                      ),
-                    ),
-                  TextField(
-                    controller: bodyCtrl,
-                    minLines: 2,
-                    maxLines: 4,
-                    decoration: InputDecoration(
-                      labelText: asRule
-                          ? 'Texte de la règle'
-                          : 'Conditions (texte libre)',
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Annuler'),
-              ),
-              FilledButton(
-                onPressed: () async {
-                  final title = titleCtrl.text.trim();
-                  if (title.isEmpty || selectedGameKey == null) return;
-                  if (asRule) {
-                    await CommunityRulesService.instance.publish(
-                      gameKey: selectedGameKey!,
-                      language: 'fr',
-                      title: title,
-                      body: bodyCtrl.text.trim(),
-                    );
-                  } else {
-                    final lines = [
-                      for (final part in catsCtrl.text.split(','))
-                        if (part.trim().isNotEmpty)
-                          ScoreLineSpec(part.trim()),
-                    ];
-                    await CommunityScoreTemplatesService.instance.publish(
-                      gameKey: selectedGameKey!,
-                      preset: NamedScorePreset(
-                        name: title,
-                        confrontation:
-                            BoardgameConfrontationType.freeForAll,
-                        template: BoardgameScoreTemplate(lines: lines),
-                      ),
-                    );
-                  }
-                  if (ctx.mounted) Navigator.pop(ctx);
-                  await _load();
-                  if (!mounted) return;
-                  setState(() {
-                    _gameKey = selectedGameKey;
-                    _kind =
-                        asRule ? ForumKind.rules : ForumKind.templates;
-                    _mineOnly = false;
-                    _sort = 'recent';
-                  });
-                },
-                child: const Text('Publier'),
-              ),
-            ],
-          );
-        },
-      ),
+            );
+          },
+        );
+      },
     );
     titleCtrl.dispose();
     bodyCtrl.dispose();
-    catsCtrl.dispose();
   }
 
   Future<void> _importTemplate(CommunityScoreTemplate entry) async {
@@ -949,8 +1261,13 @@ class _ForumTabs extends StatelessWidget {
   }
 }
 
+class _PickedForumGame {
+  final String? key;
+  final String? title;
+  const _PickedForumGame(this.key, this.title);
+}
+
 class _FilterBar extends StatelessWidget {
-  final List<String> gameKeys;
   final String? gameKey;
   final String Function(String) gameLabelOf;
   final String sort;
@@ -960,13 +1277,12 @@ class _FilterBar extends StatelessWidget {
   final bool showMonth;
   final String search;
   final ValueChanged<String> onSearch;
-  final void Function(String? key, String? title) onGameKey;
+  final VoidCallback onPickGame;
   final ValueChanged<String> onSort;
   final ValueChanged<bool> onMineOnly;
   final ValueChanged<bool> onMonthOnly;
 
   const _FilterBar({
-    required this.gameKeys,
     required this.gameKey,
     required this.gameLabelOf,
     required this.sort,
@@ -976,7 +1292,7 @@ class _FilterBar extends StatelessWidget {
     required this.showMonth,
     required this.search,
     required this.onSearch,
-    required this.onGameKey,
+    required this.onPickGame,
     required this.onSort,
     required this.onMineOnly,
     required this.onMonthOnly,
@@ -984,12 +1300,14 @@ class _FilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final gameLabel =
+        gameKey == null ? 'Tous les jeux' : gameLabelOf(gameKey!);
     return Column(
       children: [
         Row(
           children: [
             Expanded(
-              flex: 3,
               child: SizedBox(
                 height: 40,
                 child: TextField(
@@ -1005,37 +1323,47 @@ class _FilterBar extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            Expanded(
-              flex: 2,
-              child: DropdownButtonFormField<String>(
-                initialValue: gameKey ?? '',
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  isDense: true,
-                  border: OutlineInputBorder(),
-                  contentPadding: EdgeInsets.symmetric(horizontal: 8),
-                ),
-                items: [
-                  const DropdownMenuItem(
-                    value: '',
-                    child: Text('Tous les jeux', overflow: TextOverflow.ellipsis),
-                  ),
-                  for (final key in gameKeys)
-                    DropdownMenuItem(
-                      value: key,
-                      child: Text(
-                        gameLabelOf(key),
-                        overflow: TextOverflow.ellipsis,
-                      ),
+            Material(
+              color: scheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(10),
+              child: InkWell(
+                onTap: onPickGame,
+                borderRadius: BorderRadius.circular(10),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minWidth: 132, maxWidth: 180),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 10,
                     ),
-                ],
-                onChanged: (v) {
-                  if (v == null || v.isEmpty) {
-                    onGameKey(null, null);
-                  } else {
-                    onGameKey(v, gameLabelOf(v));
-                  }
-                },
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.casino_outlined,
+                          size: 16,
+                          color: scheme.primary,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            gameLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        Icon(
+                          Icons.expand_more,
+                          size: 16,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ),
           ],

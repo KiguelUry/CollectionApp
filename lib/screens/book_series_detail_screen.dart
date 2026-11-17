@@ -433,19 +433,33 @@ class _BookSeriesDetailScreenState extends State<BookSeriesDetailScreen> {
         ? BookVolumeStatus.wishlist
         : (nextOwned ? BookVolumeStatus.owned : BookVolumeStatus.missing);
 
+    final nextSlots = List<BookVolumeSlot>.of(_slots);
+    nextSlots[idx] = BookVolumeSlot(
+      volume: nextVolume,
+      item: nextItem,
+      status: status,
+    );
+    final nextVolumes = nextSlots.map((s) => s.volume).toList();
+    final items =
+        nextSlots.map((s) => s.item).whereType<CollectionItem>().toList();
+    final stats = _service.computeStats(
+      series: _series!,
+      volumes: nextVolumes,
+      items: items,
+    );
     setState(() {
-      _slots = List.of(_slots);
-      _slots[idx] = BookVolumeSlot(
-        volume: nextVolume,
-        item: nextItem,
-        status: status,
-      );
-      _stats = _service.computeStats(
-        series: _series!,
-        volumes: _slots.map((s) => s.volume).toList(),
-        items: _slots.map((s) => s.item).whereType<CollectionItem>().toList(),
-      );
+      _slots = nextSlots;
+      _stats = stats;
     });
+    // Sync immédiate : au retour sur la grille, _applySeriesFromMemoryCache
+    // lit ce cache (sinon 0/6 + couverture grise restent figés).
+    BooksCollectionCache.instance.updateSeries(
+      seriesId: _series!.id,
+      series: _series!,
+      volumes: nextVolumes,
+      items: items,
+      stats: stats,
+    );
   }
 
   CollectionItem _fakeItem(

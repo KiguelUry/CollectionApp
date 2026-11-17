@@ -603,6 +603,9 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
       showOwnedExpansions: widget.showOwnedExpansions,
       onShowOwnedExpansionsChanged: widget.onShowOwnedExpansionsChanged,
       showWishlistSortOptions: widget.showWishlistSortOptions,
+      defaultSort: widget.defaultWishlistMineFilter
+          ? CollectionSort.favoritesFirst
+          : CollectionSort.titleAsc,
     );
 
     return Column(

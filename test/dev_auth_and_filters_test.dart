@@ -21,6 +21,13 @@ void main() {
       expect(f.hasActiveFilterCriteria, isFalse);
     });
 
+    test('wishlist défaut favoris : Tri inactif si defaultSort=favoritesFirst', () {
+      final f = CollectionListFilters(sort: CollectionSort.favoritesFirst);
+      // Même logique que CollectionFilterBar.defaultSort wishlist.
+      expect(f.sort != CollectionSort.favoritesFirst, isFalse);
+      expect(f.sort != CollectionSort.titleAsc, isTrue);
+    });
+
     test('changer le tri active hasActiveFilters (pas le badge Filtre)', () {
       final f = CollectionListFilters(sort: CollectionSort.ratingDesc);
       expect(f.hasActiveFilters, isTrue);
