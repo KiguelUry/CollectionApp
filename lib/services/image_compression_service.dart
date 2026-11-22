@@ -42,4 +42,26 @@ class ImageCompressionService {
 
     return bytes;
   }
+
+  /// Couverture perso : côté max [maxSide] px, JPEG ~60 Ko.
+  static Uint8List compressCover(Uint8List input, {int maxSide = 600}) {
+    final decoded = img.decodeImage(input);
+    if (decoded == null) return input;
+    var working = img.bakeOrientation(decoded);
+    if (working.width > maxSide || working.height > maxSide) {
+      working = img.copyResize(
+        working,
+        width: working.width >= working.height ? maxSide : null,
+        height: working.height > working.width ? maxSide : null,
+        interpolation: img.Interpolation.average,
+      );
+    }
+    var quality = 80;
+    var bytes = Uint8List.fromList(img.encodeJpg(working, quality: quality));
+    while (bytes.length > 90 * 1024 && quality > 50) {
+      quality -= 10;
+      bytes = Uint8List.fromList(img.encodeJpg(working, quality: quality));
+    }
+    return bytes;
+  }
 }

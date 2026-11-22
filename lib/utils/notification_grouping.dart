@@ -78,7 +78,45 @@ String groupedNotificationTitle(AppNotificationType type, int count) {
       return '$count objets vous ont été recommandés';
     case AppNotificationType.playShared:
       return '$count parties ont été partagées avec vous';
+    case AppNotificationType.borrowRequest:
+      return '$count demandes d\'emprunt';
+    case AppNotificationType.friendAccepted:
+      return '$count personnes ont accepté ta demande d\'ami';
+    case AppNotificationType.activityReaction:
+      return '$count réactions à ton activité';
   }
+}
+
+/// Section temporelle d'une notification (liste plein écran).
+enum NotificationPeriod { today, thisWeek, older }
+
+NotificationPeriod notificationPeriodOf(DateTime at, DateTime now) {
+  final local = at.toLocal();
+  final startOfToday = DateTime(now.year, now.month, now.day);
+  if (!local.isBefore(startOfToday)) return NotificationPeriod.today;
+  if (now.difference(local).inDays < 7) return NotificationPeriod.thisWeek;
+  return NotificationPeriod.older;
+}
+
+String notificationPeriodLabel(NotificationPeriod p) => switch (p) {
+      NotificationPeriod.today => 'Aujourd\'hui',
+      NotificationPeriod.thisWeek => 'Cette semaine',
+      NotificationPeriod.older => 'Plus ancien',
+    };
+
+/// Lignes regroupées par période, ordre Aujourd'hui → Plus ancien.
+Map<NotificationPeriod, List<NotificationRow>> rowsByPeriod(
+  List<NotificationRow> rows,
+  DateTime now,
+) {
+  final out = <NotificationPeriod, List<NotificationRow>>{};
+  for (final r in rows) {
+    out.putIfAbsent(notificationPeriodOf(r.latestAt, now), () => []).add(r);
+  }
+  return {
+    for (final p in NotificationPeriod.values)
+      if (out[p] != null) p: out[p]!,
+  };
 }
 
 String notificationTitle(AppNotification n) {
@@ -98,6 +136,17 @@ String notificationTitle(AppNotification n) {
       final game = n.payload['game_title']?.toString().trim() ?? 'un jeu';
       return '$who a enregistré une partie de $game avec vous. '
           'Voulez-vous l\'ajouter à votre historique ?';
+    case AppNotificationType.borrowRequest:
+      final title = n.payload['item_title']?.toString().trim() ?? 'un jeu';
+      return '$who aimerait t\'emprunter « $title »';
+    case AppNotificationType.friendAccepted:
+      return '$who a accepté ta demande d\'ami';
+    case AppNotificationType.activityReaction:
+      final emoji = n.payload['emoji']?.toString() ?? '👍';
+      final title = n.payload['item_title']?.toString().trim();
+      return title == null || title.isEmpty
+          ? '$who a réagi $emoji à ton activité'
+          : '$who a réagi $emoji à « $title »';
   }
 }
 

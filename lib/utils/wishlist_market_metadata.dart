@@ -84,6 +84,27 @@ String formatEuroChip(double? value, {bool compact = true}) {
   return compact ? '$rounded€' : '${rounded.replaceAll('.0', '')} €';
 }
 
+/// « Occasion ≈ 18 € · Neuf dès 29 € » (null si aucune estimation).
+String? marketEstimateLabel(Map<String, dynamic>? metadata) {
+  final second = marketSecondhandPriceFromMetadata(metadata);
+  final newMin = marketNewPriceMinFromMetadata(metadata);
+  final parts = [
+    if (second != null && second > 0)
+      'Occasion ≈ ${formatEuroChip(second, compact: false)}',
+    if (newMin != null && newMin > 0)
+      'Neuf dès ${formatEuroChip(newMin, compact: false)}',
+  ];
+  return parts.isEmpty ? null : parts.join(' · ');
+}
+
+/// Vrai si l'occasion estimée (sinon le neuf) rentre dans le budget.
+bool isWithinBudget(Map<String, dynamic>? metadata, double? budget) {
+  if (budget == null || budget <= 0) return false;
+  final price = marketSecondhandPriceFromMetadata(metadata) ??
+      marketNewPriceMinFromMetadata(metadata);
+  return price != null && price > 0 && price <= budget;
+}
+
 String priorityFlameLabel(int priority) {
   return switch (priority.clamp(1, 3)) {
     1 => '🔥',

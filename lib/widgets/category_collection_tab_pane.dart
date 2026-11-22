@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/card_subcategory.dart';
 import '../models/collection_category.dart';
@@ -230,6 +231,14 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
     });
   }
 
+  void _enterSelectionWith(String itemId) {
+    HapticFeedback.selectionClick();
+    setState(() {
+      _selectionMode = true;
+      _selectedIds.add(itemId);
+    });
+  }
+
   void _toggleSelection(String itemId) {
     setState(() {
       if (_selectedIds.contains(itemId)) {
@@ -311,22 +320,7 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
     final allSelected =
         filtered.isNotEmpty &&
         filtered.every((i) => _selectedIds.contains(i.id));
-    if (!_selectionMode) {
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            onPressed: () => setState(() => _selectionMode = true),
-            style: TextButton.styleFrom(
-              foregroundColor: Theme.of(context).colorScheme.primary,
-            ),
-            icon: const Icon(Icons.checklist_rounded, size: 18),
-            label: const Text('Sélection multiple'),
-          ),
-        ),
-      );
-    }
+    if (!_selectionMode) return null;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
       child: Column(
@@ -455,6 +449,8 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
                   ),
             onLongPress: _selectionMode
                 ? null
+                : widget.enableBulkSelection
+                ? () => _enterSelectionWith(item.id)
                 : item.imageUrl != null && item.imageUrl!.trim().isNotEmpty
                 ? () => showCoverPreview(
                     context,
@@ -478,6 +474,9 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
             groupActivityCounts: groupActivity,
             onExpansionBaseFocus: expansionFocus,
             onDelete: _selectionMode ? null : () => widget.onDeleteItem(item),
+            onLongPress: _selectionMode || !widget.enableBulkSelection
+                ? null
+                : () => _enterSelectionWith(item.id),
             onTap: _selectionMode
                 ? () => _toggleSelection(item.id)
                 : () => Navigator.push(
@@ -606,6 +605,15 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
       defaultSort: widget.defaultWishlistMineFilter
           ? CollectionSort.favoritesFirst
           : CollectionSort.titleAsc,
+      trailing: widget.enableBulkSelection && !_selectionMode
+          ? IconButton(
+              key: const ValueKey('bulk_selection_toggle'),
+              tooltip: 'Sélection multiple (ou appui long sur un objet)',
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.checklist_rounded, size: 22),
+              onPressed: () => setState(() => _selectionMode = true),
+            )
+          : null,
     );
 
     return Column(

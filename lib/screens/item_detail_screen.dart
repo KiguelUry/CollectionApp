@@ -45,6 +45,8 @@ import '../widgets/detail_bento_tile.dart';
 import '../widgets/profile/pantheon_bento.dart';
 import '../widgets/compact_whereabouts_dropdown.dart';
 import '../widgets/discogs_market_value_card.dart';
+import '../widgets/friend_item_actions.dart';
+import '../widgets/item_customize_sheet.dart';
 import '../widgets/friend_ratings_panel.dart';
 import '../widgets/item_aspect_ratings_section.dart';
 import '../widgets/videogame_platform_picker.dart';
@@ -62,7 +64,6 @@ import '../utils/boardgame_expansions.dart';
 import '../services/global_play_history_service.dart';
 import '../services/player_alias_service.dart';
 import '../services/collection_change_history_service.dart';
-import '../utils/copy_friend_item.dart';
 import '../utils/friend_item_overlap.dart';
 import '../utils/whereabouts_apply.dart';
 import '../utils/whereabouts_persistence.dart';
@@ -444,6 +445,11 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     );
   }
 
+  Future<void> _customize() async {
+    final saved = await showItemCustomizeSheet(context, item: _item);
+    if (saved == true) await _reloadItem();
+  }
+
   Future<void> _reloadItem() async {
     final row = await Supabase.instance.client
         .from('collection_items')
@@ -724,12 +730,14 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
 
   Widget _buildWishlistPurchaseBlock(bool ro) {
     final avg = marketPriceAvgFromMetadata(_item.metadata);
-    final second = marketSecondhandPriceFromMetadata(_item.metadata);
-    final neu = marketNewPriceMinFromMetadata(_item.metadata);
-    final estimate = avg ?? neu ?? second;
-    final estimateLabel = estimate != null && estimate > 0
-        ? '~${formatEuroChip(estimate, compact: false)}'
-        : null;
+    final estimateLabel = marketEstimateLabel(_item.metadata) ??
+        (avg != null && avg > 0
+            ? 'Moyenne ≈ ${formatEuroChip(avg, compact: false)}'
+            : null);
+    final budget = double.tryParse(
+      _priceController.text.replaceAll(',', '.').trim(),
+    );
+    final inBudget = isWithinBudget(_item.metadata, budget);
     final priority = _item.isFavorite;
 
     return Column(
@@ -761,18 +769,50 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Budget / Prix cible',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Budget / Prix cible',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
                       ),
+                    ),
+                    if (inBudget)
+                      Container(
+                        key: const ValueKey('wishlist_in_budget'),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.green.shade600,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Text(
+                          'Dans ton budget',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  estimateLabel != null
-                      ? 'Estimation marché : $estimateLabel'
-                      : 'Pas encore d’estimation — cherche en boutique.',
-                  style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
+                  estimateLabel ??
+                      'Pas encore d’estimation — ouvre « Estimations du marché ».',
+                  style: TextStyle(
+                    color: estimateLabel != null
+                        ? Theme.of(context).colorScheme.onSurface
+                        : Colors.grey.shade700,
+                    fontSize: 13,
+                    fontWeight:
+                        estimateLabel != null ? FontWeight.w700 : FontWeight.w400,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 TextField(
@@ -786,8 +826,33 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
-                  onChanged: (_) => _scheduleSave(),
+                  onChanged: (_) {
+                    setState(() {});
+                    _scheduleSave();
+                  },
                 ),
+                if (_item.category == CollectionCategory.boardgame) ...[
+                  const SizedBox(height: 8),
+                  DetailBentoSubTile(
+                    icon: Icons.query_stats_rounded,
+                    title: 'Estimations du marché',
+                    subtitle: estimateLabel ?? 'Prix neuf, occasion et boutiques',
+                    accent: Colors.teal,
+                    selected: _marketPanelOpen,
+                    onTap: () =>
+                        setState(() => _marketPanelOpen = !_marketPanelOpen),
+                  ),
+                  if (_marketPanelOpen) ...[
+                    const SizedBox(height: 10),
+                    ItemMarketValuePanel(
+                      item: _item,
+                      readOnly: ro,
+                      onItemUpdated: (next) => setState(
+                        () => _item = _item.copyWith(metadata: next.metadata),
+                      ),
+                    ),
+                  ],
+                ],
                 const SizedBox(height: 8),
                 Align(
                   alignment: Alignment.centerLeft,
@@ -967,16 +1032,6 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
         title: cleanDisplayText(_item.title),
         showBackButton: true,
         actions: [
-          if (ro && widget.friendUsername != null)
-            IconButton(
-              icon: const Icon(Icons.add_circle_outline),
-              tooltip: 'Ajouter chez moi',
-              onPressed: () => showCopyFriendItemSheet(
-                context,
-                source: _item,
-                friendUsername: widget.friendUsername!,
-              ),
-            ),
           if (!ro && isBook && _item.volumeId == null)
             IconButton(
               icon: const Icon(Icons.link),
@@ -1007,6 +1062,8 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                   case _ItemMenuAction.location:
                     if (!mounted) return;
                     await _lend();
+                  case _ItemMenuAction.customize:
+                    await _customize();
                   case _ItemMenuAction.delete:
                     await _delete();
                 }
@@ -1064,6 +1121,15 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       title: Text('Localisation / Prêter'),
                     ),
                   ),
+                const PopupMenuItem(
+                  value: _ItemMenuAction.customize,
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.edit_outlined),
+                    title: Text('Renommer / changer l\'image'),
+                  ),
+                ),
                 const PopupMenuDivider(),
                 PopupMenuItem(
                   value: _ItemMenuAction.delete,
@@ -1156,29 +1222,23 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                           label: const Text('Ajouter au Panthéon'),
                         ),
                       ),
-                    if (ro)
-                      Card(
-                        color: Colors.blue.shade50,
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.visibility,
-                                color: Colors.blue.shade700,
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  'Collection d\'un ami — lecture seule',
-                                  style: TextStyle(color: Colors.blue.shade900),
-                                ),
-                              ),
-                            ],
-                          ),
+                    if (ro && widget.friendUsername != null) ...[
+                      FriendItemActions(
+                        item: _item,
+                        friendUsername: widget.friendUsername!,
+                        overlap: widget.friendOverlap,
+                      ),
+                      const SizedBox(height: 12),
+                    ] else if (ro) ...[
+                      Text(
+                        'Lecture seule',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                       ),
-                    if (ro) const SizedBox(height: 12),
+                      const SizedBox(height: 8),
+                    ],
                     if (!isBoardgame) ...[
                       Text(
                         _item.title,
@@ -1236,43 +1296,6 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                       ),
                       const SizedBox(height: 12),
                     ],
-                    if (ro &&
-                        widget.friendOverlap != null &&
-                        widget.friendOverlap != FriendOverlapKind.none)
-                      Card(
-                        color:
-                            widget.friendOverlap ==
-                                FriendOverlapKind.inCollection
-                            ? Colors.green.shade50
-                            : Colors.amber.shade50,
-                        child: ListTile(
-                          leading: Icon(
-                            widget.friendOverlap ==
-                                    FriendOverlapKind.inCollection
-                                ? Icons.check_circle_outline
-                                : Icons.favorite_border,
-                            color:
-                                widget.friendOverlap ==
-                                    FriendOverlapKind.inCollection
-                                ? Colors.green.shade700
-                                : Colors.amber.shade800,
-                          ),
-                          title: Text(
-                            widget.friendOverlap ==
-                                    FriendOverlapKind.inCollection
-                                ? 'Tu as déjà cet objet'
-                                : 'Déjà dans ta wishlist',
-                            style: const TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                          subtitle: const Text(
-                            'Utilise + en haut pour l\'ajouter ou compléter ta collection',
-                          ),
-                        ),
-                      ),
-                    if (ro &&
-                        widget.friendOverlap != null &&
-                        widget.friendOverlap != FriendOverlapKind.none)
-                      const SizedBox(height: 12),
                     if (!ro && isWishlist) ...[
                       _buildWishlistPurchaseBlock(ro),
                       const SizedBox(height: 16),
@@ -2992,4 +3015,11 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
   }
 }
 
-enum _ItemMenuAction { favorite, pantheon, recommend, location, delete }
+enum _ItemMenuAction {
+  favorite,
+  pantheon,
+  recommend,
+  location,
+  customize,
+  delete,
+}

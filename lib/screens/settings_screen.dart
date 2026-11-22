@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/platform_input.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -126,7 +127,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           controller: emailCtrl,
           keyboardType: TextInputType.emailAddress,
           autocorrect: false,
-          autofocus: true,
+          autofocus: kSafeAutofocus,
           decoration: const InputDecoration(labelText: 'Nouvelle adresse'),
         ),
         actions: [
@@ -177,7 +178,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         content: TextField(
           controller: passwordCtrl,
           obscureText: true,
-          autofocus: true,
+          autofocus: kSafeAutofocus,
           decoration: const InputDecoration(
             labelText: 'Nouveau mot de passe',
             helperText: '6 caractères minimum.',

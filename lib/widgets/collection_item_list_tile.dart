@@ -18,6 +18,7 @@ class CollectionItemListTile extends StatelessWidget {
   final List<CollectionGroup>? boardgameQuickEditGroups;
   final Map<String, int> groupActivityCounts;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
   final VoidCallback? onDelete;
   final Future<void> Function(CollectionItem base)? onExpansionBaseFocus;
 
@@ -30,6 +31,7 @@ class CollectionItemListTile extends StatelessWidget {
     this.boardgameQuickEditGroups,
     this.groupActivityCounts = const {},
     this.onTap,
+    this.onLongPress,
     this.onDelete,
     this.onExpansionBaseFocus,
   });
@@ -45,6 +47,7 @@ class CollectionItemListTile extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),

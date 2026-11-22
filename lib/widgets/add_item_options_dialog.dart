@@ -92,6 +92,7 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
   List<CollectionGroup> _groups = [];
   Map<String, int> _groupActivityCounts = {};
   bool _loading = true;
+  bool _submitting = false;
   bool _descExpanded = false;
   List<BggGalleryPhoto> _photos = const [];
   bool _photosLoading = false;
@@ -515,7 +516,7 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
           child: const Text('Annuler'),
         ),
         FilledButton(
-          onPressed: _loading
+          onPressed: _loading || _submitting
               ? null
               : () async {
                   if (_shareWithGroup &&
@@ -537,6 +538,7 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                     holderLabel: _holderLabelForSave(),
                     quantity: _quantity,
                   );
+                  setState(() => _submitting = true);
                   try {
                     await widget.onConfirm(options);
                   } catch (_) {
@@ -549,9 +551,17 @@ class _AddItemOptionsDialogState extends State<AddItemOptionsDialog> {
                         ),
                       );
                     }
+                  } finally {
+                    if (mounted) setState(() => _submitting = false);
                   }
                 },
-          child: const Text('Ajouter'),
+          child: _submitting
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Ajouter'),
         ),
       ],
     );

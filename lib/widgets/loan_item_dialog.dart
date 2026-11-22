@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/platform_input.dart';
 import '../services/friend_service.dart';
 import 'friend_identity.dart';
 
@@ -143,7 +144,7 @@ class _LoanItemDialogState extends State<LoanItemDialog> {
                   if (_isExternal)
                     TextField(
                       controller: _nameController,
-                      autofocus: true,
+                      autofocus: kSafeAutofocus,
                       decoration: const InputDecoration(
                         labelText: 'Nom (ex: Titouan)',
                         border: OutlineInputBorder(),

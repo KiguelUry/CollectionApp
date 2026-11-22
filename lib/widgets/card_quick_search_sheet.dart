@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/platform_input.dart';
 
 import '../models/card_subcategory.dart';
 import '../services/card_catalog_service.dart';
@@ -115,7 +116,7 @@ class _CardQuickSearchSheetState extends State<_CardQuickSearchSheet> {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: TextField(
               controller: _controller,
-              autofocus: true,
+              autofocus: kSafeAutofocus,
               textInputAction: TextInputAction.search,
               onSubmitted: (_) => _search(),
               decoration: InputDecoration(

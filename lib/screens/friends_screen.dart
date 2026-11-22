@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
 import '../models/collection_group.dart';
 import '../services/friend_service.dart';
 import '../services/group_service.dart';
+import '../services/profile_cache_service.dart';
 import '../widgets/add_friend_sheet.dart';
 import '../widgets/app_app_bar.dart';
 import '../widgets/friends_activity_feed.dart';
@@ -10,9 +13,15 @@ import '../widgets/group_badge.dart';
 import '../widgets/profile_avatar.dart';
 import 'friend_collection_screen.dart';
 import 'group_detail_screen.dart';
+import 'groups_screen.dart';
 
+const kAppPublicUrl = 'https://kiguelury.github.io/CollectionApp/';
+
+/// Social : Activité · Amis & Groupes · Demandes.
 class FriendsScreen extends StatefulWidget {
-  const FriendsScreen({super.key});
+  final int initialTab;
+
+  const FriendsScreen({super.key, this.initialTab = 0});
 
   @override
   State<FriendsScreen> createState() => _FriendsScreenState();
@@ -22,11 +31,16 @@ class _FriendsScreenState extends State<FriendsScreen> {
   final _service = FriendService();
   final _groupService = GroupService();
   final _filterController = TextEditingController();
+  final _pseudoController = TextEditingController();
   List<Map<String, dynamic>> _friends = [];
   List<CollectionGroup> _groups = [];
   List<Map<String, dynamic>> _filtered = [];
-  List<Map<String, dynamic>> _pendingRequests = [];
+  List<Map<String, dynamic>> _incoming = [];
+  List<Map<String, dynamic>> _outgoing = [];
+  Map<String, ({int count, int common})> _summary = {};
+  final Set<String> _busy = {};
   bool _loading = true;
+  bool _sendingInvite = false;
 
   @override
   void initState() {
@@ -39,6 +53,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
   void dispose() {
     _filterController.removeListener(_applyFilter);
     _filterController.dispose();
+    _pseudoController.dispose();
     super.dispose();
   }
 
@@ -48,17 +63,21 @@ class _FriendsScreenState extends State<FriendsScreen> {
     });
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool force = false}) async {
     setState(() => _loading = true);
     try {
       final results = await Future.wait([
-        _service.fetchFriends(),
+        _service.fetchFriends(force: force),
         _service.fetchIncomingFriendRequests(),
-        _groupService.fetchMyGroups(),
+        _groupService.fetchMyGroups(force: force),
+        _service.fetchOutgoingFriendRequests().catchError(
+              (_) => <Map<String, dynamic>>[],
+            ),
       ]);
       _friends = results[0] as List<Map<String, dynamic>>;
-      _pendingRequests = results[1] as List<Map<String, dynamic>>;
+      _incoming = results[1] as List<Map<String, dynamic>>;
       _groups = results[2] as List<CollectionGroup>;
+      _outgoing = results[3] as List<Map<String, dynamic>>;
       _applyFilter();
     } catch (e) {
       if (mounted) {
@@ -68,14 +87,24 @@ class _FriendsScreenState extends State<FriendsScreen> {
       }
     }
     if (mounted) setState(() => _loading = false);
+    _loadSummary();
+  }
+
+  Future<void> _loadSummary() async {
+    final ids = [
+      for (final f in _friends)
+        if (f['share_collections'] == true) f['profile_id'] as String,
+    ];
+    final s = await _service.fetchFriendsSummary(ids);
+    if (mounted) setState(() => _summary = s);
   }
 
   Future<void> _openAddFriend() async {
     final added = await showAddFriendSheet(context);
-    if (added == true) await _load();
+    if (added == true) await _load(force: true);
   }
 
-  void _openFriend(Map<String, dynamic> friend) {
+  void _openFriend(Map<String, dynamic> friend, {bool collection = false}) {
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -85,265 +114,108 @@ class _FriendsScreenState extends State<FriendsScreen> {
           avatarUrl: friend['avatar_url'] as String?,
           accentColor: friend['accent_color'] as String?,
           shareCollections: friend['share_collections'] as bool? ?? false,
+          collectionView: collection,
         ),
       ),
     );
   }
 
-  Future<void> _acceptRequest(Map<String, dynamic> req) async {
+  Future<void> _runRequest(
+    Map<String, dynamic> req,
+    Future<void> Function(String id) action,
+    String success,
+  ) async {
+    final id = req['friendship_id'] as String;
+    setState(() => _busy.add(id));
     try {
-      await _service.acceptFriendRequest(req['friendship_id'] as String);
+      await action(id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(success)),
+        );
+      }
+      await _load(force: true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy.remove(id));
+    }
+  }
+
+  Future<void> _sendByPseudo() async {
+    final pseudo = _pseudoController.text.trim();
+    if (pseudo.isEmpty || _sendingInvite) return;
+    setState(() => _sendingInvite = true);
+    try {
+      await _service.addFriendByUsername(pseudo);
+      _pseudoController.clear();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Demande envoyée à $pseudo')),
+        );
+      }
+      await _load(force: true);
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              '${req['username'] ?? 'Ami'} est maintenant ton ami',
-            ),
+            content: Text(e.toString().replaceFirst('Exception: ', '')),
           ),
         );
-        await _load();
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$e')),
-        );
-      }
+    } finally {
+      if (mounted) setState(() => _sendingInvite = false);
     }
   }
 
-  Future<void> _rejectRequest(Map<String, dynamic> req) async {
-    try {
-      await _service.rejectFriendRequest(req['friendship_id'] as String);
-      await _load();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$e')),
-        );
-      }
+  Future<void> _copyInvite() async {
+    final me = ProfileCacheService.instance.profile?.username;
+    final text = me == null || me.isEmpty
+        ? 'Rejoins-moi sur Paloma pour partager nos collections : $kAppPublicUrl'
+        : 'Rejoins-moi sur Paloma pour partager nos collections ! '
+            'Ajoute « $me » dans Social → Demandes. $kAppPublicUrl';
+    await Clipboard.setData(ClipboardData(text: text));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Lien d\'invitation copié')),
+      );
     }
   }
 
-  Widget _buildFriendsList() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Container(
-          margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: TextField(
-            controller: _filterController,
-            decoration: InputDecoration(
-              hintText: 'Chercher un ami…',
-              border: InputBorder.none,
-              icon: Icon(Icons.search, color: Colors.blueGrey.shade300),
-              suffixIcon: _filterController.text.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.clear, size: 20),
-                      onPressed: () => _filterController.clear(),
-                    )
-                  : null,
-            ),
-          ),
-        ),
-        if (_pendingRequests.isNotEmpty) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
-            child: Row(
-              children: [
-                Icon(Icons.mail_outline, size: 18, color: Colors.orange.shade700),
-                const SizedBox(width: 6),
-                Text(
-                  '${_pendingRequests.length} demande${_pendingRequests.length > 1 ? 's' : ''}',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w800,
-                    color: Colors.orange.shade900,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          ..._pendingRequests.map(_buildRequestCard),
-        ],
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-          child: Text(
-            _loading
-                ? 'Chargement…'
-                : '${_filtered.length} ami${_filtered.length > 1 ? 's' : ''}',
-            style: TextStyle(
-              fontSize: 13,
-              color: Colors.grey.shade600,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-        Expanded(
-          child: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : _friends.isEmpty && _pendingRequests.isEmpty
-                  ? _buildEmpty()
-                  : _friends.isNotEmpty && _filtered.isEmpty
-                      ? Center(
-                          child: Text(
-                            'Aucun ami pour « ${_filterController.text} »',
-                            style: TextStyle(color: Colors.grey.shade600),
-                          ),
-                        )
-                      : RefreshIndicator(
-                          onRefresh: _load,
-                          child: ListView.builder(
-                            padding: const EdgeInsets.fromLTRB(12, 4, 12, 88),
-                            itemCount: _filtered.length,
-                            itemBuilder: (context, index) {
-                              return _buildFriendCard(_filtered[index]);
-                            },
-                          ),
-                        ),
-        ),
-      ],
+  Future<void> _createGroup() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const GroupsScreen()),
     );
-  }
-
-  Widget _buildRequestCard(Map<String, dynamic> req) {
-    final accent = ProfileAvatar.colorFromHex(req['accent_color'] as String?);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      child: Material(
-        borderRadius: BorderRadius.circular(16),
-        color: Colors.orange.shade50,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          child: ListTile(
-            leading: ProfileAvatar(
-              avatarUrl: req['avatar_url'] as String?,
-              accentColorHex: req['accent_color'] as String?,
-              fallbackInitial: req['username'] as String? ?? '?',
-              radius: 24,
-            ),
-            title: Text(
-              req['username'] as String? ?? 'Utilisateur',
-              style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
-            subtitle: const Text('Veut rejoindre tes amis'),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  icon: Icon(Icons.close, color: Colors.red.shade400),
-                  onPressed: () => _rejectRequest(req),
-                ),
-                FilledButton(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: accent,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                  ),
-                  onPressed: () => _acceptRequest(req),
-                  child: const Text('OK'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildFriendCard(Map<String, dynamic> f) {
-    final username = f['username'] as String;
-    final accent = ProfileAvatar.colorFromHex(f['accent_color'] as String?);
-    final sharing = f['share_collections'] as bool? ?? false;
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        borderRadius: BorderRadius.circular(18),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: () => _openFriend(f),
-          onLongPress: () => _showFriendOptions(f),
-          child: Ink(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-                colors: [
-                  accent.withValues(alpha: 0.14),
-                  Theme.of(context).colorScheme.surface,
-                ],
-              ),
-              border: Border.all(color: accent.withValues(alpha: 0.22)),
-              borderRadius: BorderRadius.circular(18),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              child: Row(
-                children: [
-                  ProfileAvatar(
-                    avatarUrl: f['avatar_url'] as String?,
-                    accentColorHex: f['accent_color'] as String?,
-                    fallbackInitial: username,
-                    radius: 26,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          username,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 16,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          sharing
-                              ? 'Collection partagée · appui long = options'
-                              : 'Appui long = options',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: sharing
-                                ? accent.withValues(alpha: 0.95)
-                                : Colors.grey.shade600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Icon(
-                    Icons.arrow_forward_ios_rounded,
-                    size: 16,
-                    color: accent.withValues(alpha: 0.7),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
+    if (mounted) await _load(force: true);
   }
 
   @override
   Widget build(BuildContext context) {
+    final pending = _incoming.length;
     return DefaultTabController(
-      length: 2,
+      length: 3,
+      initialIndex: widget.initialTab.clamp(0, 2),
       child: Scaffold(
         appBar: AppAppBar(
-          title: 'Amis',
+          title: 'Social',
           bottom: TabBar(
-            indicatorColor: Colors.blueGrey.shade300,
-            labelColor: Colors.blueGrey.shade800,
-            tabs: const [
-              Tab(icon: Icon(Icons.bolt_rounded, size: 20), text: 'Activité'),
-              Tab(icon: Icon(Icons.people_rounded, size: 20), text: 'Mes amis'),
+            labelStyle: const TextStyle(fontWeight: FontWeight.w700),
+            tabs: [
+              const Tab(text: 'Activité'),
+              const Tab(text: 'Amis & Groupes'),
+              Tab(
+                child: Badge(
+                  isLabelVisible: pending > 0,
+                  label: Text('$pending'),
+                  offset: const Offset(12, -6),
+                  child: const Text('Demandes'),
+                ),
+              ),
             ],
           ),
           actions: [
@@ -352,240 +224,498 @@ class _FriendsScreenState extends State<FriendsScreen> {
               tooltip: 'Foyers & lieux liés',
               onPressed: () => showHouseholdsSheet(context),
             ),
-            IconButton(
-              icon: const Icon(Icons.person_add_alt_1_rounded),
-              tooltip: 'Ajouter un ami',
-              onPressed: _openAddFriend,
-            ),
           ],
         ),
-        floatingActionButton: FloatingActionButton.extended(
-          onPressed: _openAddFriend,
-          icon: const Icon(Icons.person_add),
-          label: const Text('Ami'),
-        ),
-        body: Column(
+        body: TabBarView(
           children: [
-            _avatarStrip(),
-            Expanded(
-              child: TabBarView(
-                children: [
-                  const FriendsActivityFeed(),
-                  _buildFriendsList(),
-                ],
-              ),
-            ),
+            const FriendsActivityFeed(),
+            _buildPeopleTab(),
+            _buildRequestsTab(),
           ],
         ),
       ),
     );
   }
 
-  Widget _avatarStrip() {
-    if (_groups.isEmpty && _friends.isEmpty) return const SizedBox.shrink();
-    return SizedBox(
-      height: 96,
+  // ── Amis & Groupes ─────────────────────────────────────────────────────
+
+  Widget _buildPeopleTab() {
+    if (_loading && _friends.isEmpty && _groups.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    final scheme = Theme.of(context).colorScheme;
+    return RefreshIndicator(
+      onRefresh: () => _load(force: true),
       child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 32),
         children: [
-          for (final group in _groups)
-            _roundTarget(
-              label: group.name,
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => GroupDetailScreen(group: group),
+          _sectionHeader(
+            'Mes Groupes',
+            count: _groups.length,
+            action: TextButton.icon(
+              onPressed: _createGroup,
+              icon: const Icon(Icons.tune_rounded, size: 18),
+              label: const Text('Gérer'),
+            ),
+          ),
+          if (_groups.isEmpty)
+            _emptyHint(
+              'Aucun groupe. Crée « Famille » ou « Colocs » pour partager '
+              'une collection commune.',
+            )
+          else
+            for (final g in _groups) _groupRow(g),
+          const SizedBox(height: 14),
+          _sectionHeader(
+            'Mes Amis',
+            count: _friends.length,
+            action: TextButton.icon(
+              onPressed: _openAddFriend,
+              icon: const Icon(Icons.person_add_alt_rounded, size: 18),
+              label: const Text('Ajouter'),
+            ),
+          ),
+          if (_friends.length > 6)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+              child: TextField(
+                controller: _filterController,
+                decoration: InputDecoration(
+                  hintText: 'Chercher un ami…',
+                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                  isDense: true,
+                  filled: true,
+                  fillColor: scheme.surfaceContainerHighest.withValues(
+                    alpha: 0.6,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide.none,
+                  ),
                 ),
               ),
-              child: GroupBadge.fromGroup(
-                name: group.name,
-                avatarUrl: group.avatarUrl,
-                accentColor: group.accentColor,
-                iconKey: group.iconKey,
-                radius: 26,
-              ),
             ),
-          for (final friend in _friends)
-            _roundTarget(
-              label: friend['username'] as String? ?? 'Ami',
-              onTap: () => _openFriend(friend),
-              child: ProfileAvatar(
-                avatarUrl: friend['avatar_url'] as String?,
-                accentColorHex: friend['accent_color'] as String?,
-                fallbackInitial: friend['username'] as String? ?? '?',
-                radius: 26,
-              ),
-            ),
+          if (_friends.isEmpty)
+            _emptyHint(
+              'Ajoute des amis par pseudo pour comparer vos collections et '
+              'vous prêter des jeux.',
+            )
+          else if (_filtered.isEmpty)
+            _emptyHint('Aucun ami pour « ${_filterController.text} »')
+          else
+            for (final f in _filtered) _friendRow(f),
         ],
       ),
     );
   }
 
-  Widget _roundTarget({
-    required String label,
-    required VoidCallback onTap,
-    required Widget child,
-  }) {
+  Widget _sectionHeader(String title, {required int count, Widget? action}) {
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 6),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(40),
-        child: SizedBox(
-          width: 72,
-          child: Column(
-            children: [
-              child,
-              const SizedBox(height: 4),
-              Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-              ),
-            ],
+      padding: const EdgeInsets.fromLTRB(6, 4, 0, 4),
+      child: Row(
+        children: [
+          Text(
+            title,
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
           ),
+          const SizedBox(width: 6),
+          Text(
+            '$count',
+            style: TextStyle(
+              color: scheme.onSurfaceVariant,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const Spacer(),
+          ?action,
+        ],
+      ),
+    );
+  }
+
+  Widget _emptyHint(String text) => Padding(
+        padding: const EdgeInsets.fromLTRB(8, 4, 8, 12),
+        child: Text(
+          text,
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            height: 1.35,
+          ),
+        ),
+      );
+
+  Widget _row({
+    required Widget leading,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+    required Widget menu,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+        child: Row(
+          children: [
+            leading,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            menu,
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildEmpty() {
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      children: [
-        const SizedBox(height: 48),
-        Icon(Icons.people_outline_rounded, size: 72, color: Colors.grey.shade400),
-        const SizedBox(height: 16),
-        const Text(
-          'Construis ton cercle',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
-        ),
-        const SizedBox(height: 8),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 36),
-          child: Text(
-            'Ajoute des amis par pseudo pour voir leurs collections et '
-            'copier des objets chez toi en un geste.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.grey.shade600, height: 1.35),
+  Widget _groupRow(CollectionGroup g) {
+    return _row(
+      leading: GroupBadge.fromGroup(
+        name: g.name,
+        avatarUrl: g.avatarUrl,
+        accentColor: g.accentColor,
+        iconKey: g.iconKey,
+        radius: 22,
+      ),
+      title: g.name,
+      subtitle: 'Collection commune',
+      onTap: () => _openGroup(g),
+      menu: PopupMenuButton<String>(
+        tooltip: 'Options',
+        icon: const Icon(Icons.more_vert_rounded),
+        onSelected: (v) {
+          if (v == 'open') _openGroup(g);
+          if (v == 'manage') _createGroup();
+        },
+        itemBuilder: (_) => const [
+          PopupMenuItem(value: 'open', child: Text('Ouvrir le groupe')),
+          PopupMenuItem(
+            value: 'manage',
+            child: Text('Inviter / modifier / quitter'),
           ),
-        ),
-        const SizedBox(height: 24),
-        Center(
-          child: FilledButton.icon(
-            onPressed: _openAddFriend,
-            icon: const Icon(Icons.person_add),
-            label: const Text('Ajouter un ami'),
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
-  void _showFriendOptions(Map<String, dynamic> friend) {
-    final sharing = friend['share_collections'] as bool? ?? false;
+  Future<void> _openGroup(CollectionGroup g) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => GroupDetailScreen(group: g)),
+    );
+  }
 
-    showModalBottomSheet<void>(
+  Widget _friendRow(Map<String, dynamic> f) {
+    final username = f['username'] as String? ?? 'Ami';
+    final sharing = f['share_collections'] as bool? ?? false;
+    final s = _summary[f['profile_id']];
+    final subtitle = !sharing
+        ? 'Collection non partagée'
+        : s == null
+            ? '…'
+            : '${s.count} objet${s.count > 1 ? 's' : ''} · ${s.common} en commun';
+    return _row(
+      leading: ProfileAvatar(
+        avatarUrl: f['avatar_url'] as String?,
+        accentColorHex: f['accent_color'] as String?,
+        fallbackInitial: username,
+        radius: 22,
+      ),
+      title: username,
+      subtitle: subtitle,
+      onTap: () => _openFriend(f),
+      menu: PopupMenuButton<String>(
+        tooltip: 'Options',
+        icon: const Icon(Icons.more_vert_rounded),
+        onSelected: (v) async {
+          switch (v) {
+            case 'profile':
+              _openFriend(f);
+            case 'collection':
+              _openFriend(f, collection: true);
+            case 'share':
+              await _service.setShareCollections(
+                f['friendship_id'] as String,
+                !sharing,
+              );
+              await _load(force: true);
+            case 'remove':
+              await _confirmRemove(f);
+          }
+        },
+        itemBuilder: (_) => [
+          const PopupMenuItem(value: 'profile', child: Text('Voir le profil')),
+          PopupMenuItem(
+            value: 'collection',
+            enabled: sharing,
+            child: const Text('Voir sa collection'),
+          ),
+          PopupMenuItem(
+            value: 'share',
+            child: Text(
+              sharing ? 'Arrêter le partage' : 'Partager nos collections',
+            ),
+          ),
+          const PopupMenuDivider(),
+          PopupMenuItem(
+            value: 'remove',
+            child: Text(
+              'Retirer cet ami',
+              style: TextStyle(color: Colors.red.shade700),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmRemove(Map<String, dynamic> friend) async {
+    final confirm = await showDialog<bool>(
       context: context,
-      showDragHandle: true,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: ProfileAvatar(
-                avatarUrl: friend['avatar_url'] as String?,
-                accentColorHex: friend['accent_color'] as String?,
-                fallbackInitial: friend['username'] as String,
-                radius: 22,
-              ),
-              title: Text(friend['username'] as String),
+      builder: (dCtx) => AlertDialog(
+        title: const Text('Retirer cet ami ?'),
+        content: Text(
+          '« ${friend['username']} » ne sera plus dans ta liste d\'amis.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx, false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(dCtx, true),
+            child: const Text('Retirer'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+    try {
+      await _service.removeFriend(friend['friendship_id'] as String);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${friend['username']} retiré de tes amis')),
+        );
+      }
+      await _load(force: true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e')),
+        );
+      }
+    }
+  }
+
+  // ── Demandes ───────────────────────────────────────────────────────────
+
+  Widget _buildRequestsTab() {
+    final scheme = Theme.of(context).colorScheme;
+    return RefreshIndicator(
+      onRefresh: () => _load(force: true),
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 32),
+        children: [
+          Container(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
+              borderRadius: BorderRadius.circular(16),
             ),
-            SwitchListTile(
-              title: const Text('Collections partagées'),
-              subtitle: const Text(
-                'Permet de voir collection et wishlist mutuelles',
-              ),
-              value: sharing,
-              onChanged: (val) async {
-                Navigator.pop(ctx);
-                await _service.setShareCollections(
-                  friend['friendship_id'] as String,
-                  val,
-                );
-                await _load();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.collections_bookmark_outlined),
-              title: const Text('Voir la collection'),
-              enabled: sharing,
-              onTap: sharing
-                  ? () {
-                      Navigator.pop(ctx);
-                      _openFriend(friend);
-                    }
-                  : null,
-            ),
-            ListTile(
-              leading: Icon(Icons.person_remove_outlined, color: Colors.red.shade400),
-              title: Text(
-                'Retirer cet ami',
-                style: TextStyle(color: Colors.red.shade700),
-              ),
-              onTap: () async {
-                Navigator.pop(ctx);
-                final confirm = await showDialog<bool>(
-                  context: context,
-                  builder: (dCtx) => AlertDialog(
-                    title: const Text('Retirer cet ami ?'),
-                    content: Text(
-                      '« ${friend['username']} » ne sera plus dans ta liste d\'amis.',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Ajouter un ami',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _pseudoController,
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) => _sendByPseudo(),
+                        decoration: const InputDecoration(
+                          hintText: 'Pseudo exact',
+                          isDense: true,
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
                     ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(dCtx, false),
-                        child: const Text('Annuler'),
-                      ),
-                      FilledButton(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: Colors.red,
-                        ),
-                        onPressed: () => Navigator.pop(dCtx, true),
-                        child: const Text('Retirer'),
-                      ),
-                    ],
-                  ),
-                );
-                if (confirm != true || !mounted) return;
-                try {
-                  await _service.removeFriend(
-                    friend['friendship_id'] as String,
-                  );
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          '${friend['username']} retiré de tes amis',
-                        ),
-                      ),
-                    );
-                    await _load();
-                  }
-                } catch (e) {
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('$e')),
-                    );
-                  }
-                }
-              },
+                    const SizedBox(width: 8),
+                    FilledButton(
+                      onPressed: _sendingInvite ? null : _sendByPseudo,
+                      child: _sendingInvite
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Envoyer'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 4,
+                  children: [
+                    TextButton.icon(
+                      onPressed: _openAddFriend,
+                      icon: const Icon(Icons.search_rounded, size: 18),
+                      label: const Text('Rechercher'),
+                    ),
+                    TextButton.icon(
+                      onPressed: _copyInvite,
+                      icon: const Icon(Icons.link_rounded, size: 18),
+                      label: const Text('Copier le lien d\'invitation'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          _sectionHeader('Reçues', count: _incoming.length),
+          if (_incoming.isEmpty)
+            _emptyHint('Aucune demande en attente.')
+          else
+            for (final r in _incoming) _incomingRow(r),
+          const SizedBox(height: 12),
+          _sectionHeader('Envoyées', count: _outgoing.length),
+          if (_outgoing.isEmpty)
+            _emptyHint('Aucune demande envoyée en attente.')
+          else
+            for (final r in _outgoing) _outgoingRow(r),
+        ],
+      ),
+    );
+  }
+
+  Widget _requestAvatar(Map<String, dynamic> r) => ProfileAvatar(
+        avatarUrl: r['avatar_url'] as String?,
+        accentColorHex: r['accent_color'] as String?,
+        fallbackInitial: r['username'] as String? ?? '?',
+        radius: 22,
+      );
+
+  Widget _incomingRow(Map<String, dynamic> r) {
+    final name = r['username'] as String? ?? 'Utilisateur';
+    final busy = _busy.contains(r['friendship_id']);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
+      child: Row(
+        children: [
+          _requestAvatar(r),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              name,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+          if (busy)
+            const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else ...[
+            OutlinedButton(
+              onPressed: () => _runRequest(
+                r,
+                _service.rejectFriendRequest,
+                'Demande refusée',
+              ),
+              child: const Text('Refuser'),
+            ),
+            const SizedBox(width: 6),
+            FilledButton(
+              onPressed: () => _runRequest(
+                r,
+                _service.acceptFriendRequest,
+                '$name est maintenant ton ami',
+              ),
+              child: const Text('Accepter'),
             ),
           ],
-        ),
+        ],
+      ),
+    );
+  }
+
+  Widget _outgoingRow(Map<String, dynamic> r) {
+    final scheme = Theme.of(context).colorScheme;
+    final busy = _busy.contains(r['friendship_id']);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
+      child: Row(
+        children: [
+          _requestAvatar(r),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  r['username'] as String? ?? 'Utilisateur',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                Text(
+                  'En attente',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (busy)
+            const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else
+            TextButton(
+              onPressed: () => _runRequest(
+                r,
+                _service.cancelFriendRequest,
+                'Demande annulée',
+              ),
+              child: const Text('Annuler'),
+            ),
+        ],
       ),
     );
   }

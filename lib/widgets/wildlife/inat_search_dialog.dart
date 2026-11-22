@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../utils/platform_input.dart';
 
 import '../../services/inaturalist_service.dart';
 
@@ -66,7 +67,7 @@ class _WildlifeINatSearchDialogState extends State<WildlifeINatSearchDialog> {
             children: [
               TextField(
                 controller: _controller,
-                autofocus: true,
+                autofocus: kSafeAutofocus,
                 decoration: InputDecoration(
                   hintText: 'Léopard, mésange, papillon…',
                   suffixIcon: IconButton(

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../utils/platform_input.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/friend_service.dart';
@@ -196,7 +197,7 @@ class _HouseholdsSheetState extends State<_HouseholdsSheet> {
               const SizedBox(height: 12),
               TextField(
                 controller: ctrl,
-                autofocus: true,
+                autofocus: kSafeAutofocus,
                 decoration: const InputDecoration(
                   labelText: 'Nom du lieu',
                   isDense: true,
@@ -238,7 +239,7 @@ class _HouseholdsSheetState extends State<_HouseholdsSheet> {
         title: const Text('Nouvelle personne'),
         content: TextField(
           controller: ctrl,
-          autofocus: true,
+          autofocus: kSafeAutofocus,
           decoration: const InputDecoration(
             labelText: 'Nom',
             isDense: true,

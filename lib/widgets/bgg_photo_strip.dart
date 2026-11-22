@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 
 import '../services/bgg_service.dart';
 import '../utils/cover_image_url.dart';
+import '../utils/platform_input.dart';
 import 'collection_cover_image.dart';
 
 /// Bande de miniatures BGG : défilement souris et flèches, lightbox HD.
@@ -99,55 +100,126 @@ class _BggPhotoStripState extends State<BggPhotoStrip> {
   }
 }
 
+/// Au-delà de ce facteur, la photo est « zoomée » : le swipe entre photos
+/// est coupé pour laisser le pan à l'[InteractiveViewer].
+const kLightboxZoomedScale = 1.05;
+const kLightboxDoubleTapScale = 2.5;
+
+/// Matrice de zoom ×[scale] centrée sur [focal] (coordonnées du viewport).
+Matrix4 zoomAtPoint(Offset focal, double scale) {
+  return Matrix4.identity()
+    ..translateByDouble(
+      -focal.dx * (scale - 1),
+      -focal.dy * (scale - 1),
+      0,
+      1,
+    )
+    ..scaleByDouble(scale, scale, 1, 1);
+}
+
 class _ZoomablePhoto extends StatefulWidget {
   final String url;
+  final ValueChanged<bool> onZoomChanged;
+  final VoidCallback onSingleTap;
 
-  const _ZoomablePhoto({required this.url});
+  const _ZoomablePhoto({
+    super.key,
+    required this.url,
+    required this.onZoomChanged,
+    required this.onSingleTap,
+  });
 
   @override
   State<_ZoomablePhoto> createState() => _ZoomablePhotoState();
 }
 
-class _ZoomablePhotoState extends State<_ZoomablePhoto> {
+class _ZoomablePhotoState extends State<_ZoomablePhoto>
+    with SingleTickerProviderStateMixin {
   final _transform = TransformationController();
-  TapDownDetails? _doubleTap;
+  late final AnimationController _anim;
+  Animation<Matrix4>? _tween;
+  Offset _doubleTapAt = Offset.zero;
+  bool _zoomed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _anim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 200),
+    )..addListener(() {
+        final t = _tween;
+        if (t != null) _transform.value = t.value;
+      });
+    _transform.addListener(_onTransform);
+  }
 
   @override
   void dispose() {
+    _transform.removeListener(_onTransform);
+    _anim.dispose();
     _transform.dispose();
     super.dispose();
   }
 
+  void _onTransform() {
+    final zoomed = _transform.value.getMaxScaleOnAxis() > kLightboxZoomedScale;
+    if (zoomed == _zoomed) return;
+    _zoomed = zoomed;
+    widget.onZoomChanged(zoomed);
+  }
+
   void _toggleZoom() {
-    if (_transform.value.getMaxScaleOnAxis() > 1.01) {
-      _transform.value = Matrix4.identity();
-      return;
-    }
-    final point = _doubleTap?.localPosition ?? Offset.zero;
-    const scale = 2.5;
-    _transform.value = Matrix4.identity()
-      ..translateByDouble(
-        -point.dx * (scale - 1),
-        -point.dy * (scale - 1),
-        0,
-        1,
-      )
-      ..scaleByDouble(scale, scale, 1, 1);
+    final target = _zoomed
+        ? Matrix4.identity()
+        : zoomAtPoint(_doubleTapAt, kLightboxDoubleTapScale);
+    _tween = Matrix4Tween(begin: _transform.value, end: target).animate(
+      CurvedAnimation(parent: _anim, curve: Curves.easeOutCubic),
+    );
+    _anim.forward(from: 0);
   }
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onDoubleTapDown: (details) => _doubleTap = details,
+      behavior: HitTestBehavior.opaque,
+      onTap: widget.onSingleTap,
+      onDoubleTapDown: (d) => _doubleTapAt = d.localPosition,
       onDoubleTap: _toggleZoom,
-      child: InteractiveViewer(
-        transformationController: _transform,
-        minScale: 1,
-        maxScale: 5,
-        child: CollectionCoverImage(
-          url: widget.url,
-          fit: BoxFit.contain,
-          largeSource: true,
+      child: SizedBox.expand(
+        child: InteractiveViewer(
+          transformationController: _transform,
+          clipBehavior: Clip.none,
+          minScale: 1,
+          maxScale: 5,
+          child: SizedBox.expand(
+            child: Image.network(
+              widget.url,
+              fit: BoxFit.contain,
+              filterQuality: FilterQuality.medium,
+              gaplessPlayback: true,
+              loadingBuilder: (context, child, progress) {
+                if (progress == null) return child;
+                return const Center(
+                  child: SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white70,
+                    ),
+                  ),
+                );
+              },
+              errorBuilder: (_, _, _) => const Center(
+                child: Icon(
+                  Icons.broken_image_outlined,
+                  color: Colors.white54,
+                  size: 48,
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -176,31 +248,45 @@ class _Arrow extends StatelessWidget {
   }
 }
 
+/// Visionneuse plein écran noire : pinch / double-tap pour zoomer, swipe
+/// entre photos (désactivé pendant le zoom), ✕ + compteur + légende.
 Future<void> showBggPhotoLightbox(
   BuildContext context,
   List<BggGalleryPhoto> photos,
   int initialIndex,
 ) {
-  return showDialog<void>(
+  if (photos.isEmpty) return Future.value();
+  return showGeneralDialog<void>(
     context: context,
-    barrierColor: Colors.black.withValues(alpha: 0.88),
-    builder: (ctx) => _BggLightbox(photos: photos, initialIndex: initialIndex),
+    barrierDismissible: false,
+    barrierColor: Colors.black,
+    transitionDuration: const Duration(milliseconds: 180),
+    pageBuilder: (ctx, _, _) =>
+        BggPhotoLightbox(photos: photos, initialIndex: initialIndex),
+    transitionBuilder: (ctx, anim, _, child) =>
+        FadeTransition(opacity: anim, child: child),
   );
 }
 
-class _BggLightbox extends StatefulWidget {
+class BggPhotoLightbox extends StatefulWidget {
   final List<BggGalleryPhoto> photos;
   final int initialIndex;
 
-  const _BggLightbox({required this.photos, required this.initialIndex});
+  const BggPhotoLightbox({
+    super.key,
+    required this.photos,
+    required this.initialIndex,
+  });
 
   @override
-  State<_BggLightbox> createState() => _BggLightboxState();
+  State<BggPhotoLightbox> createState() => _BggPhotoLightboxState();
 }
 
-class _BggLightboxState extends State<_BggLightbox> {
+class _BggPhotoLightboxState extends State<BggPhotoLightbox> {
   late final PageController _page;
   late int _index;
+  bool _zoomed = false;
+  bool _chrome = true;
 
   @override
   void initState() {
@@ -246,107 +332,143 @@ class _BggLightboxState extends State<_BggLightbox> {
   Widget build(BuildContext context) {
     final photo = widget.photos[_index];
     final caption = photo.caption.trim();
-    final size = MediaQuery.sizeOf(context);
+    final wide = MediaQuery.sizeOf(context).width >= 700;
+    final total = widget.photos.length;
+
     return Focus(
-      autofocus: true,
+      autofocus: kSafeAutofocus,
       onKeyEvent: _onKey,
-      child: Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxWidth: 1000,
-            maxHeight: size.height * 0.8,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
+      child: Material(
+        color: Colors.black,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            PageView.builder(
+              key: const ValueKey('lightbox_pages'),
+              controller: _page,
+              itemCount: total,
+              physics: _zoomed
+                  ? const NeverScrollableScrollPhysics()
+                  : const PageScrollPhysics(),
+              onPageChanged: (value) => setState(() {
+                _index = value;
+                _zoomed = false;
+              }),
+              itemBuilder: (context, i) => _ZoomablePhoto(
+                key: ValueKey(widget.photos[i].url),
+                url: bggMaterialPhotoUrl(
+                  widget.photos[i].url,
+                  width: 1400,
+                  quality: 90,
+                ),
+                onZoomChanged: (z) {
+                  if (mounted && z != _zoomed) setState(() => _zoomed = z);
+                },
+                onSingleTap: () => setState(() => _chrome = !_chrome),
+              ),
+            ),
+            _fade(
               Align(
-                alignment: Alignment.centerRight,
-                child: IconButton(
-                  tooltip: 'Fermer',
-                  style: IconButton.styleFrom(
-                    backgroundColor: Colors.black54,
-                    foregroundColor: Colors.white,
+                alignment: Alignment.topCenter,
+                child: Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Color(0x99000000), Color(0x00000000)],
+                    ),
                   ),
-                  onPressed: () => Navigator.pop(context),
-                  icon: const Icon(Icons.close),
+                  child: SafeArea(
+                    bottom: false,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 4, 8, 16),
+                      child: Row(
+                        children: [
+                          IconButton(
+                            key: const ValueKey('lightbox_close'),
+                            tooltip: 'Fermer',
+                            color: Colors.white,
+                            onPressed: () => Navigator.pop(context),
+                            icon: const Icon(Icons.close),
+                          ),
+                          Expanded(
+                            child: Text(
+                              'Photo ${_index + 1}/$total',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 48),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
               ),
-              Flexible(
-                child: Row(
-                  children: [
-                    IconButton(
-                      tooltip: 'Photo précédente',
-                      color: Colors.white,
-                      onPressed: _index > 0 ? () => _go(-1) : null,
-                      icon: const Icon(Icons.chevron_left, size: 36),
+            ),
+            if (caption.isNotEmpty)
+              _fade(
+                Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Container(
+                    width: double.infinity,
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.bottomCenter,
+                        end: Alignment.topCenter,
+                        colors: [Color(0xB3000000), Color(0x00000000)],
+                      ),
                     ),
-                    Expanded(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
-                        child: SizedBox(
-                          height: size.height * 0.62,
-                          child: PageView.builder(
-                            controller: _page,
-                            itemCount: widget.photos.length,
-                            onPageChanged: (value) =>
-                                setState(() => _index = value),
-                            itemBuilder: (context, i) {
-                              final item = widget.photos[i];
-                              return _ZoomablePhoto(
-                                url: bggMaterialPhotoUrl(
-                                  item.url,
-                                  width: 1400,
-                                  quality: 90,
-                                ),
-                              );
-                            },
-                          ),
+                    child: SafeArea(
+                      top: false,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 24, 20, 14),
+                        child: Text(
+                          caption,
+                          textAlign: TextAlign.center,
+                          maxLines: 4,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: Colors.white70),
                         ),
                       ),
                     ),
-                    IconButton(
-                      tooltip: 'Photo suivante',
-                      color: Colors.white,
-                      onPressed: _index < widget.photos.length - 1
-                          ? () => _go(1)
-                          : null,
-                      icon: const Icon(Icons.chevron_right, size: 36),
-                    ),
-                  ],
+                  ),
                 ),
               ),
-              const SizedBox(height: 10),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.55),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  children: [
-                    Text(
-                      'Photo ${_index + 1} / ${widget.photos.length}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    if (caption.isNotEmpty)
-                      Text(
-                        caption,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.white70),
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+            if (wide && _index > 0)
+              _fade(_sideArrow(left: true)),
+            if (wide && _index < total - 1)
+              _fade(_sideArrow(left: false)),
+          ],
         ),
       ),
     );
   }
+
+  Widget _fade(Widget child) => IgnorePointer(
+        ignoring: !_chrome,
+        child: AnimatedOpacity(
+          opacity: _chrome ? 1 : 0,
+          duration: const Duration(milliseconds: 160),
+          child: child,
+        ),
+      );
+
+  Widget _sideArrow({required bool left}) => Align(
+        alignment: left ? Alignment.centerLeft : Alignment.centerRight,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: IconButton(
+            tooltip: left ? 'Photo précédente' : 'Photo suivante',
+            style: IconButton.styleFrom(backgroundColor: Colors.black45),
+            color: Colors.white,
+            onPressed: () => _go(left ? -1 : 1),
+            icon: Icon(left ? Icons.chevron_left : Icons.chevron_right,
+                size: 32),
+          ),
+        ),
+      );
 }

@@ -233,7 +233,7 @@ class _MainDrawerState extends State<MainDrawer> {
                   const Divider(height: 20),
                   _item(
                     icon: Icons.people_rounded,
-                    label: 'Amis',
+                    label: 'Social',
                     onTap: () {
                       Navigator.pop(context);
                       Navigator.pushNamed(context, '/friends');

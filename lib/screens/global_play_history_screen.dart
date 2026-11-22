@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../utils/platform_input.dart';
 import 'package:intl/intl.dart';
 
 import '../models/boardgame_play_session.dart';
@@ -722,7 +723,7 @@ class _PickGameBottomSheetState extends State<_PickGameBottomSheet> {
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: TextField(
                   controller: _searchController,
-                  autofocus: true,
+                  autofocus: kSafeAutofocus,
                   textInputAction: TextInputAction.search,
                   decoration: InputDecoration(
                     labelText: 'Rechercher (collection ou BGG)',

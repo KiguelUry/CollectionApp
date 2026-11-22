@@ -216,9 +216,35 @@ class NotificationService extends ChangeNotifier with WidgetsBindingObserver {
         message = await _addRecommendationToWishlist(n);
       case AppNotificationType.playShared:
         message = await PlayShareService.instance.importSharedPlay(n.payload);
+      case AppNotificationType.borrowRequest:
+        message = await _lendToSender(n);
+      case AppNotificationType.friendAccepted:
+      case AppNotificationType.activityReaction:
+        message = 'OK';
     }
     await _setStatus([n.id], AppNotificationStatus.accepted);
     return message;
+  }
+
+  /// « Prêter » : marque l'objet comme prêté au demandeur.
+  Future<String> _lendToSender(AppNotification n) async {
+    final uid = _userId;
+    final itemId = n.payload['item_id']?.toString();
+    if (uid == null || itemId == null || itemId.isEmpty) {
+      throw Exception('Demande d\'emprunt invalide');
+    }
+    await _client
+        .from('collection_items')
+        .update({
+          'loaned_to_id': n.senderId,
+          'loaned_to_name': n.senderName,
+          'loaned_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('id', itemId)
+        .eq('added_by', uid);
+    CollectionRefresh.instance.bump();
+    final title = n.payload['item_title']?.toString() ?? 'Le jeu';
+    return '« $title » est marqué comme prêté à ${n.senderName}';
   }
 
   Future<String> decline(AppNotification n) async {
@@ -239,12 +265,18 @@ class NotificationService extends ChangeNotifier with WidgetsBindingObserver {
     if (draft == null) throw Exception('Recommandation invalide');
 
     for (final wishlist in [true, false]) {
-      final existing = await findDuplicateRow(
-        title: draft.title,
-        categoryDb: draft.category.dbValue,
-        isWishlist: wishlist,
-        subcategory: draft.subcategory,
-      );
+      final bggId = draft.metadata?['bgg_id']?.toString();
+      final existing = wishlist
+          ? await findWishlistDuplicate(
+              title: draft.title,
+              categoryDb: draft.category.dbValue,
+              bggId: bggId,
+            )
+          : await findOwnedDuplicate(
+              title: draft.title,
+              categoryDb: draft.category.dbValue,
+              bggId: bggId,
+            );
       if (existing != null) {
         return wishlist
             ? '« ${draft.title} » est déjà dans ta wishlist'

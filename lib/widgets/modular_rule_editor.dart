@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/platform_input.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -68,7 +69,7 @@ class _ModularRuleEditorState extends State<ModularRuleEditor> {
           content: TextField(
             controller: controller,
             decoration: const InputDecoration(hintText: 'Ex. Variante maison'),
-            autofocus: true,
+            autofocus: kSafeAutofocus,
           ),
           actions: [
             TextButton(

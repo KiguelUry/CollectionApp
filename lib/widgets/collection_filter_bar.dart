@@ -45,6 +45,9 @@ class CollectionFilterBar extends StatelessWidget {
   /// Tri considéré « par défaut » (bordure Tri inactive). Wishlist = favoris.
   final CollectionSort defaultSort;
 
+  /// Petit bouton après Tri / Filtre (ex. sélection multiple).
+  final Widget? trailing;
+
   const CollectionFilterBar({
     super.key,
     required this.filters,
@@ -74,6 +77,7 @@ class CollectionFilterBar extends StatelessWidget {
     this.showOwnedExpansions = false,
     this.onShowOwnedExpansionsChanged,
     this.defaultSort = CollectionSort.titleAsc,
+    this.trailing,
   });
 
   @override
@@ -123,6 +127,10 @@ class CollectionFilterBar extends StatelessWidget {
                 _sortMenuButton(context),
                 const SizedBox(width: 4),
                 _filterMenuButton(context),
+                if (trailing != null) ...[
+                  const SizedBox(width: 2),
+                  trailing!,
+                ],
               ],
                 ),
               ),

@@ -1449,6 +1449,7 @@ class _HomeScreenState extends State<HomeScreen>
                         tabController: _tabController,
                         accentOverride: widget.accentOverride,
                         quickActions: _quickActions(),
+                        titleActions: _titleActions(),
                         extraActions: _headerActions,
                         compactActions: innerBoxIsScrolled,
                       ),
@@ -1464,6 +1465,30 @@ class _HomeScreenState extends State<HomeScreen>
         ],
       ),
     );
+  }
+
+  List<CategoryQuickAction> _titleActions() {
+    if (widget.category != CollectionCategory.boardgame) return const [];
+    return [
+      CategoryQuickAction(
+        label: 'Modifications récentes',
+        icon: Icons.restore_rounded,
+        showBadge: _modifsUnseen,
+        onTap: () async {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (ctx) => const CollectionChangeHistoryScreen(
+                category: CollectionCategory.boardgame,
+              ),
+            ),
+          );
+          if (mounted) {
+            setState(() => _modifsUnseen = false);
+          }
+        },
+      ),
+    ];
   }
 
   List<CategoryQuickAction> _quickActions() {
@@ -1503,24 +1528,6 @@ class _HomeScreenState extends State<HomeScreen>
               builder: (ctx) => const CommunityForumScreen(),
             ),
           ),
-        ),
-        CategoryQuickAction(
-          label: 'Modifications récentes',
-          icon: Icons.restore_rounded,
-          showBadge: _modifsUnseen,
-          onTap: () async {
-            await Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (ctx) => const CollectionChangeHistoryScreen(
-                  category: CollectionCategory.boardgame,
-                ),
-              ),
-            );
-            if (mounted) {
-              setState(() => _modifsUnseen = false);
-            }
-          },
         ),
       ],
       CollectionCategory.book => [

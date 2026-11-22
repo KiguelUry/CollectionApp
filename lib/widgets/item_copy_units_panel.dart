@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/platform_input.dart';
 
 import '../models/collection_group.dart';
 import '../models/collection_item.dart';
@@ -156,7 +157,7 @@ class _CopyUnitTileState extends State<_CopyUnitTile> {
             decoration: const InputDecoration(
               hintText: 'ex. Jeu chez Kiki',
             ),
-            autofocus: true,
+            autofocus: kSafeAutofocus,
           ),
           actions: [
             TextButton(

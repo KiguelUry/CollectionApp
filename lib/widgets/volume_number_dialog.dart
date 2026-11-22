@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/platform_input.dart';
 import 'package:flutter/services.dart';
 
 /// Demande le numéro de tome (ex. ajout Walking Dead tome 12).
@@ -86,7 +87,7 @@ class _VolumeNumberDialogState extends State<_VolumeNumberDialog> {
           const SizedBox(height: 12),
           TextField(
             controller: _controller,
-            autofocus: true,
+            autofocus: kSafeAutofocus,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             inputFormatters: [
               FilteringTextInputFormatter.allow(RegExp(r'[\d.,]')),

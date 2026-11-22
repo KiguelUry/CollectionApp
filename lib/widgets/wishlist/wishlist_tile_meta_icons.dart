@@ -25,12 +25,16 @@ class WishlistTileMetaIcons extends StatefulWidget {
 class _WishlistTileMetaIconsState extends State<WishlistTileMetaIcons> {
   static const _rowHeight = 20.0;
 
+  /// Budget = « Prix cible » saisi sur la fiche wishlist.
+  bool get _inBudget =>
+      isWithinBudget(widget.item.metadata, widget.item.purchasePrice);
+
   String get _valueChipLabel {
+    final market = marketSecondhandPriceFromMetadata(widget.item.metadata);
     final avg = marketPriceAvgFromMetadata(widget.item.metadata);
-    if (avg != null && avg > 0) {
+    if (market == null && avg != null && avg > 0) {
       return '~${formatEuroChip(avg, compact: false)}';
     }
-    final market = marketSecondhandPriceFromMetadata(widget.item.metadata);
     if (market != null) return '~${formatEuroChip(market, compact: false)}';
     final neu = marketNewPriceMinFromMetadata(widget.item.metadata);
     if (neu != null) return '~${formatEuroChip(neu, compact: false)}';
@@ -88,8 +92,10 @@ class _WishlistTileMetaIconsState extends State<WishlistTileMetaIcons> {
               const SizedBox(width: 4),
               Expanded(
                 child: _chip(
-                  suffix: _valueChipLabel,
-                  color: Colors.teal.shade500,
+                  suffix: _inBudget ? '$_valueChipLabel 👌' : _valueChipLabel,
+                  color: _inBudget
+                      ? Colors.green.shade700
+                      : Colors.teal.shade500,
                   textOnly: true,
                   onTap: () => showBoardgameTileValueSheet(
                     context,

@@ -4,13 +4,19 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../models/activity_event.dart';
 import '../models/collection_category.dart';
+import '../models/collection_group.dart';
+import '../screens/item_detail_screen.dart';
 import '../services/activity_service.dart';
 import '../services/friend_service.dart';
+import '../services/group_service.dart';
 import '../utils/activity_feed_grouper.dart';
 import '../utils/copy_friend_item.dart';
 import 'collection_cover_image.dart';
+import 'group_badge.dart';
 import 'profile_avatar.dart';
 
 /// Fil d'activité — digest par personne (pas de grosses cartes).
@@ -32,6 +38,9 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
   Map<String, String> _reactions = {};
   Map<String, Map<String, int>> _reactionCounts = {};
   String? _focusActorId;
+  String? _focusGroupId;
+  List<CollectionGroup> _groupList = [];
+  Map<String, Set<String>> _groupMembers = {};
 
   static const _emoji = ['🔥', '👏', '❤️', '🎲'];
 
@@ -39,6 +48,7 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
   void initState() {
     super.initState();
     _load();
+    _loadGroups();
   }
 
   Future<void> _loadReactions(List<String> eventIds) async {
@@ -183,7 +193,67 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
       return;
     }
     final e = group.head;
-    if (_canAddFrom(e)) _showSingleDetail(e);
+    if (e.itemId != null) {
+      _openItem(e);
+    } else if (_canAddFrom(e)) {
+      _showSingleDetail(e);
+    }
+  }
+
+  /// Ouvre la fiche de l'objet (lecture seule si c'est celui d'un ami).
+  Future<void> _openItem(ActivityEvent e) async {
+    final itemId = e.itemId;
+    if (itemId == null) return;
+    final me = Supabase.instance.client.auth.currentUser?.id;
+    try {
+      final item = await _friendService.fetchFriendItem(e.actorId, itemId);
+      if (!mounted) return;
+      if (item == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Objet introuvable ou collection non partagée'),
+          ),
+        );
+        return;
+      }
+      final mine = e.actorId == me;
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ItemDetailScreen(
+            item: item,
+            readOnly: !mine,
+            friendUsername: mine ? null : e.actorUsername,
+          ),
+        ),
+      );
+    } catch (err) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Impossible d\'ouvrir : $err')),
+        );
+      }
+    }
+  }
+
+  Future<void> _loadGroups() async {
+    try {
+      final groups = await GroupService().fetchMyGroups();
+      final members = <String, Set<String>>{};
+      for (final g in groups) {
+        final rows = await GroupService().fetchMembers(g.id);
+        members[g.id] = {
+          for (final r in rows)
+            if (r['profile_id'] != null) r['profile_id'].toString()
+            else if (r['id'] != null) r['id'].toString(),
+        };
+      }
+      if (!mounted) return;
+      setState(() {
+        _groupList = groups;
+        _groupMembers = members;
+      });
+    } catch (_) {}
   }
 
   @override
@@ -242,9 +312,13 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
       );
     }
 
-    final visible = _focusActorId == null
-        ? _digests
-        : _digests.where((d) => d.actorId == _focusActorId).toList();
+    final groupMembers =
+        _focusGroupId == null ? null : _groupMembers[_focusGroupId];
+    final visible = _digests.where((d) {
+      if (_focusActorId != null) return d.actorId == _focusActorId;
+      if (groupMembers != null) return groupMembers.contains(d.actorId);
+      return true;
+    }).toList();
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -265,45 +339,63 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
     );
   }
 
+  /// Une seule barre compacte : Tous · groupes · personnes (avatars 34 px).
   Widget _buildPeopleStrip(ColorScheme scheme) {
+    final allSelected = _focusActorId == null && _focusGroupId == null;
+    final chips = <Widget>[
+      _StripChip(
+        selected: allSelected,
+        label: 'Tous',
+        onTap: () => setState(() {
+          _focusActorId = null;
+          _focusGroupId = null;
+        }),
+        child: Icon(
+          Icons.all_inclusive_rounded,
+          size: 18,
+          color: allSelected ? scheme.onPrimary : scheme.onSurfaceVariant,
+        ),
+      ),
+      for (final g in _groupList)
+        _StripChip(
+          selected: _focusGroupId == g.id,
+          label: g.name,
+          onTap: () => setState(() {
+            _focusActorId = null;
+            _focusGroupId = _focusGroupId == g.id ? null : g.id;
+          }),
+          child: GroupBadge(
+            avatarUrl: g.avatarUrl,
+            accentColorHex: g.accentColor,
+            iconKey: g.iconKey,
+            fallbackInitial: g.name,
+            radius: 15,
+          ),
+        ),
+      for (final d in _digests)
+        _StripChip(
+          selected: _focusActorId == d.actorId,
+          label: d.username,
+          onTap: () => setState(() {
+            _focusGroupId = null;
+            _focusActorId = _focusActorId == d.actorId ? null : d.actorId;
+          }),
+          child: ProfileAvatar(
+            avatarUrl: d.avatarUrl,
+            accentColorHex: d.accentColor,
+            fallbackInitial: d.username,
+            radius: 15,
+          ),
+        ),
+    ];
     return SizedBox(
-      height: 92,
+      height: 62,
       child: ListView.separated(
-        padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
+        padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
         scrollDirection: Axis.horizontal,
-        itemCount: _digests.length + 1,
-        separatorBuilder: (_, _) => const SizedBox(width: 10),
-        itemBuilder: (context, i) {
-          if (i == 0) {
-            final selected = _focusActorId == null;
-            return _StripChip(
-              selected: selected,
-              label: 'Tous',
-              onTap: () => setState(() => _focusActorId = null),
-              child: Icon(
-                Icons.groups_2_rounded,
-                size: 22,
-                color: selected ? scheme.onPrimary : scheme.onSurfaceVariant,
-              ),
-            );
-          }
-          final d = _digests[i - 1];
-          final selected = _focusActorId == d.actorId;
-          return _StripChip(
-            selected: selected,
-            label: d.username,
-            count: d.groups.length,
-            onTap: () => setState(() {
-              _focusActorId = selected ? null : d.actorId;
-            }),
-            child: ProfileAvatar(
-              avatarUrl: d.avatarUrl,
-              accentColorHex: d.accentColor,
-              fallbackInitial: d.username,
-              radius: 16,
-            ),
-          );
-        },
+        itemCount: chips.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 6),
+        itemBuilder: (context, i) => chips[i],
       ),
     );
   }
@@ -701,6 +793,12 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
                         overflow: TextOverflow.ellipsis,
                       ),
                       dense: true,
+                      onTap: ev.itemId == null
+                          ? null
+                          : () {
+                              Navigator.pop(ctx);
+                              _openItem(ev);
+                            },
                       trailing: _canAddFrom(ev) ? _addButton(ev) : null,
                     );
                   },
@@ -735,7 +833,6 @@ class _PersonDigest {
 class _StripChip extends StatelessWidget {
   final bool selected;
   final String label;
-  final int? count;
   final Widget child;
   final VoidCallback onTap;
 
@@ -744,50 +841,52 @@ class _StripChip extends StatelessWidget {
     required this.label,
     required this.child,
     required this.onTap,
-    this.count,
   });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: SizedBox(
-        width: 64,
-        child: Column(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: selected
-                    ? scheme.primary
-                    : scheme.surfaceContainerHighest,
-                border: Border.all(
+    return Tooltip(
+      message: label,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: SizedBox(
+          width: 50,
+          child: Column(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
                   color: selected
                       ? scheme.primary
-                      : scheme.outlineVariant.withValues(alpha: 0.5),
-                  width: selected ? 2 : 1,
+                      : scheme.surfaceContainerHighest,
+                  border: Border.all(
+                    color: selected
+                        ? scheme.primary
+                        : scheme.outlineVariant.withValues(alpha: 0.4),
+                    width: selected ? 2 : 1,
+                  ),
+                ),
+                child: child,
+              ),
+              const SizedBox(height: 3),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                  color: selected ? scheme.onSurface : scheme.onSurfaceVariant,
                 ),
               ),
-              child: child,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              count != null ? '$label ·$count' : label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-                color: selected ? scheme.primary : scheme.onSurfaceVariant,
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

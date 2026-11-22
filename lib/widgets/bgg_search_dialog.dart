@@ -2,10 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../services/bgg_service.dart';
 import '../utils/boardgame_display.dart';
 import '../utils/debounced_runner.dart';
 import '../utils/dialog_layout.dart';
+import '../utils/platform_input.dart';
 import 'bgg_network_image.dart';
 import 'collection_cover_image.dart';
 
@@ -25,6 +27,7 @@ class BggSearchDialog extends StatefulWidget {
 
 class _BggSearchDialogState extends State<BggSearchDialog> {
   final _controller = TextEditingController();
+  final _focus = FocusNode(debugLabel: 'bgg_search');
   final _debounce = DebouncedRunner();
   List<Map<String, String>> _results = [];
   List<Map<String, String>> _hotGames = [];
@@ -40,13 +43,26 @@ class _BggSearchDialogState extends State<BggSearchDialog> {
   void initState() {
     super.initState();
     _controller.addListener(_onTextChanged);
+    if (kSafeAutofocus) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _focus.requestFocus();
+      });
+    }
     _loadHotGames();
+  }
+
+  void _onFieldTap() {
+    // Champ déjà focalisé mais clavier fermé (web) : on le rouvre.
+    if (kIsWeb && _focus.hasFocus) {
+      SystemChannels.textInput.invokeMethod<void>('TextInput.show');
+    }
   }
 
   @override
   void dispose() {
     _controller.removeListener(_onTextChanged);
     _controller.dispose();
+    _focus.dispose();
     _debounce.dispose();
     super.dispose();
   }
@@ -136,8 +152,11 @@ class _BggSearchDialogState extends State<BggSearchDialog> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             TextField(
+              key: const ValueKey('bgg_search_field'),
               controller: _controller,
-              autofocus: true,
+              focusNode: _focus,
+              onTap: _onFieldTap,
+              textInputAction: TextInputAction.search,
               decoration: InputDecoration(
                 hintText: 'Tape pour chercher (ex: 7, Catan…)',
                 suffixIcon: _isLoading

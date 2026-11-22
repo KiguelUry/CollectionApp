@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/platform_input.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/boardgame_score_grid.dart';
@@ -592,7 +593,7 @@ class _CommunityForumScreenState extends State<CommunityForumScreen> {
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: TextField(
-                        autofocus: true,
+                        autofocus: kSafeAutofocus,
                         decoration: const InputDecoration(
                           hintText: 'Rechercher dans ta collec…',
                           prefixIcon: Icon(Icons.search),

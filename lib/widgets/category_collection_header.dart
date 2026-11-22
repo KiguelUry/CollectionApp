@@ -14,6 +14,8 @@ class CategoryCollectionHeader extends StatelessWidget {
   final Color? accentOverride;
   final List<CategoryQuickAction> quickActions;
   final List<Widget> extraActions;
+  /// Petites icônes secondaires dans la ligne du titre (ex. Modifs).
+  final List<CategoryQuickAction> titleActions;
   /// Après scroll : icônes seules ; au repos : pastilles avec libellé.
   final bool compactActions;
 
@@ -25,6 +27,7 @@ class CategoryCollectionHeader extends StatelessWidget {
     this.accentOverride,
     this.quickActions = const [],
     this.extraActions = const [],
+    this.titleActions = const [],
     this.compactActions = false,
   });
 
@@ -105,6 +108,17 @@ class CategoryCollectionHeader extends StatelessWidget {
                           ),
                         ),
                       ),
+                      for (final action in titleActions)
+                        _ToolbarAction(
+                          key: ValueKey('title_action_${action.label}'),
+                          tooltip: action.label,
+                          label: action.label,
+                          icon: action.icon,
+                          color: onAccent,
+                          showLabel: false,
+                          showBadge: action.showBadge,
+                          onTap: action.onTap,
+                        ),
                       // Accueil en haut à droite, au-dessus des toggles colonnes.
                       if (showCollectionsHome)
                         IconButton(
@@ -185,15 +199,24 @@ class _ToolbarLayout extends StatelessWidget {
     );
 
     if (!twoRows) {
+      // Au repos, ≤ 3 actions : rangée équilibrée (largeurs égales).
+      final balanced = !compact && leftActions.length <= 3;
       return SizedBox(
         height: compact ? 36 : 44,
         child: Row(
           children: [
             Expanded(
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(children: leftActions),
-              ),
+              child: balanced
+                  ? Row(
+                      children: [
+                        for (final a in leftActions)
+                          Expanded(child: a.expanded()),
+                      ],
+                    )
+                  : SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(children: leftActions),
+                    ),
             ),
             trailing,
           ],
@@ -239,8 +262,10 @@ class _ToolbarAction extends StatelessWidget {
   final bool showLabel;
   final bool showBadge;
   final VoidCallback onTap;
+  final bool fill;
 
   const _ToolbarAction({
+    super.key,
     required this.tooltip,
     required this.label,
     required this.icon,
@@ -248,7 +273,20 @@ class _ToolbarAction extends StatelessWidget {
     required this.showLabel,
     required this.onTap,
     this.showBadge = false,
+    this.fill = false,
   });
+
+  _ToolbarAction expanded() => _ToolbarAction(
+        key: key,
+        tooltip: tooltip,
+        label: label,
+        icon: icon,
+        color: color,
+        showLabel: showLabel,
+        onTap: onTap,
+        showBadge: showBadge,
+        fill: true,
+      );
 
   Widget _iconWithBadge() {
     final iconWidget = Icon(icon, size: showLabel ? 18 : 22, color: color);
@@ -303,23 +341,12 @@ class _ToolbarAction extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               child: Row(
-                mainAxisSize: MainAxisSize.min,
+                mainAxisSize: fill ? MainAxisSize.max : MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   _iconWithBadge(),
                   const SizedBox(width: 5),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 110),
-                    child: Text(
-                      short,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: color,
-                      ),
-                    ),
-                  ),
+                  if (fill) Flexible(child: _labelText(short)) else _labelText(short),
                 ],
               ),
             ),
@@ -328,6 +355,20 @@ class _ToolbarAction extends StatelessWidget {
       ),
     );
   }
+
+  Widget _labelText(String text) => ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 110),
+        child: Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: fill ? 12 : 11,
+            fontWeight: FontWeight.w700,
+            color: color,
+          ),
+        ),
+      );
 
   static String _shortLabel(String label) {
     final t = label.trim();

@@ -173,6 +173,8 @@ class ActivityService {
           if (payload is Map && payload['rating'] != null) {
             rating = (payload['rating'] as num).toDouble();
           }
+          final frozenTitle =
+              payload is Map ? payload['title']?.toString() : null;
           return ActivityEvent(
             id: map['id'] as String,
             actorId: actorId,
@@ -181,7 +183,10 @@ class ActivityService {
             actorAccentColor: p?['accent_color'] as String?,
             eventType: map['event_type'] as String,
             itemId: itemId,
-            itemTitle: it?['title'] as String?,
+            // item_id passe à null quand l'objet est supprimé : plus de titre,
+            // l'ajout disparaît du fil (cf. dedupeActivityEvents).
+            itemTitle: it?['title'] as String? ??
+                (itemId != null ? frozenTitle : null),
             itemImageUrl: it?['image_url'] as String?,
             itemCategory: it?['category'] as String?,
             rating: rating,

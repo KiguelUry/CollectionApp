@@ -27,7 +27,40 @@ class ActivityFeedGroup {
   }
 }
 
+/// Retire les événements identiques (même personne, même type, même objet ou
+/// même titre) à moins de [window] d'écart — ex. triple ajout wishlist —
+/// ainsi que les ajouts dont l'objet a été supprimé depuis.
+/// [events] est trié du plus récent au plus ancien ; on garde le plus récent.
+List<ActivityEvent> dedupeActivityEvents(
+  List<ActivityEvent> events, {
+  Duration window = const Duration(hours: 24),
+}) {
+  const itemEvents = {'item_added', 'wishlist_added', 'item_rated'};
+  final lastSeen = <String, DateTime>{};
+  final out = <ActivityEvent>[];
+  for (final e in events) {
+    final title = e.itemTitle?.trim().toLowerCase();
+    if (itemEvents.contains(e.eventType) &&
+        e.itemId == null &&
+        (title == null || title.isEmpty)) {
+      continue;
+    }
+    final identity = (title != null && title.isNotEmpty)
+        ? 't:$title'
+        : (e.itemId != null ? 'i:${e.itemId}' : 'e:${e.id}');
+    final key = '${e.actorId}|${e.eventType}|$identity';
+    final seenAt = lastSeen[key];
+    if (seenAt != null && seenAt.difference(e.createdAt).abs() <= window) {
+      continue;
+    }
+    lastSeen[key] = e.createdAt;
+    out.add(e);
+  }
+  return out;
+}
+
 List<ActivityFeedGroup> groupActivityEvents(List<ActivityEvent> events) {
+  events = dedupeActivityEvents(events);
   if (events.isEmpty) return [];
 
   final groups = <ActivityFeedGroup>[];

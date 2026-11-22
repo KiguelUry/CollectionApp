@@ -10,7 +10,6 @@ import 'screens/login_screen.dart';
 import 'screens/reset_password_screen.dart';
 import 'screens/category_selection_screen.dart';
 import 'screens/friends_screen.dart';
-import 'screens/groups_screen.dart';
 import 'screens/friend_collection_screen.dart';
 import 'services/profile_cache_service.dart';
 import 'services/social_directory_cache.dart';
@@ -122,7 +121,7 @@ class _MyAppState extends State<MyApp> {
       home: const SplashScreen(),
       routes: {
         '/categories': (context) => const CategorySelectionScreen(),
-        '/groups': (context) => const GroupsScreen(),
+        '/groups': (context) => const FriendsScreen(initialTab: 1),
         '/friends': (context) => const FriendsScreen(),
         '/profile': (context) => const _OwnProfileRoute(),
         '/settings': (context) => const SettingsScreen(),

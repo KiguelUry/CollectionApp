@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/platform_input.dart';
 import '../services/friend_service.dart';
 import '../utils/debounced_runner.dart';
 import 'profile_avatar.dart';
@@ -113,7 +114,7 @@ class _AddFriendSheetState extends State<AddFriendSheet> {
           const SizedBox(height: 8),
           TextField(
             controller: _searchController,
-            autofocus: true,
+            autofocus: kSafeAutofocus,
             decoration: InputDecoration(
               hintText: 'Chercher un pseudo…',
               border: const OutlineInputBorder(),

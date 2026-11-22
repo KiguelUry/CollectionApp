@@ -72,7 +72,10 @@ Future<Map<String, dynamic>?> findWishlistDuplicate({
 
   var base = client
       .from('collection_items')
-      .select('id, quantity, is_wishlist, title, metadata')
+      .select(
+        'id, quantity, is_wishlist, title, bgg_id:metadata->>bgg_id, '
+        'original_title:metadata->>original_title',
+      )
       .eq('category', categoryDb)
       .eq('is_wishlist', true);
 
@@ -92,18 +95,64 @@ Future<Map<String, dynamic>?> findWishlistDuplicate({
       .map((e) => Map<String, dynamic>.from(e as Map))
       .toList();
 
-  final externalId = bggId?.trim();
-  if (externalId != null && externalId.isNotEmpty) {
-    for (final row in list) {
+  return matchCatalogDuplicate(list, title: normalizedTitle, bggId: bggId);
+}
+
+/// Objet déjà possédé (perso ou ajouté par moi dans un groupe), par `bgg_id`
+/// puis titre affiché / titre d'origine.
+Future<Map<String, dynamic>?> findOwnedDuplicate({
+  required String title,
+  required String categoryDb,
+  String? bggId,
+}) async {
+  final client = Supabase.instance.client;
+  final userId = client.auth.currentUser?.id;
+  if (userId == null) return null;
+
+  final rows = await CollectionItemScope.ownedByUser(
+    client
+        .from('collection_items')
+        .select(
+          'id, quantity, title, bgg_id:metadata->>bgg_id, '
+          'original_title:metadata->>original_title',
+        )
+        .eq('category', categoryDb)
+        .eq('is_wishlist', false),
+    userId: userId,
+  ).limit(1000);
+  final list = (rows as List)
+      .map((e) => Map<String, dynamic>.from(e as Map))
+      .toList();
+  return matchCatalogDuplicate(list, title: title, bggId: bggId);
+}
+
+/// Premier doublon par `bgg_id`, sinon par titre (affiché ou d'origine).
+Map<String, dynamic>? matchCatalogDuplicate(
+  List<Map<String, dynamic>> rows, {
+  required String title,
+  String? bggId,
+}) {
+  final id = bggId?.trim();
+  if (id != null && id.isNotEmpty) {
+    for (final row in rows) {
       final meta = row['metadata'];
-      final id = meta is Map ? meta['bgg_id']?.toString().trim() : null;
-      if (id != null && id == externalId) return row;
+      final rowId = (row['bgg_id'] ??
+              (meta is Map ? meta['bgg_id'] : null))
+          ?.toString()
+          .trim();
+      if (rowId == id) return row;
     }
   }
-
-  for (final row in list) {
-    final t = row['title']?.toString().trim().toLowerCase() ?? '';
-    if (t == normalizedTitle) return row;
+  final t = title.trim().toLowerCase();
+  for (final row in rows) {
+    final meta = row['metadata'];
+    final names = [
+      row['title'],
+      row['original_title'] ?? (meta is Map ? meta['original_title'] : null),
+    ];
+    for (final n in names) {
+      if (n != null && n.toString().trim().toLowerCase() == t) return row;
+    }
   }
   return null;
 }

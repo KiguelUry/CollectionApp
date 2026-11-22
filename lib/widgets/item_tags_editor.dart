@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/platform_input.dart';
 import '../models/item_tag.dart';
 import '../services/tag_service.dart';
 
@@ -55,7 +56,7 @@ class _ItemTagsEditorState extends State<ItemTagsEditor> {
             labelText: 'Nom',
             hintText: 'ex. Famille, Noël, Rare',
           ),
-          autofocus: true,
+          autofocus: kSafeAutofocus,
           textCapitalization: TextCapitalization.sentences,
         ),
         actions: [

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/platform_input.dart';
 import 'package:flutter/services.dart';
 
 import '../constants/rating_colors.dart';
@@ -108,7 +109,7 @@ class _PrecisionStarRatingBarState extends State<PrecisionStarRatingBar> {
         title: const Text('Note /5'),
         content: TextField(
           controller: ctrl,
-          autofocus: true,
+          autofocus: kSafeAutofocus,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           inputFormatters: [
             FilteringTextInputFormatter.allow(RegExp(r'[\d.,]')),

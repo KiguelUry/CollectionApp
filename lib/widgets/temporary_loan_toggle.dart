@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/platform_input.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
@@ -172,7 +173,7 @@ class _TemporaryLoanToggleState extends State<TemporaryLoanToggle> {
           title: const Text('À qui le prêtes-tu ?'),
           content: TextField(
             controller: ctrl,
-            autofocus: true,
+            autofocus: kSafeAutofocus,
             textInputAction: TextInputAction.done,
             maxLength: kLoanBorrowerNameMaxLength,
             inputFormatters: _nameLimiters,

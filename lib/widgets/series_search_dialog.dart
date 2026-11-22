@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/platform_input.dart';
 
 import '../models/book_subcategory.dart';
 import '../models/series_search_hit.dart';
@@ -100,7 +101,7 @@ class _SeriesSearchDialogState extends State<_SeriesSearchDialog> {
           children: [
             TextField(
               controller: _controller,
-              autofocus: true,
+              autofocus: kSafeAutofocus,
               decoration: InputDecoration(
                 labelText: 'Nom de la série',
                 hintText: 'Thorgal, Naruto, Batman…',

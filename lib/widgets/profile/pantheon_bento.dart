@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../utils/platform_input.dart';
 
 import '../../models/collection_category.dart';
 import '../../models/collection_item.dart';
@@ -294,17 +295,31 @@ class PantheonBento extends StatelessWidget {
                     right: 0,
                     bottom: 0,
                     child: Container(
-                      color: Colors.black.withValues(alpha: 0.55),
-                      padding: const EdgeInsets.fromLTRB(6, 4, 6, 5),
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Color(0x00000000),
+                            Color(0xB3000000),
+                            Color(0xE6000000),
+                          ],
+                          stops: [0, 0.45, 1],
+                        ),
+                      ),
+                      padding: const EdgeInsets.fromLTRB(7, 18, 7, 6),
                       child: Text(
                         item?.title ?? 'Choisir',
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
                           height: 1.15,
+                          shadows: [
+                            Shadow(color: Colors.black54, blurRadius: 3),
+                          ],
                         ),
                       ),
                     ),
@@ -462,7 +477,7 @@ class _PantheonGamePickerState extends State<_PantheonGamePicker> {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: TextField(
               controller: _query,
-              autofocus: true,
+              autofocus: kSafeAutofocus,
               decoration: const InputDecoration(
                 hintText: 'Rechercher dans toutes tes collections',
                 prefixIcon: Icon(Icons.search),

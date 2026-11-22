@@ -3,9 +3,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../utils/collection_item_filters.dart';
+import '../utils/friend_item_overlap.dart';
 import '../utils/supabase_embeds.dart';
 import '../utils/search_relevance.dart';
-import 'group_service.dart';
 import 'supabase_read_cache.dart';
 
 class FriendService {
@@ -387,13 +387,12 @@ class FriendService {
     if (!await canViewFriendCollection(friendProfileId)) {
       return [];
     }
+    final common = await commonGroupIds(friendProfileId);
 
     final rows = await _client
         .from('collection_items')
         .select(SupabaseEmbeds.collectionItem)
-        .or(
-          'added_by.eq.$friendProfileId,location_user_id.eq.$friendProfileId',
-        )
+        .eq('added_by', friendProfileId)
         .eq('category', category.dbValue)
         .eq('is_wishlist', false)
         .order('created_at', ascending: false)
@@ -402,7 +401,51 @@ class FriendService {
     return (rows as List)
         .map((r) => CollectionItem.fromJson(Map<String, dynamic>.from(r)))
         .where(isActiveCollectionItem)
+        .where((i) => isFriendOwnedVisible(i, friendProfileId, common))
         .toList();
+  }
+
+  /// Un objet appartient à la collection d'un ami s'il l'a ajouté lui-même,
+  /// en perso ou dans un groupe où vous êtes **tous les deux** membres.
+  /// `location_user_id` (objet physiquement chez lui) ne compte pas :
+  /// c'est souvent un objet d'un autre membre posé chez lui.
+  static bool isFriendOwnedVisible(
+    CollectionItem item,
+    String friendProfileId,
+    Set<String> commonGroupIds,
+  ) {
+    if (item.addedBy != friendProfileId) return false;
+    final gid = item.groupId;
+    return gid == null || gid.isEmpty || commonGroupIds.contains(gid);
+  }
+
+  /// Groupes dont toi ET cet ami êtes membres.
+  Future<Set<String>> commonGroupIds(String friendProfileId) async {
+    final userId = _client.auth.currentUser?.id;
+    if (userId == null) return {};
+    final ids = await SupabaseReadCache.getOrFetch<List<String>>(
+      key: 'group_members:common:$userId:$friendProfileId',
+      loader: () async {
+        try {
+          final rows = await _client
+              .from('group_members')
+              .select('group_id, profile_id')
+              .inFilter('profile_id', [userId, friendProfileId]);
+          final mine = <String>{};
+          final theirs = <String>{};
+          for (final r in rows as List) {
+            final gid = r['group_id']?.toString();
+            if (gid == null) continue;
+            if (r['profile_id'] == userId) mine.add(gid);
+            if (r['profile_id'] == friendProfileId) theirs.add(gid);
+          }
+          return mine.intersection(theirs).toList();
+        } catch (_) {
+          return <String>[];
+        }
+      },
+    );
+    return ids.toSet();
   }
 
   Future<List<CollectionItem>> fetchFriendCollectionItems(
@@ -413,26 +456,28 @@ class FriendService {
         'Collection non partagée (active le partage mutuel ou demande à ton ami)',
       );
     }
+    final common = await commonGroupIds(friendProfileId);
 
     final rows = await _client
         .from('collection_items')
         .select(SupabaseEmbeds.collectionItem)
-        .or(
-          'added_by.eq.$friendProfileId,location_user_id.eq.$friendProfileId',
-        )
+        .eq('added_by', friendProfileId)
         .eq('is_wishlist', false)
         .order('title');
 
     return (rows as List)
         .map((r) => CollectionItem.fromJson(Map<String, dynamic>.from(r)))
         .where(isActiveCollectionItem)
+        .where((i) => isFriendOwnedVisible(i, friendProfileId, common))
         .toList();
   }
 
-  /// Objets des groupes dont je suis membre (collection commune, ex. Famille).
-  Future<List<CollectionItem>> fetchItemsInMyGroups() async {
-    final groups = await GroupService().fetchMyGroups();
-    final ids = groups.map((g) => g.id).where((id) => id.isNotEmpty).toList();
+  /// Objets des groupes **communs** avec cet ami (ajoutés par n'importe quel
+  /// membre). Vide si vous n'avez aucun groupe en commun.
+  Future<List<CollectionItem>> fetchItemsInCommonGroups(
+    String friendProfileId,
+  ) async {
+    final ids = (await commonGroupIds(friendProfileId)).toList();
     if (ids.isEmpty) return [];
 
     final rows = await _client
@@ -445,6 +490,99 @@ class FriendService {
         .map((r) => CollectionItem.fromJson(Map<String, dynamic>.from(r)))
         .where(isActiveCollectionItem)
         .toList();
+  }
+
+  /// Demandes d'ami que j'ai envoyées (en attente).
+  Future<List<Map<String, dynamic>>> fetchOutgoingFriendRequests() async {
+    final userId = _client.auth.currentUser!.id;
+    final rows = await _client
+        .from('friendships')
+        .select('id, addressee_id, created_at')
+        .eq('requester_id', userId)
+        .eq('status', 'pending')
+        .order('created_at');
+    final list = rows as List;
+    if (list.isEmpty) return [];
+    final ids = list.map((r) => r['addressee_id'] as String).toList();
+    List profiles = const [];
+    try {
+      profiles = await _client
+          .from('profiles')
+          .select('id, username, avatar_url, accent_color')
+          .inFilter('id', ids) as List;
+    } catch (_) {}
+    final byId = {
+      for (final p in profiles) p['id'] as String: Map<String, dynamic>.from(p),
+    };
+    return [
+      for (final row in list)
+        {
+          'friendship_id': row['id'],
+          'profile_id': row['addressee_id'],
+          'username': 'Utilisateur',
+          ...?byId[row['addressee_id'] as String],
+        },
+    ];
+  }
+
+  /// Annule une demande envoyée (encore en attente).
+  Future<void> cancelFriendRequest(String friendshipId) async {
+    final userId = _client.auth.currentUser!.id;
+    await _client
+        .from('friendships')
+        .delete()
+        .eq('id', friendshipId)
+        .eq('requester_id', userId)
+        .eq('status', 'pending');
+    invalidateFriendCache();
+  }
+
+  /// Nombre d'objets possédés par ami + nombre en commun avec moi.
+  /// Une seule requête légère (titre, catégorie, bgg_id — pas de metadata).
+  Future<Map<String, ({int count, int common})>> fetchFriendsSummary(
+    List<String> friendIds,
+  ) async {
+    final userId = _client.auth.currentUser?.id;
+    if (userId == null || friendIds.isEmpty) return {};
+    final sorted = [...friendIds]..sort();
+    return SupabaseReadCache.getOrFetch<Map<String, ({int count, int common})>>(
+      key: 'friends:summary:$userId:${sorted.join(',')}',
+      loader: () async {
+        try {
+          final rows = await _client
+              .from('collection_items')
+              .select(
+                'added_by, title, category, is_expansion, '
+                'bgg_id:metadata->>bgg_id, original_title:metadata->>original_title',
+              )
+              .inFilter('added_by', sorted)
+              .eq('is_wishlist', false)
+              .filter('group_id', 'is', null);
+          final byFriend = <String, List<Map<String, dynamic>>>{};
+          for (final r in rows as List) {
+            final m = Map<String, dynamic>.from(r as Map);
+            if (m['is_expansion'] == true) continue;
+            byFriend.putIfAbsent(m['added_by'] as String, () => []).add(m);
+          }
+          final mine = await myOverlapItems();
+          final myKeys = overlapKeysForRows([
+            for (final i in mine)
+              if (!i.isWishlist) overlapRowOf(i),
+          ]);
+          return {
+            for (final id in sorted)
+              id: (
+                count: byFriend[id]?.length ?? 0,
+                common: (byFriend[id] ?? const [])
+                    .where((r) => overlapKeysForRow(r).any(myKeys.contains))
+                    .length,
+              ),
+          };
+        } catch (_) {
+          return <String, ({int count, int common})>{};
+        }
+      },
+    );
   }
 
   Future<bool> canViewFriendWishlist(String friendProfileId) async {
@@ -468,17 +606,19 @@ class FriendService {
       throw Exception('Cette wishlist n\'est pas partagée');
     }
 
+    final common = await commonGroupIds(friendProfileId);
     final rows = await _client
         .from('collection_items')
         .select(SupabaseEmbeds.collectionItem)
-        .or(
-          'added_by.eq.$friendProfileId,location_user_id.eq.$friendProfileId',
-        )
+        .eq('added_by', friendProfileId)
         .eq('is_wishlist', true)
         .order('title');
 
-    return (rows as List)
-        .map((r) => CollectionItem.fromJson(Map<String, dynamic>.from(r)))
-        .toList();
+    return dedupeCatalogItems(
+      (rows as List)
+          .map((r) => CollectionItem.fromJson(Map<String, dynamic>.from(r)))
+          .where((i) => isFriendOwnedVisible(i, friendProfileId, common))
+          .toList(),
+    );
   }
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/platform_input.dart';
 import '../models/user_profile.dart';
 import '../services/profile_cache_service.dart';
 import '../services/profile_service.dart';
@@ -184,7 +185,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
             padding: EdgeInsets.only(bottom: bottom),
             child: TextField(
               controller: noteController,
-              autofocus: true,
+              autofocus: kSafeAutofocus,
               maxLines: 3,
               decoration: const InputDecoration(
                 labelText: 'Qu\'as-tu fait ?',

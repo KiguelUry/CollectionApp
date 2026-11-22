@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import '../utils/platform_input.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -931,7 +932,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
             const SizedBox(height: 12),
             TextField(
               controller: nameCtrl,
-              autofocus: true,
+              autofocus: kSafeAutofocus,
               textCapitalization: TextCapitalization.sentences,
               decoration: const InputDecoration(
                 labelText: 'Nom du modèle',
@@ -1046,7 +1047,7 @@ class _BoardgamePlaySessionPageState extends State<BoardgamePlaySessionPage> {
         title: const Text('Nom du modèle'),
         content: TextField(
           controller: controller,
-          autofocus: true,
+          autofocus: kSafeAutofocus,
           textCapitalization: TextCapitalization.sentences,
           decoration: const InputDecoration(labelText: 'Nom'),
           onTapOutside: (_) =>
@@ -2141,7 +2142,7 @@ class _TemplateFieldsState extends State<_TemplateFields> {
         title: const Text('Renommer la catégorie'),
         content: TextField(
           controller: controller,
-          autofocus: true,
+          autofocus: kSafeAutofocus,
           textCapitalization: TextCapitalization.sentences,
           maxLength: 20,
           decoration: const InputDecoration(

@@ -6,7 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../services/friend_service.dart';
-import '../services/household_service.dart';
+import '../services/profile_cache_service.dart';
 import '../services/profile_service.dart';
 import '../utils/collection_grid_grouper.dart';
 import '../utils/collection_grid_layout.dart';
@@ -16,8 +16,8 @@ import '../services/pantheon_memory.dart';
 import '../utils/copy_friend_item.dart';
 import '../utils/friend_item_overlap.dart';
 import '../utils/active_categories.dart';
-import '../utils/holder_label_utils.dart';
 import '../utils/hub_owned_count.dart';
+import '../utils/item_search.dart';
 import '../utils/pantheon_ranking.dart';
 import '../widgets/collection_item_tile.dart';
 import '../widgets/profile/own_profile_panel.dart';
@@ -25,9 +25,10 @@ import '../widgets/profile/pantheon_bento.dart';
 import '../widgets/profile_avatar.dart';
 import 'item_detail_screen.dart';
 
-enum _ProfileScope { shared, atHome, added }
+/// Filtre rapide de la collection d'un ami.
+enum FriendQuickFilter { all, common, discover, groups }
 
-/// Collection et wishlist d'un ami (lecture seule).
+/// Profil et collection d'un ami (lecture seule), ou mon propre profil.
 class FriendCollectionScreen extends StatefulWidget {
   final String profileId;
   final String username;
@@ -35,6 +36,8 @@ class FriendCollectionScreen extends StatefulWidget {
   final String? accentColor;
   final bool shareCollections;
   final bool collectionView;
+  /// Ouvre directement l'onglet Wishlist (vue collection).
+  final bool initialWishlist;
 
   const FriendCollectionScreen({
     super.key,
@@ -43,6 +46,7 @@ class FriendCollectionScreen extends StatefulWidget {
     this.avatarUrl,
     this.accentColor,
     this.collectionView = false,
+    this.initialWishlist = false,
     required this.shareCollections,
   });
 
@@ -52,21 +56,28 @@ class FriendCollectionScreen extends StatefulWidget {
 
 class _FriendCollectionScreenState extends State<FriendCollectionScreen>
     with RouteAware {
+  static const _darkBg = Color(0xFF14161B);
+
   final _friendService = FriendService();
+  final _search = TextEditingController();
   List<CollectionItem> _collectionItems = [];
   List<CollectionItem> _groupItems = [];
   List<CollectionItem> _wishlistItems = [];
+  Set<String> _commonGroupIds = {};
   bool? _wishlistShared;
   bool _loading = true;
   String? _error;
   CollectionCategory _selectedCategory = CollectionCategory.boardgame;
-  FriendOverlapIndex? _overlap;
+  FriendOverlapIndex _overlap = FriendOverlapIndex.empty;
   bool _categorySynced = false;
-  _ProfileScope _scope = _ProfileScope.shared;
+  FriendQuickFilter _quick = FriendQuickFilter.all;
+  late bool _showWishlist = widget.initialWishlist;
   List<String> _pantheonIds = [];
   int _pantheonCap = 10;
   bool _pantheonConfigured = false;
   bool _mine = false;
+  String? _bio;
+  int? _playsTogether;
   Set<CollectionCategory> _activeCategories = CollectionCategory.defaultActive;
 
   @override
@@ -79,9 +90,11 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
       _groupItems = cached.groups;
       _wishlistItems = cached.wishlist;
       _wishlistShared = cached.wishlistShared;
+      _commonGroupIds = cached.commonGroupIds;
       _pantheonIds = List<String>.from(cached.pantheonIds);
       _pantheonConfigured = cached.pantheonIds.isNotEmpty;
       _activeCategories = cached.active;
+      _bio = cached.bio;
       _loading = false;
     }
     final memory = PantheonMemory.instance.idsFor(widget.profileId);
@@ -93,6 +106,7 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
       }
     }
     PantheonMemory.instance.addListener(_onPantheonMemory);
+    _search.addListener(() => setState(() {}));
     _load();
   }
 
@@ -110,6 +124,7 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
   void dispose() {
     appRouteObserver.unsubscribe(this);
     PantheonMemory.instance.removeListener(_onPantheonMemory);
+    _search.dispose();
     super.dispose();
   }
 
@@ -135,7 +150,8 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
   }
 
   Future<void> _load({bool silent = false}) async {
-    final keepShown = silent || _collectionItems.isNotEmpty || _pantheonIds.isNotEmpty;
+    final keepShown =
+        silent || _collectionItems.isNotEmpty || _pantheonIds.isNotEmpty;
     if (!keepShown) {
       setState(() {
         _loading = true;
@@ -156,33 +172,47 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
     }
 
     try {
-      await HouseholdService.instance.ensureLoaded();
-      _collectionItems = await _friendService.fetchFriendCollectionItems(
-        widget.profileId,
-      );
-      _groupItems = await _friendService.fetchItemsInMyGroups();
-      _wishlistShared = await _friendService.canViewFriendWishlist(
-        widget.profileId,
-      );
-      if (_wishlistShared == true) {
-        _wishlistItems = await _friendService.fetchFriendWishlistItems(
-          widget.profileId,
-        );
-      } else {
-        _wishlistItems = [];
-      }
-      _overlap = await buildFriendOverlapIndex([
-        ..._sharedItems(),
-        ..._wishlistItems,
+      final results = await Future.wait([
+        _friendService.fetchFriendCollectionItems(widget.profileId),
+        _friendService.fetchItemsInCommonGroups(widget.profileId),
+        _friendService.commonGroupIds(widget.profileId),
+        _friendService.canViewFriendWishlist(widget.profileId),
       ]);
+      // Filet de sécurité : jamais mes objets dans la vue d'un autre profil.
+      final friendId = widget.profileId;
+      _collectionItems = (results[0] as List<CollectionItem>)
+          .where((i) => _mine || i.addedBy == friendId)
+          .toList();
+      _groupItems = results[1] as List<CollectionItem>;
+      _commonGroupIds = results[2] as Set<String>;
+      _wishlistShared = results[3] as bool;
+      _wishlistItems = _wishlistShared == true
+          ? (await _friendService.fetchFriendWishlistItems(friendId))
+              .where((i) => _mine || i.addedBy == friendId)
+              .toList()
+          : [];
+      _overlap = _mine
+          ? FriendOverlapIndex.empty
+          : await buildFriendOverlapIndex([
+              ..._collectionItems,
+              ..._groupItems,
+              ..._wishlistItems,
+            ]);
       _activeCategories = await ActiveCategories.load();
       await _loadPantheon();
+      if (!_mine) {
+        try {
+          _bio = (await ProfileService().fetchProfile(widget.profileId)).bio;
+        } catch (_) {}
+        _playsTogether = await _countPlaysTogether();
+      }
       _categorySynced = false;
+      _error = null;
     } catch (e) {
       if (!keepShown) {
         _collectionItems = [];
         _wishlistItems = [];
-        _overlap = null;
+        _overlap = FriendOverlapIndex.empty;
         _error = e.toString();
       }
     }
@@ -191,17 +221,53 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
       if (_error == null) {
         _ProfileSessionCache.save(
           widget.profileId,
-          collection: _collectionItems,
-          groups: _groupItems,
-          wishlist: _wishlistItems,
-          wishlistShared: _wishlistShared,
-          pantheonIds: _pantheonIds,
-          active: _activeCategories,
+          _ProfileSessionCache(
+            collection: List.of(_collectionItems),
+            groups: List.of(_groupItems),
+            wishlist: List.of(_wishlistItems),
+            wishlistShared: _wishlistShared,
+            commonGroupIds: Set.of(_commonGroupIds),
+            pantheonIds: List.of(_pantheonIds),
+            active: Set.of(_activeCategories),
+            bio: _bio,
+          ),
         );
       }
       setState(() => _loading = false);
       _pickInitialCategory([..._collectionItems, ..._wishlistItems]);
     }
+  }
+
+  /// Parties où vous apparaissez tous les deux (mon historique + le sien).
+  Future<int> _countPlaysTogether() async {
+    final me =
+        ProfileCacheService.instance.profile?.username.trim().toLowerCase();
+    final friend = widget.username.trim().toLowerCase();
+    final keys = <String>{};
+    void scan(Iterable<CollectionItem> items, String? other) {
+      if (other == null || other.isEmpty) return;
+      for (final item in items) {
+        final plays = item.metadata?['boardgame_plays'];
+        if (plays is! List) continue;
+        for (final p in plays) {
+          if (p is! Map) continue;
+          final players = [
+            for (final n in (p['players'] as List? ?? const []))
+              n.toString().trim().toLowerCase(),
+          ];
+          if (!players.contains(other)) continue;
+          final game = item.metadata?['bgg_id']?.toString() ??
+              item.title.trim().toLowerCase();
+          final date = p['date']?.toString() ?? '';
+          final day = date.length >= 10 ? date.substring(0, 10) : date;
+          keys.add(p['share_id']?.toString() ?? '$game|$day');
+        }
+      }
+    }
+
+    scan(await myOverlapItems(), friend);
+    scan([..._collectionItems, ..._groupItems], me);
+    return keys.length;
   }
 
   void _pickInitialCategory(List<CollectionItem> items) {
@@ -219,47 +285,7 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
     }
   }
 
-  Widget? _overlapBanner() {
-    if (_mine) return null;
-    final o = _overlap;
-    if (o == null || (o.inCollectionCount == 0 && o.inWishlistCount == 0)) {
-      return null;
-    }
-    final parts = <String>[];
-    if (o.inCollectionCount > 0) {
-      parts.add(
-        '${o.inCollectionCount} en commun',
-      );
-    }
-    if (o.inWishlistCount > 0) {
-      parts.add('${o.inWishlistCount} dans ta wishlist');
-    }
-    return Container(
-      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.teal.shade50,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.teal.shade100),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.compare_arrows, color: Colors.teal.shade700),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              parts.join(' · '),
-              style: TextStyle(
-                fontWeight: FontWeight.w600,
-                color: Colors.teal.shade900,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
+  /// Collection de l'ami + groupes communs (dédoublonnés par id).
   List<CollectionItem> _sharedItems() {
     final byId = <String, CollectionItem>{};
     for (final item in [..._collectionItems, ..._groupItems]) {
@@ -268,46 +294,51 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
     return byId.values.toList();
   }
 
-  bool _isAtThisPerson(CollectionItem item) {
-    if (item.locationUserId == widget.profileId) return true;
-    final who = widget.username.trim().toLowerCase();
-    final labels = <String>[
-      if (item.locationLabel != null) item.locationLabel!,
-      item.metadata?['holder_label']?.toString() ?? '',
-    ];
-    for (final raw in labels) {
-      if (raw.trim().isEmpty) continue;
-      if (holderLabelStorageValue(raw).trim().toLowerCase() == who) {
-        return true;
-      }
-      final home = HouseholdService.instance.matchLabel(raw);
-      if (home != null &&
-          home.people.any((p) => p.trim().toLowerCase() == who)) {
-        return true;
-      }
-    }
-    return false;
+  List<CollectionItem> _baseItems() {
+    if (_showWishlist) return _wishlistItems;
+    if (_quick == FriendQuickFilter.groups) return _groupItems;
+    return _collectionItems;
   }
 
-  List<CollectionItem> _itemsForScope() {
-    switch (_scope) {
-      case _ProfileScope.shared:
-        return _sharedItems();
-      case _ProfileScope.atHome:
-        return _sharedItems().where(_isAtThisPerson).toList();
-      case _ProfileScope.added:
-        return [
-          ..._sharedItems().where((i) => i.addedBy == widget.profileId),
-          if (_wishlistShared != false) ..._wishlistItems,
-        ];
+  bool _passesQuick(CollectionItem item, FriendQuickFilter f) {
+    switch (f) {
+      case FriendQuickFilter.all:
+      case FriendQuickFilter.groups:
+        return true;
+      case FriendQuickFilter.common:
+        return _overlap.kindFor(item) != FriendOverlapKind.none;
+      case FriendQuickFilter.discover:
+        return _overlap.kindFor(item) == FriendOverlapKind.none;
     }
   }
 
-  int _countFor(CollectionCategory category) => _itemsForScope()
-      .where(
-        (i) => i.category == category && !i.isExpansion && !i.isWishlist,
-      )
+  List<CollectionItem> _visibleFor(
+    CollectionCategory category, {
+    FriendQuickFilter? quick,
+  }) {
+    final f = quick ?? _quick;
+    final base = (!_showWishlist && f == FriendQuickFilter.groups)
+        ? _groupItems
+        : _baseItems();
+    final q = _search.text;
+    return base
+        .where(
+          (i) =>
+              i.category == category &&
+              _passesQuick(i, f) &&
+              itemMatchesSearch(i, q),
+        )
+        .toList();
+  }
+
+  int _countFor(CollectionCategory category) => _visibleFor(category)
+      .where((i) => !i.isExpansion)
       .length;
+
+  int _quickCount(FriendQuickFilter f) => _visibleFor(
+        _selectedCategory,
+        quick: f,
+      ).where((i) => !i.isExpansion).length;
 
   List<CollectionItem> _pantheonItems() {
     if (!_pantheonConfigured) return const [];
@@ -343,9 +374,20 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
   }
 
   int get _ownedVisibleCount => hubOwnedItems(
-        _sharedItems(),
+        _mine ? _sharedItems() : _collectionItems,
         active: _activeCategories,
       ).length;
+
+  int get _wishlistVisibleCount => _wishlistItems
+      .where(
+        (item) => _activeCategories.contains(item.category) && !item.isExpansion,
+      )
+      .length;
+
+  int get _commonCount => _overlap.countIn(
+        hubOwnedItems(_collectionItems, active: _activeCategories),
+        FriendOverlapKind.inCollection,
+      );
 
   List<PantheonCandidate> _pantheonCandidates() {
     return [
@@ -388,7 +430,10 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
     if (raw == null) return;
     final decoded = jsonDecode(raw);
     if (decoded is List) {
-      _pantheonIds = decoded.map((e) => e.toString()).where((id) => id.isNotEmpty).toList();
+      _pantheonIds = decoded
+          .map((e) => e.toString())
+          .where((id) => id.isNotEmpty)
+          .toList();
       _pantheonConfigured = _pantheonIds.isNotEmpty;
     }
   }
@@ -433,7 +478,9 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
       if (!seen.add(key)) continue;
       games.add(item);
     }
-    games.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+    games.sort(
+      (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+    );
     final picked = await showPantheonGamePicker(
       context,
       rank: index + 1,
@@ -447,59 +494,23 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
 
   @override
   Widget build(BuildContext context) {
-    final accent = ProfileAvatar.colorFromHex(widget.accentColor);
-
+    final friendProfile = !_mine && !widget.collectionView;
     return Scaffold(
+      backgroundColor: friendProfile ? _darkBg : null,
       appBar: AppBar(
-        title: widget.collectionView
-            ? Text('Collection de ${widget.username}')
-            : _mine
-            ? const Text('Profil')
-            : Row(
-                children: [
-                  ProfileAvatar(
-                    avatarUrl: widget.avatarUrl,
-                    accentColorHex: widget.accentColor,
-                    fallbackInitial: widget.username,
-                    radius: 18,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(widget.username),
-                        const Text(
-                          'Profil',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.normal,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-        backgroundColor: accent,
+        title: Text(
+          widget.collectionView
+              ? (_mine ? 'Ma collection' : 'Chez ${widget.username}')
+              : (_mine ? 'Profil' : widget.username),
+        ),
+        backgroundColor: friendProfile
+            ? _darkBg
+            : ProfileAvatar.colorFromHex(widget.accentColor),
         foregroundColor: Colors.white,
         iconTheme: const IconThemeData(color: Colors.white),
+        elevation: 0,
+        scrolledUnderElevation: 0,
         actions: [
-          if (!_mine)
-            IconButton(
-              icon: const Icon(Icons.add_circle_outline),
-              tooltip: 'Appui long sur un objet pour l\'ajouter chez toi',
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'Appui long sur une vignette → ajouter à ta collection ou wishlist',
-                    ),
-                    duration: Duration(seconds: 3),
-                  ),
-                );
-              },
-            ),
           IconButton(
             icon: const Icon(Icons.home_rounded),
             tooltip: 'Accueil',
@@ -513,8 +524,21 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
               !(_mine && OwnProfilePanel.memory != null)
           ? const Center(child: CircularProgressIndicator())
           : _error != null && _collectionItems.isEmpty && _pantheonIds.isEmpty
-              ? Center(child: Text(_error!))
-              : _buildProfile(),
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      _error!,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: friendProfile ? Colors.white70 : null,
+                      ),
+                    ),
+                  ),
+                )
+              : widget.collectionView
+                  ? _buildCollection()
+                  : _buildProfile(),
     );
   }
 
@@ -532,7 +556,7 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
     _savePantheon(next);
   }
 
-  void _openFriendCollection() {
+  void _openFriendCollection({bool wishlist = false}) {
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -543,6 +567,21 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
           accentColor: widget.accentColor,
           shareCollections: widget.shareCollections,
           collectionView: true,
+          initialWishlist: wishlist,
+        ),
+      ),
+    );
+  }
+
+  void _openItem(CollectionItem item, {int? quantity}) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ItemDetailScreen(
+          item: quantity == null ? item : item.copyWith(quantity: quantity),
+          readOnly: !_mine,
+          friendUsername: _mine ? null : widget.username,
+          friendOverlap: _mine ? null : _overlap.kindFor(item),
         ),
       ),
     );
@@ -550,12 +589,6 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
 
   Widget _profileStats() {
     final owned = _ownedVisibleCount;
-    final wishlist = _wishlistItems
-        .where(
-          (item) =>
-              _activeCategories.contains(item.category) && !item.isExpansion,
-        )
-        .length;
     final plays = _sharedItems().fold<int>(
       0,
       (sum, item) => sum + (item.gamesPlayed ?? 0),
@@ -567,7 +600,7 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
         '${_activeCategories.length}',
         Icons.category_outlined,
       ),
-      ('Wishlist', '$wishlist', Icons.favorite_border),
+      ('Wishlist', '$_wishlistVisibleCount', Icons.favorite_border),
       ('Parties jouées', '$plays', Icons.sports_esports_outlined),
     ];
     return LayoutBuilder(
@@ -626,14 +659,7 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
       ranked: _pantheonItems(),
       editable: _mine,
       slotCount: _visiblePantheonSlots,
-      onOpenItem: (item) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => ItemDetailScreen(item: item),
-          ),
-        );
-      },
+      onOpenItem: _openItem,
       onAutoFill: _mine && _pantheonIds.every((id) => id.isEmpty)
           ? () {
               _savePantheon(
@@ -654,80 +680,155 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
   }
 
   Widget _buildProfile() {
-    if (!widget.collectionView) {
-      final owned = _ownedVisibleCount;
+    if (_mine) {
       return ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
-          if (_mine) const OwnProfilePanel(),
-          if (_mine) ...[
-            const SizedBox(height: 12),
-            _profileStats(),
-            const SizedBox(height: 16),
-          ],
+          const OwnProfilePanel(),
+          const SizedBox(height: 12),
+          _profileStats(),
+          const SizedBox(height: 16),
           _pantheonBlock(),
-          if (!_mine) ...[
-            const SizedBox(height: 16),
-            FilledButton.tonalIcon(
-              onPressed: _openFriendCollection,
-              icon: const Text('📚'),
-              label: Text('Voir sa collection ($owned objets)'),
-            ),
-          ],
         ],
       );
     }
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 1040),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
+          children: [
+            _FriendHeader(
+              username: widget.username,
+              avatarUrl: widget.avatarUrl,
+              accentColor: widget.accentColor,
+              bio: _bio,
+              owned: _ownedVisibleCount,
+              common: _commonCount,
+              playsTogether: _playsTogether,
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: _DarkActionButton(
+                    icon: Icons.grid_view_rounded,
+                    label: 'Collection',
+                    count: _ownedVisibleCount,
+                    onTap: () => _openFriendCollection(),
+                  ),
+                ),
+                if (_wishlistShared == true) ...[
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _DarkActionButton(
+                      icon: Icons.favorite_border_rounded,
+                      label: 'Wishlist',
+                      count: _wishlistVisibleCount,
+                      onTap: () => _openFriendCollection(wishlist: true),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 18),
+            Theme(
+              data: ThemeData.dark(useMaterial3: true),
+              child: _pantheonBlock(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-    final overlapBanner = _overlapBanner();
+  Widget _buildCollection() {
+    final scheme = Theme.of(context).colorScheme;
+    final hasGroups = _commonGroupIds.isNotEmpty && _groupItems.isNotEmpty;
+    if (!hasGroups && _quick == FriendQuickFilter.groups) {
+      _quick = FriendQuickFilter.all;
+    }
+    final quickFilters = <(FriendQuickFilter, String)>[
+      (FriendQuickFilter.all, 'Tous'),
+      if (!_mine) (FriendQuickFilter.common, 'En commun'),
+      if (!_mine) (FriendQuickFilter.discover, 'À découvrir'),
+      if (hasGroups && !_showWishlist)
+        (FriendQuickFilter.groups, 'Groupes communs'),
+    ];
     return CustomScrollView(
       slivers: [
         SliverPadding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
           sliver: SliverList(
             delegate: SliverChildListDelegate([
-              if (overlapBanner != null) ...[
-                const SizedBox(height: 8),
-                overlapBanner,
-              ],
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  ChoiceChip(
-                    label: const Text('Collection & Groupes communs'),
-                    selected: _scope == _ProfileScope.shared,
-                    showCheckmark: false,
-                    onSelected: (_) =>
-                        setState(() => _scope = _ProfileScope.shared),
-                  ),
-                  ChoiceChip(
-                    label: Text(
-                      _mine
-                          ? '📍 Actuellement chez toi'
-                          : '📍 Actuellement chez ${widget.username}',
+              if (_wishlistShared == true)
+                SegmentedButton<bool>(
+                  showSelectedIcon: false,
+                  segments: [
+                    ButtonSegment(
+                      value: false,
+                      icon: const Icon(Icons.grid_view_rounded, size: 18),
+                      label: Text('Collection · $_ownedVisibleCount'),
                     ),
-                    selected: _scope == _ProfileScope.atHome,
-                    showCheckmark: false,
-                    onSelected: (_) =>
-                        setState(() => _scope = _ProfileScope.atHome),
-                  ),
-                  ChoiceChip(
-                    label: Text(
-                      _mine
-                          ? 'Ajoutés par toi'
-                          : 'Ajoutés par ${widget.username}',
+                    ButtonSegment(
+                      value: true,
+                      icon: const Icon(Icons.favorite_border_rounded, size: 18),
+                      label: Text('Wishlist · $_wishlistVisibleCount'),
                     ),
-                    selected: _scope == _ProfileScope.added,
-                    showCheckmark: false,
-                    onSelected: (_) =>
-                        setState(() => _scope = _ProfileScope.added),
+                  ],
+                  selected: {_showWishlist},
+                  onSelectionChanged: (s) => setState(() {
+                    _showWishlist = s.first;
+                    if (_showWishlist && _quick == FriendQuickFilter.groups) {
+                      _quick = FriendQuickFilter.all;
+                    }
+                  }),
+                ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _search,
+                textInputAction: TextInputAction.search,
+                decoration: InputDecoration(
+                  hintText: 'Rechercher chez ${widget.username}…',
+                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                  suffixIcon: _search.text.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.close_rounded, size: 18),
+                          onPressed: _search.clear,
+                        ),
+                  isDense: true,
+                  filled: true,
+                  fillColor: scheme.surfaceContainerHighest.withValues(
+                    alpha: 0.6,
                   ),
-                ],
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 36,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  children: [
+                    for (final (f, label) in quickFilters) ...[
+                      _QuickPill(
+                        label: label,
+                        count: _quickCount(f),
+                        selected: _quick == f,
+                        onTap: () => setState(() => _quick = f),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                  ],
+                ),
               ),
               const SizedBox(height: 8),
               SizedBox(
-                height: 40,
+                height: 38,
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   itemCount: _visibleCategories.length,
@@ -763,19 +864,21 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
       .toList();
 
   Widget _buildCategoryGridSliver(CollectionCategory category) {
-    final items =
-        _itemsForScope().where((i) => i.category == category).toList()
-          ..sort(
-            (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
-          );
+    final items = _visibleFor(category)
+      ..sort(
+        (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+      );
     if (items.isEmpty) {
-      return const SliverToBoxAdapter(
+      final msg = switch (_quick) {
+        _ when _search.text.trim().isNotEmpty => 'Aucun résultat.',
+        FriendQuickFilter.common => 'Aucun objet en commun ici.',
+        FriendQuickFilter.discover => 'Tu as déjà tout ce qu\'il a ici !',
+        _ => 'Rien dans cette catégorie.',
+      };
+      return SliverToBoxAdapter(
         child: Padding(
-          padding: EdgeInsets.fromLTRB(24, 12, 24, 32),
-          child: Text(
-            'Rien dans cette catégorie.',
-            textAlign: TextAlign.center,
-          ),
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+          child: Text(msg, textAlign: TextAlign.center),
         ),
       );
     }
@@ -791,38 +894,273 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
           (context, index) {
             final entry = grouped[index];
             final item = entry.item;
-            final overlap = _overlap?.kindFor(item);
-            final shownOverlap = overlap == FriendOverlapKind.inCollection
-                ? null
-                : overlap;
+            final overlap = _mine ? null : _overlap.kindFor(item);
 
             return CollectionItemTile(
               item: item,
               category: category,
               totalQuantity: entry.totalQuantity,
               showDuplicateBadge: entry.hasDuplicates,
-              overlapKind: shownOverlap,
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (ctx) => ItemDetailScreen(
-                    item: item.copyWith(quantity: entry.totalQuantity),
-                    readOnly: !_mine,
-                    friendUsername: widget.username,
-                    friendOverlap: overlap,
-                  ),
-                ),
-              ),
+              overlapKind: overlap == FriendOverlapKind.none ? null : overlap,
+              onTap: () => _openItem(item, quantity: entry.totalQuantity),
               onLongPress: _mine
                   ? null
                   : () => showCopyFriendItemSheet(
-                context,
-                source: item,
-                friendUsername: widget.username,
-              ),
+                        context,
+                        source: item,
+                        friendUsername: widget.username,
+                      ),
             );
           },
           childCount: grouped.length,
+        ),
+      ),
+    );
+  }
+}
+
+/// En-tête sombre : avatar, pseudo, bio et 3 mini-stats sur une ligne.
+class _FriendHeader extends StatelessWidget {
+  final String username;
+  final String? avatarUrl;
+  final String? accentColor;
+  final String? bio;
+  final int owned;
+  final int common;
+  final int? playsTogether;
+
+  const _FriendHeader({
+    required this.username,
+    required this.avatarUrl,
+    required this.accentColor,
+    required this.bio,
+    required this.owned,
+    required this.common,
+    required this.playsTogether,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = ProfileAvatar.colorFromHex(accentColor);
+    final bioText = bio?.trim();
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(22),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color.lerp(const Color(0xFF1E2128), accent, 0.28)!,
+            const Color(0xFF1A1C22),
+          ],
+        ),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(2.5),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: accent, width: 2),
+                ),
+                child: ProfileAvatar(
+                  avatarUrl: avatarUrl,
+                  accentColorHex: accentColor,
+                  fallbackInitial: username,
+                  radius: 32,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      username,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.3,
+                      ),
+                    ),
+                    if (bioText != null && bioText.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        bioText,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.72),
+                          fontSize: 13,
+                          height: 1.3,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              _MiniStat(value: '$owned', label: 'objets'),
+              _statDivider(),
+              _MiniStat(value: '$common', label: 'en commun'),
+              _statDivider(),
+              _MiniStat(
+                value: playsTogether == null ? '–' : '$playsTogether',
+                label: 'parties ensemble',
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _statDivider() => Container(
+        width: 1,
+        height: 26,
+        color: Colors.white.withValues(alpha: 0.12),
+      );
+}
+
+class _MiniStat extends StatelessWidget {
+  final String value;
+  final String label;
+
+  const _MiniStat({required this.value, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Column(
+        children: [
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+              fontSize: 18,
+            ),
+          ),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.6),
+              fontSize: 11.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DarkActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final int count;
+  final VoidCallback onTap;
+
+  const _DarkActionButton({
+    required this.icon,
+    required this.label,
+    required this.count,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white.withValues(alpha: 0.07),
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          child: Row(
+            children: [
+              Icon(icon, color: Colors.white, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  label,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+              Text(
+                '$count',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.6),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: Colors.white.withValues(alpha: 0.5),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Pilule de filtre rapide (sans coche, contraste neutre).
+class _QuickPill extends StatelessWidget {
+  final String label;
+  final int count;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _QuickPill({
+    required this.label,
+    required this.count,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final fg = selected ? scheme.surface : scheme.onSurface;
+    return Material(
+      color: selected ? scheme.onSurface : scheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Center(
+            child: Text(
+              '$label · $count',
+              style: TextStyle(
+                color: fg,
+                fontWeight: FontWeight.w700,
+                fontSize: 12.5,
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -834,38 +1172,27 @@ class _ProfileSessionCache {
   final List<CollectionItem> groups;
   final List<CollectionItem> wishlist;
   final bool? wishlistShared;
+  final Set<String> commonGroupIds;
   final List<String> pantheonIds;
   final Set<CollectionCategory> active;
+  final String? bio;
 
   const _ProfileSessionCache({
     required this.collection,
     required this.groups,
     required this.wishlist,
     required this.wishlistShared,
+    required this.commonGroupIds,
     required this.pantheonIds,
     required this.active,
+    required this.bio,
   });
 
   static final Map<String, _ProfileSessionCache> _byId = {};
 
   static _ProfileSessionCache? of(String profileId) => _byId[profileId];
 
-  static void save(
-    String profileId, {
-    required List<CollectionItem> collection,
-    required List<CollectionItem> groups,
-    required List<CollectionItem> wishlist,
-    required bool? wishlistShared,
-    required List<String> pantheonIds,
-    required Set<CollectionCategory> active,
-  }) {
-    _byId[profileId] = _ProfileSessionCache(
-      collection: List<CollectionItem>.from(collection),
-      groups: List<CollectionItem>.from(groups),
-      wishlist: List<CollectionItem>.from(wishlist),
-      wishlistShared: wishlistShared,
-      pantheonIds: List<String>.from(pantheonIds),
-      active: Set<CollectionCategory>.from(active),
-    );
+  static void save(String profileId, _ProfileSessionCache entry) {
+    _byId[profileId] = entry;
   }
 }

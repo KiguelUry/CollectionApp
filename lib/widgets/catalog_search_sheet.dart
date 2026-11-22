@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/platform_input.dart';
 
 import '../utils/debounced_runner.dart';
 import 'bgg_network_image.dart';
@@ -182,7 +183,7 @@ class _CatalogSearchSheetState extends State<_CatalogSearchSheet> {
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: TextField(
                 controller: _controller,
-                autofocus: true,
+                autofocus: kSafeAutofocus,
                 decoration: InputDecoration(
                   hintText: widget.hint,
                   prefixIcon: Icon(Icons.search, color: accent),

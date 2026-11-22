@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/platform_input.dart';
 import '../utils/search_relevance.dart';
 
 /// Choisir un ami dans une liste avec filtre en direct (tri par pertinence).
@@ -69,7 +70,7 @@ class _FriendPickerDialogState extends State<_FriendPickerDialog> {
           children: [
             TextField(
               controller: _controller,
-              autofocus: true,
+              autofocus: kSafeAutofocus,
               decoration: const InputDecoration(
                 hintText: 'Filtrer par pseudo…',
                 prefixIcon: Icon(Icons.search),

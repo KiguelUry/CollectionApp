@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../models/app_notification.dart';
+import '../../screens/friend_collection_screen.dart';
 import '../../screens/notification_detail_screen.dart';
 import '../../services/notification_service.dart';
 import '../../utils/notification_grouping.dart';
@@ -38,6 +40,27 @@ class _NotificationBellState extends State<NotificationBell> {
 
   Future<void> _openRow(NotificationRow row) async {
     _menu.close();
+    final first = row.items.first;
+    if (!row.isGroup && first.isInformational) {
+      await _service.markRead([first]);
+      if (!mounted) return;
+      if (first.type == AppNotificationType.friendAccepted &&
+          first.senderId != null) {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => FriendCollectionScreen(
+              profileId: first.senderId!,
+              username: first.senderName,
+              shareCollections: true,
+            ),
+          ),
+        );
+      } else {
+        await Navigator.pushNamed(context, '/friends');
+      }
+      return;
+    }
     await Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => NotificationDetailScreen(row: row)),

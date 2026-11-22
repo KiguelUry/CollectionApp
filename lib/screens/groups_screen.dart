@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/platform_input.dart';
 import '../models/app_notification.dart';
 import '../models/collection_group.dart';
 import '../services/friend_service.dart';
@@ -6,7 +7,6 @@ import '../services/group_service.dart';
 import '../services/notification_service.dart';
 import '../widgets/app_app_bar.dart';
 import '../widgets/friend_picker_dialog.dart';
-import '../widgets/friends_activity_feed.dart';
 import '../widgets/group_badge.dart';
 import '../widgets/households_sheet.dart';
 import '../widgets/profile_avatar.dart';
@@ -47,7 +47,7 @@ class _GroupsScreenState extends State<GroupsScreen> {
         title: const Text('Nouveau groupe'),
         content: TextField(
           controller: controller,
-          autofocus: true,
+          autofocus: kSafeAutofocus,
           decoration: const InputDecoration(
             labelText: 'Nom du groupe',
             hintText: 'Famille, colocs, club…',
@@ -192,52 +192,37 @@ class _GroupsScreenState extends State<GroupsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
-        appBar: AppAppBar(
-          title: 'Mes groupes',
-          bottom: TabBar(
-            indicatorColor: Colors.blueGrey.shade300,
-            labelColor: Colors.blueGrey.shade800,
-            tabs: const [
-              Tab(icon: Icon(Icons.bolt_rounded, size: 20), text: 'Activité'),
-              Tab(icon: Icon(Icons.groups_rounded, size: 20), text: 'Groupes'),
-            ],
+    // L'activité vit dans Social (FriendsScreen) : ici, gestion des groupes.
+    return Scaffold(
+      appBar: AppAppBar(
+        title: 'Gérer mes groupes',
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.home_outlined),
+            tooltip: 'Foyers & lieux liés',
+            onPressed: () => showHouseholdsSheet(context),
           ),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.home_outlined),
-              tooltip: 'Foyers & lieux liés',
-              onPressed: () => showHouseholdsSheet(context),
-            ),
-          ],
-        ),
-        floatingActionButton: FloatingActionButton.extended(
-          onPressed: _createGroup,
-          icon: const Icon(Icons.group_add_rounded),
-          label: const Text('Groupe'),
-        ),
-        body: TabBarView(
-          children: [
-            const FriendsActivityFeed(),
-            _loading
-                ? const Center(child: CircularProgressIndicator())
-                : _groups.isEmpty
-                    ? _buildEmpty()
-                    : RefreshIndicator(
-                        onRefresh: _load,
-                        child: ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(14, 14, 14, 88),
-                          itemCount: _groups.length,
-                          itemBuilder: (context, index) {
-                            return _buildGroupCard(_groups[index]);
-                          },
-                        ),
-                      ),
-          ],
-        ),
+        ],
       ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _createGroup,
+        icon: const Icon(Icons.group_add_rounded),
+        label: const Text('Groupe'),
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _groups.isEmpty
+              ? _buildEmpty()
+              : RefreshIndicator(
+                  onRefresh: _load,
+                  child: ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 88),
+                    itemCount: _groups.length,
+                    itemBuilder: (context, index) {
+                      return _buildGroupCard(_groups[index]);
+                    },
+                  ),
+                ),
     );
   }
 

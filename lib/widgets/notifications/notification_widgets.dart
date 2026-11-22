@@ -14,6 +14,12 @@ IconData notificationTypeIcon(AppNotificationType type) {
       return Icons.card_giftcard_rounded;
     case AppNotificationType.playShared:
       return Icons.casino_rounded;
+    case AppNotificationType.borrowRequest:
+      return Icons.handshake_rounded;
+    case AppNotificationType.friendAccepted:
+      return Icons.how_to_reg_rounded;
+    case AppNotificationType.activityReaction:
+      return Icons.local_fire_department_rounded;
   }
 }
 
@@ -27,14 +33,23 @@ String notificationAcceptLabel(AppNotificationType type) {
       return 'Ajouter à ma wishlist';
     case AppNotificationType.playShared:
       return 'Ajouter à mon historique';
+    case AppNotificationType.borrowRequest:
+      return 'Prêter';
+    case AppNotificationType.friendAccepted:
+    case AppNotificationType.activityReaction:
+      return 'OK';
   }
 }
 
 String notificationDeclineLabel(AppNotificationType type) =>
     type == AppNotificationType.friendRequest ||
-        type == AppNotificationType.groupInvite
+        type == AppNotificationType.groupInvite ||
+        type == AppNotificationType.borrowRequest
     ? 'Refuser'
     : 'Ignorer';
+
+String notificationRelativeTime(DateTime at, DateTime now) =>
+    _relativeTime(at, now);
 
 String _relativeTime(DateTime at, DateTime now) {
   final d = now.difference(at);
@@ -121,7 +136,7 @@ class NotificationDropdownPanel extends StatelessWidget {
                   TextButton(
                     key: const ValueKey('notification_mark_all_read'),
                     onPressed: onMarkAllRead,
-                    child: const Text('Tout marquer lu'),
+                    child: const Text('Tout marquer comme lu'),
                   ),
               ],
             ),
@@ -142,23 +157,36 @@ class NotificationDropdownPanel extends StatelessWidget {
             )
           else
             Flexible(
-              child: ListView.builder(
+              child: ListView(
                 shrinkWrap: true,
                 padding: const EdgeInsets.only(bottom: 8),
-                itemCount: rows.length,
-                itemBuilder: (context, i) {
-                  final row = rows[i];
-                  return _NotificationRowTile(
-                    key: ValueKey(
-                      row.isGroup
-                          ? 'notification_group_${row.type.dbValue}'
-                          : 'notification_${row.items.first.id}',
+                children: [
+                  for (final section in rowsByPeriod(rows, at).entries) ...[
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                      child: Text(
+                        notificationPeriodLabel(section.key),
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.3,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
                     ),
-                    row: row,
-                    timeLabel: _relativeTime(row.latestAt, at),
-                    onTap: () => onRowTap(row),
-                  );
-                },
+                    for (final row in section.value)
+                      _NotificationRowTile(
+                        key: ValueKey(
+                          row.isGroup
+                              ? 'notification_group_${row.type.dbValue}'
+                              : 'notification_${row.items.first.id}',
+                        ),
+                        row: row,
+                        timeLabel: _relativeTime(row.latestAt, at),
+                        onTap: () => onRowTap(row),
+                      ),
+                  ],
+                ],
               ),
             ),
         ],
@@ -353,6 +381,8 @@ class _NotificationActionCard extends StatelessWidget {
                   child: CircularProgressIndicator(strokeWidth: 2.4),
                 ),
               )
+            else if (n.isInformational)
+              const SizedBox.shrink()
             else if (n.isPending)
               Wrap(
                 alignment: WrapAlignment.end,

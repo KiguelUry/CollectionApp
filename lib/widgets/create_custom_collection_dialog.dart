@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/platform_input.dart';
 
 import '../models/user_collection_type.dart';
 import '../services/user_collection_type_service.dart';
@@ -75,7 +76,7 @@ class _CreateCustomCollectionDialogState
             children: [
               TextField(
                 controller: _nameController,
-                autofocus: true,
+                autofocus: kSafeAutofocus,
                 decoration: const InputDecoration(
                   labelText: 'Nom',
                   hintText: 'Figurines, Vin, Sneakers…',

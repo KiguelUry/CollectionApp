@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import '../utils/platform_input.dart';
 import 'package:flutter/services.dart';
 
 import '../models/boardgame_score_grid.dart';
@@ -1396,7 +1397,7 @@ class BoardgameScoreGridEditorState extends State<BoardgameScoreGridEditor> {
                   const SizedBox(height: 12),
                   TextField(
                     controller: nameCtrl,
-                    autofocus: true,
+                    autofocus: kSafeAutofocus,
                     maxLength: 18,
                     textInputAction: TextInputAction.done,
                     onTapOutside: dismissScoreFocus,

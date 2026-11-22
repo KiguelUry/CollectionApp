@@ -4,6 +4,7 @@ import '../utils/boardgame_display.dart';
 import '../utils/boardgame_genres.dart';
 import '../utils/card_item_metadata.dart';
 import '../utils/holder_filter.dart';
+import '../utils/item_search.dart';
 import '../utils/videogame_metadata.dart';
 import '../utils/wishlist_market_metadata.dart';
 import '../models/videogame_platform.dart';
@@ -232,10 +233,9 @@ class CollectionListFilters {
   List<CollectionItem> apply(List<CollectionItem> items) {
     var result = List<CollectionItem>.from(items);
 
-    final q = searchQuery.trim().toLowerCase();
-    if (q.isNotEmpty) {
+    if (searchQuery.trim().isNotEmpty) {
       result = result
-          .where((i) => i.title.toLowerCase().contains(q))
+          .where((i) => itemMatchesSearch(i, searchQuery))
           .toList();
     }
 

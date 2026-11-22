@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../utils/platform_input.dart';
 
 import '../../constants/book_accent.dart';
 import '../../models/user_list.dart';
@@ -57,7 +58,7 @@ class _UserListsHubScreenState extends State<UserListsHubScreen> {
           children: [
             TextField(
               controller: nameController,
-              autofocus: true,
+              autofocus: kSafeAutofocus,
               decoration: const InputDecoration(
                 labelText: 'Nom',
                 hintText: 'Mes lectures de l\'été',

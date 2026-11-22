@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/collection_category.dart';
 import '../../models/collection_item.dart';
 import '../../utils/app_page_route.dart';
+import '../../utils/item_search.dart';
 import '../collection_cover_image.dart';
 import '../cover_preview_sheet.dart';
 
@@ -73,6 +74,18 @@ class BoardgameDetailCompactHeader extends StatelessWidget {
                   height: 1.2,
                 ),
               ),
+              if (originalTitleOf(item) case final original?) ...[
+                const SizedBox(height: 2),
+                Text(
+                  'Titre BGG : $original',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
               if (belowTitle != null) ...[
                 const SizedBox(height: 6),
                 belowTitle!,
