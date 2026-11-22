@@ -69,10 +69,16 @@ class _BggSearchDialogState extends State<BggSearchDialog> {
 
   Future<void> _loadHotGames() async {
     final hot = await BggService.fetchHotBoardgames();
-    if (mounted) {
-      setState(() {
-        _hotGames = hot;
-        _loadingHot = false;
+    if (!mounted) return;
+    // Le rebuild des tuiles Tendances ne doit pas voler le focus du champ.
+    final keepFocus = _focus.hasFocus;
+    setState(() {
+      _hotGames = hot;
+      _loadingHot = false;
+    });
+    if (keepFocus) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _controller.text.isEmpty) _focus.requestFocus();
       });
     }
   }
@@ -341,10 +347,12 @@ class _BggSearchDialogState extends State<BggSearchDialog> {
             ),
           ),
           Expanded(
-            child: ListView.builder(
-              itemCount: _hotGames.length,
-              itemBuilder: (context, index) =>
-                  _gameTile(_hotGames[index], isHot: true),
+            child: ExcludeFocus(
+              child: ListView.builder(
+                itemCount: _hotGames.length,
+                itemBuilder: (context, index) =>
+                    _gameTile(_hotGames[index], isHot: true),
+              ),
             ),
           ),
         ],

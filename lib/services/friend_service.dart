@@ -472,8 +472,8 @@ class FriendService {
         .toList();
   }
 
-  /// Objets des groupes **communs** avec cet ami (ajoutés par n'importe quel
-  /// membre). Vide si vous n'avez aucun groupe en commun.
+  /// Objets des groupes **communs** avec cet ami, limités aux copies de
+  /// l'ami (pas le reste du foyer). Vide si aucun groupe en commun.
   Future<List<CollectionItem>> fetchItemsInCommonGroups(
     String friendProfileId,
   ) async {
@@ -484,6 +484,7 @@ class FriendService {
         .from('collection_items')
         .select(SupabaseEmbeds.collectionItem)
         .inFilter('group_id', ids)
+        .eq('added_by', friendProfileId)
         .eq('is_wishlist', false);
 
     return (rows as List)

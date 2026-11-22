@@ -286,6 +286,7 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
   }
 
   /// Collection de l'ami + groupes communs (dédoublonnés par id).
+  /// Réservé à la vue "moi" / filtre Groupes — jamais pour stats/Panthéon ami.
   List<CollectionItem> _sharedItems() {
     final byId = <String, CollectionItem>{};
     for (final item in [..._collectionItems, ..._groupItems]) {
@@ -293,6 +294,11 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
     }
     return byId.values.toList();
   }
+
+  /// Objets qui représentent l'identité collection du profil affiché.
+  /// Chez un ami : uniquement ses `added_by` (pas les copies du foyer).
+  List<CollectionItem> _identityItems() =>
+      _mine ? _sharedItems() : _collectionItems;
 
   List<CollectionItem> _baseItems() {
     if (_showWishlist) return _wishlistItems;
@@ -342,7 +348,7 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
 
   List<CollectionItem> _pantheonItems() {
     if (!_pantheonConfigured) return const [];
-    final games = _sharedItems()
+    final games = _identityItems()
         .where(
           (i) =>
               !i.isWishlist &&
@@ -374,7 +380,7 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
   }
 
   int get _ownedVisibleCount => hubOwnedItems(
-        _mine ? _sharedItems() : _collectionItems,
+        _identityItems(),
         active: _activeCategories,
       ).length;
 
@@ -391,7 +397,7 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
 
   List<PantheonCandidate> _pantheonCandidates() {
     return [
-      for (final item in _sharedItems())
+      for (final item in _identityItems())
         if (_activeCategories.contains(item.category) &&
             item.category != CollectionCategory.custom)
           PantheonCandidate(
@@ -464,7 +470,7 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
   Future<void> _editPantheonSlot(int index) async {
     final seen = <String>{};
     final games = <CollectionItem>[];
-    for (final item in _sharedItems()) {
+    for (final item in _identityItems()) {
       if (item.isWishlist ||
           item.isExpansion ||
           item.category == CollectionCategory.custom ||
@@ -589,7 +595,7 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
 
   Widget _profileStats() {
     final owned = _ownedVisibleCount;
-    final plays = _sharedItems().fold<int>(
+    final plays = _identityItems().fold<int>(
       0,
       (sum, item) => sum + (item.gamesPlayed ?? 0),
     );
