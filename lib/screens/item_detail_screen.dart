@@ -78,6 +78,8 @@ import '../utils/item_favorite.dart';
 import '../utils/app_page_route.dart';
 import '../utils/display_text.dart';
 import '../widgets/add_item_options_dialog.dart';
+import '../widgets/households_sheet.dart';
+import 'group_detail_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class ItemDetailScreen extends StatefulWidget {
@@ -497,8 +499,6 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     }
   }
 
-  bool get _sharesWithGroup => _selectedGroupIds.isNotEmpty;
-
   Map<String, dynamic> _metadataWithGroups(List<String> groupIds) {
     final meta = Map<String, dynamic>.from(_item.metadata ?? {});
     if (groupIds.isNotEmpty) {
@@ -514,16 +514,6 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
       if (g.id == id) return g.name;
     }
     return _item.groupName;
-  }
-
-  String _groupOwnershipSubtitle() {
-    if (!_sharesWithGroup) return 'Personnel';
-    final names = <String>[];
-    for (final g in _groups) {
-      if (_selectedGroupIds.contains(g.id)) names.add(g.name);
-    }
-    if (names.isEmpty) return _item.groupName ?? 'Groupe';
-    return names.join(', ');
   }
 
   void _scheduleSave() {
@@ -743,23 +733,46 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        OutlinedButton.icon(
-          onPressed: ro ? null : _toggleFavoriteFromMenu,
-          icon: Icon(
-            priority ? Icons.favorite : Icons.favorite_border,
-            color: Colors.redAccent,
-          ),
-          label: Text(
-            priority
-                ? '❤️ Priorité haute (Coup de cœur)'
-                : 'Marquer en priorité / Coup de cœur',
-          ),
-          style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            side: BorderSide(
-              color: priority ? Colors.redAccent : Colors.grey.shade400,
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: ro ? null : _toggleFavoriteFromMenu,
+                icon: Icon(
+                  priority ? Icons.favorite : Icons.favorite_border,
+                  color: Colors.redAccent,
+                  size: 18,
+                ),
+                label: Text(
+                  priority ? 'Coup de cœur' : 'Coup de cœur',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  side: BorderSide(
+                    color: priority ? Colors.redAccent : Colors.grey.shade400,
+                  ),
+                ),
+              ),
             ),
-          ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: ro ? null : _promoteFromWishlist,
+                icon: const Icon(Icons.check_circle, size: 18),
+                label: const Text(
+                  'Ajouter à ma collection',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.green.shade700,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 10),
         Card(
@@ -863,21 +876,6 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                   ),
                 ),
               ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton.icon(
-            onPressed: _promoteFromWishlist,
-            icon: const Icon(Icons.check_circle),
-            label: const Text(
-              '✅ Je l\'ai reçu / acheté — Passer dans ma collection',
-            ),
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.green.shade700,
-              padding: const EdgeInsets.symmetric(vertical: 14),
             ),
           ),
         ),
@@ -1361,14 +1359,6 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
                               ),
                             ],
                           ],
-                        ),
-                      ),
-                    if (!isWishlist && _groupOwnershipSubtitle().isNotEmpty)
-                      Text(
-                        _groupOwnershipSubtitle(),
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey.shade600,
                         ),
                       ),
                     if (!isBoardgame && !isWishlist && !isCard) ...[
@@ -1948,68 +1938,107 @@ class _ItemDetailScreenState extends State<ItemDetailScreen> {
 
   Widget _buildShareGroupsPanel(bool ro) {
     final multi = itemUsesCopyUnits(_item);
+    final selectedGroups =
+        _groups.where((g) => _selectedGroupIds.contains(g.id)).toList();
+    final title = cleanDisplayText(_item.title);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (!ro && !multi)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: OutlinedButton.icon(
-              onPressed: () async {
-                if (_groups.isEmpty) await _loadGroups();
-                if (!mounted) return;
-                if (_groups.isEmpty) {
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        'Crée d\'abord un groupe dans le menu « Groupes »',
-                      ),
-                    ),
-                  );
-                  return;
-                }
-                final picked = await _pickGroups(initial: _selectedGroupIds);
-                if (!mounted || picked == null) return;
-                if (picked.isEmpty) {
-                  setState(() {
-                    _selectedGroupIds = {};
-                    _item = _item.copyWith(clearGroup: true);
-                  });
-                } else {
-                  final first = picked.first;
-                  final g = _groups.firstWhere((x) => x.id == first);
-                  setState(() {
-                    _selectedGroupIds = picked;
-                    _item = _item.copyWith(
-                      groupId: first,
-                      groupName: g.name,
-                      metadata: _metadataWithGroups(picked.toList()),
-                      clearLocation: true,
-                    );
-                  });
-                }
-                _saveNow();
-              },
-              icon: const Icon(Icons.group_outlined, size: 18),
-              label: const Text('Gestion des groupes'),
-            ),
-          ),
-        if (_selectedGroupIds.isNotEmpty && !multi) ...[
-          const SizedBox(height: 10),
           Wrap(
             spacing: 8,
-            runSpacing: 6,
-            children: _groups
-                .where((g) => _selectedGroupIds.contains(g.id))
-                .map(
-                  (g) => Chip(
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              OutlinedButton.icon(
+                onPressed: () async {
+                  if (_groups.isEmpty) await _loadGroups();
+                  if (!mounted) return;
+                  if (_groups.isEmpty) {
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Crée d\'abord un groupe dans Social → Amis & Groupes',
+                        ),
+                      ),
+                    );
+                    return;
+                  }
+                  final picked = await _pickGroups(initial: _selectedGroupIds);
+                  if (!mounted || picked == null) return;
+                  if (picked.isEmpty) {
+                    setState(() {
+                      _selectedGroupIds = {};
+                      _item = _item.copyWith(clearGroup: true);
+                    });
+                  } else {
+                    final first = picked.first;
+                    final g = _groups.firstWhere((x) => x.id == first);
+                    setState(() {
+                      _selectedGroupIds = picked;
+                      _item = _item.copyWith(
+                        groupId: first,
+                        groupName: g.name,
+                        metadata: _metadataWithGroups(picked.toList()),
+                        clearLocation: true,
+                      );
+                    });
+                  }
+                  _saveNow();
+                },
+                icon: const Icon(Icons.group_outlined, size: 18),
+                label: const Text('Gestion des groupes'),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => showHouseholdsSheet(context),
+                icon: const Icon(Icons.home_work_outlined, size: 18),
+                label: const Text('Foyers'),
+              ),
+            ],
+          ),
+        if (!multi) ...[
+          const SizedBox(height: 10),
+          Text.rich(
+            TextSpan(
+              style: TextStyle(
+                fontSize: 13,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                height: 1.35,
+              ),
+              children: [
+                if (selectedGroups.isEmpty)
+                  TextSpan(text: '$title est un objet personnel')
+                else if (selectedGroups.length == 1) ...[
+                  TextSpan(text: '$title est présent dans le groupe '),
+                ] else ...[
+                  TextSpan(text: '$title est présent dans les groupes '),
+                ],
+              ],
+            ),
+          ),
+          if (selectedGroups.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                for (final g in selectedGroups)
+                  ActionChip(
                     label: Text(g.name),
                     visualDensity: VisualDensity.compact,
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => GroupDetailScreen(group: g),
+                        ),
+                      );
+                    },
                   ),
-                )
-                .toList(),
-          ),
+              ],
+            ),
+          ],
         ],
         if (!multi) const SizedBox(height: 12),
         if (multi)

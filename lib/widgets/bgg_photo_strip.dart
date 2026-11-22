@@ -332,8 +332,11 @@ class _BggPhotoLightboxState extends State<BggPhotoLightbox> {
   Widget build(BuildContext context) {
     final photo = widget.photos[_index];
     final caption = photo.caption.trim();
-    final wide = MediaQuery.sizeOf(context).width >= 700;
+    final size = MediaQuery.sizeOf(context);
+    final wide = size.width >= 700;
     final total = widget.photos.length;
+    // Sur PC : photo à ~80 % avec marge noire confortable.
+    final framed = wide;
 
     return Focus(
       autofocus: kSafeAutofocus,
@@ -343,28 +346,46 @@ class _BggPhotoLightboxState extends State<BggPhotoLightbox> {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            PageView.builder(
-              key: const ValueKey('lightbox_pages'),
-              controller: _page,
-              itemCount: total,
-              physics: _zoomed
-                  ? const NeverScrollableScrollPhysics()
-                  : const PageScrollPhysics(),
-              onPageChanged: (value) => setState(() {
-                _index = value;
-                _zoomed = false;
-              }),
-              itemBuilder: (context, i) => _ZoomablePhoto(
-                key: ValueKey(widget.photos[i].url),
-                url: bggMaterialPhotoUrl(
-                  widget.photos[i].url,
-                  width: 1400,
-                  quality: 90,
+            // Clic sur le fond noir (hors image, non zoomé) → fermer.
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _zoomed ? null : () => Navigator.pop(context),
+              ),
+            ),
+            Center(
+              child: SizedBox(
+                width: framed ? size.width * 0.8 : size.width,
+                height: framed ? size.height * 0.8 : size.height,
+                child: GestureDetector(
+                  onTap: () {}, // absorbe le tap pour ne pas fermer
+                  child: PageView.builder(
+                    key: const ValueKey('lightbox_pages'),
+                    controller: _page,
+                    itemCount: total,
+                    physics: _zoomed
+                        ? const NeverScrollableScrollPhysics()
+                        : const PageScrollPhysics(),
+                    onPageChanged: (value) => setState(() {
+                      _index = value;
+                      _zoomed = false;
+                    }),
+                    itemBuilder: (context, i) => _ZoomablePhoto(
+                      key: ValueKey(widget.photos[i].url),
+                      url: bggMaterialPhotoUrl(
+                        widget.photos[i].url,
+                        width: 1400,
+                        quality: 90,
+                      ),
+                      onZoomChanged: (z) {
+                        if (mounted && z != _zoomed) {
+                          setState(() => _zoomed = z);
+                        }
+                      },
+                      onSingleTap: () => setState(() => _chrome = !_chrome),
+                    ),
+                  ),
                 ),
-                onZoomChanged: (z) {
-                  if (mounted && z != _zoomed) setState(() => _zoomed = z);
-                },
-                onSingleTap: () => setState(() => _chrome = !_chrome),
               ),
             ),
             _fade(

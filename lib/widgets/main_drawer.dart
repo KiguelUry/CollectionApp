@@ -240,14 +240,6 @@ class _MainDrawerState extends State<MainDrawer> {
                     },
                   ),
                   _item(
-                    icon: Icons.groups_rounded,
-                    label: 'Groupes',
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.pushNamed(context, '/groups');
-                    },
-                  ),
-                  _item(
                     icon: Icons.settings_rounded,
                     label: 'Paramètres',
                     onTap: () {

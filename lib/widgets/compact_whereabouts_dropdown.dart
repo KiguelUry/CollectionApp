@@ -10,10 +10,9 @@ import '../services/holder_place_history_service.dart';
 import '../services/household_service.dart';
 import '../services/social_directory_cache.dart';
 import '../utils/holder_label_utils.dart';
-import 'households_sheet.dart';
 import 'profile_avatar.dart';
 
-/// « Chez qui ? » — puces rapides (personnes + foyers/lieux).
+/// « Où se trouve l'objet ? » — chez moi / personne / lieu.
 class CompactWhereaboutsDropdown extends StatefulWidget {
   final List<CollectionGroup> groups;
   final Set<String> selectedGroupIds;
@@ -69,6 +68,7 @@ class _CompactWhereaboutsDropdownState
   final _friendService = FriendService();
   final _manualFocusNode = FocusNode();
   late TextEditingController _manualController;
+  final _personSearch = TextEditingController();
 
   String? _meUserId;
   List<_MemberOption> _people = [];
@@ -232,8 +232,19 @@ class _CompactWhereaboutsDropdownState
     _placeSuggestions = [...cache.places];
   }
 
+  List<_MemberOption> _filteredPeople() {
+    final q = _personSearch.text.trim().toLowerCase();
+    final list = q.isEmpty
+        ? _people
+        : _people
+            .where((p) => p.label.toLowerCase().contains(q))
+            .toList();
+    return list;
+  }
+
   @override
   void dispose() {
+    _personSearch.dispose();
     _manualController.dispose();
     _manualFocusNode.dispose();
     super.dispose();
@@ -449,7 +460,7 @@ class _CompactWhereaboutsDropdownState
         Row(
           children: [
             Text(
-              'Chez qui ?',
+              'Où se trouve l\'objet ?',
               style: Theme.of(context).textTheme.labelLarge,
             ),
             if (dest != null && dest.isNotEmpty) ...[
@@ -529,24 +540,6 @@ class _CompactWhereaboutsDropdownState
                             }),
                   ),
                 ),
-                Expanded(
-                  child: _WhoTab(
-                    icon: Icons.home_work_outlined,
-                    label: 'Foyers',
-                    selected: false,
-                    onTap: () async {
-                      await showHouseholdsSheet(context);
-                      if (!mounted) return;
-                      setState(() {
-                        _homes = [...HouseholdService.instance.homes];
-                        _placeSuggestions = {
-                          ..._placeSuggestions,
-                          ...SocialDirectoryCache.instance.places,
-                        }.toList();
-                      });
-                    },
-                  ),
-                ),
               ],
             ),
           ),
@@ -574,11 +567,40 @@ class _CompactWhereaboutsDropdownState
             ),
           ),
           const SizedBox(height: 6),
+          if (!widget.readOnly)
+            TextField(
+              controller: _personSearch,
+              decoration: const InputDecoration(
+                hintText: 'Rechercher un ami ou saisir un nom…',
+                prefixIcon: Icon(Icons.search_rounded, size: 20),
+                isDense: true,
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (_) => setState(() {}),
+              onSubmitted: (v) {
+                final t = v.trim();
+                if (t.isEmpty) return;
+                _MemberOption? match;
+                for (final p in _people) {
+                  if (p.label.toLowerCase() == t.toLowerCase()) {
+                    match = p;
+                    break;
+                  }
+                }
+                if (match != null) {
+                  _selectUser(match.userId, match.label);
+                } else {
+                  _applySuggestion(t);
+                }
+                _personSearch.clear();
+              },
+            ),
+          const SizedBox(height: 8),
           Wrap(
             spacing: 6,
             runSpacing: 6,
             children: [
-              for (final m in _people)
+              for (final m in _filteredPeople().take(5))
                 _personChip(
                   label: m.label,
                   selected: _isSelectedUser(m.userId),
@@ -588,20 +610,6 @@ class _CompactWhereaboutsDropdownState
                       ? null
                       : () => _selectUser(m.userId, m.label),
                 ),
-              for (final name in SocialDirectoryCache.instance.people)
-                if (!_people.any(
-                  (p) => p.label.toLowerCase() == name.toLowerCase(),
-                ))
-                  FilterChip(
-                    avatar: const Icon(Icons.person_outline, size: 16),
-                    label: Text(name),
-                    selected: (widget.holderLabel ?? '').toLowerCase().contains(
-                      name.toLowerCase(),
-                    ),
-                    onSelected: widget.readOnly
-                        ? null
-                        : (_) => _applySuggestion(name),
-                  ),
             ],
           ),
           if (!widget.readOnly) ...[

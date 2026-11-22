@@ -77,6 +77,31 @@ jobs:
             -print0 | xargs -0 sed -i '/sourceMappingURL=flutter\.js\.map/d' || true
           : > build/web/flutter.js.map
 
+      - name: Emit version.json + cache-bust flutter_bootstrap.js
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          printf '{"version":"%s"}\n' "$GITHUB_SHA" > build/web/version.json
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          sha = os.environ["GITHUB_SHA"]
+          index = Path("build/web/index.html")
+          text = index.read_text(encoding="utf-8")
+          text = text.replace(
+              "flutter_bootstrap.js",
+              f"flutter_bootstrap.js?v={sha}",
+          )
+          if 'name="app-version"' not in text:
+              text = text.replace(
+                  "<head>",
+                  f'<head>\n  <meta name="app-version" content="{sha}">',
+                  1,
+              )
+          index.write_text(text, encoding="utf-8")
+          PY
+
       - name: Add .nojekyll for GitHub Pages
         run: touch build/web/.nojekyll
 

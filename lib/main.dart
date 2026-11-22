@@ -18,6 +18,7 @@ import 'screens/splash_screen.dart';
 import 'config/app_env.dart';
 import 'config/app_brand.dart';
 import 'services/settings_service.dart';
+import 'services/web_update_checker.dart';
 import 'navigation/app_route_observer.dart';
 import 'theme/app_theme.dart';
 
@@ -93,6 +94,7 @@ class _MyAppState extends State<MyApp> {
   void dispose() {
     _authSub?.cancel();
     _settings.removeListener(_rebuild);
+    if (kIsWeb) WebUpdateChecker.instance.dispose();
     super.dispose();
   }
 
@@ -118,6 +120,14 @@ class _MyAppState extends State<MyApp> {
         GlobalCupertinoLocalizations.delegate,
       ],
       navigatorObservers: [appRouteObserver],
+      builder: (context, child) {
+        if (kIsWeb) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            WebUpdateChecker.instance.start(context);
+          });
+        }
+        return child ?? const SizedBox.shrink();
+      },
       home: const SplashScreen(),
       routes: {
         '/categories': (context) => const CategorySelectionScreen(),

@@ -41,10 +41,12 @@ class _FriendsScreenState extends State<FriendsScreen> {
   final Set<String> _busy = {};
   bool _loading = true;
   bool _sendingInvite = false;
+  late int _tab;
 
   @override
   void initState() {
     super.initState();
+    _tab = widget.initialTab.clamp(0, 2);
     _filterController.addListener(_applyFilter);
     _load();
   }
@@ -194,46 +196,161 @@ class _FriendsScreenState extends State<FriendsScreen> {
     if (mounted) await _load(force: true);
   }
 
+  static const _wideBreakpoint = 950.0;
+
   @override
   Widget build(BuildContext context) {
     final pending = _incoming.length;
-    return DefaultTabController(
-      length: 3,
-      initialIndex: widget.initialTab.clamp(0, 2),
-      child: Scaffold(
-        appBar: AppAppBar(
-          title: 'Social',
-          bottom: TabBar(
-            labelStyle: const TextStyle(fontWeight: FontWeight.w700),
-            tabs: [
-              const Tab(text: 'Activité'),
-              const Tab(text: 'Amis & Groupes'),
-              Tab(
-                child: Badge(
-                  isLabelVisible: pending > 0,
-                  label: Text('$pending'),
-                  offset: const Offset(12, -6),
-                  child: const Text('Demandes'),
-                ),
+    final wide = MediaQuery.sizeOf(context).width >= _wideBreakpoint;
+    final foyersAction = IconButton(
+      icon: const Icon(Icons.home_work_outlined),
+      tooltip: 'Foyers & lieux liés',
+      onPressed: () => showHouseholdsSheet(context),
+    );
+
+    if (wide) {
+      return Scaffold(
+        appBar: AppAppBar(title: 'Social', actions: [foyersAction]),
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1080),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Expanded(
+                    child: FriendsActivityFeed(compactChrome: true),
+                  ),
+                  const SizedBox(width: 16),
+                  SizedBox(
+                    width: 340,
+                    child: _buildDesktopSidebar(pending),
+                  ),
+                ],
               ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppAppBar(title: 'Social', actions: [foyersAction]),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+            child: _SocialPillBar(
+              index: _tab,
+              pending: pending,
+              onChanged: (i) => setState(() => _tab = i),
+            ),
+          ),
+          Expanded(
+            child: IndexedStack(
+              index: _tab,
+              children: [
+                const FriendsActivityFeed(),
+                _buildPeopleTab(),
+                _buildRequestsTab(),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopSidebar(int pending) {
+    final scheme = Theme.of(context).colorScheme;
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 32),
+      children: [
+        Container(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: scheme.outlineVariant.withValues(alpha: 0.35),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _sectionHeader(
+                'Demandes',
+                count: pending,
+                action: pending > 0
+                    ? null
+                    : TextButton(
+                        onPressed: _openAddFriend,
+                        child: const Text('Ajouter'),
+                      ),
+              ),
+              if (_incoming.isEmpty && _outgoing.isEmpty)
+                _emptyHint('Aucune demande en attente.')
+              else ...[
+                for (final r in _incoming.take(4)) _incomingRow(r),
+                for (final r in _outgoing.take(2)) _outgoingRow(r),
+                if (_incoming.length + _outgoing.length > 0)
+                  TextButton(
+                    onPressed: () => setState(() => _tab = 2),
+                    child: const Text('Tout voir'),
+                  ),
+              ],
             ],
           ),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.home_outlined),
-              tooltip: 'Foyers & lieux liés',
-              onPressed: () => showHouseholdsSheet(context),
+        ),
+        const SizedBox(height: 14),
+        _sectionHeader(
+          'Mes Groupes',
+          count: _groups.length,
+          action: TextButton.icon(
+            onPressed: _createGroup,
+            icon: const Icon(Icons.tune_rounded, size: 18),
+            label: const Text('Gérer'),
+          ),
+        ),
+        if (_groups.isEmpty)
+          _emptyHint('Aucun groupe pour l\'instant.')
+        else
+          for (final g in _groups) _groupRow(g),
+        const SizedBox(height: 10),
+        _sectionHeader(
+          'Mes Amis',
+          count: _friends.length,
+          action: TextButton.icon(
+            onPressed: _openAddFriend,
+            icon: const Icon(Icons.person_add_alt_rounded, size: 18),
+            label: const Text('Ajouter'),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+          child: TextField(
+            controller: _filterController,
+            decoration: InputDecoration(
+              hintText: 'Chercher un ami…',
+              prefixIcon: const Icon(Icons.search_rounded, size: 20),
+              isDense: true,
+              filled: true,
+              fillColor: scheme.surfaceContainerHighest.withValues(alpha: 0.6),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide.none,
+              ),
             ),
-          ],
+          ),
         ),
-        body: TabBarView(
-          children: [
-            const FriendsActivityFeed(),
-            _buildPeopleTab(),
-            _buildRequestsTab(),
-          ],
-        ),
-      ),
+        if (_friends.isEmpty)
+          _emptyHint('Ajoute des amis par pseudo.')
+        else if (_filtered.isEmpty)
+          _emptyHint('Aucun ami pour « ${_filterController.text} »')
+        else
+          for (final f in _filtered) _friendRow(f),
+      ],
     );
   }
 
@@ -716,6 +833,69 @@ class _FriendsScreenState extends State<FriendsScreen> {
               child: const Text('Annuler'),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _SocialPillBar extends StatelessWidget {
+  final int index;
+  final int pending;
+  final ValueChanged<int> onChanged;
+
+  const _SocialPillBar({
+    required this.index,
+    required this.pending,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final labels = ['Flux', 'Amis & Groupes', 'Demandes'];
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(4),
+        child: Row(
+          children: [
+            for (var i = 0; i < labels.length; i++)
+              Expanded(
+                child: Material(
+                  color: index == i
+                      ? scheme.surface
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(11),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(11),
+                    onTap: () => onChanged(i),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      child: Badge(
+                        isLabelVisible: i == 2 && pending > 0,
+                        label: Text('$pending'),
+                        offset: const Offset(10, -8),
+                        child: Text(
+                          labels[i],
+                          textAlign: TextAlign.center,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight:
+                                index == i ? FontWeight.w800 : FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

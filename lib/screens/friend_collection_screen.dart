@@ -19,6 +19,7 @@ import '../utils/active_categories.dart';
 import '../utils/hub_owned_count.dart';
 import '../utils/item_search.dart';
 import '../utils/pantheon_ranking.dart';
+import '../widgets/collection_cover_image.dart';
 import '../widgets/collection_item_tile.dart';
 import '../widgets/profile/own_profile_panel.dart';
 import '../widgets/profile/pantheon_bento.dart';
@@ -504,18 +505,34 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
     return Scaffold(
       backgroundColor: friendProfile ? _darkBg : null,
       appBar: AppBar(
-        title: Text(
-          widget.collectionView
-              ? (_mine ? 'Ma collection' : 'Chez ${widget.username}')
-              : (_mine ? 'Profil' : widget.username),
-        ),
-        backgroundColor: friendProfile
-            ? _darkBg
-            : ProfileAvatar.colorFromHex(widget.accentColor),
+        backgroundColor: _darkBg,
         foregroundColor: Colors.white,
         iconTheme: const IconThemeData(color: Colors.white),
         elevation: 0,
         scrolledUnderElevation: 0,
+        title: widget.collectionView && !_mine
+            ? Row(
+                children: [
+                  ProfileAvatar(
+                    avatarUrl: widget.avatarUrl,
+                    accentColorHex: widget.accentColor,
+                    fallbackInitial: widget.username,
+                    radius: 14,
+                  ),
+                  const SizedBox(width: 10),
+                  Flexible(
+                    child: Text(
+                      'Chez ${widget.username}',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              )
+            : Text(
+                widget.collectionView
+                    ? (_mine ? 'Ma collection' : 'Chez ${widget.username}')
+                    : (_mine ? 'Profil' : widget.username),
+              ),
         actions: [
           IconButton(
             icon: const Icon(Icons.home_rounded),
@@ -524,27 +541,36 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
           ),
         ],
       ),
-      body: _loading &&
-              _collectionItems.isEmpty &&
-              _pantheonIds.isEmpty &&
-              !(_mine && OwnProfilePanel.memory != null)
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null && _collectionItems.isEmpty && _pantheonIds.isEmpty
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text(
-                      _error!,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: friendProfile ? Colors.white70 : null,
+      body: ColoredBox(
+        color: (friendProfile || (!_mine && widget.collectionView))
+            ? _darkBg
+            : Colors.transparent,
+        child: _loading &&
+                _collectionItems.isEmpty &&
+                _pantheonIds.isEmpty &&
+                !(_mine && OwnProfilePanel.memory != null)
+            ? const Center(child: CircularProgressIndicator())
+            : _error != null &&
+                    _collectionItems.isEmpty &&
+                    _pantheonIds.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        _error!,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: friendProfile || !_mine
+                              ? Colors.white70
+                              : null,
+                        ),
                       ),
                     ),
-                  ),
-                )
-              : widget.collectionView
-                  ? _buildCollection()
-                  : _buildProfile(),
+                  )
+                : widget.collectionView
+                    ? _buildCollection()
+                    : _buildProfile(),
+      ),
     );
   }
 
@@ -742,9 +768,90 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
               data: ThemeData.dark(useMaterial3: true),
               child: _pantheonBlock(),
             ),
+            const SizedBox(height: 16),
+            _recentAddsRibbon(),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _recentAddsRibbon() {
+    final recent = [..._collectionItems]
+      ..sort((a, b) {
+        final ac = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final bc = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        return bc.compareTo(ac);
+      });
+    final top = recent.where((i) => !i.isExpansion).take(5).toList();
+    if (top.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Ajouts récents',
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w800,
+            fontSize: 15,
+          ),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 118,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: top.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemBuilder: (context, i) {
+              final item = top[i];
+              return InkWell(
+                onTap: () => _openItem(item),
+                borderRadius: BorderRadius.circular(12),
+                child: SizedBox(
+                  width: 84,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: item.imageUrl != null &&
+                                  item.imageUrl!.isNotEmpty
+                              ? CollectionCoverImage(
+                                  url: item.imageUrl!,
+                                  fit: BoxFit.cover,
+                                  bookCover:
+                                      item.category == CollectionCategory.book,
+                                )
+                              : ColoredBox(
+                                  color: Colors.white12,
+                                  child: Icon(
+                                    item.category.icon,
+                                    color: Colors.white54,
+                                  ),
+                                ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        item.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
@@ -768,27 +875,62 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
           sliver: SliverList(
             delegate: SliverChildListDelegate([
               if (_wishlistShared == true)
-                SegmentedButton<bool>(
-                  showSelectedIcon: false,
-                  segments: [
-                    ButtonSegment(
-                      value: false,
-                      icon: const Icon(Icons.grid_view_rounded, size: 18),
-                      label: Text('Collection · $_ownedVisibleCount'),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(14),
                     ),
-                    ButtonSegment(
-                      value: true,
-                      icon: const Icon(Icons.favorite_border_rounded, size: 18),
-                      label: Text('Wishlist · $_wishlistVisibleCount'),
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: IntrinsicWidth(
+                        child: SegmentedButton<bool>(
+                          showSelectedIcon: false,
+                          style: ButtonStyle(
+                            visualDensity: VisualDensity.compact,
+                            backgroundColor:
+                                WidgetStateProperty.resolveWith((states) {
+                              if (states.contains(WidgetState.selected)) {
+                                return Colors.white.withValues(alpha: 0.14);
+                              }
+                              return Colors.transparent;
+                            }),
+                            foregroundColor: WidgetStateProperty.all(
+                              Colors.white,
+                            ),
+                            side: WidgetStateProperty.all(BorderSide.none),
+                          ),
+                          segments: [
+                            ButtonSegment(
+                              value: false,
+                              icon: const Icon(
+                                Icons.grid_view_rounded,
+                                size: 16,
+                              ),
+                              label: Text('Collection · $_ownedVisibleCount'),
+                            ),
+                            ButtonSegment(
+                              value: true,
+                              icon: const Icon(
+                                Icons.favorite_border_rounded,
+                                size: 16,
+                              ),
+                              label: Text('Wishlist · $_wishlistVisibleCount'),
+                            ),
+                          ],
+                          selected: {_showWishlist},
+                          onSelectionChanged: (s) => setState(() {
+                            _showWishlist = s.first;
+                            if (_showWishlist &&
+                                _quick == FriendQuickFilter.groups) {
+                              _quick = FriendQuickFilter.all;
+                            }
+                          }),
+                        ),
+                      ),
                     ),
-                  ],
-                  selected: {_showWishlist},
-                  onSelectionChanged: (s) => setState(() {
-                    _showWishlist = s.first;
-                    if (_showWishlist && _quick == FriendQuickFilter.groups) {
-                      _quick = FriendQuickFilter.all;
-                    }
-                  }),
+                  ),
                 ),
               const SizedBox(height: 10),
               TextField(
@@ -865,9 +1007,18 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
     );
   }
 
-  List<CollectionCategory> get _visibleCategories => CollectionCategory.values
-      .where((c) => _activeCategories.contains(c))
-      .toList();
+  List<CollectionCategory> get _visibleCategories {
+    final cats = CollectionCategory.values
+        .where((c) => _activeCategories.contains(c))
+        .where((c) => _countFor(c) > 0 || c == _selectedCategory)
+        .toList();
+    if (cats.isEmpty) {
+      return CollectionCategory.values
+          .where((c) => _activeCategories.contains(c))
+          .toList();
+    }
+    return cats;
+  }
 
   Widget _buildCategoryGridSliver(CollectionCategory category) {
     final items = _visibleFor(category)

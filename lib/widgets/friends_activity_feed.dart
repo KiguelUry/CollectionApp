@@ -18,10 +18,14 @@ import '../utils/copy_friend_item.dart';
 import 'collection_cover_image.dart';
 import 'group_badge.dart';
 import 'profile_avatar.dart';
+import 'social_activity_post.dart';
 
-/// Fil d'activité — digest par personne (pas de grosses cartes).
+/// Fil d'activité — cartes Polaroid / mosaïque.
 class FriendsActivityFeed extends StatefulWidget {
-  const FriendsActivityFeed({super.key});
+  /// Sur PC (sidebar déjà visible) : chrome un peu plus compact.
+  final bool compactChrome;
+
+  const FriendsActivityFeed({super.key, this.compactChrome = false});
 
   @override
   State<FriendsActivityFeed> createState() => _FriendsActivityFeedState();
@@ -41,14 +45,47 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
   String? _focusGroupId;
   List<CollectionGroup> _groupList = [];
   Map<String, Set<String>> _groupMembers = {};
+  FeedMosaicDensity _density = FeedMosaicDensity.auto;
+  FeedActivityKindFilter _kind = FeedActivityKindFilter.all;
+  String? _categoryFilter;
 
   static const _emoji = ['🔥', '👏', '❤️', '🎲'];
+  static const _prefsDensity = 'feed_mosaic_density_v1';
+  static const _prefsKind = 'feed_activity_kind_v1';
 
   @override
   void initState() {
     super.initState();
+    _loadPrefs();
     _load();
     _loadGroups();
+  }
+
+  Future<void> _loadPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final d = prefs.getString(_prefsDensity);
+    final k = prefs.getString(_prefsKind);
+    if (!mounted) return;
+    setState(() {
+      if (d != null) {
+        _density = FeedMosaicDensity.values.firstWhere(
+          (e) => e.name == d,
+          orElse: () => FeedMosaicDensity.auto,
+        );
+      }
+      if (k != null) {
+        _kind = FeedActivityKindFilter.values.firstWhere(
+          (e) => e.name == k,
+          orElse: () => FeedActivityKindFilter.all,
+        );
+      }
+    });
+  }
+
+  Future<void> _persistPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefsDensity, _density.name);
+    await prefs.setString(_prefsKind, _kind.name);
   }
 
   Future<void> _loadReactions(List<String> eventIds) async {
@@ -187,19 +224,6 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
     }
   }
 
-  void _openGroup(ActivityFeedGroup group) {
-    if (group.isBurst) {
-      _showBurstDetail(group);
-      return;
-    }
-    final e = group.head;
-    if (e.itemId != null) {
-      _openItem(e);
-    } else if (_canAddFrom(e)) {
-      _showSingleDetail(e);
-    }
-  }
-
   /// Ouvre la fiche de l'objet (lecture seule si c'est celui d'un ami).
   Future<void> _openItem(ActivityEvent e) async {
     final itemId = e.itemId;
@@ -314,28 +338,215 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
 
     final groupMembers =
         _focusGroupId == null ? null : _groupMembers[_focusGroupId];
-    final visible = _digests.where((d) {
-      if (_focusActorId != null) return d.actorId == _focusActorId;
-      if (groupMembers != null) return groupMembers.contains(d.actorId);
-      return true;
-    }).toList();
+    final posts = <ActivityFeedGroup>[
+      for (final d in _digests)
+        if (_focusActorId == null || d.actorId == _focusActorId)
+          if (groupMembers == null || groupMembers.contains(d.actorId))
+            for (final g in d.groups)
+              if (feedEventMatchesKind(g.head, _kind))
+                if (_categoryFilter == null ||
+                    g.head.itemCategory == _categoryFilter)
+                  g,
+    ];
 
     return RefreshIndicator(
       onRefresh: _load,
       child: CustomScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
+          SliverToBoxAdapter(child: _buildFeedToolbar(scheme)),
           SliverToBoxAdapter(child: _buildPeopleStrip(scheme)),
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(14, 4, 14, 28),
-            sliver: SliverList.separated(
-              itemCount: visible.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 18),
-              itemBuilder: (context, i) => _buildDigest(visible[i], scheme),
+          if (posts.isEmpty)
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(24, 28, 24, 0),
+                child: Text(
+                  'Aucune activité pour ces filtres.',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            )
+          else
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(
+                widget.compactChrome ? 4 : 12,
+                4,
+                widget.compactChrome ? 4 : 12,
+                28,
+              ),
+              sliver: SliverList.separated(
+                itemCount: posts.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 14),
+                itemBuilder: (context, i) {
+                  final g = posts[i];
+                  final e = g.head;
+                  return Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 640),
+                      child: SocialActivityPost(
+                        group: g,
+                        actorName: e.actorUsername,
+                        actorAvatarUrl: e.actorAvatarUrl,
+                        actorAccentColor: e.actorAccentColor,
+                        actorAvatar: ProfileAvatar(
+                          avatarUrl: e.actorAvatarUrl,
+                          accentColorHex: e.actorAccentColor,
+                          fallbackInitial: e.actorUsername,
+                          radius: 16,
+                        ),
+                        timeAgo: _timeAgo(g.createdAt),
+                        density: _density,
+                        reactions: _reactions,
+                        reactionCounts: _reactionCounts,
+                        emojis: _emoji,
+                        onReact: _react,
+                        onOpenItem: _openItem,
+                        onQuickWishlist: _canAddFrom(e) ? _addFromActivity : null,
+                        addingItemId: _addingItemId,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFeedToolbar(ColorScheme scheme) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 8, 0),
+      child: Row(
+        children: [
+          Text(
+            'Flux',
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              fontSize: widget.compactChrome ? 15 : 16,
+            ),
+          ),
+          const Spacer(),
+          TextButton.icon(
+            onPressed: _openFeedSettings,
+            icon: const Icon(Icons.tune_rounded, size: 18),
+            label: const Text('Vue du flux'),
+            style: TextButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              foregroundColor: scheme.onSurfaceVariant,
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Future<void> _openFeedSettings() async {
+    final cats = <String?>{
+      null,
+      for (final g in _groups)
+        if (g.head.itemCategory != null) g.head.itemCategory,
+    }.toList();
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'Vue du flux',
+                      style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Densité mosaïque',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        for (final d in FeedMosaicDensity.values)
+                          ChoiceChip(
+                            label: Text(d.label),
+                            selected: _density == d,
+                            onSelected: (_) {
+                              setLocal(() => _density = d);
+                              setState(() => _density = d);
+                              _persistPrefs();
+                            },
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    const Text(
+                      'Type d\'activité',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        for (final entry in {
+                          FeedActivityKindFilter.all: 'Tout',
+                          FeedActivityKindFilter.collection: 'Ajouts Collection',
+                          FeedActivityKindFilter.wishlist: 'Wishlist',
+                          FeedActivityKindFilter.ratings: 'Notes & Parties',
+                        }.entries)
+                          ChoiceChip(
+                            label: Text(entry.value),
+                            selected: _kind == entry.key,
+                            onSelected: (_) {
+                              setLocal(() => _kind = entry.key);
+                              setState(() => _kind = entry.key);
+                              _persistPrefs();
+                            },
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    const Text(
+                      'Catégorie',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        for (final c in cats)
+                          ChoiceChip(
+                            label: Text(
+                              c == null
+                                  ? 'Toutes'
+                                  : (categoryBadgeLabel(c) ?? c),
+                            ),
+                            selected: _categoryFilter == c,
+                            onSelected: (_) {
+                              setLocal(() => _categoryFilter = c);
+                              setState(() => _categoryFilter = c);
+                            },
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -396,245 +607,6 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
         itemCount: chips.length,
         separatorBuilder: (_, _) => const SizedBox(width: 6),
         itemBuilder: (context, i) => chips[i],
-      ),
-    );
-  }
-
-  Widget _buildDigest(_PersonDigest digest, ColorScheme scheme) {
-    final accent = digest.accentColor != null
-        ? ProfileAvatar.colorFromHex(digest.accentColor)
-        : scheme.primary;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            ProfileAvatar(
-              avatarUrl: digest.avatarUrl,
-              accentColorHex: digest.accentColor,
-              fallbackInitial: digest.username,
-              radius: 16,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    digest.username,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 14,
-                    ),
-                  ),
-                  Text(
-                    '${digest.groups.length} activité${digest.groups.length > 1 ? 's' : ''} · ${_timeAgo(digest.latestAt)}',
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Container(
-          decoration: BoxDecoration(
-            border: Border(
-              left: BorderSide(color: accent.withValues(alpha: 0.55), width: 2.5),
-            ),
-          ),
-          padding: const EdgeInsets.only(left: 12),
-          child: Column(
-            children: [
-              for (var i = 0; i < digest.groups.length; i++) ...[
-                if (i > 0)
-                  Divider(
-                    height: 14,
-                    thickness: 0.6,
-                    color: scheme.outlineVariant.withValues(alpha: 0.35),
-                  ),
-                _buildPulseLine(digest.groups[i], scheme),
-              ],
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildPulseLine(ActivityFeedGroup group, ColorScheme scheme) {
-    final e = group.head;
-    final verb = switch (e.eventType) {
-      'item_rated' => 'a noté',
-      'wishlist_added' => 'wishlist',
-      'trophies_updated' => 'trophées',
-      'item_added' => group.isBurst ? 'a ajouté' : 'ajout',
-      _ => 'activité',
-    };
-    final title = group.isBurst
-        ? '${group.count} objets'
-        : (e.itemTitle ?? 'un objet');
-
-    return InkWell(
-      onTap: () => _openGroup(group),
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (!group.isBurst &&
-                e.itemImageUrl != null &&
-                e.itemImageUrl!.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(right: 8, top: 1),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(5),
-                  child: SizedBox(
-                    width: 26,
-                    height: 34,
-                    child: CollectionCoverImage(
-                      url: e.itemImageUrl!,
-                      width: 26,
-                      height: 34,
-                      bookCover: e.itemCategory == 'book',
-                      fit: e.itemCategory == 'book'
-                          ? BoxFit.contain
-                          : BoxFit.cover,
-                    ),
-                  ),
-                ),
-              )
-            else if (group.isBurst)
-              Padding(
-                padding: const EdgeInsets.only(right: 8, top: 2),
-                child: _miniThumbs(group),
-              ),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text.rich(
-                    TextSpan(
-                      children: [
-                        TextSpan(
-                          text: '$verb  ',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: scheme.onSurfaceVariant,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        TextSpan(
-                          text: title,
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            color: scheme.onSurface,
-                          ),
-                        ),
-                        if (e.eventType == 'item_rated' && e.rating != null)
-                          TextSpan(
-                            text: '  ${e.rating}★',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.amber.shade700,
-                            ),
-                          ),
-                      ],
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    _timeAgo(group.createdAt),
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: scheme.onSurfaceVariant.withValues(alpha: 0.85),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      for (final emoji in _emoji)
-                        InkWell(
-                          onTap: () => _react(e.id, emoji),
-                          borderRadius: BorderRadius.circular(8),
-                          child: Padding(
-                            padding: const EdgeInsets.only(right: 6),
-                            child: Opacity(
-                              opacity: _reactions[e.id] == emoji ? 1 : 0.55,
-                              child: Text(
-                                (_reactionCounts[e.id]?[emoji] ?? 0) > 0
-                                    ? '$emoji${_reactionCounts[e.id]![emoji]}'
-                                    : emoji,
-                                style: const TextStyle(fontSize: 12.5),
-                              ),
-                            ),
-                          ),
-                        ),
-                      const Spacer(),
-                      if (_canAddFrom(e) && !group.isBurst) _addButton(e),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _miniThumbs(ActivityFeedGroup group) {
-    final imgs = group.events
-        .where((e) => e.itemImageUrl != null && e.itemImageUrl!.isNotEmpty)
-        .take(3)
-        .toList();
-    if (imgs.isEmpty) {
-      return Container(
-        width: 34,
-        height: 34,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Text(
-          '+${group.count}',
-          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
-        ),
-      );
-    }
-    return SizedBox(
-      width: 46,
-      height: 34,
-      child: Stack(
-        children: [
-          for (var i = 0; i < imgs.length; i++)
-            Positioned(
-              left: i * 10.0,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: SizedBox(
-                  width: 24,
-                  height: 32,
-                  child: CollectionCoverImage(
-                    url: imgs[i].itemImageUrl!,
-                    width: 24,
-                    height: 32,
-                    bookCover: imgs[i].itemCategory == 'book',
-                    fit: BoxFit.cover,
-                  ),
-                ),
-              ),
-            ),
-        ],
       ),
     );
   }

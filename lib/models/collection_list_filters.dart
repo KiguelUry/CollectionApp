@@ -20,6 +20,32 @@ enum CollectionSort {
   genreAsc,
   locationAsc,
   favoritesFirst,
+  playsDesc,
+  costPerPlayAsc,
+  durationAsc,
+  complexityAsc,
+  yearDesc,
+  dateAddedDesc,
+}
+
+enum BoardgamePlayStatusFilter {
+  any,
+  neverPlayed,
+  played,
+  staleSixMonths,
+}
+
+enum BoardgameComplexityBand {
+  familial,
+  intermediate,
+  expert,
+}
+
+enum BoardgameDurationBucket {
+  under30,
+  from30to60,
+  from1hTo2h,
+  over2h,
 }
 
 enum CollectionScopeFilter {
@@ -79,6 +105,16 @@ class CollectionListFilters {
   /// Jeux jamais joués (0 partie) — « pile de la honte ».
   bool unplayedOnly;
 
+  /// Filtres jeux de société avancés.
+  Set<int> playerCounts;
+  bool playerCountBestOnly;
+  Set<BoardgameDurationBucket> durationBuckets;
+  Set<BoardgameComplexityBand> complexityBands;
+  BoardgamePlayStatusFilter playStatus;
+  bool forSaleOrTradeOnly;
+  bool withExpansionsOnly;
+  bool withCustomRulesOnly;
+
   CollectionListFilters({
     this.searchQuery = '',
     this.sort = CollectionSort.titleAsc,
@@ -102,12 +138,23 @@ class CollectionListFilters {
     this.wishlistMineUserId,
     this.favoritesOnly = false,
     this.unplayedOnly = false,
+    Set<int>? playerCounts,
+    this.playerCountBestOnly = false,
+    Set<BoardgameDurationBucket>? durationBuckets,
+    Set<BoardgameComplexityBand>? complexityBands,
+    this.playStatus = BoardgamePlayStatusFilter.any,
+    this.forSaleOrTradeOnly = false,
+    this.withExpansionsOnly = false,
+    this.withCustomRulesOnly = false,
   })  : groupIds = groupIds ?? <String>{},
         boardgameGenres = boardgameGenres ?? <String>{},
         videogamePlatforms = videogamePlatforms ?? <String>{},
         cardRarities = cardRarities ?? <String>{},
         pokemonTypes = pokemonTypes ?? <String>{},
-        cardSubcategories = cardSubcategories ?? <String>{};
+        cardSubcategories = cardSubcategories ?? <String>{},
+        playerCounts = playerCounts ?? <int>{},
+        durationBuckets = durationBuckets ?? <BoardgameDurationBucket>{},
+        complexityBands = complexityBands ?? <BoardgameComplexityBand>{};
 
   bool get hasActiveFilters =>
       searchQuery.trim().isNotEmpty ||
@@ -127,6 +174,13 @@ class CollectionListFilters {
       wishlistMineOnly ||
       favoritesOnly ||
       unplayedOnly ||
+      playerCounts.isNotEmpty ||
+      durationBuckets.isNotEmpty ||
+      complexityBands.isNotEmpty ||
+      playStatus != BoardgamePlayStatusFilter.any ||
+      forSaleOrTradeOnly ||
+      withExpansionsOnly ||
+      withCustomRulesOnly ||
       sort != CollectionSort.titleAsc;
 
   /// Filtres actifs hors tri (pour badge bouton Filtre).
@@ -147,7 +201,14 @@ class CollectionListFilters {
       pokemonTypes.isNotEmpty ||
       cardSubcategories.isNotEmpty ||
       favoritesOnly ||
-      unplayedOnly;
+      unplayedOnly ||
+      playerCounts.isNotEmpty ||
+      durationBuckets.isNotEmpty ||
+      complexityBands.isNotEmpty ||
+      playStatus != BoardgamePlayStatusFilter.any ||
+      forSaleOrTradeOnly ||
+      withExpansionsOnly ||
+      withCustomRulesOnly;
 
   CollectionListFilters copyWith({
     String? searchQuery,
@@ -181,6 +242,15 @@ class CollectionListFilters {
     bool clearWishlistMine = false,
     bool? favoritesOnly,
     bool? unplayedOnly,
+    Set<int>? playerCounts,
+    bool? playerCountBestOnly,
+    Set<BoardgameDurationBucket>? durationBuckets,
+    Set<BoardgameComplexityBand>? complexityBands,
+    BoardgamePlayStatusFilter? playStatus,
+    bool? forSaleOrTradeOnly,
+    bool? withExpansionsOnly,
+    bool? withCustomRulesOnly,
+    bool clearBoardgameAdvanced = false,
   }) {
     return CollectionListFilters(
       searchQuery: searchQuery ?? this.searchQuery,
@@ -220,6 +290,30 @@ class CollectionListFilters {
           : (wishlistMineUserId ?? this.wishlistMineUserId),
       favoritesOnly: favoritesOnly ?? this.favoritesOnly,
       unplayedOnly: unplayedOnly ?? this.unplayedOnly,
+      playerCounts: clearBoardgameAdvanced
+          ? <int>{}
+          : (playerCounts ?? this.playerCounts),
+      playerCountBestOnly: clearBoardgameAdvanced
+          ? false
+          : (playerCountBestOnly ?? this.playerCountBestOnly),
+      durationBuckets: clearBoardgameAdvanced
+          ? <BoardgameDurationBucket>{}
+          : (durationBuckets ?? this.durationBuckets),
+      complexityBands: clearBoardgameAdvanced
+          ? <BoardgameComplexityBand>{}
+          : (complexityBands ?? this.complexityBands),
+      playStatus: clearBoardgameAdvanced
+          ? BoardgamePlayStatusFilter.any
+          : (playStatus ?? this.playStatus),
+      forSaleOrTradeOnly: clearBoardgameAdvanced
+          ? false
+          : (forSaleOrTradeOnly ?? this.forSaleOrTradeOnly),
+      withExpansionsOnly: clearBoardgameAdvanced
+          ? false
+          : (withExpansionsOnly ?? this.withExpansionsOnly),
+      withCustomRulesOnly: clearBoardgameAdvanced
+          ? false
+          : (withCustomRulesOnly ?? this.withCustomRulesOnly),
     );
   }
 
@@ -228,6 +322,93 @@ class CollectionListFilters {
     final sessions = parseBoardgamePlays(item.metadata).length;
     if (sessions > 0) return sessions;
     return item.gamesPlayed ?? 0;
+  }
+
+  static int? playingTimeOf(CollectionItem item) {
+    final raw = item.playingTime ??
+        int.tryParse('${item.metadata?['playing_time'] ?? ''}');
+    return raw != null && raw > 0 ? raw : null;
+  }
+
+  static double? complexityOf(CollectionItem item) {
+    final raw = item.metadata?['bgg_weight'] ??
+        item.metadata?['averageweight'] ??
+        item.metadata?['avgweight'];
+    return double.tryParse('$raw');
+  }
+
+  static int? yearOf(CollectionItem item) {
+    final raw = item.metadata?['year'] ?? item.metadata?['yearpublished'];
+    return int.tryParse('$raw');
+  }
+
+  static DateTime? lastPlayAt(CollectionItem item) {
+    DateTime? latest;
+    for (final p in parseBoardgamePlays(item.metadata)) {
+      if (latest == null || p.date.isAfter(latest)) latest = p.date;
+    }
+    return latest;
+  }
+
+  static bool matchesPlayerCount(
+    CollectionItem item,
+    int count, {
+    required bool bestOnly,
+  }) {
+    if (bestOnly) {
+      final best = item.metadata?['bgg_best_players'];
+      if (best is List) {
+        return best.any((v) => int.tryParse('$v') == count);
+      }
+      final s = best?.toString() ?? '';
+      return RegExp(r'\b$count\b'.replaceFirst(r'$count', '$count'))
+          .hasMatch(s);
+    }
+    final min = item.minPlayers;
+    final max = item.maxPlayers;
+    if (min == null && max == null) return false;
+    if (count >= 6) {
+      final top = max ?? min ?? 0;
+      return top >= 6;
+    }
+    final lo = min ?? 1;
+    final hi = max ?? lo;
+    return count >= lo && count <= hi;
+  }
+
+  static bool matchesDuration(
+    CollectionItem item,
+    Set<BoardgameDurationBucket> buckets,
+  ) {
+    final t = playingTimeOf(item);
+    if (t == null) return false;
+    for (final b in buckets) {
+      final ok = switch (b) {
+        BoardgameDurationBucket.under30 => t < 30,
+        BoardgameDurationBucket.from30to60 => t >= 30 && t <= 60,
+        BoardgameDurationBucket.from1hTo2h => t > 60 && t <= 120,
+        BoardgameDurationBucket.over2h => t > 120,
+      };
+      if (ok) return true;
+    }
+    return false;
+  }
+
+  static bool matchesComplexity(
+    CollectionItem item,
+    Set<BoardgameComplexityBand> bands,
+  ) {
+    final w = complexityOf(item);
+    if (w == null) return false;
+    for (final b in bands) {
+      final ok = switch (b) {
+        BoardgameComplexityBand.familial => w < 2.0,
+        BoardgameComplexityBand.intermediate => w >= 2.0 && w < 3.2,
+        BoardgameComplexityBand.expert => w >= 3.2,
+      };
+      if (ok) return true;
+    }
+    return false;
   }
 
   List<CollectionItem> apply(List<CollectionItem> items) {
@@ -245,6 +426,75 @@ class CollectionListFilters {
 
     if (unplayedOnly) {
       result = result.where((i) => playCountOf(i) == 0).toList();
+    }
+
+    if (playerCounts.isNotEmpty) {
+      result = result
+          .where(
+            (i) => playerCounts.any(
+              (c) => matchesPlayerCount(
+                i,
+                c,
+                bestOnly: playerCountBestOnly,
+              ),
+            ),
+          )
+          .toList();
+    }
+
+    if (durationBuckets.isNotEmpty) {
+      result =
+          result.where((i) => matchesDuration(i, durationBuckets)).toList();
+    }
+
+    if (complexityBands.isNotEmpty) {
+      result =
+          result.where((i) => matchesComplexity(i, complexityBands)).toList();
+    }
+
+    switch (playStatus) {
+      case BoardgamePlayStatusFilter.any:
+        break;
+      case BoardgamePlayStatusFilter.neverPlayed:
+        result = result.where((i) => playCountOf(i) == 0).toList();
+      case BoardgamePlayStatusFilter.played:
+        result = result.where((i) => playCountOf(i) > 0).toList();
+      case BoardgamePlayStatusFilter.staleSixMonths:
+        final cutoff = DateTime.now().subtract(const Duration(days: 183));
+        result = result.where((i) {
+          if (playCountOf(i) == 0) return true;
+          final last = lastPlayAt(i);
+          return last == null || last.isBefore(cutoff);
+        }).toList();
+    }
+
+    if (forSaleOrTradeOnly) {
+      result = result
+          .where(
+            (i) =>
+                i.isForSale ||
+                i.metadata?['for_trade'] == true ||
+                i.metadata?['to_trade'] == true,
+          )
+          .toList();
+    }
+
+    if (withExpansionsOnly) {
+      result = result.where((i) {
+        final ex = i.metadata?['expansions'] ?? i.metadata?['owned_expansions'];
+        if (ex is List) return ex.isNotEmpty;
+        return (i.metadata?['expansion_count'] as num?)?.toInt() != null &&
+            ((i.metadata?['expansion_count'] as num?)?.toInt() ?? 0) > 0;
+      }).toList();
+    }
+
+    if (withCustomRulesOnly) {
+      result = result.where((i) {
+        final pr = i.personalRules?.trim() ?? '';
+        return pr.isNotEmpty ||
+            i.metadata?['has_score_template'] == true ||
+            i.metadata?['modular_rules'] != null;
+      }).toList();
     }
 
     if (locationId != null) {
@@ -399,6 +649,40 @@ class CollectionListFilters {
         final la = holderLabelForItem(a).toLowerCase();
         final lb = holderLabelForItem(b).toLowerCase();
         final cmp = locationAscending ? lb.compareTo(la) : la.compareTo(lb);
+        return cmp != 0 ? cmp : a.title.compareTo(b.title);
+      case CollectionSort.playsDesc:
+        final cmp = playCountOf(b).compareTo(playCountOf(a));
+        return cmp != 0 ? cmp : a.title.compareTo(b.title);
+      case CollectionSort.costPerPlayAsc:
+        final pa = playCountOf(a);
+        final pb = playCountOf(b);
+        final va = marketSecondhandPriceFromMetadata(a.metadata) ??
+            marketNewPriceMinFromMetadata(a.metadata);
+        final vb = marketSecondhandPriceFromMetadata(b.metadata) ??
+            marketNewPriceMinFromMetadata(b.metadata);
+        final ca = (pa > 0 && va != null) ? va / pa : double.infinity;
+        final cb = (pb > 0 && vb != null) ? vb / pb : double.infinity;
+        final cmp = ca.compareTo(cb);
+        return cmp != 0 ? cmp : a.title.compareTo(b.title);
+      case CollectionSort.durationAsc:
+        final ta = playingTimeOf(a) ?? 1 << 20;
+        final tb = playingTimeOf(b) ?? 1 << 20;
+        final cmp = ta.compareTo(tb);
+        return cmp != 0 ? cmp : a.title.compareTo(b.title);
+      case CollectionSort.complexityAsc:
+        final wa = complexityOf(a) ?? 99;
+        final wb = complexityOf(b) ?? 99;
+        final cmp = wa.compareTo(wb);
+        return cmp != 0 ? cmp : a.title.compareTo(b.title);
+      case CollectionSort.yearDesc:
+        final ya = yearOf(a) ?? 0;
+        final yb = yearOf(b) ?? 0;
+        final cmp = yb.compareTo(ya);
+        return cmp != 0 ? cmp : a.title.compareTo(b.title);
+      case CollectionSort.dateAddedDesc:
+        final da = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final db = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final cmp = db.compareTo(da);
         return cmp != 0 ? cmp : a.title.compareTo(b.title);
     }
   }

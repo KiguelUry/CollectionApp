@@ -1285,6 +1285,18 @@ class _HomeScreenState extends State<HomeScreen>
         }
         if (options.isWishlist) {
           message = '« $title » ajouté à la wishlist';
+        } else {
+          final removedWishlist =
+              await consumeWishlistDuplicateForCollectionAdd(
+            title: title,
+            categoryDb: widget.category.dbValue,
+            bggId: bggId,
+            subcategory: resolvedSub,
+          );
+          if (removedWishlist) {
+            message =
+                'Ajouté à ta collection et retiré de ta wishlist !';
+          }
         }
       }
 

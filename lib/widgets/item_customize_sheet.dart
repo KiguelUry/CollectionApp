@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -10,6 +13,7 @@ import '../services/collection_refresh.dart';
 import '../services/image_compression_service.dart';
 import '../services/inventory_service.dart';
 import '../utils/picked_image_bytes.dart';
+import '../utils/web_image_paste.dart';
 import 'collection_cover_image.dart';
 
 /// Nouveau titre / image d'un objet. `original_title` et `original_image_url`
@@ -66,6 +70,17 @@ ItemCustomization applyItemCustomization(
   );
 }
 
+/// Extrait le path Storage `avatars` d'une URL publique de couverture.
+String? avatarsStoragePathFromUrl(String? url) {
+  if (url == null || url.isEmpty) return null;
+  const marker = '/storage/v1/object/public/avatars/';
+  final i = url.indexOf(marker);
+  if (i < 0) return null;
+  final path = Uri.decodeComponent(url.substring(i + marker.length));
+  if (!path.contains('/covers/')) return null;
+  return path;
+}
+
 Future<bool?> showItemCustomizeSheet(
   BuildContext context, {
   required CollectionItem item,
@@ -93,6 +108,7 @@ class _ItemCustomizeSheetState extends State<_ItemCustomizeSheet> {
   late String? _imageUrl = widget.item.imageUrl;
   Uint8List? _pendingBytes;
   bool _saving = false;
+  bool _dragging = false;
   List<BggGalleryPhoto>? _gallery;
   bool _galleryLoading = false;
 
@@ -116,7 +132,19 @@ class _ItemCustomizeSheetState extends State<_ItemCustomizeSheet> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    if (kIsWeb) {
+      bindWebImagePaste((bytes) {
+        if (!mounted) return;
+        unawaited(_acceptBytes(bytes));
+      });
+    }
+  }
+
+  @override
   void dispose() {
+    if (kIsWeb) unbindWebImagePaste();
     _title.dispose();
     super.dispose();
   }
@@ -132,6 +160,23 @@ class _ItemCustomizeSheetState extends State<_ItemCustomizeSheet> {
     final compressed = ImageCompressionService.compressCover(raw);
     if (!mounted) return;
     setState(() => _pendingBytes = compressed);
+  }
+
+  Future<void> _acceptBytes(Uint8List raw) async {
+    final compressed = ImageCompressionService.compressCover(raw);
+    if (!mounted) return;
+    setState(() => _pendingBytes = compressed);
+  }
+
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (!kIsWeb) return KeyEventResult.ignored;
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final isPaste = (HardwareKeyboard.instance.isControlPressed ||
+            HardwareKeyboard.instance.isMetaPressed) &&
+        event.logicalKey == LogicalKeyboardKey.keyV;
+    if (!isPaste) return KeyEventResult.ignored;
+    // Le collage image web passe souvent par le drop ; on signale juste.
+    return KeyEventResult.ignored;
   }
 
   Future<void> _loadGallery() async {
@@ -153,7 +198,6 @@ class _ItemCustomizeSheetState extends State<_ItemCustomizeSheet> {
     final uid = client.auth.currentUser!.id;
     final path =
         '$uid/covers/${widget.item.id}-${DateTime.now().millisecondsSinceEpoch}.jpg';
-    // Bucket `avatars` : déjà public, policy « dossier = mon uid ».
     await client.storage.from('avatars').uploadBinary(
           path,
           bytes,
@@ -165,10 +209,19 @@ class _ItemCustomizeSheetState extends State<_ItemCustomizeSheet> {
     return client.storage.from('avatars').getPublicUrl(path);
   }
 
+  Future<void> _deleteStoredCover(String? url) async {
+    final path = avatarsStoragePathFromUrl(url);
+    if (path == null) return;
+    try {
+      await Supabase.instance.client.storage.from('avatars').remove([path]);
+    } catch (_) {}
+  }
+
   Future<void> _save() async {
     if (_saving) return;
     setState(() => _saving = true);
     try {
+      final previousUrl = widget.item.imageUrl;
       var url = _imageUrl;
       if (_pendingBytes != null) url = await _upload(_pendingBytes!);
       final next = applyItemCustomization(
@@ -181,6 +234,16 @@ class _ItemCustomizeSheetState extends State<_ItemCustomizeSheet> {
         'image_url': next.imageUrl,
         'metadata': next.metadata,
       }).eq('id', widget.item.id);
+
+      // Nettoie l'ancienne couverture perso orpheline.
+      final restoredBgg = next.metadata['custom_image'] != true;
+      final replacedCustom = previousUrl != null &&
+          previousUrl != next.imageUrl &&
+          avatarsStoragePathFromUrl(previousUrl) != null;
+      if (restoredBgg || replacedCustom) {
+        await _deleteStoredCover(previousUrl);
+      }
+
       InventoryService.patchRow(widget.item.id, (row) {
         row['title'] = next.title;
         row['image_url'] = next.imageUrl;
@@ -197,6 +260,81 @@ class _ItemCustomizeSheetState extends State<_ItemCustomizeSheet> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  Widget _previewBox(ColorScheme scheme) {
+    final child = ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: SizedBox(
+        width: 120,
+        height: 120,
+        child: _pendingBytes != null
+            ? Image.memory(_pendingBytes!, fit: BoxFit.cover)
+            : (_imageUrl != null && _imageUrl!.isNotEmpty)
+                ? CollectionCoverImage(
+                    url: _imageUrl!,
+                    width: 120,
+                    height: 120,
+                    fit: BoxFit.cover,
+                  )
+                : ColoredBox(
+                    color: scheme.surfaceContainerHighest,
+                    child: const Icon(Icons.image_outlined),
+                  ),
+      ),
+    );
+
+    if (!kIsWeb) return child;
+
+    return Focus(
+      autofocus: true,
+      onKeyEvent: _onKey,
+      child: DragTarget<Object>(
+        onWillAcceptWithDetails: (_) {
+          setState(() => _dragging = true);
+          return true;
+        },
+        onLeave: (_) => setState(() => _dragging = false),
+        onAcceptWithDetails: (details) async {
+          setState(() => _dragging = false);
+          final data = details.data;
+          if (data is Uint8List) {
+            await _acceptBytes(data);
+          }
+        },
+        builder: (context, candidate, rejected) {
+          return DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: _dragging || candidate.isNotEmpty
+                    ? scheme.primary
+                    : scheme.outlineVariant,
+                width: _dragging ? 2.5 : 1,
+              ),
+            ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                child,
+                if (_dragging)
+                  Positioned.fill(
+                    child: ColoredBox(
+                      color: scheme.primary.withValues(alpha: 0.18),
+                      child: const Center(
+                        child: Text(
+                          'Déposer l\'image',
+                          style: TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
   }
 
   @override
@@ -246,7 +384,8 @@ class _ItemCustomizeSheetState extends State<_ItemCustomizeSheet> {
                     ),
                     if (_title.text.trim() != origTitle)
                       TextButton(
-                        onPressed: () => setState(() => _title.text = origTitle),
+                        onPressed: () =>
+                            setState(() => _title.text = origTitle),
                         child: const Text('Rétablir'),
                       ),
                   ],
@@ -264,30 +403,21 @@ class _ItemCustomizeSheetState extends State<_ItemCustomizeSheet> {
                 'Image',
                 style: TextStyle(fontWeight: FontWeight.w700),
               ),
+              if (kIsWeb) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'Glisse une image ici ou colle avec Ctrl+V',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
               const SizedBox(height: 8),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: SizedBox(
-                      width: 96,
-                      height: 96,
-                      child: _pendingBytes != null
-                          ? Image.memory(_pendingBytes!, fit: BoxFit.cover)
-                          : (_imageUrl != null && _imageUrl!.isNotEmpty)
-                              ? CollectionCoverImage(
-                                  url: _imageUrl!,
-                                  width: 96,
-                                  height: 96,
-                                  fit: BoxFit.cover,
-                                )
-                              : ColoredBox(
-                                  color: scheme.surfaceContainerHighest,
-                                  child: const Icon(Icons.image_outlined),
-                                ),
-                    ),
-                  ),
+                  _previewBox(scheme),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Wrap(
@@ -296,13 +426,19 @@ class _ItemCustomizeSheetState extends State<_ItemCustomizeSheet> {
                       children: [
                         OutlinedButton.icon(
                           onPressed: _saving ? null : _pickPhoto,
-                          icon: const Icon(Icons.photo_camera_outlined, size: 18),
+                          icon: const Icon(
+                            Icons.photo_camera_outlined,
+                            size: 18,
+                          ),
                           label: const Text('Ma photo'),
                         ),
                         if (_bggId != null)
                           OutlinedButton.icon(
                             onPressed: _saving ? null : _loadGallery,
-                            icon: const Icon(Icons.collections_outlined, size: 18),
+                            icon: const Icon(
+                              Icons.collections_outlined,
+                              size: 18,
+                            ),
                             label: const Text('Galerie BGG'),
                           ),
                         if (imageChanged && origImage != null)

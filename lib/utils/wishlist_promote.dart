@@ -157,6 +157,36 @@ Map<String, dynamic>? matchCatalogDuplicate(
   return null;
 }
 
+/// Après un ajout collection : retire le doublon wishlist (même bgg_id / titre).
+/// Retourne true si une ligne wishlist a été consommée.
+Future<bool> consumeWishlistDuplicateForCollectionAdd({
+  required String title,
+  required String categoryDb,
+  String? bggId,
+  String? subcategory,
+}) async {
+  final dup = await findWishlistDuplicate(
+    title: title,
+    categoryDb: categoryDb,
+    bggId: bggId,
+    subcategory: subcategory,
+  );
+  if (dup == null) return false;
+  final id = dup['id']?.toString();
+  if (id == null || id.isEmpty) return false;
+  try {
+    await Supabase.instance.client
+        .from('collection_items')
+        .delete()
+        .eq('id', id)
+        .eq('is_wishlist', true);
+    CollectionRefresh.instance.bump();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 /// Cherche un doublon (même titre / catégorie / scope wishlist).
 Future<Map<String, dynamic>?> findDuplicateRow({
   required String title,

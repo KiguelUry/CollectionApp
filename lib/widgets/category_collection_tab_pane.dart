@@ -605,6 +605,35 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
       defaultSort: widget.defaultWishlistMineFilter
           ? CollectionSort.favoritesFirst
           : CollectionSort.titleAsc,
+      onRandomPick: widget.category == CollectionCategory.boardgame
+          ? () {
+              final pool = filtered.where((i) => !i.isExpansion).toList();
+              if (pool.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Aucun jeu à tirer avec ces filtres'),
+                  ),
+                );
+                return;
+              }
+              pool.shuffle();
+              final pick = pool.first;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('🎲 ${pick.title}'),
+                  action: SnackBarAction(
+                    label: 'Ouvrir',
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ItemDetailScreen(item: pick),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }
+          : null,
       trailing: widget.enableBulkSelection && !_selectionMode
           ? IconButton(
               key: const ValueKey('bulk_selection_toggle'),

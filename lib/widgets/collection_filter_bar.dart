@@ -48,6 +48,9 @@ class CollectionFilterBar extends StatelessWidget {
   /// Petit bouton après Tri / Filtre (ex. sélection multiple).
   final Widget? trailing;
 
+  /// Tirage au sort parmi les résultats filtrés (jeux de société).
+  final VoidCallback? onRandomPick;
+
   const CollectionFilterBar({
     super.key,
     required this.filters,
@@ -78,6 +81,7 @@ class CollectionFilterBar extends StatelessWidget {
     this.onShowOwnedExpansionsChanged,
     this.defaultSort = CollectionSort.titleAsc,
     this.trailing,
+    this.onRandomPick,
   });
 
   @override
@@ -127,6 +131,17 @@ class CollectionFilterBar extends StatelessWidget {
                 _sortMenuButton(context),
                 const SizedBox(width: 4),
                 _filterMenuButton(context),
+                if (onRandomPick != null &&
+                    showBoardgameGenreFilter &&
+                    filters.hasActiveFilterCriteria) ...[
+                  const SizedBox(width: 2),
+                  IconButton(
+                    tooltip: 'Tirer au sort parmi ces résultats',
+                    onPressed: onRandomPick,
+                    icon: const Text('🎲', style: TextStyle(fontSize: 18)),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
                 if (trailing != null) ...[
                   const SizedBox(width: 2),
                   trailing!,
@@ -196,6 +211,32 @@ class CollectionFilterBar extends StatelessWidget {
             value: CollectionSort.bggRatingDesc,
             child: Text('Note communautaire'),
           ),
+        if (showBoardgameGenreFilter) ...[
+          const PopupMenuItem(
+            value: CollectionSort.playsDesc,
+            child: Text('Nombre de parties'),
+          ),
+          const PopupMenuItem(
+            value: CollectionSort.costPerPlayAsc,
+            child: Text('Coût par partie (€/partie)'),
+          ),
+          const PopupMenuItem(
+            value: CollectionSort.durationAsc,
+            child: Text('Durée'),
+          ),
+          const PopupMenuItem(
+            value: CollectionSort.complexityAsc,
+            child: Text('Complexité'),
+          ),
+          const PopupMenuItem(
+            value: CollectionSort.yearDesc,
+            child: Text('Année de sortie'),
+          ),
+          const PopupMenuItem(
+            value: CollectionSort.dateAddedDesc,
+            child: Text('Date d\'ajout'),
+          ),
+        ],
         const PopupMenuItem(
           value: CollectionSort.locationAsc,
           child: Text('Localisation'),
@@ -338,10 +379,121 @@ class CollectionFilterBar extends StatelessWidget {
                         ],
                       ),
                     ),
-                    if (showBoardgameGenreFilter && !showWishlistSortOptions)
+                    if (showBoardgameGenreFilter && !showWishlistSortOptions) ...[
                       _filterSection(
                         context,
-                        title: 'Parties',
+                        title: 'Nombre de joueurs',
+                        icon: Icons.groups_outlined,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: [
+                                for (final n in [1, 2, 3, 4, 5, 6])
+                                  _sheetChip(
+                                    context,
+                                    label: n == 6 ? '6+' : '$n',
+                                    selected:
+                                        sheetFilters.playerCounts.contains(n),
+                                    onTap: () {
+                                      final next = {...sheetFilters.playerCounts};
+                                      if (!next.add(n)) next.remove(n);
+                                      apply(
+                                        sheetFilters.copyWith(
+                                          playerCounts: next,
+                                        ),
+                                      );
+                                    },
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            FilterChip(
+                              label: const Text('Conseillé à ce nombre'),
+                              selected: sheetFilters.playerCountBestOnly,
+                              onSelected: (v) => apply(
+                                sheetFilters.copyWith(playerCountBestOnly: v),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      _filterSection(
+                        context,
+                        title: 'Durée',
+                        icon: Icons.timer_outlined,
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            for (final entry in {
+                              BoardgameDurationBucket.under30: '< 30 min',
+                              BoardgameDurationBucket.from30to60: '30–60 min',
+                              BoardgameDurationBucket.from1hTo2h: '1h–2h',
+                              BoardgameDurationBucket.over2h: '2h+',
+                            }.entries)
+                              _sheetChip(
+                                context,
+                                label: entry.value,
+                                selected: sheetFilters.durationBuckets
+                                    .contains(entry.key),
+                                onTap: () {
+                                  final next = {
+                                    ...sheetFilters.durationBuckets,
+                                  };
+                                  if (!next.add(entry.key)) {
+                                    next.remove(entry.key);
+                                  }
+                                  apply(
+                                    sheetFilters.copyWith(
+                                      durationBuckets: next,
+                                    ),
+                                  );
+                                },
+                              ),
+                          ],
+                        ),
+                      ),
+                      _filterSection(
+                        context,
+                        title: 'Complexité',
+                        icon: Icons.psychology_outlined,
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            for (final entry in {
+                              BoardgameComplexityBand.familial: 'Familial',
+                              BoardgameComplexityBand.intermediate: 'Initié',
+                              BoardgameComplexityBand.expert: 'Expert',
+                            }.entries)
+                              _sheetChip(
+                                context,
+                                label: entry.value,
+                                selected: sheetFilters.complexityBands
+                                    .contains(entry.key),
+                                onTap: () {
+                                  final next = {
+                                    ...sheetFilters.complexityBands,
+                                  };
+                                  if (!next.add(entry.key)) {
+                                    next.remove(entry.key);
+                                  }
+                                  apply(
+                                    sheetFilters.copyWith(
+                                      complexityBands: next,
+                                    ),
+                                  );
+                                },
+                              ),
+                          ],
+                        ),
+                      ),
+                      _filterSection(
+                        context,
+                        title: 'Statut de jeu',
                         icon: Icons.casino_outlined,
                         child: Wrap(
                           spacing: 6,
@@ -350,23 +502,118 @@ class CollectionFilterBar extends StatelessWidget {
                             _sheetChip(
                               context,
                               label: 'Tous',
-                              selected: !sheetFilters.unplayedOnly,
+                              selected: sheetFilters.playStatus ==
+                                      BoardgamePlayStatusFilter.any &&
+                                  !sheetFilters.unplayedOnly,
                               onTap: () => apply(
-                                sheetFilters.copyWith(unplayedOnly: false),
+                                sheetFilters.copyWith(
+                                  unplayedOnly: false,
+                                  playStatus: BoardgamePlayStatusFilter.any,
+                                ),
                               ),
                             ),
                             _sheetChip(
                               context,
                               key: const ValueKey('filter_unplayed'),
-                              label: 'Non joués (0 partie)',
-                              selected: sheetFilters.unplayedOnly,
+                              label: 'Jamais joué — 0 partie',
+                              selected: sheetFilters.unplayedOnly ||
+                                  sheetFilters.playStatus ==
+                                      BoardgamePlayStatusFilter.neverPlayed,
                               onTap: () => apply(
-                                sheetFilters.copyWith(unplayedOnly: true),
+                                sheetFilters.copyWith(
+                                  unplayedOnly: true,
+                                  playStatus:
+                                      BoardgamePlayStatusFilter.neverPlayed,
+                                ),
+                              ),
+                            ),
+                            _sheetChip(
+                              context,
+                              label: 'Déjà joué',
+                              selected: sheetFilters.playStatus ==
+                                  BoardgamePlayStatusFilter.played,
+                              onTap: () => apply(
+                                sheetFilters.copyWith(
+                                  unplayedOnly: false,
+                                  playStatus: BoardgamePlayStatusFilter.played,
+                                ),
+                              ),
+                            ),
+                            _sheetChip(
+                              context,
+                              label: 'Non joué depuis 6 mois',
+                              selected: sheetFilters.playStatus ==
+                                  BoardgamePlayStatusFilter.staleSixMonths,
+                              onTap: () => apply(
+                                sheetFilters.copyWith(
+                                  unplayedOnly: false,
+                                  playStatus: BoardgamePlayStatusFilter
+                                      .staleSixMonths,
+                                ),
                               ),
                             ),
                           ],
                         ),
                       ),
+                      _filterSection(
+                        context,
+                        title: 'Collection & logistique',
+                        icon: Icons.inventory_2_outlined,
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            _sheetChip(
+                              context,
+                              label: 'Prêté',
+                              selected: sheetFilters.scope ==
+                                  CollectionScopeFilter.onLoanOnly,
+                              onTap: () => apply(
+                                sheetFilters.copyWith(
+                                  scope: sheetFilters.scope ==
+                                          CollectionScopeFilter.onLoanOnly
+                                      ? CollectionScopeFilter.all
+                                      : CollectionScopeFilter.onLoanOnly,
+                                ),
+                              ),
+                            ),
+                            _sheetChip(
+                              context,
+                              label: 'À vendre / échanger',
+                              selected: sheetFilters.forSaleOrTradeOnly,
+                              onTap: () => apply(
+                                sheetFilters.copyWith(
+                                  forSaleOrTradeOnly:
+                                      !sheetFilters.forSaleOrTradeOnly,
+                                ),
+                              ),
+                            ),
+                            _sheetChip(
+                              context,
+                              label: 'Avec extensions',
+                              selected: sheetFilters.withExpansionsOnly,
+                              onTap: () => apply(
+                                sheetFilters.copyWith(
+                                  withExpansionsOnly:
+                                      !sheetFilters.withExpansionsOnly,
+                                ),
+                              ),
+                            ),
+                            _sheetChip(
+                              context,
+                              label: 'Avec règles/templates perso',
+                              selected: sheetFilters.withCustomRulesOnly,
+                              onTap: () => apply(
+                                sheetFilters.copyWith(
+                                  withCustomRulesOnly:
+                                      !sheetFilters.withCustomRulesOnly,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     if (useHolderLocationFilter &&
                         holderFilterOptions.isNotEmpty)
                       _filterSection(
