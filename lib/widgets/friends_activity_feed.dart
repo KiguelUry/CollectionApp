@@ -444,31 +444,34 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
               ),
             ],
           ),
-          const SizedBox(height: 4),
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            children: [
-              ActionChip(
-                avatar: const Icon(Icons.forum_outlined, size: 16),
-                label: const Text('Forum'),
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const CommunityForumScreen(),
+          // PC (compactChrome) : Forum/Échanges déjà dans la sidebar.
+          if (!widget.compactChrome) ...[
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                ActionChip(
+                  avatar: const Icon(Icons.forum_outlined, size: 16),
+                  label: const Text('Forum'),
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const CommunityForumScreen(),
+                    ),
                   ),
                 ),
-              ),
-              ActionChip(
-                avatar: const Icon(Icons.handshake_outlined, size: 16),
-                label: const Text('Échanges'),
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const ExchangesScreen()),
+                ActionChip(
+                  avatar: const Icon(Icons.handshake_outlined, size: 16),
+                  label: const Text('Échanges'),
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const ExchangesScreen()),
+                  ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
+          ],
         ],
       ),
     );

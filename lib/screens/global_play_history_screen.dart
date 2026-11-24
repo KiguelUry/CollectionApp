@@ -23,7 +23,15 @@ import 'shake_pick_screen.dart';
 
 /// Historique global des parties (tous jeux confondus).
 class GlobalPlayHistoryScreen extends StatefulWidget {
-  const GlobalPlayHistoryScreen({super.key});
+  /// Pseudos (lower) : ne garder que les parties où l'un d'eux joue.
+  final List<String>? playerNameFilter;
+  final String? filterTitle;
+
+  const GlobalPlayHistoryScreen({
+    super.key,
+    this.playerNameFilter,
+    this.filterTitle,
+  });
 
   @override
   State<GlobalPlayHistoryScreen> createState() =>
@@ -40,6 +48,21 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
   final _expanded = <String>{};
   String? _rankingGame;
   bool _mobileActionsCompact = false;
+  /// false = filtre ami actif ; true = toutes les parties.
+  bool _showAllPlays = false;
+
+  Set<String> get _nameFilter {
+    final raw = widget.playerNameFilter;
+    if (raw == null || raw.isEmpty || _showAllPlays) return const {};
+    return {
+      for (final n in raw)
+        if (n.trim().isNotEmpty) n.trim().toLowerCase(),
+    };
+  }
+
+  bool get _hasFriendFilter =>
+      widget.playerNameFilter != null &&
+      widget.playerNameFilter!.any((n) => n.trim().isNotEmpty);
 
   @override
   void initState() {
@@ -50,8 +73,8 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
     });
     final cached = _service.cachedEntries;
     if (cached != null && cached.isNotEmpty) {
-      _entries = cached;
-      _groups = groupPlayHistoryEntries(cached);
+      _entries = _applyPlayerFilter(cached);
+      _groups = groupPlayHistoryEntries(_entries);
       _loading = false;
     }
     unawaited(_load(silent: cached != null && cached.isNotEmpty));
@@ -61,6 +84,20 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  List<GlobalPlayHistoryEntry> _applyPlayerFilter(
+    List<GlobalPlayHistoryEntry> all,
+  ) {
+    final filter = _nameFilter;
+    if (filter.isEmpty) return all;
+    return [
+      for (final e in all)
+        if (e.session.players.any(
+          (p) => filter.contains(p.trim().toLowerCase()),
+        ))
+          e,
+    ];
   }
 
   List<GlobalPlayHistoryGroup> get _visibleGroups {
@@ -73,8 +110,9 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
 
   Future<void> _load({bool silent = false}) async {
     if (!silent) setState(() => _loading = true);
-    final entries = await _service.loadAllEntries();
+    final all = await _service.loadAllEntries();
     if (!mounted) return;
+    final entries = _applyPlayerFilter(all);
     setState(() {
       _entries = entries;
       _groups = groupPlayHistoryEntries(entries);
@@ -382,7 +420,11 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Historique des parties'),
+        title: Text(
+          !_showAllPlays && widget.filterTitle != null
+              ? widget.filterTitle!
+              : 'Historique des parties',
+        ),
         actions: [
           if (compactActions) ...[
             IconButton(
@@ -428,6 +470,31 @@ class _GlobalPlayHistoryScreenState extends State<GlobalPlayHistoryScreen> {
               onOpenDraw: _openDraw,
               child: Column(
               children: [
+                if (_hasFriendFilter)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: FilterChip(
+                        selected: !_showAllPlays,
+                        avatar: Icon(
+                          _showAllPlays
+                              ? Icons.people_outline
+                              : Icons.person_outline,
+                          size: 18,
+                        ),
+                        label: Text(
+                          _showAllPlays
+                              ? 'Voir toutes les parties'
+                              : (widget.filterTitle ?? 'Filtre ami'),
+                        ),
+                        onSelected: (_) {
+                          setState(() => _showAllPlays = !_showAllPlays);
+                          unawaited(_load(silent: true));
+                        },
+                      ),
+                    ),
+                  ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
                   child: SegmentedButton<int>(

@@ -6,8 +6,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/collection_category.dart';
 import '../models/collection_item.dart';
 import '../services/friend_service.dart';
+import '../services/player_alias_service.dart';
 import '../services/profile_cache_service.dart';
 import '../services/profile_service.dart';
+import 'global_play_history_screen.dart';
 import '../utils/collection_grid_grouper.dart';
 import '../utils/collection_grid_layout.dart';
 import '../navigation/app_navigation.dart';
@@ -239,24 +241,68 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
     }
   }
 
+  /// Pseudos « moi » (identité isMe + username) — jamais confondus avec un ami.
+  Future<Set<String>> _myPlayNames() async {
+    await PlayerAliasService.instance.ensureLoaded();
+    final names = <String>{};
+    final me = PlayerAliasService.instance.meIdentity;
+    if (me != null) {
+      for (final n in me.names) {
+        final t = n.trim().toLowerCase();
+        if (t.isNotEmpty) names.add(t);
+      }
+      final d = me.displayName.trim().toLowerCase();
+      if (d.isNotEmpty) names.add(d);
+    }
+    final user =
+        ProfileCacheService.instance.profile?.username.trim().toLowerCase();
+    if (user != null && user.isNotEmpty) names.add(user);
+    return names;
+  }
+
+  /// Pseudos de cet ami : lien identité → profileId, sinon username
+  /// (sauf si ce username est déjà « moi » — cas Kiki).
+  Future<Set<String>> _friendPlayNames(Set<String> meNames) async {
+    await PlayerAliasService.instance.ensureLoaded();
+    final names = <String>{};
+    for (final id in PlayerAliasService.instance.identities) {
+      if (id.isMe) continue;
+      if (id.friendProfileId != widget.profileId) continue;
+      for (final n in id.names) {
+        final t = n.trim().toLowerCase();
+        if (t.isNotEmpty) names.add(t);
+      }
+      final d = id.displayName.trim().toLowerCase();
+      if (d.isNotEmpty) names.add(d);
+      final fu = id.friendUsername?.trim().toLowerCase();
+      if (fu != null && fu.isNotEmpty) names.add(fu);
+    }
+    final friendUser = widget.username.trim().toLowerCase();
+    if (friendUser.isNotEmpty && !meNames.contains(friendUser)) {
+      names.add(friendUser);
+    }
+    names.removeAll(meNames);
+    return names;
+  }
+
   /// Parties où vous apparaissez tous les deux (mon historique + le sien).
   Future<int> _countPlaysTogether() async {
-    final me =
-        ProfileCacheService.instance.profile?.username.trim().toLowerCase();
-    final friend = widget.username.trim().toLowerCase();
+    final meNames = await _myPlayNames();
+    final friendNames = await _friendPlayNames(meNames);
+    if (friendNames.isEmpty && meNames.isEmpty) return 0;
     final keys = <String>{};
-    void scan(Iterable<CollectionItem> items, String? other) {
-      if (other == null || other.isEmpty) return;
+    void scan(Iterable<CollectionItem> items, Set<String> lookingFor) {
+      if (lookingFor.isEmpty) return;
       for (final item in items) {
         final plays = item.metadata?['boardgame_plays'];
         if (plays is! List) continue;
         for (final p in plays) {
           if (p is! Map) continue;
-          final players = [
+          final players = {
             for (final n in (p['players'] as List? ?? const []))
               n.toString().trim().toLowerCase(),
-          ];
-          if (!players.contains(other)) continue;
+          }..removeWhere((e) => e.isEmpty);
+          if (!players.any(lookingFor.contains)) continue;
           final game = item.metadata?['bgg_id']?.toString() ??
               item.title.trim().toLowerCase();
           final date = p['date']?.toString() ?? '';
@@ -266,9 +312,26 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
       }
     }
 
-    scan(await myOverlapItems(), friend);
-    scan([..._collectionItems, ..._groupItems], me);
+    // Mes parties où l'ami apparaît (via identité liée, pas mon pseudo).
+    scan(await myOverlapItems(), friendNames);
+    // Parties de l'ami où j'apparais.
+    scan([..._collectionItems, ..._groupItems], meNames);
     return keys.length;
+  }
+
+  Future<void> _openPlaysTogether() async {
+    final meNames = await _myPlayNames();
+    final friendNames = await _friendPlayNames(meNames);
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => GlobalPlayHistoryScreen(
+          playerNameFilter: friendNames.toList(),
+          filterTitle: 'Avec ${widget.username}',
+        ),
+      ),
+    );
   }
 
   void _pickInitialCategory(List<CollectionItem> items) {
@@ -686,7 +749,33 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
   }
 
   Widget _pantheonBlock() {
-    if (!_mine && !_pantheonConfigured) return const SizedBox.shrink();
+    // Toujours afficher le bloc chez un ami (même vide) — sinon profil « triste ».
+    if (!_mine && !_pantheonConfigured) {
+      return Container(
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.emoji_events_outlined,
+                color: Colors.amber.shade300, size: 22),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Panthéon de ${widget.username} pas encore configuré',
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     return PantheonBento(
       ranked: _pantheonItems(),
       editable: _mine,
@@ -738,6 +827,9 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
               owned: _ownedVisibleCount,
               common: _commonCount,
               playsTogether: _playsTogether,
+              onPlaysTogetherTap: (_playsTogether ?? 0) > 0
+                  ? _openPlaysTogether
+                  : null,
             ),
             const SizedBox(height: 14),
             Row(
@@ -770,43 +862,79 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
             ),
             const SizedBox(height: 16),
             _recentAddsRibbon(),
-            if ((_playsTogether ?? 0) > 0) ...[
-              const SizedBox(height: 18),
-              _playsTogetherBlock(),
-            ],
+            const SizedBox(height: 18),
+            if ((_playsTogether ?? 0) > 0)
+              _playsTogetherBlock()
+            else
+              _playsTogetherHint(),
           ],
         ),
       ),
     );
   }
 
-  Widget _playsTogetherBlock() {
+  Widget _playsTogetherHint() {
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.06),
+        color: Colors.white.withValues(alpha: 0.04),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white12),
+        border: Border.all(color: Colors.white10),
       ),
       child: Row(
         children: [
-          const Icon(Icons.sports_esports_rounded, color: Colors.orangeAccent),
+          const Icon(Icons.link_outlined, color: Colors.white38, size: 20),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              '${_playsTogether ?? 0} partie${(_playsTogether ?? 0) > 1 ? 's' : ''} ensemble',
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w800,
-                fontSize: 14.5,
-              ),
+              'Aucune partie ensemble pour l’instant. '
+              'Lie « ${widget.username} » dans Identités joueurs '
+              '(Parties → Identités) pour compter les parties.',
+              style: const TextStyle(color: Colors.white54, fontSize: 12.5),
             ),
           ),
-          Text(
-            'avec ${widget.username}',
-            style: const TextStyle(color: Colors.white54, fontSize: 12),
-          ),
         ],
+      ),
+    );
+  }
+
+  Widget _playsTogetherBlock() {
+    return Material(
+      color: Colors.white.withValues(alpha: 0.06),
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: _openPlaysTogether,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white12),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.sports_esports_rounded,
+                  color: Colors.orangeAccent),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '${_playsTogether ?? 0} partie${(_playsTogether ?? 0) > 1 ? 's' : ''} ensemble',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14.5,
+                  ),
+                ),
+              ),
+              Text(
+                'avec ${widget.username}',
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+              const SizedBox(width: 6),
+              const Icon(Icons.chevron_right_rounded, color: Colors.white38),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1147,6 +1275,7 @@ class _FriendHeader extends StatelessWidget {
   final int owned;
   final int common;
   final int? playsTogether;
+  final VoidCallback? onPlaysTogetherTap;
 
   const _FriendHeader({
     required this.username,
@@ -1156,6 +1285,7 @@ class _FriendHeader extends StatelessWidget {
     required this.owned,
     required this.common,
     required this.playsTogether,
+    this.onPlaysTogetherTap,
   });
 
   @override
@@ -1238,6 +1368,7 @@ class _FriendHeader extends StatelessWidget {
               _MiniStat(
                 value: playsTogether == null ? '–' : '$playsTogether',
                 label: 'parties ensemble',
+                onTap: onPlaysTogetherTap,
               ),
             ],
           ),
@@ -1256,33 +1387,50 @@ class _FriendHeader extends StatelessWidget {
 class _MiniStat extends StatelessWidget {
   final String value;
   final String label;
+  final VoidCallback? onTap;
 
-  const _MiniStat({required this.value, required this.label});
+  const _MiniStat({
+    required this.value,
+    required this.label,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final col = Column(
+      children: [
+        Text(
+          value,
+          style: TextStyle(
+            color: Colors.white,
+            decoration: onTap != null ? TextDecoration.underline : null,
+            decorationColor: Colors.white38,
+            fontWeight: FontWeight.w800,
+            fontSize: 18,
+          ),
+        ),
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.6),
+            fontSize: 11.5,
+          ),
+        ),
+      ],
+    );
     return Expanded(
-      child: Column(
-        children: [
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w800,
-              fontSize: 18,
+      child: onTap == null
+          ? col
+          : InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: col,
+              ),
             ),
-          ),
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.6),
-              fontSize: 11.5,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

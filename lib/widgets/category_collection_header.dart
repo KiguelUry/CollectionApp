@@ -199,24 +199,20 @@ class _ToolbarLayout extends StatelessWidget {
     );
 
     if (!twoRows) {
-      // Au repos, ≤ 3 actions : rangée équilibrée (largeurs égales).
-      final balanced = !compact && leftActions.length <= 3;
+      // PC : pastilles compactes (pas d'Expanded qui étire Découvrir/Forum).
       return SizedBox(
         height: compact ? 36 : 44,
         child: Row(
           children: [
             Expanded(
-              child: balanced
-                  ? Row(
-                      children: [
-                        for (final a in leftActions)
-                          Expanded(child: a.expanded()),
-                      ],
-                    )
-                  : SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(children: leftActions),
-                    ),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    for (final a in leftActions) a,
+                  ],
+                ),
+              ),
             ),
             trailing,
           ],
@@ -328,25 +324,31 @@ class _ToolbarAction extends StatelessWidget {
     }
 
     final short = _shortLabel(label);
+    // Fond plus opaque + ombre légère : reste lisible sur le dégradé clair à droite.
     return Padding(
-      padding: const EdgeInsets.only(right: 4),
+      padding: const EdgeInsets.only(right: 6),
       child: Tooltip(
         message: tooltip,
         child: Material(
-          color: color.withValues(alpha: 0.14),
+          color: Colors.black.withValues(alpha: 0.28),
+          elevation: 1,
+          shadowColor: Colors.black45,
           borderRadius: BorderRadius.circular(10),
           child: InkWell(
             onTap: onTap,
             borderRadius: BorderRadius.circular(10),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
               child: Row(
                 mainAxisSize: fill ? MainAxisSize.max : MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   _iconWithBadge(),
                   const SizedBox(width: 5),
-                  if (fill) Flexible(child: _labelText(short)) else _labelText(short),
+                  if (fill)
+                    Flexible(child: _labelText(short))
+                  else
+                    _labelText(short),
                 ],
               ),
             ),
@@ -363,9 +365,12 @@ class _ToolbarAction extends StatelessWidget {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
-            fontSize: fill ? 12 : 11,
-            fontWeight: FontWeight.w700,
+            fontSize: fill ? 12 : 11.5,
+            fontWeight: FontWeight.w800,
             color: color,
+            shadows: const [
+              Shadow(color: Colors.black54, blurRadius: 4, offset: Offset(0, 1)),
+            ],
           ),
         ),
       );

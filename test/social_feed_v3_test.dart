@@ -11,14 +11,17 @@ void main() {
       expect(resolveMosaicTiles(1, FeedMosaicDensity.auto), 1);
       expect(resolveMosaicTiles(2, FeedMosaicDensity.auto), 2);
       expect(resolveMosaicTiles(4, FeedMosaicDensity.auto), 4);
-      expect(resolveMosaicTiles(8, FeedMosaicDensity.auto), 8);
-      expect(resolveMosaicTiles(9, FeedMosaicDensity.auto), 16);
-      expect(resolveMosaicTiles(40, FeedMosaicDensity.auto), 16);
+      expect(resolveMosaicTiles(6, FeedMosaicDensity.auto), 6);
+      expect(resolveMosaicTiles(8, FeedMosaicDensity.auto), 9);
+      expect(resolveMosaicTiles(9, FeedMosaicDensity.auto), 9);
+      expect(resolveMosaicTiles(40, FeedMosaicDensity.auto), 12);
     });
 
     test('fixed density', () {
       expect(resolveMosaicTiles(50, FeedMosaicDensity.four), 4);
-      expect(resolveMosaicTiles(1, FeedMosaicDensity.sixteen), 16);
+      // Densité forcée plafonnée au nb d'événements (pas de cases vides).
+      expect(resolveMosaicTiles(1, FeedMosaicDensity.sixteen), 1);
+      expect(resolveMosaicTiles(20, FeedMosaicDensity.sixteen), 16);
     });
   });
 

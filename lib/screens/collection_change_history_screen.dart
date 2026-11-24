@@ -10,7 +10,7 @@ import '../utils/app_page_route.dart';
 import '../widgets/bgg_network_image.dart';
 import 'item_detail_screen.dart';
 
-enum _ModifsFilter { all, collection, wishlist, places }
+enum _ModifsFilter { all, collection, wishlist, places, plays }
 
 /// Timeline moderne des modifications de collection.
 class CollectionChangeHistoryScreen extends StatefulWidget {
@@ -35,7 +35,7 @@ class _CollectionChangeHistoryScreenState
   void initState() {
     super.initState();
     _future = CollectionChangeHistoryService.instance
-        .load(category: widget.category);
+        .loadWithBackfill(category: widget.category);
     unawaited(
       CollectionChangeHistoryService.instance
           .markSeen(category: widget.category),
@@ -45,7 +45,7 @@ class _CollectionChangeHistoryScreenState
   Future<void> _reload() async {
     setState(() {
       _future = CollectionChangeHistoryService.instance
-          .load(category: widget.category);
+          .loadWithBackfill(category: widget.category);
     });
   }
 
@@ -106,6 +106,7 @@ class _CollectionChangeHistoryScreenState
           e.action == 'location' ||
               e.action == 'loaned' ||
               e.action == 'returned',
+        _ModifsFilter.plays => e.action == 'play',
       };
     }).toList();
   }
@@ -142,6 +143,7 @@ class _CollectionChangeHistoryScreenState
                             _ModifsFilter.collection => 'Collection',
                             _ModifsFilter.wishlist => 'Wishlist',
                             _ModifsFilter.places => 'Lieux & Prêts',
+                            _ModifsFilter.plays => 'Parties',
                           }),
                           onSelected: (_) => setState(() => _filter = f),
                         ),
@@ -269,6 +271,11 @@ class _TimelineTile extends StatelessWidget {
           icon: Icons.undo_rounded,
           color: Colors.teal.shade700,
           label: '↩ Rendu',
+        ),
+      'play' => (
+          icon: Icons.sports_esports_rounded,
+          color: Colors.deepPurple.shade600,
+          label: '🎲 Partie',
         ),
       _ => (
           icon: Icons.history,

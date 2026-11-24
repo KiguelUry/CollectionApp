@@ -153,11 +153,32 @@ class ActivityService {
     if (itemIds.isNotEmpty) {
       final items = await _client
           .from('collection_items')
-          .select('id, title, image_url, category')
+          .select('id, title, image_url, category, metadata')
           .inFilter('id', itemIds.toList());
       for (final it in items as List) {
         itemById[it['id'] as String] = Map<String, dynamic>.from(it);
       }
+    }
+
+    String? resolveFeedImage(Map<String, dynamic>? it, Object? payload) {
+      if (it != null) {
+        final direct = it['image_url']?.toString().trim();
+        if (direct != null && direct.isNotEmpty) return direct;
+        final meta = it['metadata'];
+        if (meta is Map) {
+          for (final k in ['image_url', 'cover_url', 'cover']) {
+            final v = meta[k]?.toString().trim();
+            if (v != null && v.isNotEmpty) return v;
+          }
+        }
+      }
+      if (payload is Map) {
+        for (final k in ['image_url', 'cover_url']) {
+          final v = payload[k]?.toString().trim();
+          if (v != null && v.isNotEmpty) return v;
+        }
+      }
+      return null;
     }
 
     return [
@@ -187,7 +208,7 @@ class ActivityService {
             // l'ajout disparaît du fil (cf. dedupeActivityEvents).
             itemTitle: it?['title'] as String? ??
                 (itemId != null ? frozenTitle : null),
-            itemImageUrl: it?['image_url'] as String?,
+            itemImageUrl: resolveFeedImage(it, payload),
             itemCategory: it?['category'] as String?,
             rating: rating,
             createdAt: DateTime.parse(map['created_at'] as String),

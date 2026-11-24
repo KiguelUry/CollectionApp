@@ -241,8 +241,10 @@ class CollectionItem {
     if (direct != null && direct.isNotEmpty) return direct;
     final meta = json['metadata'];
     if (meta is Map) {
-      final fromMeta = meta['image_url']?.toString().trim();
-      if (fromMeta != null && fromMeta.isNotEmpty) return fromMeta;
+      for (final k in ['image_url', 'cover_url', 'cover']) {
+        final fromMeta = meta[k]?.toString().trim();
+        if (fromMeta != null && fromMeta.isNotEmpty) return fromMeta;
+      }
     }
     return null;
   }

@@ -11,6 +11,7 @@ import '../models/boardgame_play_session.dart';
 import '../models/boardgame_score_grid.dart';
 import '../models/collection_item.dart';
 import '../models/friend_choice.dart';
+import '../services/collection_change_history_service.dart';
 import '../services/collection_local_cache.dart';
 import '../services/friend_service.dart';
 import '../services/inventory_service.dart';
@@ -104,9 +105,27 @@ class _BoardgamePlayHistoryPanelState extends State<BoardgamePlayHistoryPanel> {
   }
 
   void _saveSessions(List<BoardgamePlaySession> sessions) {
+    final prevCount =
+        ((widget.item.metadata?['boardgame_plays'] as List?) ?? const []).length;
     final meta = Map<String, dynamic>.from(widget.item.metadata ?? {});
     meta['boardgame_plays'] = sessions.map((s) => s.toJson()).toList();
     meta['games_played'] = sessions.length;
+    if (sessions.length > prevCount && sessions.isNotEmpty) {
+      final latest = sessions.last;
+      final players = latest.players
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .join(', ');
+      unawaited(
+        CollectionChangeHistoryService.instance.recordPlay(
+          item: widget.item,
+          detail: players.isEmpty
+              ? 'Partie enregistrée'
+              : 'Partie · $players',
+          at: latest.date,
+        ),
+      );
+    }
     BoardgameScoreTemplate? template;
     DateTime? stamp;
     for (final s in sessions) {

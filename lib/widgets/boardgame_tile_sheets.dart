@@ -15,8 +15,10 @@ import '../utils/item_copy_units.dart';
 import '../utils/whereabouts_apply.dart';
 import '../utils/whereabouts_persistence.dart';
 import '../utils/wishlist_market_metadata.dart';
+import '../services/friend_ratings_service.dart';
 import 'bgg_community_rating_panel.dart';
 import 'compact_whereabouts_dropdown.dart';
+import 'friend_ratings_panel.dart';
 import 'item_condition_pill.dart';
 import 'item_copy_units_panel.dart';
 import 'households_sheet.dart';
@@ -29,6 +31,10 @@ Future<void> showBoardgameTileRatingSheet(
   BuildContext context, {
   required CollectionItem item,
   bool readOnly = false,
+  /// Chez un ami : libellé de sa note (ex. « Sa note »).
+  String? ownerRatingLabel,
+  /// Chez un ami : ma propre note sur le même objet (catalogue).
+  double? myRatingOnFive,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -37,6 +43,8 @@ Future<void> showBoardgameTileRatingSheet(
     builder: (ctx) => _BoardgameTileRatingSheet(
       item: item,
       readOnly: readOnly,
+      ownerRatingLabel: ownerRatingLabel ?? (readOnly ? 'Sa note' : null),
+      myRatingOnFive: myRatingOnFive,
     ),
   );
 }
@@ -75,10 +83,14 @@ Set<String> _groupIdsFromItem(CollectionItem item) {
 class _BoardgameTileRatingSheet extends StatefulWidget {
   final CollectionItem item;
   final bool readOnly;
+  final String? ownerRatingLabel;
+  final double? myRatingOnFive;
 
   const _BoardgameTileRatingSheet({
     required this.item,
     required this.readOnly,
+    this.ownerRatingLabel,
+    this.myRatingOnFive,
   });
 
   @override
@@ -88,7 +100,13 @@ class _BoardgameTileRatingSheet extends StatefulWidget {
 
 class _BoardgameTileRatingSheetState extends State<_BoardgameTileRatingSheet> {
   double? _rating;
+  double? _myRating;
   bool _saving = false;
+  bool _friendsOpen = false;
+
+  bool get _viewingFriend =>
+      widget.readOnly &&
+      (widget.ownerRatingLabel != null && widget.ownerRatingLabel!.isNotEmpty);
 
   @override
   void initState() {
@@ -97,6 +115,34 @@ class _BoardgameTileRatingSheetState extends State<_BoardgameTileRatingSheet> {
       widget.item.rating,
       metadata: widget.item.metadata,
     );
+    _myRating = widget.myRatingOnFive;
+    if (_viewingFriend && _myRating == null) {
+      unawaited(_loadMyRating());
+    }
+  }
+
+  Future<void> _loadMyRating() async {
+    final key = FriendRatingsService.catalogKey(widget.item);
+    if (key == null) return;
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    if (uid == null) return;
+    try {
+      final rows = await Supabase.instance.client
+          .from('collection_items')
+          .select('rating, metadata, title, category')
+          .eq('added_by', uid)
+          .eq('is_wishlist', false)
+          .not('rating', 'is', null)
+          .limit(400);
+      for (final row in rows as List) {
+        final mine = CollectionItem.fromJson(Map<String, dynamic>.from(row));
+        if (FriendRatingsService.catalogKey(mine) != key) continue;
+        final r = personalRatingOnFive(mine.rating, metadata: mine.metadata);
+        if (!mounted) return;
+        setState(() => _myRating = r);
+        return;
+      }
+    } catch (_) {}
   }
 
   Future<void> _saveRating(double? value) async {
@@ -164,47 +210,134 @@ class _BoardgameTileRatingSheetState extends State<_BoardgameTileRatingSheet> {
             const SizedBox(height: 16),
             BggCommunityRatingPanel(avgRating: bggAvg),
             const SizedBox(height: 20),
-            Text(
-              'Ma note',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-            const SizedBox(height: 8),
-            PrecisionStarRatingBar(
-              rating: _rating,
-              onChanged: _saveRating,
-              readOnly: widget.readOnly,
-            ),
-            if (review != null && review.isNotEmpty) ...[
-              const SizedBox(height: 20),
+            if (_viewingFriend) ...[
               Text(
-                'Mon avis',
+                widget.ownerRatingLabel!,
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
               ),
               const SizedBox(height: 8),
+              PrecisionStarRatingBar(
+                rating: _rating,
+                onChanged: (_) {},
+                readOnly: true,
+              ),
+              const SizedBox(height: 16),
               Text(
-                review,
-                style: TextStyle(
-                  fontSize: 14,
-                  height: 1.45,
+                'Ma note',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              const SizedBox(height: 8),
+              PrecisionStarRatingBar(
+                rating: _myRating,
+                onChanged: (_) {},
+                readOnly: true,
+              ),
+              if (_myRating == null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    'Tu n\'as pas encore noté ce jeu.',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+            ] else ...[
+              Text(
+                'Ma note',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              const SizedBox(height: 8),
+              PrecisionStarRatingBar(
+                rating: _rating,
+                onChanged: _saveRating,
+                readOnly: widget.readOnly,
+              ),
+              if (review != null && review.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                Text(
+                  'Mon avis',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  review,
+                  style: TextStyle(
+                    fontSize: 14,
+                    height: 1.45,
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withValues(alpha: 0.85),
+                  ),
+                ),
+              ] else if (!widget.readOnly) ...[
+                const SizedBox(height: 12),
+                Text(
+                  'Pas d\'avis pour l\'instant.',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+              if (!widget.readOnly) ...[
+                const SizedBox(height: 12),
+                Material(
                   color: Theme.of(context)
                       .colorScheme
-                      .onSurface
-                      .withValues(alpha: 0.85),
+                      .surfaceContainerHighest
+                      .withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(12),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => setState(() => _friendsOpen = !_friendsOpen),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.people_outline_rounded,
+                            size: 20,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Notes amis',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleSmall
+                                  ?.copyWith(fontWeight: FontWeight.w800),
+                            ),
+                          ),
+                          Icon(
+                            _friendsOpen
+                                ? Icons.expand_less_rounded
+                                : Icons.expand_more_rounded,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-            ] else if (!widget.readOnly) ...[
-              const SizedBox(height: 12),
-              Text(
-                'Pas d\'avis pour l\'instant.',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
+                if (_friendsOpen) ...[
+                  const SizedBox(height: 10),
+                  FriendRatingsPanel(item: widget.item),
+                ],
+              ],
             ],
           ],
         ),

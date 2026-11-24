@@ -37,12 +37,18 @@ enum FeedActivityKindFilter { all, collection, wishlist, ratings }
 
 /// Choisit la densité effective pour un lot d'événements.
 int resolveMosaicTiles(int count, FeedMosaicDensity density) {
-  if (density != FeedMosaicDensity.auto) return density.tilesPerSlide;
+  if (density != FeedMosaicDensity.auto) {
+    final forced = density.tilesPerSlide;
+    // Ne jamais inventer de cases vides : plafonner au nombre d'événements.
+    if (forced <= 0) return count.clamp(1, 16);
+    return forced.clamp(1, count.clamp(1, 16));
+  }
   if (count <= 1) return 1;
   if (count <= 2) return 2;
   if (count <= 4) return 4;
-  if (count <= 8) return 8;
-  return 16;
+  if (count <= 6) return 6;
+  if (count <= 9) return 9;
+  return 12;
 }
 
 bool feedEventMatchesKind(ActivityEvent e, FeedActivityKindFilter kind) {
@@ -219,11 +225,11 @@ class _SocialActivityPostState extends State<SocialActivityPost> {
           ),
           LayoutBuilder(
             builder: (context, constraints) {
-              // PC : moins haut (plus « story » Insta) ; mobile : un peu plus carré.
+              // PC : ratio story 4:5 max ; mosaïque un peu plus large.
               final wide = constraints.maxWidth >= 520;
               final ratio = tiles == 1
-                  ? (wide ? 1.35 : 1.08)
-                  : (wide ? 1.45 : 1.2);
+                  ? (wide ? 1.15 : 0.95)
+                  : (wide ? 1.55 : 1.25);
               return AspectRatio(
                 aspectRatio: ratio,
                 child: Stack(
@@ -241,6 +247,8 @@ class _SocialActivityPostState extends State<SocialActivityPost> {
                         addingItemId: widget.addingItemId,
                       ),
                     ),
+                    // Flèches aussi sur slide unique multi-items? Non — multi-pages only.
+                    // Sur PC le scroll horizontal souris marche ; flèches restent cliquables.
                     if (slides.length > 1) ...[
                       Align(
                         alignment: Alignment.centerLeft,
@@ -407,7 +415,8 @@ class _MosaicSlide extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (tilesPerSlide <= 1 || events.length == 1) {
+    final n = events.length.clamp(1, tilesPerSlide);
+    if (n <= 1) {
       return _PolaroidTile(
         event: events.first,
         large: true,
@@ -417,23 +426,25 @@ class _MosaicSlide extends StatelessWidget {
         adding: addingItemId == events.first.itemId,
       );
     }
-    final cols = tilesPerSlide <= 2
+    // Grille dimensionnée sur le nombre réel d'items (pas de cases vides).
+    final cols = n <= 2
         ? 2
-        : tilesPerSlide <= 4
+        : n <= 4
             ? 2
-            : 4;
-    final rows = (tilesPerSlide / cols).ceil().clamp(1, 4);
+            : n <= 6
+                ? 3
+                : 3;
     return Padding(
-      padding: const EdgeInsets.all(6),
+      padding: const EdgeInsets.all(8),
       child: GridView.builder(
         physics: const NeverScrollableScrollPhysics(),
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: cols,
-          mainAxisSpacing: 4,
-          crossAxisSpacing: 4,
-          childAspectRatio: rows >= 3 ? 0.85 : 0.9,
+          mainAxisSpacing: 6,
+          crossAxisSpacing: 6,
+          childAspectRatio: 0.78,
         ),
-        itemCount: events.length.clamp(0, tilesPerSlide),
+        itemCount: n,
         itemBuilder: (context, i) => _PolaroidTile(
           event: events[i],
           large: false,
@@ -481,8 +492,10 @@ class _PolaroidTile extends StatelessWidget {
             if (url != null && url.isNotEmpty)
               CollectionCoverImage(
                 url: url,
-                fit: book ? BoxFit.contain : BoxFit.cover,
+                // Contenir : plus de couvertures tronquées / cases « coupées ».
+                fit: BoxFit.contain,
                 bookCover: book,
+                boxedCover: !book,
               )
             else
               ColoredBox(

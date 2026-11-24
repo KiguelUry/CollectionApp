@@ -191,11 +191,111 @@ class CollectionChangeHistoryService {
     );
   }
 
+  Future<void> recordPlay({
+    required CollectionItem item,
+    required String detail,
+    DateTime? at,
+  }) async {
+    await _record(
+      action: 'play',
+      item: item,
+      detail: detail,
+      snapshot: {
+        'id': item.id,
+        'is_wishlist': false,
+        'play': true,
+      },
+      at: at,
+    );
+  }
+
+  /// Si l'historique local est vide : reconstituer ajouts récents + parties
+  /// depuis la collection (évite l'écran « Aucune modification » trompeur).
+  Future<List<CollectionChangeEvent>> loadWithBackfill({
+    required CollectionCategory category,
+  }) async {
+    final existing = await load(category: category);
+    if (existing.isNotEmpty) return existing;
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return const [];
+    try {
+      final rows = await Supabase.instance.client
+          .from('collection_items')
+          .select(
+            'id, title, image_url, category, is_wishlist, created_at, metadata',
+          )
+          .eq('added_by', userId)
+          .eq('category', category.dbValue)
+          .order('created_at', ascending: false)
+          .limit(40);
+      final synthesized = <CollectionChangeEvent>[];
+      for (final row in rows as List) {
+        final map = Map<String, dynamic>.from(row as Map);
+        final item = CollectionItem.fromJson(map);
+        final created = DateTime.tryParse(map['created_at']?.toString() ?? '') ??
+            DateTime.now();
+        synthesized.add(
+          CollectionChangeEvent(
+            id: 'backfill_add_${item.id}',
+            action: 'added',
+            at: created,
+            category: category,
+            title: item.title,
+            imageUrl: item.imageUrl,
+            snapshot: {
+              'id': item.id,
+              'is_wishlist': item.isWishlist,
+            },
+          ),
+        );
+        final plays = item.metadata?['boardgame_plays'];
+        if (plays is List) {
+          for (final p in plays) {
+            if (p is! Map) continue;
+            final date = DateTime.tryParse(p['date']?.toString() ?? '') ??
+                created;
+            final players = (p['players'] as List? ?? const [])
+                .map((e) => e.toString())
+                .where((e) => e.trim().isNotEmpty)
+                .join(', ');
+            synthesized.add(
+              CollectionChangeEvent(
+                id: 'backfill_play_${item.id}_${p['share_id'] ?? date}',
+                action: 'play',
+                at: date,
+                category: category,
+                title: item.title,
+                imageUrl: item.imageUrl,
+                detail: players.isEmpty
+                    ? 'Partie enregistrée'
+                    : 'Partie · $players',
+                snapshot: {
+                  'id': item.id,
+                  'is_wishlist': false,
+                  'play': true,
+                },
+              ),
+            );
+          }
+        }
+      }
+      synthesized.sort((a, b) => b.at.compareTo(a.at));
+      final kept = synthesized.take(_maxEntries).toList();
+      if (kept.isNotEmpty) {
+        await _save(userId, category, kept);
+      }
+      return kept;
+    } catch (_) {
+      return existing;
+    }
+  }
+
   Future<void> _record({
     required String action,
     required CollectionItem item,
     required Map<String, dynamic> snapshot,
     String? detail,
+    DateTime? at,
   }) async {
     final userId = Supabase.instance.client.auth.currentUser?.id;
     if (userId == null) return;
@@ -212,7 +312,7 @@ class CollectionChangeHistoryService {
     final entry = CollectionChangeEvent(
       id: '${DateTime.now().microsecondsSinceEpoch}_${item.id}',
       action: action,
-      at: DateTime.now(),
+      at: at ?? DateTime.now(),
       category: item.category,
       title: item.title,
       imageUrl: item.imageUrl,
