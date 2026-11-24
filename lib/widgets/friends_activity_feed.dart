@@ -9,6 +9,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/activity_event.dart';
 import '../models/collection_category.dart';
 import '../models/collection_group.dart';
+import '../screens/community_forum_screen.dart';
+import '../screens/exchanges_screen.dart';
 import '../screens/item_detail_screen.dart';
 import '../services/activity_service.dart';
 import '../services/friend_service.dart';
@@ -417,24 +419,55 @@ class _FriendsActivityFeedState extends State<FriendsActivityFeed> {
   Widget _buildFeedToolbar(ColorScheme scheme) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 4, 8, 0),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Flux',
-            style: TextStyle(
-              fontWeight: FontWeight.w800,
-              fontSize: widget.compactChrome ? 15 : 16,
-            ),
+          Row(
+            children: [
+              Text(
+                'Flux',
+                style: TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: widget.compactChrome ? 16 : 18,
+                  letterSpacing: -0.2,
+                ),
+              ),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: _openFeedSettings,
+                icon: const Icon(Icons.tune_rounded, size: 18),
+                label: const Text('Vue'),
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  foregroundColor: scheme.onSurfaceVariant,
+                ),
+              ),
+            ],
           ),
-          const Spacer(),
-          TextButton.icon(
-            onPressed: _openFeedSettings,
-            icon: const Icon(Icons.tune_rounded, size: 18),
-            label: const Text('Vue du flux'),
-            style: TextButton.styleFrom(
-              visualDensity: VisualDensity.compact,
-              foregroundColor: scheme.onSurfaceVariant,
-            ),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              ActionChip(
+                avatar: const Icon(Icons.forum_outlined, size: 16),
+                label: const Text('Forum'),
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const CommunityForumScreen(),
+                  ),
+                ),
+              ),
+              ActionChip(
+                avatar: const Icon(Icons.handshake_outlined, size: 16),
+                label: const Text('Échanges'),
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ExchangesScreen()),
+                ),
+              ),
+            ],
           ),
         ],
       ),

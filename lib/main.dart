@@ -17,6 +17,8 @@ import 'screens/settings_screen.dart';
 import 'screens/splash_screen.dart';
 import 'config/app_env.dart';
 import 'config/app_brand.dart';
+import 'package:flutter/services.dart';
+import 'services/image_resume_service.dart';
 import 'services/settings_service.dart';
 import 'services/web_update_checker.dart';
 import 'navigation/app_route_observer.dart';
@@ -29,6 +31,17 @@ Future<void> main() async {
     cache.maximumSize = 2500;
     cache.maximumSizeBytes = 256 << 20;
   }
+  // Barre système (heure / batterie) : plus de mauve Material par défaut.
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+      statusBarBrightness: Brightness.dark,
+      systemNavigationBarColor: Color(0xFF121212),
+      systemNavigationBarIconBrightness: Brightness.light,
+    ),
+  );
+  ImageResumeService.instance.start();
 
   try {
     await dotenv.load(fileName: '.env');

@@ -169,22 +169,28 @@ class _SocialActivityPostState extends State<SocialActivityPost> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        widget.actorName,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 14.5,
+                      Text.rich(
+                        TextSpan(
+                          children: [
+                            TextSpan(
+                              text: widget.actorName,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 15,
+                              ),
+                            ),
+                            TextSpan(
+                              text: '  $summary',
+                              style: TextStyle(
+                                fontSize: 13.5,
+                                color: scheme.onSurfaceVariant,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                      Text(
-                        summary,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          color: scheme.onSurfaceVariant,
-                          fontWeight: FontWeight.w600,
-                        ),
                       ),
                     ],
                   ),
@@ -211,74 +217,108 @@ class _SocialActivityPostState extends State<SocialActivityPost> {
               ],
             ),
           ),
-          AspectRatio(
-            aspectRatio: tiles == 1 ? 1.05 : (tiles <= 4 ? 1.15 : 1.25),
-            child: Stack(
-              children: [
-                PageView.builder(
-                  controller: _page,
-                  itemCount: slides.length,
-                  onPageChanged: (i) => setState(() => _pageIndex = i),
-                  itemBuilder: (context, i) => _MosaicSlide(
-                    events: slides[i],
-                    tilesPerSlide: tiles,
-                    isWishlist: isWishlist,
-                    onOpen: widget.onOpenItem,
-                    onQuickWishlist: widget.onQuickWishlist,
-                    addingItemId: widget.addingItemId,
-                  ),
-                ),
-                if (slides.length > 1) ...[
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: _navArrow(
-                      Icons.chevron_left_rounded,
-                      () => _page.previousPage(
-                        duration: const Duration(milliseconds: 240),
-                        curve: Curves.easeOut,
+          LayoutBuilder(
+            builder: (context, constraints) {
+              // PC : moins haut (plus « story » Insta) ; mobile : un peu plus carré.
+              final wide = constraints.maxWidth >= 520;
+              final ratio = tiles == 1
+                  ? (wide ? 1.35 : 1.08)
+                  : (wide ? 1.45 : 1.2);
+              return AspectRatio(
+                aspectRatio: ratio,
+                child: Stack(
+                  children: [
+                    PageView.builder(
+                      controller: _page,
+                      itemCount: slides.length,
+                      onPageChanged: (i) => setState(() => _pageIndex = i),
+                      itemBuilder: (context, i) => _MosaicSlide(
+                        events: slides[i],
+                        tilesPerSlide: tiles,
+                        isWishlist: isWishlist,
+                        onOpen: widget.onOpenItem,
+                        onQuickWishlist: widget.onQuickWishlist,
+                        addingItemId: widget.addingItemId,
                       ),
-                      enabled: _pageIndex > 0,
                     ),
-                  ),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: _navArrow(
-                      Icons.chevron_right_rounded,
-                      () => _page.nextPage(
-                        duration: const Duration(milliseconds: 240),
-                        curve: Curves.easeOut,
-                      ),
-                      enabled: _pageIndex < slides.length - 1,
-                    ),
-                  ),
-                  Positioned(
-                    right: 10,
-                    bottom: 10,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black54,
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        '${_pageIndex + 1}/${slides.length}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
+                    if (slides.length > 1) ...[
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: _navArrow(
+                          Icons.chevron_left_rounded,
+                          () => _page.previousPage(
+                            duration: const Duration(milliseconds: 240),
+                            curve: Curves.easeOut,
+                          ),
+                          enabled: _pageIndex > 0,
                         ),
                       ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: _navArrow(
+                          Icons.chevron_right_rounded,
+                          () => _page.nextPage(
+                            duration: const Duration(milliseconds: 240),
+                            curve: Curves.easeOut,
+                          ),
+                          enabled: _pageIndex < slides.length - 1,
+                        ),
+                      ),
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 10,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            for (var i = 0; i < slides.length; i++)
+                              AnimatedContainer(
+                                duration: const Duration(milliseconds: 180),
+                                margin: const EdgeInsets.symmetric(
+                                  horizontal: 3,
+                                ),
+                                width: i == _pageIndex ? 16 : 6,
+                                height: 6,
+                                decoration: BoxDecoration(
+                                  color: i == _pageIndex
+                                      ? Colors.white
+                                      : Colors.white38,
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      Positioned(
+                        right: 10,
+                        top: 10,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            '${_pageIndex + 1}/${slides.length}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            },
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
             child: Row(
               children: [
                 for (final emoji in widget.emojis)
@@ -286,14 +326,14 @@ class _SocialActivityPostState extends State<SocialActivityPost> {
                     onTap: () => widget.onReact(e.id, emoji),
                     borderRadius: BorderRadius.circular(8),
                     child: Padding(
-                      padding: const EdgeInsets.only(right: 8),
+                      padding: const EdgeInsets.only(right: 10),
                       child: Opacity(
                         opacity: widget.reactions[e.id] == emoji ? 1 : 0.55,
                         child: Text(
                           (widget.reactionCounts[e.id]?[emoji] ?? 0) > 0
                               ? '$emoji ${widget.reactionCounts[e.id]![emoji]}'
                               : emoji,
-                          style: const TextStyle(fontSize: 14),
+                          style: const TextStyle(fontSize: 15),
                         ),
                       ),
                     ),
@@ -302,7 +342,8 @@ class _SocialActivityPostState extends State<SocialActivityPost> {
                 Text(
                   widget.timeAgo,
                   style: TextStyle(
-                    fontSize: 11.5,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
                     color: scheme.onSurfaceVariant,
                   ),
                 ),
@@ -315,18 +356,21 @@ class _SocialActivityPostState extends State<SocialActivityPost> {
   }
 
   Widget _navArrow(IconData icon, VoidCallback onTap, {required bool enabled}) {
-    if (!enabled) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Material(
-        color: Colors.black45,
-        shape: const CircleBorder(),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(4),
-            child: Icon(icon, color: Colors.white, size: 22),
+    return Opacity(
+      opacity: enabled ? 1 : 0.25,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        child: Material(
+          color: Colors.black54,
+          shape: const CircleBorder(),
+          elevation: 2,
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: enabled ? onTap : null,
+            child: Padding(
+              padding: const EdgeInsets.all(6),
+              child: Icon(icon, color: Colors.white, size: 24),
+            ),
           ),
         ),
       ),
@@ -476,8 +520,17 @@ class _PolaroidTile extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                        fontSize: large ? 14.5 : 11,
+                        fontWeight: FontWeight.w900,
+                        fontSize: large ? 19 : 13,
+                        letterSpacing: large ? -0.3 : 0,
+                        height: 1.12,
+                        shadows: const [
+                          Shadow(
+                            color: Colors.black87,
+                            blurRadius: 10,
+                            offset: Offset(0, 1),
+                          ),
+                        ],
                       ),
                     ),
                     if (large) ...[

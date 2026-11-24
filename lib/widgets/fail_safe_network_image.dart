@@ -11,6 +11,9 @@ void markImageUrlFailed(String url, {bool soft = false}) {
   _failedUntil[url] = DateTime.now().add(soft ? _kSoftFailTtl : _kHardFailTtl);
 }
 
+/// Vide le coupe-circuit (ex. au retour au premier plan).
+void clearFailedImageUrls() => _failedUntil.clear();
+
 bool isImageUrlFailed(String url) {
   final until = _failedUntil[url];
   if (until == null) return false;

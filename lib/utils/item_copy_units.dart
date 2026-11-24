@@ -57,6 +57,7 @@ class ItemCopyUnit {
     this.purchaseSource,
     this.condition,
     this.groupIds = const [],
+    this.accentColorHex,
   });
 
   final List<String> groupIds;
@@ -69,6 +70,8 @@ class ItemCopyUnit {
   final PurchaseKind? purchaseKind;
   final String? purchaseSource;
   final ItemCondition? condition;
+  /// Couleur de distinction entre exemplaires (ex: `#E67E22`).
+  final String? accentColorHex;
 
   String defaultLabel(int oneBased) =>
       label?.trim().isNotEmpty == true ? label!.trim() : 'Exemplaire $oneBased';
@@ -83,12 +86,14 @@ class ItemCopyUnit {
     String? purchaseSource,
     ItemCondition? condition,
     List<String>? groupIds,
+    String? accentColorHex,
     bool clearLocationUserId = false,
     bool clearHolder = false,
     bool clearPrice = false,
     bool clearPurchaseKind = false,
     bool clearPurchaseSource = false,
     bool clearCondition = false,
+    bool clearAccent = false,
   }) {
     return ItemCopyUnit(
       index: index,
@@ -106,6 +111,8 @@ class ItemCopyUnit {
           : (purchaseSource ?? this.purchaseSource),
       condition: clearCondition ? null : (condition ?? this.condition),
       groupIds: groupIds ?? this.groupIds,
+      accentColorHex:
+          clearAccent ? null : (accentColorHex ?? this.accentColorHex),
     );
   }
 
@@ -127,6 +134,8 @@ class ItemCopyUnit {
         'purchase_source': purchaseSource!.trim(),
       if (condition != null) 'condition': condition!.dbValue,
       if (groupIds.isNotEmpty) 'group_ids': groupIds,
+      if (accentColorHex != null && accentColorHex!.trim().isNotEmpty)
+        'accent_color': accentColorHex!.trim(),
     };
   }
 
@@ -156,6 +165,7 @@ class ItemCopyUnit {
           for (final id in map['group_ids'] as List)
             if (id != null) id.toString(),
       ],
+      accentColorHex: map['accent_color']?.toString(),
     );
   }
 }

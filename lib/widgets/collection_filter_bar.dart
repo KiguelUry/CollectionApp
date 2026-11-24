@@ -3,6 +3,7 @@ import '../models/card_subcategory.dart';
 import '../models/collection_list_filters.dart';
 import '../models/item_tag.dart';
 import '../models/storage_location.dart';
+import '../utils/debounced_runner.dart';
 import '../utils/holder_filter.dart';
 import '../models/videogame_platform.dart';
 
@@ -14,7 +15,7 @@ class GroupFilterOption {
 }
 
 /// Barre recherche + filtres (emplacement, tags) + tri.
-class CollectionFilterBar extends StatelessWidget {
+class CollectionFilterBar extends StatefulWidget {
   final CollectionListFilters filters;
   final ValueChanged<CollectionListFilters> onChanged;
   final List<StorageLocation> locations;
@@ -85,72 +86,212 @@ class CollectionFilterBar extends StatelessWidget {
   });
 
   @override
+  State<CollectionFilterBar> createState() => _CollectionFilterBarState();
+}
+
+class _CollectionFilterBarState extends State<CollectionFilterBar> {
+  late final TextEditingController _ownedController;
+  late final bool _ownsController;
+  final _searchDebounce = DebouncedRunner();
+  final _searchFocus = FocusNode();
+  bool _hasText = false;
+
+  CollectionListFilters get filters => widget.filters;
+  ValueChanged<CollectionListFilters> get onChanged => widget.onChanged;
+  CollectionSort get defaultSort => widget.defaultSort;
+  bool get showBoardgameGenreFilter => widget.showBoardgameGenreFilter;
+  VoidCallback? get onRandomPick => widget.onRandomPick;
+  Widget? get trailing => widget.trailing;
+  bool get showWishlistSortOptions => widget.showWishlistSortOptions;
+  // Pass-through getters used by existing private methods below.
+  List<StorageLocation> get locations => widget.locations;
+  List<ItemTag> get tags => widget.tags;
+  bool get showFocusFilter => widget.showFocusFilter;
+  bool get showLocationFilter => widget.showLocationFilter;
+  bool get showTagFilter => widget.showTagFilter;
+  List<String> get boardgameGenres => widget.boardgameGenres;
+  bool get showVideogamePlatformFilter => widget.showVideogamePlatformFilter;
+  List<VideogamePlatform> get videogamePlatformOptions =>
+      widget.videogamePlatformOptions;
+  bool get showCardFilter => widget.showCardFilter;
+  bool get showCardSubcategoryFilter => widget.showCardSubcategoryFilter;
+  bool get showCardUniverseDetailFilters =>
+      widget.showCardUniverseDetailFilters;
+  List<String> get cardRarities => widget.cardRarities;
+  List<String> get pokemonTypes => widget.pokemonTypes;
+  List<CardSubcategory> get cardSubcategoryOptions =>
+      widget.cardSubcategoryOptions;
+  List<GroupFilterOption> get groupOptions => widget.groupOptions;
+  List<HolderFilterOption> get holderFilterOptions =>
+      widget.holderFilterOptions;
+  bool get useHolderLocationFilter => widget.useHolderLocationFilter;
+  bool get showWishlistMineToggle => widget.showWishlistMineToggle;
+  bool get showExpansionVisibilityToggle =>
+      widget.showExpansionVisibilityToggle;
+  bool get showOwnedExpansions => widget.showOwnedExpansions;
+  ValueChanged<bool>? get onShowOwnedExpansionsChanged =>
+      widget.onShowOwnedExpansionsChanged;
+
+  TextEditingController get _controller =>
+      widget.searchController ?? _ownedController;
+
+  @override
+  void initState() {
+    super.initState();
+    _ownsController = widget.searchController == null;
+    _ownedController = widget.searchController ??
+        TextEditingController(text: widget.filters.searchQuery);
+    if (widget.searchController != null &&
+        widget.searchController!.text.isEmpty &&
+        widget.filters.searchQuery.isNotEmpty) {
+      widget.searchController!.text = widget.filters.searchQuery;
+    }
+    _hasText = _controller.text.isNotEmpty;
+    _controller.addListener(_onControllerTick);
+  }
+
+  @override
+  void didUpdateWidget(covariant CollectionFilterBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Sync externe (réinit filtres) uniquement hors frappe — sinon le debounce
+    // parent écrase le texte IME (GSM : caractères invisibles / backspace mort).
+    if (_searchFocus.hasFocus) return;
+    if (widget.filters.searchQuery != _controller.text) {
+      _controller.value = TextEditingValue(
+        text: widget.filters.searchQuery,
+        selection: TextSelection.collapsed(
+          offset: widget.filters.searchQuery.length,
+        ),
+      );
+    }
+  }
+
+  void _onControllerTick() {
+    final next = _controller.text.isNotEmpty;
+    if (next != _hasText && mounted) setState(() => _hasText = next);
+  }
+
+  void _onSearchChanged(String v) {
+    // Debounce : évite setState parent à chaque frappe (casse l'IME GSM).
+    _searchDebounce.run(
+      delay: const Duration(milliseconds: 320),
+      action: () {
+        if (!mounted) return;
+        // Toujours lire le texte actuel (pas la fermeture `v` périmée).
+        final latest = _controller.text;
+        if (widget.filters.searchQuery == latest) return;
+        widget.onChanged(widget.filters.copyWith(searchQuery: latest));
+      },
+    );
+  }
+
+  void _clearSearch() {
+    _searchDebounce.cancel();
+    _controller.clear();
+    if (widget.filters.searchQuery.isNotEmpty) {
+      widget.onChanged(widget.filters.copyWith(searchQuery: ''));
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(_onControllerTick);
+    _searchDebounce.dispose();
+    _searchFocus.dispose();
+    if (_ownsController) _ownedController.dispose();
+    super.dispose();
+  }
+
+  Widget _searchField() {
+    return TextField(
+      controller: _controller,
+      focusNode: _searchFocus,
+      textInputAction: TextInputAction.search,
+      decoration: InputDecoration(
+        hintText: 'Rechercher…',
+        prefixIcon: const Icon(Icons.search, size: 22),
+        suffixIcon: _hasText
+            ? IconButton(
+                icon: const Icon(Icons.clear, size: 20),
+                onPressed: _clearSearch,
+              )
+            : null,
+        isDense: true,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 10,
+        ),
+      ),
+      onChanged: _onSearchChanged,
+    );
+  }
+
+  Widget _actionCluster({required bool narrow}) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _sortMenuButton(context),
+        const SizedBox(width: 4),
+        _filterMenuButton(context),
+        if (!narrow &&
+            onRandomPick != null &&
+            showBoardgameGenreFilter &&
+            filters.hasActiveFilterCriteria) ...[
+          const SizedBox(width: 2),
+          IconButton(
+            tooltip: 'Tirer au sort parmi ces résultats',
+            onPressed: onRandomPick,
+            icon: const Text('🎲', style: TextStyle(fontSize: 18)),
+            visualDensity: VisualDensity.compact,
+          ),
+        ],
+        if (trailing != null) ...[
+          const SizedBox(width: 2),
+          trailing!,
+        ],
+      ],
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final narrow = MediaQuery.sizeOf(context).width < 520;
+    // GSM : barre plus haute pour laisser de la place (évite Tri collé au champ).
+    final barHeight = narrow ? 108.0 : 64.0;
     return Material(
       elevation: 0,
       color: Theme.of(context).colorScheme.surfaceContainerLowest,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 860),
-                child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: searchController,
-                    decoration: InputDecoration(
-                      hintText: 'Rechercher…',
-                      prefixIcon: const Icon(Icons.search, size: 22),
-                      suffixIcon: filters.searchQuery.isNotEmpty
-                          ? IconButton(
-                              icon: const Icon(Icons.clear, size: 20),
-                              onPressed: () {
-                                searchController?.clear();
-                                onChanged(filters.copyWith(searchQuery: ''));
-                              },
-                            )
-                          : null,
-                      isDense: true,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
-                      ),
-                    ),
-                    onChanged: (v) =>
-                        onChanged(filters.copyWith(searchQuery: v)),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                _sortMenuButton(context),
-                const SizedBox(width: 4),
-                _filterMenuButton(context),
-                if (onRandomPick != null &&
-                    showBoardgameGenreFilter &&
-                    filters.hasActiveFilterCriteria) ...[
-                  const SizedBox(width: 2),
-                  IconButton(
-                    tooltip: 'Tirer au sort parmi ces résultats',
-                    onPressed: onRandomPick,
-                    icon: const Text('🎲', style: TextStyle(fontSize: 18)),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ],
-                if (trailing != null) ...[
-                  const SizedBox(width: 2),
-                  trailing!,
-                ],
-              ],
-                ),
-              ),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: 860,
+              minHeight: narrow ? barHeight - 12 : 0,
             ),
-          ],
+            child: narrow
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _searchField(),
+                      const SizedBox(height: 6),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: _actionCluster(narrow: true),
+                      ),
+                    ],
+                  )
+                : Row(
+                    children: [
+                      Expanded(child: _searchField()),
+                      const SizedBox(width: 8),
+                      _actionCluster(narrow: false),
+                    ],
+                  ),
+          ),
         ),
       ),
     );

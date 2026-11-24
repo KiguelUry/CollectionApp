@@ -770,8 +770,43 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
             ),
             const SizedBox(height: 16),
             _recentAddsRibbon(),
+            if ((_playsTogether ?? 0) > 0) ...[
+              const SizedBox(height: 18),
+              _playsTogetherBlock(),
+            ],
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _playsTogetherBlock() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.sports_esports_rounded, color: Colors.orangeAccent),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              '${_playsTogether ?? 0} partie${(_playsTogether ?? 0) > 1 ? 's' : ''} ensemble',
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                fontSize: 14.5,
+              ),
+            ),
+          ),
+          Text(
+            'avec ${widget.username}',
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+        ],
       ),
     );
   }
@@ -975,28 +1010,55 @@ class _FriendCollectionScreenState extends State<FriendCollectionScreen>
                 ),
               ),
               const SizedBox(height: 8),
-              SizedBox(
-                height: 38,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _visibleCategories.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: 6),
-                  itemBuilder: (context, index) {
-                    final cat = _visibleCategories[index];
-                    final count = _countFor(cat);
-                    final selected = cat == _selectedCategory;
-                    return FilterChip(
-                      label: Text(
-                        count > 0 ? '${cat.label} ($count)' : cat.label,
-                        style: const TextStyle(fontSize: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: PopupMenuButton<CollectionCategory>(
+                  tooltip: 'Changer de collection',
+                  onSelected: (c) => setState(() => _selectedCategory = c),
+                  itemBuilder: (_) => [
+                    for (final cat in _visibleCategories)
+                      PopupMenuItem(
+                        value: cat,
+                        child: Row(
+                          children: [
+                            Icon(cat.icon, size: 18),
+                            const SizedBox(width: 10),
+                            Expanded(child: Text(cat.label)),
+                            Text(
+                              '${_countFor(cat)}',
+                              style: TextStyle(
+                                color: scheme.onSurfaceVariant,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                      selected: selected,
-                      showCheckmark: false,
-                      onSelected: (_) =>
-                          setState(() => _selectedCategory = cat),
-                      avatar: Icon(cat.icon, size: 16),
-                    );
-                  },
+                  ],
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white24),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(_selectedCategory.icon, size: 18),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${_selectedCategory.label} (${_countFor(_selectedCategory)})',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.expand_more_rounded, size: 18),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ]),

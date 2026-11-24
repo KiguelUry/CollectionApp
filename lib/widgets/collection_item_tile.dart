@@ -947,7 +947,10 @@ class CollectionItemTile extends StatelessWidget {
     return Positioned(
       top: 4,
       left: 4,
-      child: _badge(inColl ? 'Toi' : '♥', inColl ? Colors.green.shade700 : Colors.amber.shade800),
+      child: _badge(
+        inColl ? 'En commun' : 'Wishlist',
+        inColl ? Colors.green.shade700 : Colors.amber.shade800,
+      ),
     );
   }
 

@@ -183,10 +183,9 @@ class CollectionListFilters {
       withCustomRulesOnly ||
       sort != CollectionSort.titleAsc;
 
-  /// Filtres actifs hors tri (pour badge bouton Filtre).
-  /// `wishlistMineOnly` est un scope par défaut wishlist, pas un filtre « utilisateur ».
+  /// Filtres actifs hors tri **et hors recherche** (badge Filtre).
+  /// La recherche a sa propre barre : ne doit pas allumer Tri/Filtre.
   bool get hasActiveFilterCriteria =>
-      searchQuery.trim().isNotEmpty ||
       scope != CollectionScopeFilter.all ||
       status != CollectionStatusFilter.all ||
       locationId != null ||

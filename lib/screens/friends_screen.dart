@@ -11,6 +11,8 @@ import '../widgets/friends_activity_feed.dart';
 import '../widgets/households_sheet.dart';
 import '../widgets/group_badge.dart';
 import '../widgets/profile_avatar.dart';
+import 'community_forum_screen.dart';
+import 'exchanges_screen.dart';
 import 'friend_collection_screen.dart';
 import 'group_detail_screen.dart';
 import 'groups_screen.dart';
@@ -262,11 +264,40 @@ class _FriendsScreenState extends State<FriendsScreen> {
     );
   }
 
+  Widget _socialShortcuts() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          OutlinedButton.icon(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const CommunityForumScreen()),
+            ),
+            icon: const Icon(Icons.forum_outlined, size: 18),
+            label: const Text('Forum'),
+          ),
+          OutlinedButton.icon(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ExchangesScreen()),
+            ),
+            icon: const Icon(Icons.handshake_outlined, size: 18),
+            label: const Text('Échanges'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDesktopSidebar(int pending) {
     final scheme = Theme.of(context).colorScheme;
     return ListView(
       padding: const EdgeInsets.only(bottom: 32),
       children: [
+        _socialShortcuts(),
         Container(
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
           decoration: BoxDecoration(
@@ -366,6 +397,7 @@ class _FriendsScreenState extends State<FriendsScreen> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 32),
         children: [
+          _socialShortcuts(),
           _sectionHeader(
             'Mes Groupes',
             count: _groups.length,

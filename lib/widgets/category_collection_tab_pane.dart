@@ -686,7 +686,10 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
                   elevation: 0,
                   scrolledUnderElevation: 0,
                   bottom: PreferredSize(
-                    preferredSize: const Size.fromHeight(64),
+                    // GSM : recherche sur sa propre ligne → barre plus haute.
+                    preferredSize: Size.fromHeight(
+                      MediaQuery.sizeOf(context).width < 520 ? 108 : 64,
+                    ),
                     child: filterBar,
                   ),
                 ),
@@ -787,7 +790,7 @@ class _CategoryCollectionTabPaneState extends State<CategoryCollectionTabPane>
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.grey.shade600),
             ),
-            if (_filters.hasActiveFilterCriteria) ...[
+            if (_filters.hasActiveFilters) ...[
               const SizedBox(height: 12),
               TextButton(
                 onPressed: () {

@@ -86,11 +86,12 @@ class BggService {
   /// Moins d'appels /thing (limite BGG ~429 si trop de requêtes).
   static const _maxMetaLookup = discoverThingBatchSize;
   static const _thingChunkSize = discoverThingBatchSize;
-  static const _maxPollAttempts = 10;
+  /// Poll XML : 6 essais max (évite le spam « surchargé 10/10 »).
+  static const _maxPollAttempts = 6;
   static const _rateLimitBackoff = BackoffPolicy(
-    initialDelay: Duration(milliseconds: 900),
-    maxDelay: Duration(seconds: 15),
-    maxAttempts: 5,
+    initialDelay: Duration(milliseconds: 1200),
+    maxDelay: Duration(seconds: 12),
+    maxAttempts: 4,
   );
 
   /// Jeux de société + JDR narratifs (ex. Alice is Missing) + extensions.
@@ -147,7 +148,7 @@ class BggService {
         policy: _rateLimitBackoff,
         onRetry: (attempt, _) {
           lastSearchStatus =
-              'BGG surchargé — nouvel essai ($attempt/${_rateLimitBackoff.maxAttempts})…';
+              'BGG est un peu lent — nouvel essai ($attempt/${_rateLimitBackoff.maxAttempts})…';
         },
       );
       if (response.statusCode != 200 || response.body.isEmpty) {
@@ -221,7 +222,7 @@ class BggService {
   static const _searchCacheTtl = Duration(minutes: 15);
   static const _searchCacheMaxEntries = 48;
   static DateTime? _lastBggHttpAt;
-  static const _minBggRequestGap = Duration(milliseconds: 320);
+  static const _minBggRequestGap = Duration(milliseconds: 480);
 
   static List<Map<String, String>>? _hotCache;
   static DateTime? _hotCacheAt;
@@ -297,9 +298,9 @@ class BggService {
       last = await http.get(target, headers: headers);
       if (isRetryableHttpStatus(last.statusCode)) {
         lastSearchStatus =
-            'BGG surchargé — nouvel essai (${attempt + 1}/$_maxPollAttempts)…';
+            'BGG est un peu lent — nouvel essai (${attempt + 1}/$_maxPollAttempts)…';
         lastSearchError =
-            'BGG limite les requêtes (trop d’appels). Nouvel essai automatique…';
+            'BoardGameGeek répond doucement. Nouvelle tentative…';
         await Future.delayed(_rateLimitBackoff.delayFor(rateLimitRetries++));
         continue;
       }

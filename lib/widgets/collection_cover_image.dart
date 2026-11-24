@@ -3,11 +3,13 @@ import 'package:cached_network_image_platform_interface/cached_network_image_pla
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../services/image_resume_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/cover_image_url.dart';
 import 'fail_safe_network_image.dart';
 
-export 'fail_safe_network_image.dart' show kFailedImageUrls;
+export 'fail_safe_network_image.dart'
+    show kFailedImageUrls, markImageUrlFailed, clearFailedImageUrls;
 
 /// Couverture nette (cache disque + mémoire, ratio livre, URLs adaptées).
 ///
@@ -42,10 +44,19 @@ class CollectionCoverImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Rebuild au resume app (ban URL + textures blanches).
+    return ListenableBuilder(
+      listenable: ImageResumeService.instance,
+      builder: (context, _) => _buildImage(context),
+    );
+  }
+
+  Widget _buildImage(BuildContext context) {
     final padded = bookCover || boxedCover;
     final imageFit = padded ? BoxFit.contain : fit;
     final w = width;
     final h = height;
+    final gen = ImageResumeService.instance.generation;
 
     final thumbSize = compact ? kThumbnailSize : (largeSource ? 1000 : 600);
     final thumb = (compact || kIsWeb)
@@ -63,6 +74,7 @@ class CollectionCoverImage extends StatelessWidget {
     Widget image;
     if (kIsWeb) {
       image = FailSafeNetworkImage(
+        key: ValueKey('cover-$gen-$thumb'),
         url: thumb,
         width: w,
         height: h,
@@ -89,7 +101,7 @@ class CollectionCoverImage extends StatelessWidget {
       );
     } else if (thumb != url) {
       image = CachedNetworkImage(
-        key: ValueKey(thumb),
+        key: ValueKey('cover-$gen-$thumb'),
         imageUrl: thumb,
         width: w,
         height: h,
@@ -102,8 +114,9 @@ class CollectionCoverImage extends StatelessWidget {
         fadeOutDuration: Duration.zero,
         placeholder: (_, _) => _fallback(child: const SizedBox.shrink()),
         errorWidget: (context, failedUrl, _) {
-          kFailedImageUrls.add(failedUrl);
-          kFailedImageUrls.add(thumb);
+          // Soft : après resume / 502, on réessaie bientôt (pas un ban 6h).
+          markImageUrlFailed(failedUrl, soft: true);
+          markImageUrlFailed(thumb, soft: true);
           return _fallback();
         },
       );
@@ -163,8 +176,8 @@ class CollectionCoverImage extends StatelessWidget {
         ),
       ),
       errorWidget: (_, failedUrl, _) {
-        kFailedImageUrls.add(failedUrl);
-        kFailedImageUrls.add(displayUrl);
+        markImageUrlFailed(failedUrl, soft: true);
+        markImageUrlFailed(displayUrl, soft: true);
         return _fallback();
       },
     );

@@ -179,9 +179,83 @@ class _CopyUnitTileState extends State<_CopyUnitTile> {
     }
   }
 
+  static const _accentChoices = <Color>[
+    Color(0xFFE67E22),
+    Color(0xFF3498DB),
+    Color(0xFF2ECC71),
+    Color(0xFF9B59B6),
+    Color(0xFFE74C3C),
+    Color(0xFF1ABC9C),
+    Color(0xFFF1C40F),
+    Color(0xFF95A5A6),
+  ];
+
+  Color _unitAccent(ColorScheme scheme) {
+    final hex = widget.unit.accentColorHex?.trim();
+    if (hex != null && hex.isNotEmpty) {
+      final raw = hex.replaceFirst('#', '');
+      final value = int.tryParse(raw, radix: 16);
+      if (value != null) {
+        return Color(raw.length <= 6 ? (0xFF000000 | value) : value);
+      }
+    }
+    // Alternance douce Exemplaire 1 / 2 / …
+    return _accentChoices[widget.unit.index % _accentChoices.length];
+  }
+
+  Future<void> _pickAccent() async {
+    final picked = await showModalBottomSheet<Color>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Couleur de l\'exemplaire',
+                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  for (final c in _accentChoices)
+                    InkWell(
+                      onTap: () => Navigator.pop(ctx, c),
+                      borderRadius: BorderRadius.circular(999),
+                      child: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: c,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white24, width: 2),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    final hex =
+        '#${picked.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+    widget.onChanged(widget.unit.copyWith(accentColorHex: hex));
+  }
+
   @override
   Widget build(BuildContext context) {
-    final accent = Theme.of(context).colorScheme.primary;
+    final scheme = Theme.of(context).colorScheme;
+    final accent = _unitAccent(scheme);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -199,12 +273,18 @@ class _CopyUnitTileState extends State<_CopyUnitTile> {
                 onTap: () => setState(() => _open = !_open),
               ),
             ),
-            if (!widget.readOnly)
+            if (!widget.readOnly) ...[
+              IconButton(
+                tooltip: 'Couleur',
+                icon: Icon(Icons.palette_outlined, size: 18, color: accent),
+                onPressed: _pickAccent,
+              ),
               IconButton(
                 tooltip: 'Renommer',
                 icon: const Icon(Icons.edit_outlined, size: 18),
                 onPressed: _rename,
               ),
+            ],
           ],
         ),
         if (_open) ...[
